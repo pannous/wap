@@ -109,4 +109,12 @@ printf '%s\n' 'use "../speak.wap"' 'twice(x: int) as int := x * 2' >"$stage/part
 check "an included file's definitions are the program's own; its use is found beside it" "$(ran included 'include "parts/twice.wap"
 say(text(twice(21)))')" "loaded
 42"
+# a module exports each function under its header line (wiki/wasm-representation.md "Export names"), so a host calls
+# one overload by that name
+called_export() {
+	printf '%s\n' "$2" >"$stage/$1.wap"
+	$warp "$compiler" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && wasmtime run -W gc=y,function-references=y,exceptions=y --invoke "$3" "$stage/$1.wasm" "${@:4}" 2>/dev/null
+}
+check "a host calls an exported overload by its header line" "$(called_export overloads 'add(a: int, b: int = 1) as int := a + b
+add(a: text, b: text) as text := a + b' 'add(a: int, b: int = 1) → int' 2 3)" "5"
 exit $((failures > 0))

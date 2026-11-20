@@ -50,16 +50,18 @@ OTHER_LABEL = "other"
 FRAME_BINDINGS = [DefinitionKind.Local, DefinitionKind.Parameter, DefinitionKind.Capture]
 
 # The module of a program: its statements become the body of `main`, which the host runs. The typing stage made the
-# program print its value, `print(show(it))`, so main gives nothing back.
-emitted(program: Block) as WasmModule := {
+# program print its value, `print(show(it))`, so main gives nothing back. The functions the program's file defines at
+# the top level are exported (core/emit/functions.wap).
+emitted(program: Block, file: text) as WasmModule := {
 	m = WasmModule()
-	p = Program(m)
+	p = Program(m, file)
 	for name in host_calls(program) { p.host[name] = imported(m, WASI, name, HOST_FUNCTIONS[name]#1, HOST_FUNCTIONS[name]#2) }
 	for call in foreign_calls(program) { foreign_imported(call, p) }
 	p.records = added_records(Records(), match program { Block(statements) => statements })
 	f = Frame()
 	body = code(program, p, f)
 	exported(m, "main", FUNCTION_KIND, function_of(m, [], Code([], if #m.tags == 0 then dropped(body) else uncaught_ended(dropped(body), p)), f))
+	functions_exported(match program { Block(statements) => statements }, p)
 	exported(m, "memory", MEMORY_KIND, 0)
 	m
 }
@@ -79,6 +81,8 @@ primitives_in(n: Node) as list<text> := match n {
 # globals emitted so far, each a Placed
 class Program {
 	m: WasmModule
+	# the program's own file, whose functions are exported (functions_exported), so never kept in place
+	source: text = ""
 	# the host functions imported: name → index
 	host: map<text, int> = {}
 	functions: list<Placed> = []
@@ -143,7 +147,7 @@ code(form: Node, p: Program, f: Frame) as Code := match form {
 # Statements run in order, the value the last one's, every other value dropped. The functions the block defines are
 # placed at its start, so a call before a definition's line finds it; a definition emits its body and leaves no value.
 block_code(statements: list<Node>, p: Program, f: Frame) as Code := {
-	for definition in statements.filter(s => s is Define) { if is_in_place(definition) then p.in_place[function_key(definition)] = definition else function_placed(definition, p) }
+	for definition in statements.filter(s => s is Define) { if is_in_place(definition) and file_of(defined_name(definition)) != p.source then p.in_place[function_key(definition)] = definition else function_placed(definition, p) }
 	codes = statements.map(s => code(s, p, f))
 	if codes is empty { return Code() }
 	Code(codes.last.type, codes[.. #codes - 1].flat_map(dropped) + codes.last.instructions)
