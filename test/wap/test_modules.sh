@@ -128,4 +128,8 @@ check "a program changes a used module's variable" "$(ran reassign_used 'use "gr
 greeting = greeting + "!"
 welcome()')" "loaded
 hi!"
+# a word's one function is exported under its plain word too
+check "a host calls a word's one function by its plain word" "$(called_export plain 'twice(x: int) as int := x * 2
+add(a: int, b: int) as int := a + b
+add(a: text, b: text) as text := a + b' twice 21)" "42"
 exit $((failures > 0))
