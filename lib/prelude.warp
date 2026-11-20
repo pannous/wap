@@ -1,0 +1,1151 @@
+// The prelude (notes/stdlib.md §8): words every program has without `use`; only those it calls come along.
+// Each is `name(parameters) := body` (modules::prelude_word_arity reads the parameters); library_words maps other
+// spellings and method forms onto them (`isdigit(c)`, `xs.first()`, `round(x, 2)` → round_to)
+// The words and aliases the compiler itself is written with are the prelude's core part, core/prelude_core.warp,
+// which every program's prelude reads before this file (decision core-takes-what-it-uses).
+// The builtins, the words no warp definition gives, are the core's: core/analysis/builtins.warp and math_builtins.warp.
+
+// the call form of xs.add(x), appended in place; written `+=`, since inside this file, which defines add, xs.add(x)
+// is this call again (extensions/sugar/methods.warp leaves a method the program defines to the program)
+add(xs, x) := { xs += [x]; xs }
+// xs.insert(x, at: i) at the 0-based position i, in place; of a map Rust's HashMap::insert (card rust-map-insert): the
+// key at set to x in place, the map back. One definition, so a call names its arguments (`at:`) as written (an
+// overload set by type passes them by position, card library-labelled-args)
+insert(xs, at, x) := if xs is map then { xs[at] = x; xs } else list_insert(xs, at, x)
+pop(xs: list) as any := list_pop(xs)
+// Python's xs.clear() and m.clear(): x emptied in place, so every alias sees it
+clear(x: any) as any := { if x is map { for k in keys(x) { x.remove(k) } } else { while count(x) > 0 { x.pop() } }; x }
+// clear() the screen: the terminal clear and the cursor home, in the playground a text frame's start, the text shown
+// anew (decision page-text-frames: `loop { clear(); draw_board(); sleep 50ms }`)
+TERMINAL_CLEAR = "\e[2J\e[H"
+clear() := print TERMINAL_CLEAR
+// Python's xs.pop(i) and m.pop(k): the item at the 0-based position i (-1 the last) or the value of the key k, removed
+// from x in place, so every alias sees it
+pop(x: any, k: any) as any := {
+	if x is map { v = x.get(k); x.remove(k); return v }
+	p = popped_position(x, k)
+	v = x#p
+	for i in p to count(x) - 1 { x#i = x#(i + 1) }
+	x.pop()
+	v
+}
+// bool(x), the truthiness of any value (wiki/bool.md; a call only, extensions/sugar/calls.warp, as a function named bool
+// would hide the type in `x: bool = …`): bool([]) is no, bool([0]) yes; a text or character is read as a word,
+// bool("0") and bool("no") are no
+truth_of(x) := if x is text or x is codepoint then text(x) as bool else if x then yes else no
+// eval(code): the value of the code run as a program of its own, by the host word eval_code, which the host compiles
+// with its own warp.wasm (decision N31; core/native/driver.warp code_evaluated, the page's driver.js). It sees none of
+// the caller's names: eval(code, with: {x: 5}) names them, each bound to its value as data before the code (card
+// eval-explicit-names)
+eval(code) := eval_code(code)
+// each name bound to warp code giving its value back: text_form quotes the texts inside a list, not a text itself
+eval(code: text, with names: map) := eval_code(names.keys.map(name => "${name} = ${text_form([names[name]])}#1").join("\n") + "\n" + code)
+
+// Foreign type names (Kotlin, Java, Swift, C#): `x: Int`, `class P(val name: String)` read as warp's type; types, not
+// aliases, so only a type's place reads them (an alias would rename the enum case Kind.Int too); a program's own
+// `class Int` or `type String = …` shadows them (card data-class-p)
+type Int = int
+type Long = int
+type Double = float
+type Float = float
+type String = text
+type Boolean = bool
+type Char = codepoint
+type Real = real
+
+// Other spellings of the built-in and prelude words (wiki/alias.md): `sorted(xs)`, `xs.contains(x)`, `t.strip()`
+alias warn => warning
+alias tuple => list
+// decision nat-and-int: a fraction is a rational
+type fraction = rational
+// JavaScript's names of the list tests
+alias every => all
+alias some => any
+alias includes => collection_contains
+// P35 default: `xs.index_of(x)` is the 1-based position (0 when absent)
+// card of-in-chain: `t.characters`, `characters in t`; a glyph is a character too; decision text-unit-plurals:
+// `t.graphemes`, `t.codepoints` are the lists
+alias characters => chars
+alias glyphs => chars
+alias graphemes => chars
+alias uppercase => upper
+alias lowercase => lower
+// the text builtin trim, Python's strip
+alias strip => trim
+// card fix-rewrites: we call it text; str stays as an alias
+alias reversed => reverse
+alias squared => square
+alias cubed => cube
+alias clone => copy
+// synonyms of the canonical words (decision synonyms-are-aliases)
+alias description => doc
+alias returns => return_type
+alias was => old
+alias previous => old
+alias invocable => callable
+alias runnable => callable
+alias forEach => each
+alias for_each => each
+alias foreach => each
+alias integer => int
+alias string => text
+alias unit => empty
+alias nil => empty
+alias ordinal => ord
+alias codepoint => ord
+alias isdigit => is_digit
+alias average => mean
+alias is_letter => is_alpha
+alias isalpha => is_alpha
+alias is_alnum => is_alphanumeric
+alias isalnum => is_alphanumeric
+alias is_whitespace => is_space
+alias isspace => is_space
+// C's put words, as print: each gives nothing, as print does (decision output-words-nothing)
+puts(t) := print t
+puti(n: int) := print n
+putl(n: int) := print n
+putf(x: float) := print x
+first(xs: list or text) := xs#1
+// decision byte-index-of: a text names the unit it counts a part's place in: `"a👍🏽b".find "b"` is the position 3
+// (characters from 1, like t#p), `"a👍🏽b".byte_index_of "b"` the offset 9 (bytes from 0); a missing part is an error
+byte_index_of(t: text, part: text) := byte_size(split(t, present_part(t, part))#1)
+// `x#i = c` of a text (extensions/sugar/text_elements.warp): the text with its i-th character replaced (1-based, by
+// grapheme), a new text, as texts are values; c a character, a one-character text or a code point (97 → 'a'). A
+// prelude word, as a sugar rule's call brings the prelude's word along and no module (card text-element-assign)
+text_with_at(t: text, i: int, c: any) as text := {
+	ch = if c is int then "" + chr(c) else "" + c
+	parts = chars(t)
+	parts#i = ch
+	join(parts, "")
+}
+// Python's `list(x)`: the list itself, a text's characters
+as_list(x) := x as list
+// `count x in y`, `y.count(x)`: how often x occurs as an item of a list or a character of a text, and how often part
+// occurs in a text, not overlapping: count("banana", "an") is 2; # counts, so a program's own count leaves them be
+occurrences(xs, x) := #filter(xs, item => item == x)
+// (a walk over the bytes, nothing allocated: split made a list of every piece only to count them, card count-of-split;
+// its counters are declared int, an untyped `at = 0` is an unbounded nat and walked 70x slower, card byte-walk)
+occurrences(t: text, part: text) as int := {
+	size: int = byte_size(part)
+	if size == 0 { return #split(t, part) - 1 }
+	last: int = byte_size(t) - size
+	found: int = 0
+	at: int = 0
+	while at <= last {
+		matched: int = 0
+		while matched < size and byte_at(t, at + matched) == byte_at(part, matched) { matched += 1 }
+		if matched == size { found += 1; at += size } else { at += 1 }
+	}
+	found
+}
+// the count of x in y, written `count(y, x)` or `y.count(x)` (arity_variants; `count x in y` counts a yes/no, refused): of a text its parts,
+// else its items, and of a function the items it holds for, `xs.count { |x| x > 1 }`; its own name, so `count xs`
+// stays the emitter's count
+count_in(y, x) := if y is text then occurrences(y, "" + x) else if x is function then #filter(y, x) else occurrences(y, x)
+// the first or last n items (fewer when xs has fewer): `xs.first(3)`, `first 3 of xs`
+first_items(xs, n) := xs[0: min(n, count(xs))]
+last_items(xs, n) := xs[max(count(xs) - n, 0): count(xs)]
+// `sort(words, {it.length})`: the items ordered by the key the function gives each (extensions/sugar/calls.warp)
+sorted_by_key(xs: list, key: function) as list := list_sorted_by(xs, xs.map(key))
+// `sort(xs, (a, b) => a > b)`: the items in the order the function of two gives, yes where a goes before b; equal
+// items keep their order (a merge sort)
+sorted_in_order(xs: list, before: function) as list := {
+	if #xs < 2 { return xs }
+	middle = int(#xs / 2)
+	left = sorted_in_order([xs#i for i in 1 to middle], before)
+	right = sorted_in_order([xs#i for i in middle + 1 to #xs], before)
+	out = []
+	i = 1
+	j = 1
+	while i <= #left or j <= #right {
+		if j > #right or (i <= #left and not before(right#j, left#i)) { out += [left#i]; i += 1 } else { out += [right#j]; j += 1 }
+	}
+	out
+}
+// x rounded to that many digits after the point, `round(x, decimals: 2)` or `round(x, 2)` (core/passes/prelude_words.warp
+// arity_variants: a prelude word can't overload the runtime's round(x) yet)
+round_to(x, decimals) := round(x * repeated_product(10, decimals)) / repeated_product(10, decimals)
+// (a float's own, unboxed: the prelude is linked, its untyped words take nodes)
+round_to(x: float, decimals: int) as float := round(x * repeated_product(10, decimals)) / repeated_product(10, decimals)
+// xⁿ of a whole n, exact, by multiplying (1/x⁻ⁿ of a negative n): the prelude writes no `^`, whose spellings link
+// big_numbers (card runtime-bridge-slots), which every program would then link. Squared and multiplied in a loop, so
+// n costs about log₂ n products and no stack (`2 ↑ 100000`); the last square is never taken, it could pass 64 bits
+repeated_product(x, n: int) := {
+	if n < 0 { return 1 / repeated_product(x, -n) }
+	product = 1
+	square = x
+	left = n
+	while left > 0 {
+		if left % 2 == 1 { product = product * square }
+		left = left ÷ 2
+		if left > 0 { square = square * square }
+	}
+	product
+}
+// The laws of the operators a fold combines with (card sum-plain-fold): each one is associative, so the compiler may
+// regroup, fuse and split any fold of it, whatever the word calling it is named, and the identity starts the fold
+operator_laws = {"+": {associative: yes, identity: 0}, "*": {associative: yes, identity: 1}, and: {associative: yes, identity: yes}, or: {associative: yes, identity: no}, max: {associative: yes}, min: {associative: yes}}
+// `sum 1 2 3`, `sum(1, 2, 3)`: the numbers given, as max takes them (lib/extrema.warp)
+sum(a: number, b: number, more...) as number := fold([a, b] + more, 0, +)
+// dir(v) of a value only the run knows (extensions/sugar/reflection.warp gives the words of a list, a text and a map): a map's
+// keys, then its words (decision dir-map-keys-first), a list's or a text's words, none of a number
+// help(x), function(x).definition of a value only the run knows (extensions/sugar/reflection.warp gives the program's and its
+// modules' words and their texts): the text of the word a text names, or of an instance's class; a name that is no
+// word is an error naming it
+looked_up_word(x, asked, names, texts) := {
+	name = if x is text then x else "${type(x).name}"
+	for at in 1 to #names { if names#at == name { return texts#at } }
+	raise "${asked}: ${name} is no word or class of the program or its modules"
+}
+dir_of_value(x, list_words, text_words, map_words) := if x is map then x.keys + map_words else if x is list then list_words else if x is text then text_words else []
+// `m.fields`, `fields(o)`, `P(3, 4).properties` of a value only the run knows: a map's keys, an instance's fields with
+// those of the classes it extends (extensions/sugar/reflection.warp names a declared class's at compile time); a
+// field of that name wins. properties, attributes and members say the same (decision synonyms-are-aliases)
+fields(x) := keys(x)
+properties(x) := fields(x)
+attributes(x) := fields(x)
+members(x) := fields(x)
+// a range's sum in closed form, Gauss's count · (first + last) / 2, the even factor halved first so the product stays small.
+// The template names no helper word (card after-sum): it lands in the program's code, where a program's own word of
+// that name (`range_sum(a, b) := sum(a..b)`) would be called instead, and every lane emits its arithmetic
+rewrite sum($first to $last) => (if $last < $first then 0 else if ($last - $first + 1) % 2 == 0 then (($last - $first + 1) /! 2) * ($first + $last) else ($last - $first + 1) * (($first + $last) /! 2))
+rewrite sum($first .. $end) => (if $end <= $first then 0 else if ($end - $first) % 2 == 0 then (($end - $first) /! 2) * ($first + $end - 1) else ($end - $first) * (($first + $end - 1) /! 2))
+// `ys = 2 floats`: a list of 2 floats, as `ys = float[2]` (warp fix writes the count first, card fix-in-lib)
+rewrite $n floats => float[$n]
+rewrite $n ints => int[$n]
+// the arithmetic mean, also spelled average
+mean(xs) := if count(xs) == 0 then raise "mean of an empty list" else sum(xs) / count(xs)
+// x↑n, Knuth's up arrow, is the power and x↓b the log of x to base b (card easy-add): operators of numbers only, so
+// another type declares its own `infix operator ↑(v: V, n: int) := …`. Knuth's arrow takes a whole n, multiplied out
+// exactly; x^y is the power of any y
+infix operator ↑(x: number, n: int) := repeated_product(x, n)
+infix operator ↓(x: number, b: number) := log(x, b)
+// the logarithm of x to the base: log(100, 10) is 2
+log(x: number, base: number) as float := log(x) / log(base)
+// the natural logarithm, a standard word without `use math`, as sin is (math's alias ln => natural_log maps it over lists)
+ln(x: number) as float := log(x)
+// `3 squared`, `2 cubed` (suffix words, decision postfix-words)
+square(x: number) as number := x * x
+cube(x: number) as number := x * x * x
+// ∜x (lib/math.warp prefix operator)
+fourth_root(x) := sqrt(sqrt(x))
+fourth_root(x: float) as float := sqrt(sqrt(x))
+is_hex_digit(c) := is_digit(c) or (lower(c) >= 'a' and lower(c) <= 'f')
+is_word_char(c) := is_alphanumeric(c) or c == '_'
+// at least one character, each passing is_class: consists_of("42", is_digit)
+consists_of(t: text, is_class: function) := { if t is empty { return false }; for c in t { if not is_class(c) { return false } }; true }
+// a whole number, optionally signed: "-3"
+is_integer(t: text) := consists_of(unsigned(t), is_digit)
+// a hole's text fits its type in a text pattern: `"/users/" + id: int`, `"v" + n: digits`, `c: letter + "!"`
+fits_text_type(t: text, type: text) := match type {
+	"int" | "integer" => is_integer(t)
+	"number" | "float" => { parts = split(t, "."); count(parts) <= 2 and is_integer(parts#1) and (count(parts) == 1 or consists_of(parts#2, is_digit)) }
+	"digit" => count(t) == 1 and is_digit(t)
+	"digits" => consists_of(t, is_digit)
+	"letter" => count(t) == 1 and is_alpha(t)
+	"letters" => consists_of(t, is_alpha)
+	"hex" => consists_of(t, is_hex_digit)
+	"space" => consists_of(t, is_space)
+	"word" => consists_of(t, is_word_char)
+	_ => true
+}
+// text patterns (wiki/pattern-matching.md): the texts of the holes between the pieces of `"0x" + rest`, [] when t doesn't
+// match (also when t is no text); the first piece is the prefix, the last the suffix, "" where the pattern starts or
+// ends with a hole; each hole's text fits its type, "" for any text
+text_holes(t, pieces: [text], types: [text]) := {
+	if not (t is text) { return [] }
+	prefix = first(pieces)
+	suffix = last(pieces)
+	if count(t) < count(prefix) + count(suffix) or not starts_with(t, prefix) or not ends_with(t, suffix) { return [] }
+	rest = t[count(prefix): count(t) - count(suffix)]
+	holes = []
+	for piece in pieces[1: count(pieces) - 1] {
+		at = index_of(rest, piece)
+		if at == 0 { return [] }
+		holes = holes + [rest[0: at - 1]]
+		rest = rest[at - 1 + count(piece):]
+	}
+	holes = holes + [rest]
+	for i in 1 to count(holes) { if not fits_text_type(holes#i, types#i) { return [] } }
+	holes
+}
+// the digits of n in a base up to 36, letters past 9 (upper: true capitals): to_base(255, 16) is "ff",
+// from_base("ff", 16) is 255; a digit is its code point ('0' is 48, 'A' 10 + 55, 'a' 10 + 87), not an index into a text of
+// symbols, which needs the grapheme runtime
+to_base(n: int, base: int, upper = false) := { if base < 2 or base > 36 { raise "to_base: the base " + text(base) + " is not 2 to 36" }; if n == 0 { return "0" }; out = ""; rest = abs(n); while rest > 0 { digit = rest % base; out = (digit + (if digit < 10 then 48 else if upper then 55 else 87)) as char + out; rest = rest /! base }; if n < 0 then "-" + out else out }
+from_base(t: text, base: int) := { if base < 2 or base > 36 { raise "from_base: the base " + text(base) + " is not 2 to 36" }; if t == "" { raise "from_base of an empty text" }; out = 0; for c in lower(t) { code = ord(c); digit = if code >= 48 and code < 58 then code - 48 else if code >= 97 and code <= 122 then code - 87 else 99; if digit >= base { raise "from_base: " + c + " is not a base-" + text(base) + " digit in " + t }; out = out * base + digit }; out }
+// how an int shown in hex or binary prints (cards hex-printing, binary-int): hex_text(255) is "0xff", binary_text(-5)
+// "-0b101"; the printer of such values calls them (wasm_emitter/numbers/radix.rs)
+radix_text(n: int, base: int, prefix: text) := (if n < 0 then "-" else "") + prefix + to_base(abs(n), base)
+hex_text(n: int) := radix_text(n, 16, "0x")
+// a number shown in hex: hex(123), `123 as hex` and `[1, 256].map hex` show 0x7b, 0x1, 0x100, read back as the literals
+// they show; arithmetic on one gives a plain int (user 11-11)
+type hex < int
+format hex h as text := hex_text(h)
+binary_text(n: int) := radix_text(n, 2, "0b")
+// n copies of value, ø for none (list.warp fill): `n times [x]` and `int[n]` where no typed array holds them; the
+// compiler calls it (wasm_emitter/lists/list_emitter.rs), so a fractional count is the error the runtime gives
+filled_list(n, value: any) := { if n > floor(n) { raise "count must be an integer; fix: compute it with /! (floor division) or `… as int`" }; [value for i in 1 to n] }
+// `n times {…}` runs the block n times, a plain library function (decision language-layers); `n times [x]` is n
+// copies of x, `n times "ab"` the text n times, `n times x` of a number their product
+infix operator times(n: int, body: block) := for i in 1 to n { body() }
+infix operator times(n: int, items: list) := if #items == 1 then zero_fill(n, items#1) else { out = []; for i in 1 to n { out = out + items }; out }
+infix operator times(n: int, t: text) := t * n
+infix operator times(n: number, x: number) := n * x
+// once, twice and thrice count as times does (decision count-words-library): a block runs, a value repeats
+once(body: block) := 1 times body
+once(value: any) := 1 times value
+twice(body: block) := 2 times body
+twice(value: any) := 2 times value
+thrice(body: block) := 3 times body
+thrice(value: any) := 3 times value
+// `x as decimal` of a ratio (card repeating-decimals): the digits before the period, then the period's overlined, 1/6
+// is 0.16̅; a terminating decimal as its digits, a period longer than 1000 digits as the ratio n/d: how a quotient of
+// values shows (extensions/big_numbers/exact.warp exact_text, decision quotient-period). The cast calls it with the
+// ratio's parts, the denominator never 0
+decimal_text(numerator: int, denominator: int) := "\(numerator / denominator)"
+// `x as decimal` (extensions/sugar/arithmetic.warp): the decimal digits of x, its period overlined
+as_decimal(x: number) := decimal_text(numerator(x), denominator(x))
+// x as a fraction, by its continued fraction (rust-harness:src/numbers/real.rs computes it exactly for √2, π, … written in the program):
+// `within: 1e-6` the first convergent that close, a limit the closest fraction whose denominator is at most that
+// (Python's limit_denominator and its default 1000000, user decision); limit 0 the exact fraction, of a float the first
+// convergent that is the same float. A precision replaces the default limit (`within: 1e-40` reaches beyond it)
+nearest(x, kind, limit = 1000000, within = 0) := {
+	p0 = 0; q0 = 1; p1 = 1; q1 = 0; rest = x
+	cap = if within > 0 and limit == 1000000 then 0 else limit
+	while true {
+		a = floor(rest) as int
+		q2 = q0 + a * q1
+		if cap > 0 and q2 > cap {
+			// the closer of the last convergent and the semiconvergent with the largest denominator in the limit
+			k = (cap - q0) /! q1
+			below = (p0 + k * p1) / (q0 + k * q1)
+			above = p1 / q1
+			return if abs(above - x) <= abs(below - x) then above else below
+		}
+		p2 = p0 + a * p1
+		p0 = p1; q0 = q1; p1 = p2; q1 = q2
+		fraction = p1 / q1
+		// a float stops at the first fraction that is the same float: its continued fraction beyond is noise
+		is_same_float = x is float and float(p1) / q1 == x
+		if rest == a or is_same_float or (within > 0 and abs(fraction - x) <= within) { return fraction }
+		rest = 1 / (rest - a)
+	}
+}
+// Python's dict(pairs) (card python-stdlib): a map of [key value] pairs
+dict(pairs) := { out = {}; for pair in pairs { out[pair#1] = pair#2 }; out }
+// copy(x), clone(x): a value of its own that a change to x no longer reaches (decisions P205-P207): deep, each
+// field, item and entry copied too; copy(x, shallow: yes) is a new one sharing what x holds. A copy keeps its class
+copy(x, shallow: bool = no) := {
+	if x is list { return x.map(item => copied(item, shallow)) }
+	made = if x is map then {} else instance_copy(x)
+	# (neither a map nor an instance: a number, a text, … is a value of its own)
+	if made === x { return x }
+	for name in keys(x) { made[name] = copied(x[name], shallow) }
+	made
+}
+copied(item, shallow: bool) := if shallow then item else copy(item)
+// Python's dict.fromkeys(ks, value) (card python-aliases): a map of each key with the one value
+fromkeys(ks, value) := { out = {}; for k in ks { out[k] = value }; out }
+// Python's xs.pop(i) and m.pop(k) (card python-aliases, declaration_lowering removed_key): the element at the 0-based
+// position i (-1 the last) or the value of the key k, and the list or map without it
+popped_position(xs, i) := if i < 0 then count(xs) + i + 1 else i + 1
+popped_item(x, k) := if x is map then x.get(k) else x#(popped_position(x, k))
+popped_rest(x, k) := if x is map then { rest = x; rest.remove(k); rest } else [x#i for i in 1 to count(x) if i != popped_position(x, k)]
+// Python's xs.clear() and m.clear() (card python-aliases, declaration_lowering cleared_collection): the empty list or map
+cleared(x) := if x is map then {} else []
+// xs.insert(v, at: i) (list_mutations inserted_in_place): the list with v at the 0-based position i, past the end or
+// before 0 at the end
+inserted(xs, i: int, v: any) := if i < 0 or i >= count(xs) then xs + [v] else xs[0: i] + [v] + xs[i:]
+// `a .op b` where the compiler cannot tell which side is a list (broadcasting.rs, card compile-shaders): each item of
+// a list with the other side, two lists paired by index, two numbers plainly; `combined` is `(l, r) => l op r`. Both
+// sides are `any`: inferred from the body, one call with a number made it a list
+element_wise_any(left: any, right: any, combined: function) := if left is list and right is list then { if count(left) != count(right) { raise "element-wise operator: the lists differ in length" }; [combined(left#i, right#i) for i in 1 to count(left)] } else if left is list then [combined(item, right) for item in left] else if right is list then [combined(left, item) for item in right] else combined(left, right)
+// f of a value that may be a list (extensions/sugar/broadcasting.warp): of each item of a list, else of the value itself
+each_any(value: any, f: function) := if value is list then [f(item) for item in value] else f(value)
+// a pixel of paint(f, width, height) on the CPU (gpu_maps painted_functions): a vector of 3 numbers from 0 to 1 is
+// that color as 0xAARRGGBB, as the shader paints it; an int stays itself; any other number is refused, as the wiki
+// says a painted function gives three numbers (graphics.md)
+pixel_color(v: any) := if v is list then 0xFF000000 + pixel_channel(v#1) * 65536 + pixel_channel(v#2) * 256 + pixel_channel(v#3) else if v is int then v else raise "a painted function gives three numbers [r, g, b], each 0 … 1, not ${v}; fix: return [v, v, v] for a gray"
+pixel_channel(c) := round(255 * min(max(c, 0), 1)) as int
+pixel_channel(c: float) as int := round(255 * min(max(c, 0.0), 1.0)) as int
+// paint(f, width, height) of a warp function on the CPU, where no shader paints it (gpu_maps painted_functions): f(column,
+// row) of every pixel, row by row; in a frame without a window (lib/frames.warp frames_end) at most the window's size,
+// f sampled across the size asked; the coordinates are floats as a fragment shader's are (a mandelbrot's z² + c in exact fractions never ends; decision gpu-first-asap)
+global painting_headless_frame = no
+paint_each(f: function, width, height) := {
+	columns = if painting_headless_frame then min(width, window_width(), window_height() * width /! height) else width
+	rows = columns * height /! width
+	paint([pixel_color(f(float((i % columns) * width /! columns), float((i /! columns) * height /! rows))) for i in 0..columns * rows], columns, rows)
+}
+// f painted on the CPU where a GPU shader was wanted, said once a run with why: its pixels are width × height, which
+// a window shows scaled where a shader paints every pixel of it
+global cpu_painting_said = no
+cpu_painted(f: function, width, height, why: text) := {
+	if not cpu_painting_said {
+		cpu_painting_said = yes
+		hint "painted on the CPU at ${width}×${height}: " + why
+	}
+	paint_each(f, width, height)
+}
+// paint(pixels, width, height) of a list of pixels, row by row, as the host paints them; of a WGSL shader text, as the
+// host renders it; of a function value, f(column, row) of each pixel on the CPU (paint_each): only a function the
+// program names is translated to a shader (lib/shaders.warp paint_function)
+paint(picture, width, height) := if picture is list or picture is text then paint(shader_words(picture), width, height, ø) else cpu_painted(picture, width, height, "only a function the program defines and names, `paint(stripes, 64, 32)`, becomes a GPU shader")
+// the program values a shader reads as the plain floats it takes: a quantity by its amount in SI base units, an angle in
+// radians, each item of a vector (decision no-units-in-shaders: a shader ignores units)
+shader_floats(values) := {
+	if values == ø { return ø }
+	plain = {}
+	for name in values.keys { plain[name] = shader_value(values[name]) }
+	plain
+}
+// a text is kept: a storage array may be a file the host reads straight into the
+// GPU buffer (the baked atlas), which a float list of its bytes would rebuild; a GPU list too, which the host binds
+// where its cells are (a copy would walk its numbers on every paint); its place is -1 for no GPU list, negative
+// places are GPU lists past 2 GiB of memory
+shader_value(value) := if is_gpu_list(value) or value is text then value else if value is list then value.map(shader_value) else float(value)
+// the words warp gives every shader, as WGSL: hash(cell), a number 0 ..< 1 that stays the same for a cell (decision
+// shader-hash); the cell taken modulo 289 keeps the sine's argument small enough for f32
+SHADER_WORDS_WGSL = {hash: "fn hash(cell: vec2f) -> f32 {\n\tlet wrapped = cell - 289.0 * floor(cell / 289.0);\n\treturn fract(sin(dot(wrapped, vec2f(127.1, 311.7))) * 43758.5453);\n}"}
+// a WGSL shader text with each of those words it calls but does not define added after it; anything else as it is
+shader_words(shader) := {
+	if not (shader is text) { return shader }
+	added = shader
+	for word in keys(SHADER_WORDS_WGSL) {
+		if shader.contains(word + "(") and not shader.contains("fn " + word + "(") { added += "\n" + SHADER_WORDS_WGSL[word] + "\n" }
+	}
+	added
+}
+// the shader words of a shader block's text, placed where the block stands in the program: [its first line, the columns
+// before that line, the columns before each later one] (extensions/shader_blocks.warp shader_place), so the GPU says
+// its errors at their place in the program (card wgsl-error)
+shader_words(shader, place) := {
+	lines = shader.split("\n")
+	indented = join(["\n" + " " * place#3 + line for line in lines[1 ..]], "")
+	shader_words("\n" * (place#1 - 1) + " " * place#2 + lines[0] + indented)
+}
+// paint(shader) of a WGSL shader text, at the size of where it shows (wiki/graphics.md)
+paint(shader: text) := paint(shader_words(shader), shown_width(), shown_height(), ø)
+// where a painting without a size shows: the window, in its frames, once it is open or where one can open (natively its
+// points as its user sizes it, the pointer told in them; headless the frame's small window, decision on-frame-headless),
+// else the view (the playground's pane, the terminal)
+painting_in_window() := painting_headless_frame or window_open() or window_possible()
+window_possible() := system_value("window_possible") != 0
+shown_width() := if painting_in_window() then window_width() else view_width()
+shown_height() := if painting_in_window() then window_height() else view_height()
+// sleep 0.2, sleep(t): a bare number is seconds (decision sleep-seconds); `sleep 20ms` the compiler folds into sleep_ms
+sleep(amount) := slept(amount * 1000)
+
+// the wait of a sleep, ms: the tasks module's runs the tasks due meanwhile, which replaces this
+slept(ms) := sleep_ms(ms)
+// a `use js` call's value (extensions/foreign_globals.warp): a promise it gave, which the host keeps, waited for
+foreign_settled(value: any?) as any? := if foreign_pending() != 0 then foreign_await() else value
+// what a module holds per task, kept around a task and given back after it (extensions/sugar/tasks.warp): nothing here, a
+// module holding some (sound's voice) defines both, which replace these
+task_context() := ø
+task_context_back(context) := ø
+// random(a, b) (decision random-forms): of whole numbers a whole number from a to b, both included (random(1, 6) rolls
+// a die), else a float in [a, b); random a..b one of the range's elements, a to b-1
+random_fraction(a, b) := a + random() * (b - a)
+random_until(a, b) := if a is int and b is int then a + random_below(b - a) else random_fraction(a, b)
+random_between(a, b) := { if a > b { raise "random_between needs lo <= hi" }; if a is int and b is int then random_until(a, b + 1) else random_fraction(a, b) }
+// random(x) by the value's type (card random-dispatches): of a list one of its elements, of a whole number n one of 0…n-1,
+// of a fraction a float from 0 up to it
+random_element(xs) := xs#(random_below(count(xs)) + 1)
+random_of(x) := if x is list then random_element(x) else random_of_type(x)
+// random int, random bool, random codepoint, random float: a random value of the type, before a whole number n (0…n-1)
+// and a fraction (a float below it)
+random_of_type(x) := {
+	if x == int { return random_int() }
+	if x == bool { return random_bool() }
+	if x == codepoint { return random_codepoint() }
+	if x == float { return random() }
+	if x is int then random_below(x) else random_fraction(0, x)
+}
+// `300 as u8`, `x: u8 = 300` (decision cast-checks): a fixed-width int takes a value that fits it, else a catchable
+// error naming the range; `as! u8` wraps instead
+fitted_int(value: any, type: text) as int := {
+	n = value as int
+	range = fixed_int_range(type)
+	if n < range#1 or n > range#2 { raise "${value} does not fit ${type} (${range#1}…${range#2})" }
+	n
+}
+fixed_int_range(type: text) as list := {
+	if type in ["u8", "uint8", "byte"] { return [0, 255] }
+	if type in ["i8", "int8"] { return [-128, 127] }
+	if type in ["u16", "uint16"] { return [0, 65535] }
+	if type in ["i16", "int16"] { return [-32768, 32767] }
+	if type in ["u32", "uint32"] { return [0, 4294967295] }
+	if type in ["i32", "int32"] { return [-2147483648, 2147483647] }
+	[0, 18446744073709551615]
+}
+// random int, random bool, random codepoint: a random value of the type; random int spans the whole 64-bit range
+random_int() := (random_below(0x100000000) - 0x80000000) * 0x100000000 + random_below(0x100000000)
+random_bool() := random_below(2) == 1
+// a Unicode scalar value: the surrogates 0xD800…0xDFFF are no characters
+random_codepoint() := { n = random_below(0x110000 - 0x800); if n >= 0xD800 then n = n + 0x800; n as codepoint }
+// random(x), random(a, b): the dispatch above; random() itself is the host's float in [0, 1)
+random(x: list or number) := random_of(x)
+random(a, b) := random_between(a, b)
+// asked as a float, `x: float = random(50, 550)`, a fraction from a up to b however a and b are written (decision default-variant)
+random(a, b) as float := random_fraction(a, b)
+// the machine's readings, read now by the host word system_value (Rust: lowering/signals/system_values.rs,
+// rust-harness:crates/warp-runtime host_words.rs SYSTEM_VALUES): a yes/no one is a reading other than 0, the mouse's place a float; a
+// program's own name of the same word wins
+battery() := system_value("battery")
+charging() := system_value("charging") != 0
+online() := system_value("online") != 0
+// whether the system shows dark mode (the page: the browser's prefers-color-scheme; natively the window library asks
+// the system); `on change dark mode {…}` hears it switch (lib/signals.warp)
+dark_mode() := system_value("dark mode") != 0
+// the system value as said, `whenever dark mode {…}`, `not dark mode`
+rewrite dark mode => dark_mode
+mouse_x() := system_value("mouse_x") as float
+mouse_y() := system_value("mouse_y") as float
+mouse_down() := system_value("mouse_down") != 0
+// where the button went down, while it is down: a stroke starts there, though a frame polling mouse_x saw the pointer
+// move on first; while it is up (and without a window), where the pointer is
+mouse_down_x() := if mouse_down then system_value("mouse_down_x") as float else mouse_x
+mouse_down_y() := if mouse_down then system_value("mouse_down_y") as float else mouse_y
+mouse_wheel() := system_value("mouse_wheel")
+key_down() := system_value("key_down") != 0
+window_open() := system_value("window_open") != 0
+view_width() := system_value("view_width")
+view_height() := system_value("view_height")
+gpu_drawing() := system_value("gpu_drawing") != 0
+gpu_paints() := system_value("gpu_paints") != 0
+window_width() := system_value("window_width")
+window_height() := system_value("window_height")
+display_width() := system_value("display_width")
+display_height() := system_value("display_height")
+// the text on the clipboard, by the host word clipboard_text (the page asks the browser for it)
+clipboard() := clipboard_text()
+display_dpi() := system_value("display_dpi")
+// the paint window's size (the playground: the paintings' frame), system values, so `whenever window.width > 800 {…}`
+// listens; written, the window resizes
+window.width := window_width
+window.width(new_width) := set_system_value("window_width", new_width)
+window.height := window_height
+window.height(new_height) := set_system_value("window_height", new_height)
+// whether the window fills the screen (the playground: the paintings' frame); written, it goes full screen or back
+window_fullscreen() := system_value("window_fullscreen") != 0
+window.fullscreen := window_fullscreen
+window.fullscreen(full) := set_system_value("window_fullscreen", if full then 1 else 0)
+// fullscreen(): the window fills the screen, fullscreen(no) back; in the page only right after the viewer's run key or
+// click, as the browser allows
+fullscreen(full = yes) := window.fullscreen(full)
+// a program cannot resize the display: set window.width or canvas.width instead
+// The fields of a time at run time (card time-fields-warp, wiki/time.md), called late by the emitter's
+// time_field with the time's form (TimeForm: 1 a date, its position in days; else nanoseconds since 1970), its
+// position, its zone's seconds east of UTC (a zoned time's, else 0; not `offset`: the index type's synonym) and the
+// index of the field in times.rs TIME_FIELDS. A zoned time's fields are those of its wall clock, its epoch seconds the instant's
+time_field_of(form: int, position: int, zone_seconds: int, field: int) as int := {
+	wall = if form == 1 then position else position + zone_seconds * 1000000000
+	days = time_days(form, wall)
+	nanos = time_nanos(form, wall)
+	match field {
+		0 => civil_year(days)
+		1 => civil_month(days)
+		2 => civil_day(days)
+		// ISO weekday: 1970-01-01 was a Thursday, Monday is 1
+		3 => floor_mod(days + 3, 7) + 1
+		4 => days - days_from_civil(civil_year(days), 1, 1) + 1
+		5 => nanos /! 3600000000000
+		6 => nanos /! 60000000000 % 60
+		7 => nanos /! 1000000000 % 60
+		8 => days * 86400 + nanos /! 1000000000 - zone_seconds
+		9 => zone_seconds
+		// the time of day in whole seconds, as calendar::Time::part: 22:27:46
+		10 => nanos /! 1000000000 * 1000000000
+		// the form of the time (lib/time.warp zoned tells a local time from an instant so)
+		12 => form
+		_ => days
+	}
+}
+// time_parts(form, position): the calendar day of a position and the nanoseconds into it; a date has no clock
+time_days(form: int, position: int) as int := if form == 1 then position else position /! 86400000000000
+time_nanos(form: int, position: int) as int := if form == 1 then 0 else floor_mod(position, 86400000000000)
+// the remainder with the divisor's sign (Python's %): floor_mod(7, -3) is -2, floor_mod(-7, 3) is 2
+floor_mod(n: int, divisor: int) as int := { if divisor == 0 { raise "floor_mod by zero" }; r = n - n /! divisor * divisor; if r != 0 and (r < 0) != (divisor < 0) { r = r + divisor }; r }
+// Howard Hinnant's calendar over day numbers (days since 1970-01-01, proleptic Gregorian), the one warp copy of
+// rust-harness:src/time/calendar.rs days_from_civil / civil_from_days (card civil-days-dup); lib/time.warp builds on it.
+// civil_from_days: eras of 400 years from 0000-03-01, a year from March
+civil_era(days: int) as int := (days + 719468) /! 146097
+civil_day_of_era(days: int) as int := days + 719468 - civil_era(days) * 146097
+civil_year_of_era(day_of_era: int) as int := (day_of_era - day_of_era /! 1460 + day_of_era /! 36524 - day_of_era /! 146096) /! 365
+civil_day_of_year(day_of_era: int) as int := {
+	year_of_era = civil_year_of_era(day_of_era)
+	day_of_era - (365 * year_of_era + year_of_era /! 4 - year_of_era /! 100)
+}
+// the month counted from March: months 10 and 11 of the year are January and February
+civil_march_month(day_of_year: int) as int := (5 * day_of_year + 2) /! 153
+civil_month(days: int) as int := {
+	march_month = civil_march_month(civil_day_of_year(civil_day_of_era(days)))
+	if march_month < 10 then march_month + 3 else march_month - 9
+}
+civil_day(days: int) as int := {
+	day_of_year = civil_day_of_year(civil_day_of_era(days))
+	day_of_year - (153 * civil_march_month(day_of_year) + 2) /! 5 + 1
+}
+civil_year(days: int) as int := {
+	year = civil_year_of_era(civil_day_of_era(days)) + civil_era(days) * 400
+	if civil_month(days) <= 2 then year + 1 else year
+}
+// the date of a day number as {year, month, day}
+civil_from_days(day_count: int) := {year: civil_year(day_count), month: civil_month(day_count), day: civil_day(day_count)}
+// the check of the Rust tests' `is!("3+3", 6)`, written `is! "3+3" 6` (decision warp-is-tests): the code's value is
+// the expected one, permissively: equal, or both nothing-like (0, ø, [], no); a failure says what the code gave
+is!(warp: text, expected: any) := {
+	got = eval(warp)
+	passed = got == expected or (not got and not expected)
+	if not passed then print("✗ is! \"" + warp + "\" " + text(expected) + ": got " + text(got))
+	passed
+}
+
+// `300 as! byte` is 44: the low 8 bits, in 0..255 (decision checked-forced-conversions). A text is not a byte:
+// parsing has no forced rule, so "200" as! byte refuses
+byte_wrapped(n) := {
+	if n is text or n is list or n is map { raise "no forced conversion to byte of that value" }
+	whole = n as! int
+	rest = whole % 256
+	if rest < 0 then rest + 256 else rest
+}
+
+// bytes as! text: invalid UTF-8 becomes U+FFFD, one replacement per bad byte. from_utf8 stays strict
+lossy_utf8(bytes) := {
+	if not (bytes is list) { raise "no forced conversion to text of that value" }
+	out = ""
+	i = 0
+	total = count(bytes)
+	while i < total {
+		b = bytes[i]
+		length = if not (b is int) or b < 0 or b > 255 then 0 else if b < 128 then 1 else if b >= 194 and b < 224 then 2 else if b >= 224 and b < 240 then 3 else if b >= 240 and b < 245 then 4 else 0
+		if length == 0 or i + length > total {
+			out = out + chr(65533)
+			i = i + 1
+		} else {
+			n = if length == 1 then b else if length == 2 then b % 32 else if length == 3 then b % 16 else b % 8
+			ok = yes
+			if length > 1 {
+				for k in 1 to length - 1 {
+					c = bytes[i + k]
+					if not (c is int) or c < 128 or c > 191 { ok = no } else { n = n * 64 + c % 64 }
+				}
+			}
+			if not ok or (length == 3 and n < 2048) or (length == 4 and (n < 65536 or n > 1114111)) or (n >= 55296 and n <= 57343) {
+				out = out + chr(65533)
+				i = i + 1
+			} else {
+				out = out + chr(n)
+				i = i + length
+			}
+		}
+	}
+	out
+}
+// `x as! T` is convert!(x, to: T), the target a value (decision checked-forced-conversions, convert-bang): one
+// definition for every target the prelude forces, as typed parameters cannot tell targets apart; T a type or its
+// symbol (`as!` passes symbol("byte")), named alike
+byte_names = ["byte", "u8", "uint8"]
+convert!(value, to) := {
+	target = to.name
+	if byte_names.contains(target) { return byte_wrapped(value) }
+	if target == "text" { return lossy_utf8(value) }
+	raise "no forced conversion to " + target + " of that value"
+}
+
+// The class of every error (decision error-classes): `class ParseError: Error` declares one, `except Error` catches all
+class Error { message: text }
+# the cell of a shared capture as the seed's compiler writes it (`n·cell = Cell(n)`): the compiler of today writes a
+# list of one item; a program's own class Cell replaces this one (TODO (card seed-drops-cell) remove once the seed is refreshed)
+class Cell { value: any }
+// a pattern written as text, which the words given it read: format(t, Pattern("yyyy-MM-dd")) a date's fields (time)
+class Pattern { written: text }
+
+// Pattern matching (wiki/pattern-matching.md): the names a pattern binds in a value as a map, ø when it doesn't fit.
+// The pattern is an arm's code quoted (core/passes/node_matches.warp asks for an arm of a list, tuple, map, text cut or
+// `data(…)` pattern): a name binds, `_` takes anything, a type word tests the type, a value must be equal; a rest
+// `...rest` takes what the other items leave; `>= 18`, `18..65` and `a | b` stand for a part. Inside `data(…)` the
+// code must be the same but for its `$holes`, a hole used twice taking equal code
+pattern_bindings(value: any, pattern: any) as any := {
+	bound = {}
+	if fits_pattern(value, pattern, bound, no) then bound else ø
+}
+fits_pattern(value: any, pattern: any, bound: map, code: bool) as bool := {
+	if is_type(pattern, "symbol") { return fits_name(value, name_of(pattern), bound, code) }
+	if is_type(pattern, "key") { return fits_key(value, pattern, bound, code) }
+	if bracket_of(pattern) != ø { return fits_group(value, pattern, bound, code) }
+	value == pattern
+}
+// a hole or name takes the value, the same one again where it is bound already
+bound_as(value: any, name: text, bound: map) as bool := {
+	if name == "_" { return yes }
+	if name in bound { return bound[name] == value }
+	bound[name] = value
+	yes
+}
+fits_name(value: any, name: text, bound: map, code: bool) as bool := {
+	if name.starts_with("$") { return bound_as(value, name[1 ..< #name], bound) }
+	if code { return value == symbol(name) }
+	if is_pattern_type(name) { return has_pattern_type(value, name) }
+	if name in character_classes { return is_type(value, "text") and character_classes[name](value) }
+	bound_as(value, name, bound)
+}
+// the type words a pattern tests a value by, each with its test
+pattern_types = {"int": is_int_value, "float": is_float_value, "number": is_number_value, "text": is_text_value,
+	"bool": is_bool_value, "list": is_list_value, "map": is_map_value, "symbol": is_symbol_value, "key": is_key_value,
+	"block": is_block_value}
+is_int_value(value: any) as bool := is_type(value, "int")
+is_float_value(value: any) as bool := is_type(value, "number") and not is_type(value, "int")
+is_number_value(value: any) as bool := is_type(value, "number")
+is_text_value(value: any) as bool := is_type(value, "text")
+is_bool_value(value: any) as bool := is_type(value, "bool")
+is_list_value(value: any) as bool := is_type(value, "list")
+is_map_value(value: any) as bool := is_type(value, "map")
+is_symbol_value(value: any) as bool := is_type(value, "symbol")
+is_key_value(value: any) as bool := is_type(value, "key")
+is_block_value(value: any) as bool := bracket_of(value) == "{"
+is_pattern_type(name: text) as bool := name in pattern_types
+has_pattern_type(value: any, name: text) as bool := pattern_types[name](value)
+fits_key(value: any, pattern: any, bound: map, code: bool) as bool := {
+	op = op_of(pattern)
+	left = key_of(pattern)
+	right = value_of(pattern)
+	if is_text_cut(pattern) and not code { return fits_text_cut(value, text_pieces(pattern), bound) }
+	// `x: int`, `$k: int`, `$n: > 0`, `$c: Call`: the part fits the condition, and the name takes it; a condition's own
+	// holes (a declared pattern's) bind apart, never meeting the outer pattern's names
+	if op == ":" and is_type(left, "symbol") { return fits_pattern(value, right, {}, no) and fits_name(value, name_of(left), bound, code) }
+	if op == "|" or op == "or" { return fits_alternative(value, left, bound, code) or fits_pattern(value, right, bound, code) }
+	// `Shape::Circle(r)`, `Shape.Circle(r)`: the case of its enum
+	if (op == "::" or op == ".") and not code and is_case_with_fields(right) { return fits_pattern(value, right, bound, code) }
+	// `not p`, `!= x` (read as `not == x`): the part does not fit p, binding nothing
+	if op == "not" and left == ø and not code { return not fits_pattern(value, right, {}, no) }
+	if op in range_ops and not code { return in_range(value, op, left, right) }
+	if left == ø and not code { return compares(value, op, right) }
+	is_type(value, "key") and op_of(value) == op and fits_pattern(key_of(value), left, bound, code) and fits_pattern(value_of(value), right, bound, code)
+}
+// an alternative keeps its names only where it fits: `data($x * 2) | data(2 * $x)` of 2 * y binds x = y, never the 2
+// the first one took before it failed
+fits_alternative(value: any, pattern: any, bound: map, code: bool) as bool := {
+	tried = copy(bound, shallow: yes)
+	if not fits_pattern(value, pattern, tried, code) { return no }
+	for name in keys(tried) { bound[name] = tried[name] }
+	yes
+}
+// `>= 18`, `!= ""`: the comparison of the part with the limit; an order only between two numbers or two texts
+comparisons = {">=": at_least, ">": above, "<=": at_most, "<": below, "!=": unequal, "==": equal}
+compares(value: any, op: text, limit: any) as bool := {
+	if not (op in comparisons) { raise "a pattern compares by >=, >, <=, <, != or ==, not " + op }
+	if op != "!=" and op != "==" and not are_ordered(value, limit) { return no }
+	comparisons[op](value, limit)
+}
+are_ordered(a: any, b: any) as bool := (is_type(a, "number") and is_type(b, "number")) or (is_type(a, "text") and is_type(b, "text"))
+at_least(a: any, b: any) as bool := a >= b
+above(a: any, b: any) as bool := a > b
+at_most(a: any, b: any) as bool := a <= b
+below(a: any, b: any) as bool := a < b
+unequal(a: any, b: any) as bool := a != b
+// `13 to 19`, `18..65`, `65..`: the part within the range, an open end unbounded; `to` takes its end, `..` and `..<` stop
+// before it
+range_ops = ["to", "..", "..<"]
+in_range(value: any, op: text, low: any, high: any) as bool := {
+	if low != ø and not (are_ordered(value, low) and value >= low) { return no }
+	if high == ø { return yes }
+	are_ordered(value, high) and (if op == "to" then value <= high else value < high)
+}
+equal(a: any, b: any) as bool := a == b
+fits_group(value: any, pattern: any, bound: map, code: bool) as bool := {
+	// `data(…)`: the code inside, holes and all
+	if not code and bracket_of(pattern) == "(" and #pattern == 2 and pattern#1 == symbol("data") { return fits_pattern(value, pattern#2, bound, yes) }
+	if bracket_of(pattern) == "{" and not code { return fits_map(value, pattern, bound) }
+	if is_case_with_fields(pattern) and not code and class_name(value) == name_of(pattern#1) { return fits_fields(value, pattern, bound) }
+	if code and is_type(value, "key") and is_operator_hole(pattern) { return fits_operation(value, pattern, bound) }
+	if code and bracket_of(value) != bracket_of(pattern) { return no }
+	if code and is_phrase_hole(value, pattern) { return bound_as(phrase_of(value), name_of(pattern#1)[1 ..], bound) }
+	if not code and not is_type(value, "list") { return no }
+	fits_items(value, pattern, bound, code)
+}
+// `{ $body }` of `{ print x }`: a hole alone in a block or group takes its one phrase, whose words it holds spaced;
+// a list's items stay items, `[1 2]` is two
+is_phrase_hole(value: any, pattern: any) as bool := bracket_of(value) != "[" and #pattern == 1 and is_type(pattern#1, "symbol") and name_of(pattern#1).starts_with("$") and separator_of(value) == " " and #value > 1
+phrase_of(group: any) as any := separated(bracketed([part for part in group], ""), " ")
+// `data($l $op $r)`: a hole between two parts takes any operator, its spelling bound: `-` of `a - b`
+is_operator_hole(pattern: any) as bool := bracket_of(pattern) == "" and #pattern == 3 and is_type(pattern#2, "symbol") and name_of(pattern#2).starts_with("$")
+fits_operation(value: any, pattern: any, bound: map) as bool := fits_pattern(key_of(value), pattern#1, bound, yes) and bound_as(op_of(value), name_of(pattern#2)[1 ..], bound) and fits_pattern(value_of(value), pattern#3, bound, yes)
+// `Circle(r)`, `Rect(w, h)`: an enum case carrying data, or a class, with a pattern for each field
+is_case_with_fields(pattern: any) as bool := bracket_of(pattern) == "(" and #pattern > 1 and is_type(pattern#1, "symbol")
+// the class of an instance, Circle of `Circle{r: 2}` (its type, shown by its name)
+class_name(value: any) as text := name_of(type(value))
+// the instance's fields fit the places after the case name: a place `name: pattern` (`Circle{r}` arrives as
+// `Circle(r: r)`) the field of that name, any other place the field at its position; a field no place names is not
+// looked at, as in a map pattern, so `Call(f, args)` takes apart a Call that has more fields (Python's class patterns
+// read the same)
+fits_fields(value: any, pattern: any, bound: map) as bool := {
+	fields = value.keys
+	if #pattern - 1 > #fields { return no }
+	for i in 1 to #pattern - 1 {
+		place = pattern#(i + 1)
+		named = is_type(place, "key") and op_of(place) == ":" and is_type(key_of(place), "symbol")
+		name = if named then name_of(key_of(place)) else fields#i
+		if not (name in fields) or not fits_pattern(value[name], if named then value_of(place) else place, bound, no) { return no }
+	}
+	yes
+}
+// the items, a rest among them taking those the others leave, the items after it counted from the end
+fits_items(value: any, pattern: any, bound: map, code: bool) as bool := {
+	rest = 0
+	for i in 0..<#pattern { if rest == 0 and is_rest_item(pattern#(i + 1)) { rest = i + 1 } }
+	if rest == 0 {
+		if #value != #pattern { return no }
+		for i in 0..<#pattern { if not fits_pattern(value#(i + 1), pattern#(i + 1), bound, code) { return no } }
+		return yes
+	}
+	after = #pattern - rest
+	if #value < rest - 1 + after { return no }
+	for i in 0..<(rest - 1) { if not fits_pattern(value#(i + 1), pattern#(i + 1), bound, code) { return no } }
+	for i in 0..<after { if not fits_pattern(value#(#value - after + i + 1), pattern#(rest + i + 1), bound, code) { return no } }
+	taken = []
+	for i in (rest - 1)..<(#value - after) { taken += [value#(i + 1)] }
+	fits_rest(taken, pattern#rest, bound, code)
+}
+// `...rest`, `*rest`, `rest...`, `$rest...`, a bare `..`, an item pattern `[n, label]...`
+is_rest_item(item: any) as bool := {
+	if is_type(item, "symbol") { return name_of(item).starts_with("*") }
+	is_type(item, "key") and (op_of(item) == "to" or op_of(item) == "..") and value_of(item) == ø
+}
+fits_rest(taken: list, item: any, bound: map, code: bool) as bool := {
+	if is_type(item, "symbol") { return bound_as(taken, name_of(item)[1 ..< #name_of(item)], bound) }
+	held = key_of(item)
+	if held == ø { return yes }
+	if is_type(held, "symbol") { return bound_as(taken, unmarked(name_of(held), "$"), bound) }
+	// an item pattern fits each item; each of its names takes the list of its values
+	fitted = []
+	for item_value in taken {
+		one = {}
+		if not fits_pattern(item_value, held, one, code) { return no }
+		fitted += [one]
+	}
+	for name in pattern_names(held) { bound[name] = fitted.map(one => one[name]) }
+	yes
+}
+// the names a pattern binds, in order; a map's by its fields' patterns, `{name}` its field's name
+pattern_names(pattern: any) as list := {
+	if bracket_of(pattern) == "{" { return field_pattern_names(pattern) }
+	if is_type(pattern, "symbol") { return if name_of(pattern) == "_" or is_pattern_type(name_of(pattern)) then [] else [unmarked(unmarked(name_of(pattern), "$"), "*")] }
+	if is_type(pattern, "key") { return pattern_names(key_of(pattern)) + (if op_of(pattern) == ":" then [] else pattern_names(value_of(pattern))) }
+	if bracket_of(pattern) == ø { return [] }
+	names = []
+	for i in 0..<#pattern { names += pattern_names(pattern#(i + 1)) }
+	names
+}
+// `debug?: bool`, which a map pattern holds as the phrase [debug, ?:, bool]
+is_optional_field(field: any) as bool := is_type(field, "list") and #field == 3 and is_type(field#2, "symbol") and name_of(field#2) == "?:"
+field_pattern_names(pattern: any) as list := {
+	names = []
+	for i in 0..<#pattern {
+		field = pattern#(i + 1)
+		names += if is_type(field, "symbol") then [name_of(field)] else if is_type(field, "key") then pattern_names(value_of(field)) else []
+	}
+	names
+}
+// `{status: 200, data: {user: {name}}}`: the fields it names, the others ignored; `{name}` binds the field to its name;
+// `debug?: bool` (read `debug ?: bool`) may be missing
+fits_map(value: any, pattern: any, bound: map) as bool := {
+	if not is_type(value, "map") { return no }
+	for i in 0..<#pattern {
+		field = pattern#(i + 1)
+		if is_type(field, "symbol") {
+			if not (name_of(field) in value) or not bound_as(value[name_of(field)], name_of(field), bound) { return no }
+		} else if is_optional_field(field) {
+			name = name_of(field#1)
+			if name in value and not fits_pattern(value[name], field#3, bound, no) { return no }
+		} else if is_type(field, "key") and op_of(field) == ":" {
+			name = field_key(field)
+			if not (name in value) or not fits_pattern(value[name], value_of(field), bound, no) { return no }
+		} else { return no }
+	}
+	yes
+}
+// every part of a value, itself first, then its items' and fields' parts in order
+parts_within(value: any) as list := {
+	found = [value]
+	if is_type(value, "key") { found += parts_within(key_of(value)) + parts_within(value_of(value)) }
+	else if is_type(value, "list") { for item in value { found += parts_within(item) } }
+	else if is_type(value, "map") { for key in value.keys { found += parts_within(value[key]) } }
+	found
+}
+// what `value find pattern` gives each match: the one name's value, the part itself, or the map of the names
+found_as(part: any, bound: map, names: list) as any := if #names == 1 then bound[names#1] else if #names == 0 then part else bound
+// `x replace data($a * 1) with data($a + 10)`: a pattern or template written as code already is that code, not code
+// quoting it (the phrase quotes what it is given)
+written_code(given: any) as any := if bracket_of(given) == "(" and count(given) == 2 and is_type(given#1, "symbol") and name_of(given#1) == "data" then given#2 else given
+find_matches(value: any, given: any) as list := {
+	pattern = written_code(given)
+	names = pattern_names(pattern)
+	found = []
+	for part in parts_within(value) {
+		bound = pattern_bindings(part, pattern)
+		if bound != ø { found += [found_as(part, bound, names)] }
+	}
+	found
+}
+// `value replace pattern with template`: the items, fields and code parts replaced first (`n * 1 + k * 1`'s two
+// products), then the value itself where it fits, the template's names its bindings
+replace_matches(value: any, given: any, written: any) as any := {
+	template = written_code(written)
+	// (a code template's `$holes` are filled as code, a plain one's names by their values)
+	filled = if template != written then (bound => filled_template(template, bound)) else (bound => instantiated(template, bound))
+	replaced(value, written_code(given), filled)
+}
+replaced(value: any, pattern: any, filled: function) as any := {
+	inner = value
+	if is_type(value, "key") { inner = key(replaced(key_of(value), pattern, filled), op_of(value), replaced(value_of(value), pattern, filled)) }
+	else if is_type(value, "list") { inner = value.map(item => replaced(item, pattern, filled)) }
+	else if is_type(value, "map") {
+		inner = {}
+		for field in value.keys { inner[field] = replaced(value[field], pattern, filled) }
+	}
+	bound = pattern_bindings(inner, pattern)
+	if bound == ø then inner else filled(bound)
+}
+// `{port: "80", host: "x"} as Config`: the value with each text field converted to its pattern's type ("80" the int 80),
+// raising when it then does not fit the pattern
+converted_to_pattern(value: any, pattern: any) as any := {
+	if bracket_of(pattern) == "{" and is_type(value, "map") {
+		converted = {}
+		for key in value.keys { converted[key] = value[key] }
+		for i in 0..<#pattern {
+			field = pattern#(i + 1)
+			typed = if is_optional_field(field) then [name_of(field#1), field#3] else if is_type(field, "key") then [field_key(field), value_of(field)] else ø
+			if typed != ø and typed#1 in converted { converted[typed#1] = converted_to_pattern(converted[typed#1], typed#2) }
+		}
+		value = converted
+	} else if is_type(value, "text") and is_type(pattern, "symbol") and name_of(pattern) in part_conversions {
+		part = part_conversions[name_of(pattern)](value)
+		if part != ø { value = part }
+	}
+	if pattern_bindings(value, pattern) == ø { raise "the value does not fit the pattern it converts to" }
+	value
+}
+// `{port: "80", extra: 1} as! Config`: the fields the pattern does not name are dropped, then it converts as `as` does
+kept_pattern(value, pattern) := {
+	if bracket_of(pattern) == "{" and is_type(value, "map") {
+		kept = {}
+		for i in 0..<#pattern {
+			field = pattern#(i + 1)
+			name = if is_type(field, "symbol") then name_of(field) else if is_optional_field(field) then name_of(field#1) else if is_type(field, "key") then field_key(field) else ø
+			if name != ø and name in value { kept[name] = value[name] }
+		}
+		return converted_to_pattern(kept, pattern)
+	}
+	converted_to_pattern(value, pattern)
+}
+// a map pattern's field name: `port` of `port: int`
+field_key(field: any) as any := if is_type(key_of(field), "symbol") then name_of(key_of(field)) else key_of(field)
+// the template with each name it binds put in: `{type: "link", href: src}` a map, `[x, y]` a list
+instantiated(template: any, bound: map) as any := {
+	if is_type(template, "symbol") { return if name_of(template) in bound then bound[name_of(template)] else template }
+	if bracket_of(template) == "{" {
+		made = {}
+		for i in 0..<#template {
+			field = template#(i + 1)
+			if is_type(field, "symbol") { made[name_of(field)] = instantiated(field, bound) }
+			else if is_type(field, "key") { made[field_key(field)] = instantiated(value_of(field), bound) }
+		}
+		return made
+	}
+	if bracket_of(template) == "[" {
+		made = []
+		for i in 0..<#template { made += [instantiated(template#(i + 1), bound)] }
+		return made
+	}
+	template
+}
+// code with each part rewritten by the rule, then itself again while the rule gives code (ø: no rule fits); a rule
+// set that never settles stops loudly after a thousand steps, naming the rewrite that keeps firing (decision rewrite-rules)
+rewritten_everywhere(code: any, rule: function) as any := {
+	settle_cap = 1000
+	steps = 0
+	while yes {
+		inner = code
+		if is_type(code, "key") { inner = key(rewritten_everywhere(key_of(code), rule), op_of(code), rewritten_everywhere(value_of(code), rule)) }
+		else if is_type(code, "list") { inner = separated(bracketed(code.map(part => rewritten_everywhere(part, rule)), bracket_of(code)), separator_of(code)) }
+		rewritten = rule(inner)
+		if rewritten == ø { return inner }
+		steps += 1
+		if steps == settle_cap { raise "the rules never settle: after ${settle_cap} steps one still rewrites ${inner} to ${rewritten}" }
+		code = rewritten
+	}
+}
+// a code template's holes filled (extensions/code_templates.warp): `$a` by the value of a, `$xs...` by xs's items
+filled_template(code: any, values: map) as any := {
+	if is_type(code, "symbol") { return if name_of(code).starts_with("$") and name_of(code)[1 ..] in values then values[name_of(code)[1 ..]] else code }
+	if is_type(code, "key") { return key(filled_template(key_of(code), values), op_of(code), filled_template(value_of(code), values)) }
+	if bracket_of(code) == ø { return code }
+	items = []
+	for item in code {
+		spread = if is_type(item, "key") and is_rest_item(item) and is_type(key_of(item), "symbol") then name_of(key_of(item))[1 ..] else ""
+		if spread in values { for part in values[spread] { items += [part] } }
+		else { items += [filled_template(item, values)] }
+	}
+	separated(bracketed(items, bracket_of(code)), separator_of(code))
+}
+// the pieces of `"/users/" + id: int + "/x"`, texts and holes in order, a typed hole as [name, type]
+text_pieces(pattern: any) as list := {
+	if not is_type(pattern, "key") { return [pattern] }
+	if op_of(pattern) == "+" { return text_pieces(key_of(pattern)) + text_pieces(value_of(pattern)) }
+	if op_of(pattern) != ":" { return [pattern] }
+	// `+` binds closer than `:`, so `id: int + "/x"` reads `(… + id): (int + "/x")`: the type is the first piece after it
+	before = text_pieces(key_of(pattern))
+	after = text_pieces(value_of(pattern))
+	before[0 ..< #before - 1] + [[before#(#before), after#1]] + after[1 ..< #after]
+}
+// `"0x" + h`, `name + ".html"`, `"/u/" + id: int + "/p/"`: a text with holes
+is_text_cut(pattern: any) as bool := {
+	if op_of(pattern) != "+" and op_of(pattern) != ":" { return no }
+	pieces = text_pieces(pattern)
+	#pieces > 1 and pieces.any(piece => is_type(piece, "text"))
+}
+// the text cut at its literal pieces, each hole taking what lies between, its type converting or testing it
+fits_text_cut(value: any, pieces: list, bound: map) as bool := {
+	if not is_type(value, "text") { return no }
+	rest = value
+	for i in 0..<#pieces {
+		piece = pieces#(i + 1)
+		if is_type(piece, "text") {
+			if not rest.starts_with(piece) { return no }
+			rest = rest[#piece ..< #rest]
+		} else {
+			next = if i + 1 < #pieces then pieces#(i + 2) else ø
+			ends = if next == ø then #rest + 1 else if rest.contains(next) then rest.find(text(next)) else 0
+			if ends == 0 { return no }
+			part = rest[0 ..< ends - 1]
+			rest = rest[ends - 1 ..< #rest]
+			typed = if is_type(piece, "list") then converted_part(part, piece#2) else part
+			hole = if is_type(piece, "list") then piece#1 else piece
+			if typed == ø or not bound_as(typed, name_of(hole), bound) { return no }
+		}
+	}
+	rest == ""
+}
+// a text part as its hole's type wants it, ø when it isn't one: int, float and number convert it, a class of
+// characters tests it; another type is an error
+part_conversions = {"int": int_part, "float": float_part, "number": number_part, "text": text_part}
+character_classes = {"digit": is_digit_text, "digits": is_digits, "letter": is_letter_text, "letters": is_letters, "hex": is_hex}
+converted_part(part: text, type_word: any) as any := {
+	name = name_of(type_word)
+	if name in part_conversions { return part_conversions[name](part) }
+	if not (name in character_classes) { raise "a text cut's hole converts to int, float, number or text or is digit(s), letter(s) or hex, not " + name }
+	if character_classes[name](part) then part else ø
+}
+is_digits(t: text) as bool := t != "" and t.all(c => c >= '0' and c <= '9')
+is_letters(t: text) as bool := t != "" and lower(t).all(c => c >= 'a' and c <= 'z')
+is_hex(t: text) as bool := t != "" and lower(t).all(c => (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f'))
+is_digit_text(t: text) as bool := #t == 1 and is_digits(t)
+is_letter_text(t: text) as bool := #t == 1 and is_letters(t)
+# a number's digits after its leading minus, if any: `-3`, `-2.5`
+unsigned(t: text) as text := if starts_with(t, "-") then slice(t, 1) else t
+int_part(t: text) as any := if is_digits(unsigned(t)) then int(t) else ø
+float_part(t: text) as any := {
+	pieces = unsigned(t).split(".")
+	if #pieces > 2 or not is_digits(pieces#1) or (#pieces == 2 and not is_digits(pieces#2)) { return ø }
+	float(t)
+}
+number_part(t: text) as any := if is_digits(unsigned(t)) then int(t) else float_part(t)
+text_part(t: text) as any := t
+// the name without its mark: `$a` → a, `*rest` → rest
+unmarked(name: text, mark: text) as text := if starts_with(name, mark) then slice(name, #mark) else name
+
+// Named events (extensions/sugar/events.warp): each event's listeners in order, with their numbers (counted within the event
+// from 1) and whether they listen once, as three lists of the same length
+global event_listeners = {}
+global listener_numbers = {}
+global listening_once = {}
+global listener_counts = {}
+// a listener as a value: the event it listens to and its number there, so it is removed by itself, `h = on alarm {…}`
+// … `remove h`, short for `remove h from listeners of alarm` (card listener-address)
+class Listener { event: text; number: int }
+// `listeners of alarm -= h` (wiki Footguns "Event handlers"), in parentheses, as `=>` binds tighter than `-=`; a rule
+// of the prelude, as the event sugar's walk never takes such a write
+rewrite (listeners of $e -= $h) => unlisten(data $e, $h) where $e is symbol
+// `remove alarm` (extensions/sugar/events.warp): the listener removed from the event it listens to
+listener_removed(listener: Listener) := unlisten(listener.event, listener)
+listen(name: any, listener: function, once: bool) as Listener := {
+	key = name_of(name)
+	if not (key in event_listeners) {
+		event_listeners[key] = []
+		listener_numbers[key] = []
+		listening_once[key] = []
+		listener_counts[key] = 0
+	}
+	listener_counts[key] += 1
+	event_listeners[key] += [listener]
+	listener_numbers[key] += [listener_counts[key]]
+	listening_once[key] += [once]
+	Listener(event: key, number: listener_counts[key])
+}
+emitted(name: any, data: any) as any := {
+	key = name_of(name)
+	if not (key in event_listeners) { return ø }
+	running = event_listeners[key]
+	kept_listeners(key, i => not listening_once[key]#i)
+	result = ø
+	for listener in running { result = listener(data) }
+	result
+}
+listeners_of(name: any) as list := if name_of(name) in listener_numbers then listener_numbers[name_of(name)] else []
+// a listener by itself or by its number within the event, `remove 2 from listeners of tick`
+unlisten(name: any, listener: any) as any := {
+	key = name_of(name)
+	number = if listener is Listener then listener.number else listener
+	if key in event_listeners { kept_listeners(key, i => listener_numbers[key]#i != number) }
+	ø
+}
+// `clear listeners of alarm`: none listen any more
+listeners_cleared(name: any) as any := {
+	if name_of(name) in event_listeners { kept_listeners(name_of(name), i => no) }
+	ø
+}
+// the listeners of an event at the positions keep holds for
+kept_listeners(key: text, keep: function) as any := {
+	listeners = []
+	numbers = []
+	onces = []
+	for i in 1 ..< #event_listeners[key] + 1 {
+		if keep(i) {
+			listeners += [event_listeners[key]#i]
+			numbers += [listener_numbers[key]#i]
+			onces += [listening_once[key]#i]
+		}
+	}
+	event_listeners[key] = listeners
+	listener_numbers[key] = numbers
+	listening_once[key] = onces
+	ø
+}
+
+// Python's range: `range(4)` is [0, 1, 2, 3], `range(1, 4)` [1, 2, 3]
+range(stop: int) as list := 0 ..< stop
+range(start: int, stop: int) as list := start ..< stop
+// the GPU host words, which a library answers (natively lib/host/native_host/gpu.warp over wgpu-native, the
+// playground's host-gpu.js over WebGPU); the shaders they run are written at compile time by extensions/rules/wgsl.warp
+gpu_computed(shader: node, values: node, count: int): node from host
+gpu_render(shader: node, width: int, height: int, values: node): node from host
+// gpu_compute(shader, values, workgroups): the compute shader run over the numbers given (a list, or a map of named
+// lists), which it changes where they are, as any word writing into a list does: the lists given, the shader's
+// numbers in them, whether or not the program made them GPU lists (card xs-float-xs); a GPU list's cells the host
+// changes itself
+gpu_compute(shader: text, values: any, count: int) as any := written_back(gpu_computed(shader, values, count), values)
+written_back(left: any, given: any) as any := {
+	if is_error(left) { raise left }
+	if not (given is map) { return items_written(left, given) }
+	for name in given.keys { items_written(left[name], given[name]) }
+	given
+}
+items_written(left: any, given: any) as any := {
+	if same(left, given) { return given }
+	for i in 1 to #given { given#i = left#i }
+	given
+}
