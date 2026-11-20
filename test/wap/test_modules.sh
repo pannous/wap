@@ -123,4 +123,10 @@ print twice(\"ab\")")" "10
 abab"
 check "a compiled module that exports no function declares nothing" "$(printf '%s\n' 'x = 1' >"$stage/no_functions.wap" && $warp "$compiler" "$stage/no_functions.wap" "$stage/no_functions.wasm" 2>&1 && ran uses_no_functions "use \"$stage/no_functions.wasm\"
 print(\"ok\")")" "ok"
+# the plain word names the dispatcher of a word's overloads, or a word's one function itself
+check "a host calls a word's one function by its plain word" "$(called_export plain 'twice(x: int) as int := x * 2
+add(a: int, b: int) as int := a + b
+add(a: text, b: text) as text := a + b' twice 21)" "42"
+check "a module exports a word's overloads under their plain word too, as the dispatcher" "$(called_export dispatched 'add(a: int, b: int) as int := a + b
+add(a: text, b: text) as text := a + b' add >/dev/null; wasm-objdump -x -j Export "$stage/dispatched.wasm" 2>/dev/null | grep -c '"add"')" "1"
 exit $((failures > 0))

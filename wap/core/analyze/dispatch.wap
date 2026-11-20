@@ -33,7 +33,11 @@ NARROWING_WORD = "narrowed"
 dispatching(called: Node, candidates: list<Signature>, types: list, s: TypingState) as Signature? := {
 	counted = candidates.filter(definition => takes_count(definition, #types, s))
 	if not counted.any(definition => tested_places(definition, types, s) != []) { return ø }
-	name = name_for("${called}(${types_text(types)})", declared_name(written_name(define_of(counted#1, s))))
+	dispatching_as(dispatcher_name(called, counted, types, s), called, counted, types, s)
+}
+dispatcher_name(called: Node, counted: list<Signature>, types: list, s: TypingState) as Node := name_for("${called}(${types_text(types)})", declared_name(written_name(define_of(counted#1, s))))
+# the dispatching function of that name over the definitions that take the arguments' count
+dispatching_as(name: Node, called: Node, counted: list<Signature>, types: list, s: TypingState) as Signature := {
 	known = definition_keyed(place_key(name), s)
 	if known != ø { return known }
 	reads = parameters_of(name, types)
@@ -44,6 +48,27 @@ dispatching(called: Node, candidates: list<Signature>, types: list, s: TypingSta
 	last = if untested is empty then raised("${called}: no definition takes these values' types", name, s) else named_call(text(called), untested, reads, name, s)
 	tried = taking.filter(definition => tested_places(definition, types, s) != []).map(definition => Choice(tests_of(definition, reads, types, s, name), named_call(definition.name, [definition], reads, name, s)))
 	dispatcher_made(name, reads, chained(tried, last, name), order.map(definition => definition.result), s)
+}
+# The dispatchers a module exports under the plain words it overloads (wiki/wasm-representation.md "Export names"):
+# for the overloads of a word, all of one count of parameters, a function of any values calling the one their Kind
+# tags fit; overloads that differ only in their result leave nothing to test, so it raises naming them
+exported_dispatchers(file: text, s: TypingState) := {
+	own = s.definitions.filter(definition => definition.module == file and is_function(definition))
+	for word in unique(own.map(definition => definition.name)) {
+		overloads = own.filter(definition => definition.name == word)
+		if #overloads > 1 and overloads.all(each => #each.parameters == #overloads#1.parameters) {
+			dispatcher = exported_dispatcher(symbol(word), overloads, s)
+			# typed as a call would type it, though only the host calls it
+			function_typed(dispatcher, dispatcher.parameters, s, dispatcher.definer)
+		}
+	}
+}
+exported_dispatcher(word: Node, overloads: list<Signature>, s: TypingState) as Signature := {
+	types = overloads#1.parameters.map(type => symbol(ANY_TYPE))
+	name = with_fact(dispatcher_name(word, overloads, types, s), EXPORTED_AS, Text(text(word)))
+	written = overloads.map(definition => types_text(definition.parameters))
+	if #unique(written) == #written { return dispatching_as(name, word, overloads, types, s) }
+	dispatcher_made(name, parameters_of(name, types), raised("${word} gives ${overloads.map(definition => type_text(definition.result)).join(" or ")}: call it by its full name, `${word}(…) → ${type_text(overloads#1.result)}`", name, s), [ø], s)
 }
 # The dispatching function a read of this field on an any means, `.name(any)`; ø when no record has the field
 field_dispatching(key: Node, s: TypingState) as Signature? := {
@@ -90,7 +115,7 @@ chained(choices: list<Choice>, last: Node, at: Node) as Node := {
 # argument's type: an `is` test there chooses it
 # a parameter's type a test chooses by: written, no any, no generic letter, none that takes its argument's own type
 dispatchable(type: Node?, records: Records) as bool := once_typed(type, records) and type != symbol(ANY_TYPE)
-tested_places(definition: Signature, types: list, s: TypingState) as list := (1 to #types).filter(at => {
+tested_places(definition: Signature, types: list, s: TypingState) as list<int> := (1 to #types).filter(at => {
 	wanted = definition.parameters#at
 	wanted != ø and dispatchable(wanted, s.records) and tested_fit(wanted, types#at, s)
 })
