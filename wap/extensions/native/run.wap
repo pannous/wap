@@ -1,7 +1,6 @@
 # How the native wap runs wasm modules (wap/extensions/native, driver.wap): by wasmtime's C API, one engine for the
-# run, a store with WASI for each program's arguments, what a module imports by a .wasm path linked first; wap.wasm,
-# the compiler beside the executable, compiling a source to a module; and the program's memory, where the driver and
-# the console keep their words.
+# run, a store with WASI for each program's arguments, what a module imports by a .wasm path linked first; and the
+# program's memory, where the driver, the compiler's loading and the console keep their words.
 use "c.wap"
 
 # --- the program's memory: where the driver keeps its own words, below the data at 65536 (core/emit/opcodes.wap) ---
@@ -20,6 +19,8 @@ COMPILER_AT := 32768
 MODULE_AT := 40960
 SOURCE_AT := 45056
 COMMAND_AT := 49152
+CACHE_AT := 53248
+PART_AT := 57344
 PATH_BYTES := 4096
 # the host's records the C API fills, by their sizes in bytes: a byte vector (size, data), an instance, an extern
 VECTOR_BYTES := 16
@@ -38,7 +39,6 @@ STANDARD_ERROR := 2
 SLASH := 47
 FAILED := 1
 # the texts named here, each a C string in the program's memory
-compiler_beside(): pointer := prim data_address("/wap-seed/wap.wasm")
 wap_suffix(): pointer := prim data_address(".wap")
 module_suffix(): pointer := prim data_address(".wasm")
 temporary_folder(): pointer := prim data_address("TMPDIR")
@@ -48,7 +48,6 @@ root(): pointer := prim data_address("/")
 reading(): pointer := prim data_address("rb")
 main_name(): pointer := prim data_address("main")
 MAIN_NAME_BYTES := 4
-own_path_link(): pointer := prim data_address("/proc/self/exe")
 no_module(): pointer := prim data_address("wap: no module at that path\n")
 
 # the run ended with this status, its temporary files gone (a path not made yet is an empty one, unlinking nothing)
@@ -134,9 +133,12 @@ module_compiled(path: pointer): int := {
 	set_word(STATUS_AT, FAILED)
 	size_at = host_block(8)
 	bytes = file_read(path, size_at)
-	if bytes == 0 { return 0 }
+	if bytes == 0 then 0 else module_of(bytes, long_at(size_at))
+}
+# the module of these bytes of the host's memory; 0 where they are none, said
+module_of(bytes: int, size: int): int := {
 	module_at = host_block(8)
-	if failed(wasmtime_module_new(engine, bytes, long_at(size_at), module_at), host_block(8)) then 0 else long_at(module_at)
+	if failed(wasmtime_module_new(engine, bytes, size, module_at), host_block(8)) then 0 else long_at(module_at)
 }
 # the module instantiated in the context, what it imports by a .wasm path linked first, then its main run: the
 # instance, 0 where a step failed
@@ -163,7 +165,7 @@ imports_linked(linker: int, context: int, module: int): bool := {
 		memcpy(pointer_at(NAME_AT), long_at(from + 8), long_at(from))
 		set_word(NAME_AT + long_at(from), 0)
 		held = wasmtime_linker_get(linker, context, from, name, host_block(EXTERN_BYTES)) % BOOL_BYTE != 0
-		linked = if ends_in(pointer_at(NAME_AT), module_suffix()) and not held then instance_defined(linker, context, pointer_at(NAME_AT)) and linked else linked
+		if ends_in(pointer_at(NAME_AT), module_suffix()) and not held { linked = instance_defined(linker, context, pointer_at(NAME_AT)) and linked }
 		i = i + 1
 	}
 	linked
@@ -185,27 +187,6 @@ exports_more(module: int): bool := {
 }
 # the module run with the host argument list given, in a store of its own; whether it ran
 module_ran(module: int, count: int, arguments: int): bool := module != 0 and instance_ran(linker_made(), context_made(count, arguments), module) != 0
-# the source compiled to the module by the compiler's module: whether it was, the compiler's refusal said
-COMPILE_COUNT := 3
-compiled(compiler: int, source: pointer, module: pointer): bool := {
-	arguments = host_block(8 * COMPILE_COUNT)
-	set_long_at(arguments, host_of(pointer_at(COMPILER_AT)))
-	# (its links followed: WASI follows none out of a folder it opened, and data/ often is one)
-	set_long_at(arguments + 8, program_path(source))
-	set_long_at(arguments + 16, host_of(module))
-	module_ran(compiler, COMPILE_COUNT, arguments)
-}
-
-# this executable's path (Linux's link, else macOS's dyld) with its file name replaced by the compiler's, at COMPILER_AT
-compiler_found() := {
-	length = readlink(own_path_link(), pointer_at(COMPILER_AT), PATH_BYTES - 1)
-	if length > 0 then set_word(COMPILER_AT + length, 0) else {
-		set_word(SIZE_AT, PATH_BYTES)
-		_NSGetExecutablePath(pointer_at(COMPILER_AT), pointer_at(SIZE_AT))
-	}
-	slash = strrchr(pointer_at(COMPILER_AT), SLASH) - host_of(pointer_at(COMPILER_AT))
-	strcpy(pointer_at(COMPILER_AT + slash), compiler_beside())
-}
 # a new path in the temporary folder at `at`, by the template
 temporary_path(at: int, template: pointer) := {
 	set_word(at, 0)
