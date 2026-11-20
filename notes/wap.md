@@ -64,6 +64,7 @@ wap/
     stage.wap                 the one walker every stage runs through; positions and provenance of new nodes
     bindings.wap              the facts binding learns of a name: what it refers to, assignments, captures
     type_notation.wap         types as written: list<int>, int?, (int) -> text, built and taken apart
+    signature.wap             a definition's record, built by declare, held by typing, its header line the export's name
     errors.wap                refusals: the user's line, the readings, the fix-it, the rule that expanded it
     format.wap                code → canonical warp text (`format`): operators in their notation, spacing spelled out
     paths.wap                 a used file's path beside the file using it, `.` and `..` resolved
