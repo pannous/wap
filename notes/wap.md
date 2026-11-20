@@ -62,7 +62,7 @@ wap/
     pipeline.wap              one function per step from source to typed program, shared by compiler and census
     language.wap              the language a program is read in: operator table, rule words, the rules of each stage
     stage.wap                 the one walker every stage runs through; positions and provenance of new nodes
-    bindings.wap              the facts binding learns of a name: what it refers to, assignments, captures
+    bindings.wap              the facts binding learns of a name: what it refers to, assignments, captures; a definition's record
     type_notation.wap         types as written: list<int>, int?, (int) -> text, built and taken apart
     errors.wap                refusals: the user's line, the readings, the fix-it, the rule that expanded it
     format.wap                code → canonical warp text (`format`): operators in their notation, spacing spelled out
