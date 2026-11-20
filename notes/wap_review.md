@@ -19,9 +19,9 @@ In two days and about 300 commits wap became a working compiler: 7000 lines, ten
 green. **Its front half is sound and follows the first principles; its back half has grown by accretion; and the
 whole effort is aimed at the wrong target.**
 
-- **Front half, keep as it is.** A pure two-pass reader, operators as one table of data in the preload, a rule
+- **Front half, keep as it is.** A pure two-pass reader, operators as one table of data in the types module, a rule
   engine with a head index, specificity, hygiene and a termination bound, kernel forms as named patterns over Node,
-  built-ins declared in the preload with `prim` bodies, one binding analysis, every refusal through one function,
+  built-ins declared in the types module with `prim` bodies, one binding analysis, every refusal through one function,
   a wasm module builder that knows nothing of warp. This is the best code in the repository.
 - **Back half, needs a second pass.** Typing (1100 lines) is in fact a rewriting stage; it knows about thirty
   library and surface words by their spelling and answers "does this value fit there" in more than fifteen
@@ -42,7 +42,7 @@ file, with a gauge that counts every refusal instead of the first.
 ## How this was checked
 
 - Read: notes/first_principles.md, backbone.md, kernel.md, reader.md, wap.md; all of wap/ (57 files: parse 1304
-  lines, rules 933, analyze 1622, emit 1502, sugar 95, core root 495, kernel 74, compiler.wap 28, preload 936);
+  lines, rules 933, analyze 1622, emit 1502, sugar 95, core root 495, kernel 74, compiler.wap 28, types 936);
   all 27 scripts of test/wap; scripts/wap-census.warp. Of the five commits that landed during the writing, the
   diffs and the new files' seams, not every moved line again.
 - Ran once: `bash test/wap/run.sh --wait` at bc30daa9c8: 376 ✓, 0 ✗ in 27 scripts, 82 s.
@@ -147,7 +147,7 @@ to here, and only binding knows.
   two rule stages (shape, typed) and one resolve pass.
 - **B: build stage 2 as rules, one stage later than planned (bound, not declared).** Needs a hole condition "this
   word names a function / a type / a field" in the matcher, about 40 core lines; then about 8 rule lines in the
-  preload replace the hand code. The most principled; I would do it after self-build, with A's cases as its list.
+  types replace the hand code. The most principled; I would do it after self-build, with A's cases as its list.
 - **C: leave it.** Cost: every new name-dependent form adds a case in whichever stage its author owns.
 - **Park.**
 
@@ -162,7 +162,7 @@ opposite ("a program's own `(Call …)` group never reaches the emitter as one")
 - **A (recommended): public.** The kernel is a notation anyone may write; rules already write it in their
   results. Core cost 0: correct the two sentences. What must not stay is that `(Prim print_text "x")` or
   `prim print_text(3)` gives **invalid wasm** instead of a refusal (probes p12, q14): fix 6 closes that for the
-  preload's own typos too.
+  types module's own typos too.
 - **B: private.** Only the lowering may build kernel nodes: a mark on every node a rule or the lowering builds,
   checked by every stage. About 10 core lines plus a mark in every rule result, and it contradicts the principle.
 - **Park.**
@@ -333,7 +333,7 @@ wap's source is written so at core/rules/patterns.wap:148. Do: lower the index o
   :66 `HOST_FUNCTIONS`, :78 `HELPERS`, :81-82, :88-105 `primitive_code`, and :107 `ON_LISTS`, three primitives
   that mean something else when the operand is a list.
 - **Why it matters:** nothing checks a primitive's operands. `prim print_text(3)` and a program's own
-  `(Prim print_text "x")` produce wasm that fails to load (probes q14, p12); so would a typo in the preload.
+  `(Prim print_text "x")` produce wasm that fails to load (probes q14, p12); so would a typo in the types module.
 - **Do:** one table, a row per primitive: name, operand types, result type, how it is emitted (an instruction, a
   host call, a helper). Typing checks every `Prim` against its row and takes the result type from it; the emitter
   looks the row up; the three of `ON_LISTS` become rows of their own.
@@ -366,9 +366,9 @@ wap's source is written so at core/rules/patterns.wap:148. Do: lower the index o
 - **Why it matters:** notes/first_principles.md:25-26 ("The compiler knows no built-in by name") and :132-133
   ("no domain names, no surface keywords"). Each word is a place where renaming a library function breaks the
   compiler without a refusal.
-- **Do:** the type words once, in wap/kernel/types.wap. The library words as *roles* the preload declares on its
+- **Do:** the type words once, in wap/kernel/types.wap. The library words as *roles* the types module declares on its
   definitions ("the program's value is shown by this word", "a value's text", "the item of", "required"), read
-  by core through one file, never by name. The surface words go to the preload as shape rules, one line each
+  by core through one file, never by name. The surface words go to the types module as shape rules, one line each
   (`rule yes => True`).
 
 ### Fix 9. The runtime in warp
@@ -377,17 +377,17 @@ wap's source is written so at core/rules/patterns.wap:148. Do: lower the index o
   instruction by instruction; core/emit/lists.wap (136 lines) does lists and maps (`key_searched`, :113, is a
   linear search); core/emit/equality.wap (100 lines; :72 and :90 are the same line).
 - **Why it matters:** notes/kernel.md:111 says runtime words are "functions of the runtime written in warp", and
-  wap/preload/texts.wap shows it works: the text words stand on three primitives. Hand-assembled wasm is the
+  wap/types/texts.wap shows it works: the text words stand on three primitives. Hand-assembled wasm is the
   slowest code to write and to review, and where modules that fail to load come from.
 - **Do:** primitives are only what wasm gives directly (array new, get, set, length, copy; struct get and set;
-  the host calls). Lists, maps, int-to-text and equality are preload functions in warp. Equality of a class or an
+  the host calls). Lists, maps, int-to-text and equality are types functions in warp. Equality of a class or an
   enum can be written by the rule that already writes its `show` (core/sugar/records.wap:7).
 
 ### Fix 10. Rules: prove stage 3 or park it, and tidy the sugar
 
 - **Stage 3 has no user.** core/rules/typed.wap binds and types the whole program again after every round in
   which a typed rule fired (:27, up to `ROUNDS_LIMIT = 100`, :18; the debt at notes/backbone.md:258). Neither
-  core/sugar/ nor wap/preload/ holds a typed rule; test/wap/test_typed_rules.sh has 4 checks. Before more work
+  core/sugar/ nor wap/types/ holds a typed rule; test/wap/test_typed_rules.sh has 4 checks. Before more work
   goes into it, move two hand-written typed rewrites into it: the character read as a text, and `x is w`. If they
   read well as rules the stage has earned its place; if not, the plan's third stage is wrong and should go.
 - **Helper words leak.** core/sugar/records.wap:7 (316 characters) tells its helper rules apart by text tags,
@@ -397,9 +397,9 @@ wap's source is written so at core/rules/patterns.wap:148. Do: lower the index o
   thing to walk needs a third rule.
 - **`as` has two meanings since today:** the result type (`f(x) as int := …`) and a conversion (`x as T`,
   core/sugar/types.wap:4).
-- **Layer:** notes/first_principles.md:144-150 puts the rules for surface forms in the preload; they sit in
+- **Layer:** notes/first_principles.md:144-150 puts the rules for surface forms in the types module; they sit in
   wap/core/sugar/, and notes/wap.md:48 calls the layer "extensions". Choose one. I would move them to
-  wap/preload/, so that core/ holds machinery only and a `grep rule wap/core` finds nothing.
+  wap/types/, so that core/ holds machinery only and a `grep rule wap/core` finds nothing.
 
 ### Fix 11. Structure and names
 
@@ -423,8 +423,8 @@ wap's source is written so at core/rules/patterns.wap:148. Do: lower the index o
   every file whose names it writes; a ten-line script checks both until wap does.
 - **The same thing twice:** `result_given` (core/analyze/calls.wap:224) and `result_type`
   (core/emit/functions.wap:99); `counted` with three parameters (core/emit/primitives.wap:184) and with one
-  (core/emit/wasm.wap:85); the operators listed three times: `enum Op` (wap/preload/nodes.wap:24), the operator
-  table (wap/preload/operators.wap:65) and, since today, `text(op: Op)` (wap/preload/nodes.wap:101), arm for arm.
+  (core/emit/wasm.wap:85); the operators listed three times: `enum Op` (wap/types/nodes.wap:24), the operator
+  table (wap/types/operators.wap:65) and, since today, `text(op: Op)` (wap/types/nodes.wap:101), arm for arm.
 - **One name, two functions:** core/format.wap:124 asks `is_letter` of a character, a word only the old compiler
   has; core/analyze/letters.wap:14 defines another `is_letter`, of a type and the records. Until the split wap
   bound the first to the second by name, through a `use` that serves nothing else (core/format.wap:9); since the
@@ -454,7 +454,7 @@ wap's source is written so at core/rules/patterns.wap:148. Do: lower the index o
 - **A symptom:** three separate checks pin the character-to-text patch at three sites (test/wap/test_lists.sh:53,
   test/wap/test_types.sh:100-105, test/wap/test_texts.sh:13-17).
 - **Tests of intermediates:** programs in the tests write `prim` themselves (test/wap/test_texts.sh:18-22,
-  test/wap/test_data.sh:32, :58, :60, :74). They become calls of preload words when fix 6 lands.
+  test/wap/test_data.sh:32, :58, :60, :74). They become calls of types words when fix 6 lands.
 
 ### Fix 13. Speed, measured before it hurts
 
@@ -467,7 +467,7 @@ wap's source is written so at core/rules/patterns.wap:148. Do: lower the index o
 - **Likely causes, all lookups in lists:** `fact_of` walks a node's attributes on every question
   (core/stage.wap:63); typed and placed functions are searched in lists (core/analyze/types.wap:53,
   core/emit/emitter.wap:80); `added_type` compares every type (core/emit/wasm.wap:102); `settled_everywhere` walks
-  the whole program again (core/analyze/letters.wap:60); lists grow by `out + [x]` (wap/preload/lists.wap:26-42),
+  the whole program again (core/analyze/letters.wap:60); lists grow by `out + [x]` (wap/types/lists.wap:26-42),
   which copies.
 - **Do:** nothing yet. When the first large file of wap compiles under wap, profile that build and turn the three
   or four hot lists into maps. Put a time budget into the definition of done.
@@ -476,7 +476,7 @@ wap's source is written so at core/rules/patterns.wap:148. Do: lower the index o
 
 - notes/wap.md: the tree lists kernel/primitives.wap (:58) and core/emit/closures.wap (:106), which do not exist;
   "State" (:160-171) still says milestone 1 is in progress; the layers are "kernel, core, extensions, library"
-  (:48) against notes/first_principles.md:144-150 "kernel, core, preload, library"; the census table
+  (:48) against notes/first_principles.md:144-150 "kernel, core, types, library"; the census table
   (notes/wap.md:175-192) names blockers that are built and misses the ones of decision 1 and fix 2.
 - Who owns typing: notes/backbone.md:58 says wap-reader, notes/wap.md:146 says warp-wap-binding.
 - notes/backbone.md:281 "Function values and captures are refused by the typing stage": they are built.
@@ -489,7 +489,7 @@ wap's source is written so at core/rules/patterns.wap:148. Do: lower the index o
 | the plan (notes/backbone.md, first_principles.md) | as built | judgment |
 |---|---|---|
 | a pure reader, Node out | core/parse/: reader, lexemes, atoms, layout, cascade | follows |
-| operators: one table, data in the preload | core/parse/operator_table.wap, wap/preload/operators.wap; reads the rules' words through a global | follows; fix 7 |
+| operators: one table, data in the types module | core/parse/operator_table.wap, wap/types/operators.wap; reads the rules' words through a global | follows; fix 7 |
 | stage 1, shape rules | core/rules/ (stages, patterns, templates), 95 lines of rules in core/sugar/ | follows; their layer is undecided |
 | declaration prescan, facts only | core/analyze/declarations.wap | follows |
 | stage 2, signature rules | not built; lowering by hand, cases in bind, type and emit | drifted; the planned place (before binding) cannot work: decision 2 |
@@ -527,7 +527,7 @@ Where the plan itself is wrong or silent:
 
 **Where it stands.** 50 program files. wap types 11, none of which holds a function. In front: 9 distinct first
 refusals. Behind them, uncounted: the seven kinds of decision 1 (several hundred places), the six defects of fix
-2, words of the old compiler that wap's preload lacks (`float_bits`, `hint`, `split`, `is_letter` of a character,
+2, words of the old compiler that wap's types module lacks (`float_bits`, `hint`, `split`, `is_letter` of a character,
 `normalize_path`, `path_join`, `dirname`, `use path`, `program.folder`, `args`, `write_bytes`), and `[if …]`
 three times.
 
@@ -543,7 +543,7 @@ systems.
 
 1. Take decision 1. Every day without it is spent on the wrong queue.
 2. Fix 1: the gauge. Half a day, and it makes every later step measurable.
-3. Fix 2 and the missing words of the preload. A day; wap's most basic helpers then type.
+3. Fix 2 and the missing words of the types module. A day; wap's most basic helpers then type.
 4. Compile wap with wap from the leaves of the use graph upward: opcodes.wap (done) → wasm.wap → errors.wap and
    stage.wap → lexemes.wap → the rest of parse/ → rules/ → analyze/ → emit/. Per file: add its `use` lines,
    write the types decision 1 asks for, compile, compare what the file's functions give under both compilers,
@@ -571,7 +571,7 @@ them.
 5. wap's source uses no word that only the old compiler knows.
 
 **The workers.** Today five sessions own lists of files that follow history, not stages (notes/wap.md:142-146):
-the reader's owner also has the driver of the typed rules, two sugar files and four preload files; the operators'
+the reader's owner also has the driver of the typed rules, two sugar files and four types files; the operators'
 owner has the rule engine, the formatter, core/analyze/data.wap and four sugar files; the emitter's owner two
 sugar files; one worker alone has all of binding and typing, the hardest 1500 lines; and the two notes disagree
 on who owns typing. "Only the owner edits it; anyone else sends the owner the change" (notes/wap.md:135-138): so
@@ -587,7 +587,7 @@ What I would change:
   any file of wap to write its types and its `use` lines, reports each defect it meets as the smallest program
   that shows it, and owns test_self.sh.
 - **Front: reader, operators, rules, lowering and resolve under one owner.** The front is nearly done; this
-  worker takes fix 7, decision 2, fix 10 and the preload's missing words.
+  worker takes fix 7, decision 2, fix 10 and the types module's missing words.
 - **Types: binding and typing.** Fix 2, the fit relation of fix 4, the typing side of fix 3. This is the
   critical path: give it the second-strongest worker and no side work.
 - **Back: emitter and runtime.** The emitting side of fix 3, then fixes 5, 6 and 9.
@@ -610,7 +610,7 @@ get from one to the other without a second type system. Each point has a `# REVI
    raises with both types and the place. Typing writes the conversion into the kernel; the emitter emits it.
    Today the emitter meets that case and gives ø instead (core/emit/values.wap, `fitted`): fix this first.
 3. **Calls on dynamic values are elaboration, not an emitter feature.** `show(x: any) := prim dispatched(x)`
-   (wap/preload/prelude.wap, core/analyze/types.wap) is the idea, by hand, for one word and one parameter. General
+   (wap/types/prelude.wap, core/analyze/types.wap) is the idea, by hand, for one word and one parameter. General
    rule: a call with an `any` argument that no overload takes as `any` makes typing write the instance `f(any)`
    once, as plain kernel: a chain of `is` tests over the overloads, most specific first, each arm a checked
    conversion and a static call, the last arm a raise. The order is the one the static choice uses, from one
@@ -632,12 +632,12 @@ get from one to the other without a second type system. Each point has a `# REVI
 
 Found on the way, and a test of point 3: `[1, 2] == [1, 2]` and `Point(1, 2) == Point(1, 2)` compile and run out
 of stack (probes y05, y07). No `==` takes two lists or two instances, so the choice falls to the `==` of optionals
-(wap/preload/prelude.wap), whose `a! == b!` chooses itself again. No test compares two lists.
+(wap/types/prelude.wap), whose `a! == b!` chooses itself again. No test compares two lists.
 
 ## What to keep
 
 - The reader: pure, two passes, layout and brackets by one cascade, and tested by what it reads.
-- Operators as one table of data in the preload, with a refusal for a spelling the table does not hold.
+- Operators as one table of data in the types module, with a refusal for a spelling the table does not hold.
 - The rule engine: a head index, the most specific rule wins, fresh names for the names a rule makes, a bound on
   rounds, a rule that may refuse a spelling with a fix-it (core/rules/stages.wap:135).
 - Kernel forms as sixteen named patterns that are also their builders.
@@ -645,7 +645,7 @@ of stack (probes y05, y07). No `==` takes two lists or two instances, so the cho
 - Refusals that name both readings: "this could change the global total or make a new variable here: write `let
   total = …` for a new one, `global total = …` for the program's" (probe p18). That is the standard for all.
 - The check that a `match` covers every case (core/analyze/matching.wap:57).
-- The text words written in warp over three primitives (wap/preload/texts.wap), the model for fix 9.
+- The text words written in warp over three primitives (wap/types/texts.wap), the model for fix 9.
 - core/emit/wasm.wap, a module builder that knows nothing of warp.
 - The "Debts" list of notes/backbone.md: candid, and nearly every structural finding here starts from one of
   its entries. What it lacks is an order; this review proposes one.
