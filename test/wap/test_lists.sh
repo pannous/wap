@@ -117,4 +117,6 @@ count = 4
 print text(scaled(length, count)) + " " + text(length) + " " + text([1, 2].size)')" "34 3 2"
 check "a list of items that have an order sorts by itself" "$(ran sorted_items 'keys: list<text> = ["b", "c", "a"]
 print text(keys.sorted()) + " " + text([3, 1, 2].sorted())')" "[a, b, c] [1, 2, 3]"
+# a list sorted by a comparison, `before(a, b)` yes when a goes first (lib's natural and semver orders)
+check "a list sorted by a comparison" "$(ran sorted_before 'print show([3, 1, 2].sorted(before: (a, b) => a > b))')" "[3, 2, 1]"
 exit $((failures > 0))

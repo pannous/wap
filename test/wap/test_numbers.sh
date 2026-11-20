@@ -52,4 +52,5 @@ check "rem and ⦼ give the truncated remainder, of the dividend's sign (wiki/Fo
 check "an int widens to a float: compared, added, passed, and a number against an int" "$(ran widening 'below(v: number) as bool := v < 0
 half(x: float) as float := x / 2.0
 print text(2.5 < 0) + " " + text(2.5 + 1) + " " + text(half(3)) + " " + text(below(-2.5)) + " " + text(below(2))')" "no 3.5 1.5 yes no"
+check "chr is another name of char" "$(ran chr_made 'print text(chr(97))')" "a"
 exit $((failures > 0))
