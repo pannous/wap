@@ -20,4 +20,6 @@ still running"
 check "a hint is a got-it line on the standard error, the program going on" "$(ran hinted 'hint "write a + b"
 print "out"' 2>/dev/null)" "hint: write a + b
 out"
+# throw, fail and panic are other names of raise (wiki/keyword.md)
+check "throw is another name of raise" "$(ran thrown 'throw "bad"' 2>&1)" "bad"
 exit $((failures > 0))
