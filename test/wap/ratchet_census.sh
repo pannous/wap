@@ -9,7 +9,7 @@
 # default set: about 1 min more); the warp under test is WARP (default the warp on PATH)
 # files outside the preload: a preload file is no program but every program's library, typed function by function
 # (warp-lead, 2026-11-18)
-FILES_TYPED_WHOLE=53
+FILES_TYPED_WHOLE=62
 FUNCTIONS_UNTYPED=0
 # wap's size, the nodes its reader makes of its source (scripts/wap-size.warp), may not rise above the ceiling: only a
 # real simplification lowers it
