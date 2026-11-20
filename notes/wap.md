@@ -130,6 +130,7 @@ wap/
     operators.wap             the operator table: precedence groups and their relations, operators, aliases
     nodes.wap                 warp's Node, case for case as core/node.warp declares it, and the words over it
     lists.wap                 list words over function values: map, filter, contains …
+    maps.wap                  map words: a key's value, set, has, remove; text keys found by their hash
     texts.wap                 text words over a text's UTF-8 bytes
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
