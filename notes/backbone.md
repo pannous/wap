@@ -355,23 +355,14 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **Ints have no `÷` or `%` yet** (wap/types/floats.wap holds only the truncated quotient and rem, which programs do
   not see): warp's `÷` and its floored `%` (`-7 % 2` is 1) are to be defined on top of them, and `quotient` is warp's
   exact division (3.5), so the truncated one keeps that name hidden. Paid off when the types module defines `÷` and `%`.
-- **A module's rules reach files that don't `use` it** (wap/core/rules/stages.wap `shape_rules`). All loaded rules go
-  into one table, so once a module is shaped its rules also apply to every file shaped after it, the types module's and
-  the census's included. Bends "use builds the language the program is written in": the scope should follow `use`.
-  Paid off by a rule table per program, the language's rules plus those of the modules it uses.
+
 
 
 
 - **any compares other references by identity:** inside an `any`, refs other than boxes and texts compare by
   identity (a record compared directly compares by fields); by type via dispatch, as show does, when code needs it.
-- **A rewrite that loops forever hangs the compiler instead of being refused** (wap/core/rules/stages.wap): letting
-  any rule read a square list as one phrase made `xs = [1 2 3]` hang, some rule rewriting the phrase `1 2 3` again and
-  again (the loop was not traced). A list is now one phrase only when its first word leads a rule. A rewrite whose
-  result fires the rules again without end should be refused by name, as every other unknown form is.
-- **Every word a rule's template spells carries DERIVED** (wap/core/rules/templates.wap filled), though only a
-  definition's name reads it (core/analyze/calls.wap ranked). Reason: a template does not know which of its words
-  will stand in a definition's name place. Paid off when templates are built from their forms, so the Define's name
-  hole is known.
+
+
 - **Every operator's spelling is written twice**: in the table of wap/types/operators.wap and in `text(op: Op)` of
   wap/types/nodes.wap. Reason: the Op enum is declared case for case as core/node.warp declares it, so old warp
   reads wap's source the same; the table can't build it, and naming each Op in its row would save about 15 nodes for a
@@ -404,9 +395,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **`===` is value equality in the prelude** (wap/types/prelude.wap `===(a: T, b: T) := a == b`), where warp's `===`
   is identity (the user, 2026-11-18; wiki/equality.md): two separately built `[1]` are `===` under wap. Off the
   census: wap's own compiler compares definitions by their DEFINER id instead. Paid off when `===` is ref.eq identity.
-- **The source avoids comparing an optional record with ø** (core/rules/patterns.wap names_pattern, matcher.wap
-  of_shape, stages.wap rule_applied's best as a list), because the seed's emitter compares records field by field.
-  Paid off at the next seed refresh, once the seed compares an optional with ø: `!= ø` and `best: Rule? = ø` again.
 
 
 - **stage.wap without_fact rebuilds the Meta itself**, a copy of nodes.wap with_attribute's layout, because the
