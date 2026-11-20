@@ -150,6 +150,7 @@ wap/
                               (units 3km, durations 2 weeks, inline html … as the forms arrive)
     native/                   a wap program built to a native executable (build.sh: wasm2c, cc, glue.awk, main.c)
       c.wap                   libc's and wasmtime's C functions, foreign primitives of the module c
+      compiler.wap            wap.wasm found beside the executable, its machine code kept beside it by its hash
       console.wap             `wap` alone: each line a module, linked to the earlier lines' kept instances
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
