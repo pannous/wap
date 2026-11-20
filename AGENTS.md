@@ -25,8 +25,10 @@ https://github.com/pannous/wap
   (operators.wap) and the sugar rules (sugar/). known
   <!-- todo (card preload-rename-types) ^^ rename to types? -->
 - A feature is a preload function or a rule in sugar/ before it is core code; a core diff that adds names of
-  a domain is the sign a mechanism is missing: card it.
+  a domain is the sign a mechanism is missing: note it.
   <!-- todo (card move-sugar) move preload/sugar to sugar/  -->
+- wap/core and wap/kernel are semi-frozen: every change there goes to warp-interviewer first. A new feature goes
+  into wap/extensions/ (first case: the native binary).
 
 ## How it compiles (notes/backbone.md "Stage languages")
 read = parse → shape rules (stage 1) → declare → declaration rules (stage 2) → lower → bind → type, with the kind rules
@@ -130,7 +132,7 @@ before asking a question). After a context swap, this file and your role file be
 - Vocabulary is library: the names and values of a domain (keys, units, colors, system values, months …) are
   declared in lib/ as an enum or as values of a class, found through `use` or names from the expected type; never a
   table in core/, never one rewrite rule per name. core/ holds mechanisms only. A core diff that adds names of a domain
-  is the sign that a mechanism is missing: card it.
+  is the sign that a mechanism is missing: note it.
 - Emptiness is tested loosely: `is empty`, `if no x`, `if x`; `x is ø` only tests missing.
 - JSON5 or warp notation for anything people or agents write; strict JSON only where a tool requires it.
 - NO environment variables as an interface, configure exclusively via:
@@ -228,12 +230,11 @@ before asking a question). After a context swap, this file and your role file be
 - Explore before the first edit of a card, a bug or a "why" question: spec, history, live work and evidence.
 - Quick cards first: those that never touch core/ or extensions/ (website, samples, lib/). core/ or extensions/ needs a
   compiler build: never quick.
-- A TODO in the code without a card gets one: `# TODO (card <name>) <text>`, card name right after the word TODO.
-- Sprint (user, from 2026-11-16): a new card only when it reduces existing ones (a split that closes others, a
-  shared root cause); features come only from the user.
+- A TODO in the code names an existing card: `# TODO (card <name>) <text>`; without one it stays a plain TODO.
+- Features come only from the user.
 - A new card's title is one plain sentence the user understands without context (what goes wrong or is wanted);
   keys, names and paths go in the body.
-- Unrelated problems: `todo add "…"`. Tiny no-choice fixes (typo, stale comment, wrong path) on the spot, own commit.
+- Unrelated problems: a `todo note` on the nearest card, or a test line that shows them. Tiny no-choice fixes (typo, stale comment, wrong path) on the spot, own commit.
 - We do not care about edge cases! Whenever you encounter an edge case code or test, remove it yourself or ask the interviewer if you're unsure. e.g. `"x" * yes` Whatever the compiler makes out of that from first principles is what we accept, even if it's an error. 
 - If you think the edge case might be important someday, put it into a todo card in the Edge column 
 <!-- - No focus on edge cases unless a program, sample or wiki example needs them (user, 2026-11-18). They never halt
