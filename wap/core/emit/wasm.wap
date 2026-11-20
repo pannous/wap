@@ -32,7 +32,10 @@ class WasmModule {
 	named: map<text, int> = {}
 	naming: list<text> = []
 	reserved: list<int> = []
+	# the functions' names, for the name section profilers and backtraces show
+	names: list<FunctionName> = []
 }
+class FunctionName { index: int, name: text }
 # a recursion group: the index of its first type, how many it holds, and whether its types are distinct from the
 # same shapes elsewhere; those of records that refer to each other are not, so they are found again by shape
 class RecursionGroup { first: int, count: int, distinct: bool }
@@ -174,6 +177,7 @@ type_entries(m: WasmModule) as list<list<int>> := {
 # An imported function, `wasi_snapshot_preview1.fd_write`: its index among the functions.
 imported(m: WasmModule, module: text, name: text, parameters: list<list<int>>, results: list<list<int>>) as int := {
 	m.imports += [named(module) + named(name) + [FUNCTION_KIND] + unsigned(added_type(m, function_type(parameters, results)))]
+	m.names += [FunctionName(#m.imports - 1, name)]
 	#m.imports - 1
 }
 
@@ -203,7 +207,10 @@ added_global(m: WasmModule, type: list<int>, mutability: int, initial: list<int>
 	#m.globals - 1
 }
 
-exported(m: WasmModule, name: text, kind: int, index: int) := { m.exports += [named(name) + [kind] + unsigned(index)] }
+exported(m: WasmModule, name: text, kind: int, index: int) := {
+	m.exports += [named(name) + [kind] + unsigned(index)]
+	if kind == FUNCTION_KIND and not m.names.any(each => each.index == index) { m.names += [FunctionName(index, name)] }
+}
 
 # An exception tag whose exceptions carry values of these types: its index
 added_tag(m: WasmModule, parameters: list<list<int>>) as int := {
@@ -239,5 +246,14 @@ module_bytes(m: WasmModule) as list<int> := {
 	passive = m.texts.map(bytes => [PASSIVE_SEGMENT] + bytes_vector(bytes)) + (if #m.memory_data == 0 then [] else [[ACTIVE_SEGMENT] + i32_const(DATA_ADDRESS) + END + bytes_vector(m.memory_data)])
 	memory_pages = [[0x00] + unsigned(1 + (#m.memory_data + PAGE_BYTES - 1) ÷ PAGE_BYTES)]
 	segment_count = [DATA_COUNT_SECTION] + unsigned(#unsigned(#passive)) + unsigned(#passive)
-	MAGIC + VERSION + section(TYPE_SECTION, type_entries(m)) + section(IMPORT_SECTION, m.imports) + section(FUNCTION_SECTION, declarations) + section(MEMORY_SECTION, memory_pages) + section(TAG_SECTION, m.tags) + section(GLOBAL_SECTION, m.globals) + section(EXPORT_SECTION, m.exports) + declared_references(m) + segment_count + section(CODE_SECTION, codes) + section(DATA_SECTION, passive)
+	MAGIC + VERSION + section(TYPE_SECTION, type_entries(m)) + section(IMPORT_SECTION, m.imports) + section(FUNCTION_SECTION, declarations) + section(MEMORY_SECTION, memory_pages) + section(TAG_SECTION, m.tags) + section(GLOBAL_SECTION, m.globals) + section(EXPORT_SECTION, m.exports) + declared_references(m) + segment_count + section(CODE_SECTION, codes) + section(DATA_SECTION, passive) + names_section(m)
+}
+# the custom section `name`, its subsection of function names, each a function's index and name in their order
+NAME_SECTION = "name"
+FUNCTION_NAMES = 1
+names_section(m: WasmModule) as list<int> := {
+	if m.names is empty { return [] }
+	names = counted(sorted(m.names, each => each.index).map(each => unsigned(each.index) + named(each.name)))
+	content = named(NAME_SECTION) + [FUNCTION_NAMES] + unsigned(#names) + names
+	[CUSTOM_SECTION] + unsigned(#content) + content
 }
