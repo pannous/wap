@@ -57,4 +57,7 @@ print(if not b then "empty" else "full")')" "empty
 full
 empty
 full"
+check "a bare ø is empty, and or gives the other operand" "$(ran bare_nothing 'print text(ø is empty)
+print text(ø or 3)')" "yes
+3"
 exit $((failures > 0))
