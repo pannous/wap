@@ -123,4 +123,9 @@ print twice(\"ab\")")" "10
 abab"
 check "a compiled module that exports no function declares nothing" "$(printf '%s\n' 'x = 1' >"$stage/no_functions.wap" && $warp "$compiler" "$stage/no_functions.wap" "$stage/no_functions.wasm" 2>&1 && ran uses_no_functions "use \"$stage/no_functions.wasm\"
 print(\"ok\")")" "ok"
+# the program changes a used module's variable, which the module's own functions then read
+check "a program changes a used module's variable" "$(ran reassign_used 'use "greet.wap"
+greeting = greeting + "!"
+welcome()')" "loaded
+hi!"
 exit $((failures > 0))
