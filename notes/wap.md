@@ -252,7 +252,7 @@ The 20 largest top-level statements:
 | file and name | nodes |
 |---|---|
 | wap/core/analyze/scope.wap bound | 717 |
-| wap/types/nodes.wap text | 625 |
+| wap/nodes.wap text | 625 |
 | wap/core/analyze/calls.wap call_typed | 584 |
 | wap/core/analyze/calls.wap function_typed | 560 |
 | wap/core/rules/lowering.wap lowered_form | 534 |
