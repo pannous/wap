@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wap reads files (wap/preload/prelude.wap read; wiki/standard-library.md): read(path) is the file's text, a path it
+# wap reads files (wap/types/prelude.wap read; wiki/standard-library.md): read(path) is the file's text, a path it
 # cannot open stops the program naming it. Run it with bash test/wap/test_files.sh
 source "$(dirname "$0")/compile.sh"
 
