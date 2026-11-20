@@ -8,33 +8,36 @@ use "../../kernel/forms.wap"
 use "scope.wap"
 use "names.wap"
 use "declarations.wap"
+use "fits.wap"
 
 # the words of the modules a program uses, each module named too; a word an earlier module defines identically is
 # that module's, one word
-modules_scope(modules: list<Node>) as list<Definition> := (1 to #modules).flat_map(at => [Definition(module_name(modules#at), DefinitionKind.Module, modules#at, MODULE_DEPTH)] + declarations_of(modules#at).filter(declaration => not modules.take(at - 1).any(earlier => defines_identically(earlier, modules#at, declaration))).flat_map(declaration => library_words(declaration, MODULE_DEPTH)))
+modules_scope(modules: list<Module>) as list<Definition> := (1 to #modules).flat_map(at => [Definition(module_name(modules#at.code), DefinitionKind.Module, modules#at.code, MODULE_DEPTH)] + modules#at.signatures.filter(signature => not modules.take(at - 1).any(earlier => defines_identically(earlier, modules#at, signature))).flat_map(signature => library_words(signature, MODULE_DEPTH)))
 # a module's name, its file's without the folder and the extension
 module_name(module: Node) as text := (file_of(module) ?? "").split("/").last.split(".")#1
 # the names a module declares itself: its functions, variables and types, not their fields or cases
-module_names(module: Node) as list := declarations_of(module).map(declaration_name)
+module_names(module: Node) as list := signatures_of(module).map(signature => signature.definer)
 # Two used modules defining one word alike, refused naming both, even where nothing calls it: the same name taking the
 # same parameter types, or one type's or variable's name, unless both definitions are identical; words of one name
 # taking other types are one word's overloads
-clashes_refused(modules: list<Node>) := for later in 2 to #modules {
+clashes_refused(modules: list<Module>) := for later in 2 to #modules {
 	for earlier in modules.take(later - 1) {
-		for declaration in declarations_of(modules#later) {
-			for other in declarations_of(earlier) { if declared_alike(other) == declared_alike(declaration) and not defines_identically(earlier, modules#later, declaration) { refused(declaration_name(declaration), "${module_name(earlier)}.wap line ${line_of(declaration_name(other))} and ${module_name(modules#later)}.wap line ${line_of(declaration_name(declaration))} both define ${declared_alike(declaration)}: rename one") } }
+		for signature in modules#later.signatures {
+			for other in earlier.signatures { if alike(other, signature) and not defines_identically(earlier, modules#later, signature) { refused(signature.definer, "${module_name(earlier.code)}.wap line ${line_of(other.definer)} and ${module_name(modules#later.code)}.wap line ${line_of(signature.definer)} both define ${described(signature)}: rename one") } }
 		}
 	}
 }
-# whether an earlier module defines a module's declaration identically: alike, and its code read alike
-defines_identically(earlier: Node, module: Node, declaration: Node) as bool := declarations_of(earlier).any(other => declared_alike(other) == declared_alike(declaration)) and definition_text(earlier, declaration) == definition_text(module, declaration)
-# a module's definition of a declaration as code reads, without its places: two identical ones read alike
-definition_text(module: Node, declaration: Node) as text := text(top_level_statements(module).find(statement => declared_alike(declaration_of(statement) ?? Empty) == declared_alike(declaration)) ?? declaration)
-# a declaration as two modules may not both write it: `twice(int)`, a type's or a variable's bare name
-declared_alike(declaration: Node) as text := match declaration {
-	Key(name, Op.Colon, signature) => if not declares_function(declaration) then text(name) else "${name}(${declared_parameters(declaration).map(parameter => text(declared_type(parameter) ?? "")).join(", ")})"
-	_ => text(declaration_name(declaration))
-}
+# whether an earlier module defines a module's word identically: alike, and its code read alike
+defines_identically(earlier: Module, module: Module, signature: Signature) as bool := earlier.signatures.any(other => alike(other, signature) and definition_text(earlier.code, other) == definition_text(module.code, signature))
+# a module's definition of a word as code reads, without its places: two identical ones read alike
+definition_text(module: Node, signature: Signature) as text := text(defining_statement(module, signature) ?? signature.definer)
+# whether two modules may not both define these words: one name, both functions taking the same parameter types, or
+# neither a function
+alike(one: Signature, other: Signature) as bool := one.name == other.name and is_function(one) == is_function(other) and (not is_function(one) or same_types(parameter_types(one), parameter_types(other)))
+# a function's parameter types, an untyped one Empty
+parameter_types(signature: Signature) as list<Node> := signature.parameters.map(type => type ?? Empty)
+# a word as two modules may not both write it: `twice(int)`, a type's or a variable's bare name
+described(signature: Signature) as text := if is_function(signature) then "${signature.name}(${signature.parameters.map(type => text(type ?? "")).join(", ")})" else signature.name
 # A used module's word named by the module, `a.twice(3)`, read as twice(a, 3) is: the definitions of
 # that name the module declares, bound as the bare name would be were they the only ones; ø where the subject names no
 # module, or names something nearer, a variable `a`
