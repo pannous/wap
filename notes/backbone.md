@@ -319,12 +319,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 
 
 
-- **A decimal literal is a binary float (f64), not exact:** `0.1 + 0.2` is 0.30000000000000004 in wap and 0.3 in warp,
-  whose decimal literals are exact (notes/decisions.md core-round-untyped-half, exact-decimal-big; tests
-  test/numbers/test_number_and_unit_rules:7, test_fraction_written_form:11, test_declared_float_exact_reals:13). The
-  compiler's own source barely uses decimals, so self-build does not wait for it; the exact number kind (the runtime's
-  exact numbers as types warp) comes after self-build. No test pins the f64 value. Where: core/parse/atoms.wap
-  number_read, types/floats.wap; `1e21` likewise shows 1e21 where warp gives 1000000000000000000000.
 
 
 
@@ -332,13 +326,12 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **Stage 3 serves only the rules programs write** (decision hole-types): no rewrite of wap's own moves into it. The
   char read as a text depends on the type its place wants (binding's conversion), `x is w` on what w means (scope);
   a typed rule sees only its hole's type.
-- **Ints longer than 18 digits read as floats** (wap/core/parse/reader.wap `whole`). Reason: warp's `int(text)`
-  wraps beyond 64 bits. Paid off by an unbounded int reading.
+
 - **Glued names read as operators** (`a-b` is `(Call - a b)`). Kebab names are stage 2 by notes/reader.md, but the
   operator stage decides the glued run first, before declarations say whether `a-b` is a name. Paid off when the
   stage leaves a glued run of declared-name candidates for stage 2, or the user drops kebab names.
 
-- **`format` prints no comments yet** (wap/core/format.wap). Comments ride in Meta; the printer reads only shapes.
+
 
 
 
@@ -370,21 +363,10 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **A named function is refused where a function type is written for a variable** (found 2026-11-19, off-census):
   `g: (int) -> int = inc` says it gives fn<"… inc">, while the same `inc` in a `map<text, (int) -> int>` literal is
   taken. Paid off when a function's value fits a written function type wherever it is given.
-- **`compact` lives in core/stage.wap, not the types module** (wap/core/stage.wap): old warp's prelude lacks it, and wap
-  can't hold two same-arity definitions of one name. Paid off when old warp retires: it moves to
-  types/lists.wap with a test_lists line. Old warp no longer builds wap's tests (wap-facts-replace): the tests'
-  compiler starts from the seed beside the seed's own types module, which lacks `compact` too, so the move waits for a seed
-  whose types module holds it.
-- **A types file compiled as the program brings its definitions twice** (wap/core/pipeline.wap typed_file): the
-  file is the program and also part of the library around it, so calls.wap refuses "two definitions share the key"
-  (types/floats.wap, host, texts, types.wap, prelude.wap) and nodes.wap lists `text(n: Node)` twice. Off the
-  census: a types file is library, typed function by function, never a program of its own. Paid off when a program
-  that is a types file is bound inside the rest of the types module only.
 
 
 
-- **stage.wap without_fact rebuilds the Meta itself**, a copy of nodes.wap with_attribute's layout, because the
-  compiler may use only the seed's types words. Paid off at the next seed refresh: nodes.wap gets one
-  without_attribute that with_attribute uses too, and without_fact calls it.
+
+
 
 
