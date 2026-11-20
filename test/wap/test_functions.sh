@@ -267,4 +267,8 @@ check "a bare function parameter takes a function of a written type" "$(ran bare
 inc(x: int): int := x + 1
 steps: map<text, (int) -> int> = {"inc": inc}
 print text(once(steps["inc"], 3))')" "4"
+check "an if giving only ø beside an early return of an int, in a function giving int?" "$(ran empty_arms_return 'f(w: int) as int? := if w == 0 then ø else { if w > 1 { return w }; ø }
+print(text(f(2)))
+print(text(f(1)))')" "2
+ø"
 exit $((failures > 0))
