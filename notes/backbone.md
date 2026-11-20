@@ -560,3 +560,8 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   `declarations` list, which stage-2 rules (rules/matcher.wap) and modules.wap still read. Reason: step 4 moves its
   readers one phase at a time, typing first. Paid off in phase 2: stage 2 and modules read the Signatures, and
   DECLARES/DECLARATIONS go.
+
+- **A rule's output names resolve where the rule fires** (preload/sugar/conditions.wap `x != ø` → `not missing(x)`).
+  Reason: a template's words are bound in the program's scope, so a local named `missing` hid the preload's predicate
+  (core/analyze/calls.wap words_missing, renamed to `lacking`). Paid off when a template's names bind in the rule's
+  own file, as a hygienic macro's do.
