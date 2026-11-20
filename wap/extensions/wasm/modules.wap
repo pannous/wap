@@ -8,7 +8,8 @@ use "../../core/analyze/declarations.wap"
 use "../../core/emit/opcodes.wap"
 use "../../core/emit/wasm.wap"
 use "../../core/stage.wap"
-use "../../core/errors.wap"
+use "../../core/paths.wap"
+use "../../core/parse/reader.wap"
 
 # the bytes before the first section (magic and version)
 PREAMBLE_BYTES = 8
@@ -29,38 +30,33 @@ wasm_source(path: text) as text := {
 compiled_once(module: Module, records: Records) as list<Signature> := {
 	typed = module.signatures.filter(signature => is_function(signature) and all_typed(signature, records) and compiled_body(defining_statement(module.code, signature)!))
 	ids = typed.map(signature => definer_id(signature.definer))
-	kept = travelling(module).filter(statement => not defined_by(statement, ids)).map(place_of)
-	typed.filter(signature => not kept.contains(place_of(statement_place(defining_statement(module.code, signature)!))))
+	kept = top_level_statements(module.code).filter(statement => not defined_by(statement, ids)).map(statement => line_place(statement_place(statement)))
+	typed.filter(signature => not kept.contains(line_place(defining_statement(module.code, signature)!)))
 }
 compiled_body(statement: Node) as bool := match statement { Call(called, arguments) => not arguments#2 is Prim; _ => no }
 defined_by(statement: Node, ids: list<text>) as bool := declaration_of(statement) != ø and ids.contains(definer_id(declaration_name(declaration_of(statement)!)))
-# the top-level statements of a module that a file writes, each at its place
-travelling(module: Module) as list<Node> := top_level_statements(module.code).filter(statement => line_of(statement_place(statement)) != ø)
-# the wap section's source: each top-level phrase of the module as its file writes it, once, but the definitions
-# compiled once, which their export names declare
+# the wap section's source: the module's files as written, each top-level statement but the definitions compiled
+# once, which their export names declare, and the includes, whose files follow in their place
 header_source(module: Module, exported: list<Signature>) as text := {
-	statements = travelling(module).map(statement_place)
-	done = exported.map(signature => place_of(statement_place(defining_statement(module.code, signature)!)))
-	files: map<text, list<text>> = {}
-	for statement in statements { if not files.has(file_of(statement)!) { files[file_of(statement)!] = read(file_of(statement)!).split("\n") } }
-	written = ""
-	for statement in statements {
-		if not done.contains(place_of(statement)) { written += written_lines(statement, statements, files) }
-		done += [place_of(statement)]
+	cut = exported.map(signature => line_place(defining_statement(module.code, signature)!))
+	written_files(module.file).map(file => kept_lines(file, cut)).join("")
+}
+line_place(statement: Node) as text := "${file_of(statement)}:${line_of(statement)}"
+# a file and the files it includes, in their order
+written_files(file: text) as list<text> := [file] + files_named(notation(read(file), file), INCLUDE_WORD).flat_map(included => written_files(beside(file, included)))
+# a file's text without the lines of the statements cut and of its includes, each statement up to the next one
+kept_lines(file: text, cut: list<text>) as text := {
+	lines = read(file).split("\n")
+	statements = top_level_statements(notation(read(file), file)).filter(statement => line_of(statement) != ø)
+	starts = statements.map(statement => line_of(statement)!) + [#lines + 1]
+	kept = ""
+	for at in 0 to #statements - 1 {
+		if not cut.contains(line_place(statements[at])) and phrase_text(statements[at], INCLUDE_WORD) == ø { kept += lines[starts[at] - 1 .. starts[at + 1] - 1].join("\n") + "\n" }
 	}
-	written
+	kept
 }
 # where a top-level statement is written: its own place, a class's that of its name
 statement_place(statement: Node) as Node := if line_of(statement) == ø and declaration_of(statement) != ø then declaration_name(declaration_of(statement)!) else statement
-# a statement's lines in its file, up to the next statement of that file
-written_lines(statement: Node, statements: list<Node>, files: map<text, list<text>>) as text := {
-	file = file_of(statement)!
-	lines = files[file]
-	start = line_of(statement)!
-	end = #lines + 1
-	for other in statements { if file_of(other) == file and line_of(other)! > start { end = min(end, line_of(other)!) } }
-	lines[start - 1 .. end - 1].join("\n") + "\n"
-}
 
 # `add(a: int, b: int = 1) as int := prim foreign("m.wasm", "add(a: int, b: int = 1) → int", a, b)`
 foreign_definition(path: text, header: text) as text := {

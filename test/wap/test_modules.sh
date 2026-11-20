@@ -121,4 +121,12 @@ check "a program uses a compiled module as it uses its source" "$(printf '%s\n' 
 print text(add(2, 3) + add(4))
 print twice(\"ab\")")" "10
 abab"
+# a module compiled once carries what wasm erases as source in its wap section (wiki/wasm-representation.md): a class,
+# a generic function and a value travel along, the functions compiled once are called through its exports
+check "a compiled module's classes, generic functions and values work in the program using it" "$(printf '%s\n' 'class P { n: int, name: text }' 'names(ps: list<P>) as text := ps.map(p => p.name).join(",")' 'made(n: int) as P := P(n, "p" + text(n))' 'second(xs: list<T>) as T := xs#2' 'LIMIT = 7' >"$stage/carried.wap" && $warp "$compiler" "$stage/carried.wap" "$stage/carried.wasm" 2>&1 && ran uses_carried "use \"$stage/carried.wasm\"
+print names([made(1), P(2, \"q\")])
+print second([\"a\", \"b\"])
+print text(LIMIT)")" "p1,q
+b
+7"
 exit $((failures > 0))
