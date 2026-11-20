@@ -17,7 +17,7 @@ class WasmModule {
 	groups: list<RecursionGroup> = []
 	imports: list<list<int>> = []
 	functions: list<DefinedFunction> = []
-	globals: list<list<int>> = []
+	globals: list<DefinedGlobal> = []
 	# the globals of other modules, numbered before its own
 	global_imports: list<list<int>> = []
 	exports: list<list<int>> = []
@@ -44,6 +44,8 @@ class WasmModule {
 class RecursionGroup { first: int, count: int, distinct: bool }
 # a function of the module: its type's index, and its code, empty while only its place is reserved
 class DefinedFunction { type_index: int, code: list<int>, name: text = "" }
+# a global of the module: its type, whether it changes, the constant instructions it starts with
+class DefinedGlobal { type: list<int>, mutability: int, initial: list<int> }
 
 # An unsigned number as LEB128, 7 bits a byte, the low bits first, each byte but the last with its high bit set:
 # 624485 → [0xE5, 0x8E, 0x26]
@@ -206,9 +208,11 @@ code_entry(locals: list<list<int>>, body: list<int>) as list<int> := {
 
 # A global of that type, mutable or not, set at start by the constant instructions `initial`: its index.
 added_global(m: WasmModule, type: list<int>, mutability: int, initial: list<int>) as int := {
-	m.globals += [type + [mutability] + initial + END]
+	m.globals += [DefinedGlobal(type, mutability, initial)]
 	#m.global_imports + #m.globals - 1
 }
+# the constant instructions a global of the module starts with, given once its value is known
+initial_given(m: WasmModule, index: int, initial: list<int>) := { m.globals[index - #m.global_imports].initial = initial }
 # An imported global, mutable, the one the module exporting it holds: its index among the globals.
 imported_global(m: WasmModule, module: text, name: text, type: list<int>) as int := {
 	m.global_imports += [named(module) + named(name) + [GLOBAL_KIND] + type + [MUTABLE]]
@@ -259,7 +263,7 @@ module_bytes(m: WasmModule) as list<int> := {
 	passive = m.texts.map(bytes => [PASSIVE_SEGMENT] + bytes_vector(bytes)) + (if #m.memory_data == 0 then [] else [[ACTIVE_SEGMENT] + i32_const(DATA_ADDRESS) + END + bytes_vector(m.memory_data)])
 	memory_pages = [[0x00] + unsigned(1 + (#m.memory_data + PAGE_BYTES - 1) ÷ PAGE_BYTES)]
 	segment_count = [DATA_COUNT_SECTION] + unsigned(#unsigned(#passive)) + unsigned(#passive)
-	MAGIC + VERSION + section(TYPE_SECTION, type_entries(m)) + section(IMPORT_SECTION, m.imports + m.global_imports) + section(FUNCTION_SECTION, declarations) + section(MEMORY_SECTION, memory_pages) + section(TAG_SECTION, m.tags) + section(GLOBAL_SECTION, m.globals) + section(EXPORT_SECTION, m.exports) + declared_references(m) + segment_count + section(CODE_SECTION, codes) + section(DATA_SECTION, passive) + names_section(m) + (if m.header is empty then [] else custom_section(WAP_SECTION, m.header.bytes))
+	MAGIC + VERSION + section(TYPE_SECTION, type_entries(m)) + section(IMPORT_SECTION, m.imports + m.global_imports) + section(FUNCTION_SECTION, declarations) + section(MEMORY_SECTION, memory_pages) + section(TAG_SECTION, m.tags) + section(GLOBAL_SECTION, m.globals.map(global => global.type + [global.mutability] + global.initial + END)) + section(EXPORT_SECTION, m.exports) + declared_references(m) + segment_count + section(CODE_SECTION, codes) + section(DATA_SECTION, passive) + names_section(m) + (if m.header is empty then [] else custom_section(WAP_SECTION, m.header.bytes))
 }
 # the custom section `name`, its subsection of function names, each a function's index and name in their order
 NAME_SECTION = "name"
