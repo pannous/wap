@@ -1,6 +1,6 @@
 # wap's operator stage: design choices
 
-The plan is notes/backbone.md "Operators"; the table is wap/preload/operators.wap, the mechanism
+The plan is notes/backbone.md "Operators"; the table is wap/types/operators.wap, the mechanism
 wap/core/parse/operators.wap, the printer wap/core/format.wap. What the code decided beyond the plan:
 
 - **One parse, juxtaposition included.** The stage is an operator-precedence parse in which juxtaposition is two
@@ -16,7 +16,7 @@ wap/core/parse/operators.wap, the printer wap/core/format.wap. What the code dec
   (`fold +`, `prefix operator ⁻ := …`). No refusal for a missing operand is left.
 - **A program's own operators** join the table before its phrases are read (a prescan of the whole program):
   `[infix|prefix|postfix|suffix] operator ⊕ …` in the group its word names (binds like `+`, prefix unary, postfix
-  superscript; rows in the preload), a spelling the table has in that fixity is an overload, and
+  superscript; rows in the types module), a spelling the table has in that fixity is an overload, and
   `operator ⊕ has precedence above|below *` gives ⊕ a group of its own related to `*`'s. The declaration lines stay
   in the program, operated like any phrase, for stage 2 to define.
 - **format drops brackets precedence makes needless** (`1 + (2 * 3)` → `1 + 2 * 3`): what a reading decided shows.

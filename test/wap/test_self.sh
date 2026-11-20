@@ -26,7 +26,7 @@ files=(
 	wap/core/bindings.wap
 	wap/core/paths.wap
 	wap/core/type_notation.wap
-	wap/preload/operators.wap
+	wap/types/operators.wap
 	wap/core/emit/emitter.wap
 	wap/core/emit/equality.wap
 	wap/core/emit/function_values.wap
@@ -42,19 +42,19 @@ files=(
 	wap/core/parse/layout.wap
 	wap/core/parse/reader.wap
 	wap/core/analyze/names.wap
-	wap/preload/lists.wap
-	wap/preload/numbers.wap
-	wap/preload/rules.wap
-	wap/preload/sugar/calls.wap
-	wap/preload/sugar/conditions.wap
-	wap/preload/sugar/data.wap
-	wap/preload/sugar/definitions.wap
-	wap/preload/sugar/literals.wap
-	wap/preload/sugar/loops.wap
-	wap/preload/sugar/matching.wap
-	wap/preload/sugar/ranges.wap
-	wap/preload/sugar/records.wap
-	wap/preload/sugar/types.wap
+	wap/types/lists.wap
+	wap/types/numbers.wap
+	wap/types/rules.wap
+	wap/types/sugar/calls.wap
+	wap/types/sugar/conditions.wap
+	wap/types/sugar/data.wap
+	wap/types/sugar/definitions.wap
+	wap/types/sugar/literals.wap
+	wap/types/sugar/loops.wap
+	wap/types/sugar/matching.wap
+	wap/types/sugar/ranges.wap
+	wap/types/sugar/records.wap
+	wap/types/sugar/types.wap
 	wap/core/format.wap
 	wap/core/language.wap
 	wap/core/parse/operator_table.wap
@@ -87,7 +87,7 @@ for file in "${files[@]}"; do
 	check "wap compiles $file and the result loads" "$(loaded "$file")" "loads"
 done
 # Stage 2: the module wap makes of its own compiler, wap1, compiles programs, and they run; it is built once, its
-# preload beside it (compile.sh compiler_built)
+# types beside it (compile.sh compiler_built)
 wap1=$(compiler_built "$stage/self" 1)
 # wap1 built, or why not
 wap1_built() { [ -f "$wap1" ] || { echo "$wap1"; return 1; }; }

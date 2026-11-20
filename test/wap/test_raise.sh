@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wap's raise (wap/preload/prelude.wap; wiki/keyword.md raise): the program stops, its message on the standard error;
+# wap's raise (wap/types/prelude.wap; wiki/keyword.md raise): the program stops, its message on the standard error;
 # raise fits where any value is wanted, since it never gives one. Run it with bash test/wap/test_raise.sh
 source "$(dirname "$0")/compile.sh"
 

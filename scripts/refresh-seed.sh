@@ -1,13 +1,13 @@
 #!/bin/bash
 # Refresh wap's seed: wap-seed/wap.wasm beside the warp binary, the compiler wap's tests and census start from
-# (test/wap/compile.sh), with the preload and kernel it reads beside it. Stage A is the seed compiling wap/compiler.wap
-# beside the seed's own preload, so a rule form the tree's preload is the first to write is known; B is A compiling it
-# beside the tree's preload, C is B compiling it again. The last stage built is the new seed once it compiles and runs
-# hello: no identical bytes asked (user 2026-11-20), a fixpoint is only reported. A compiler source word new in the
-# tree's preload reaches the source a seed later: such a change lands after a refresh.
-# The native wap beside the warp binary is rebuilt from the tree's driver by the new seed.
-# The new seed is published as the pre-release wap-seed-<date>-<sha8> on pannous/wap, built from the tree's HEAD, and
-# wap-seed.lock names it, committed in the tree.
+# (test/wap/compile.sh), with the types module and kernel it reads beside it. Stage A is the seed compiling
+# wap/compiler.wap beside the seed's own types module, so a rule form the tree's types module is the first to write is
+# known; B is A compiling it beside the tree's types module, C is B compiling it again. The last stage built is the new
+# seed once it compiles and runs hello: no identical bytes asked (user 2026-11-20), a fixpoint is only reported. A
+# compiler source word new in the tree's types module reaches the source a seed later: such a change lands after a
+# refresh. The native wap beside the warp binary is rebuilt from the tree's driver by the new seed. The new seed is
+# published as the pre-release wap-seed-<date>-<sha8> on pannous/wap, built from the tree's HEAD, and wap-seed.lock
+# names it, committed in the tree.
 # usage: scripts/refresh-seed.sh [--check] [<tree>, default this checkout]   (--check: run the stages, replace nothing)
 # WARP_BINARY: the warp host that runs the modules (default `warp` on PATH). A stage takes about half a minute.
 set -u -o pipefail
@@ -24,8 +24,8 @@ seed=$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm
 [ -f "$seed" ] || { echo "refresh-seed: no seed at $seed" >&2; exit 2; }
 mkdir -p "$tree/data" && scratch=$(mktemp -d "$tree/data/refresh-seed.XXXXXX") || exit 2
 trap 'rm -rf "$scratch"' EXIT
-# every stage after A reads the tree's preload and kernel beside itself
-cp -R "$tree/wap/preload" "$tree/wap/kernel" "$scratch/" || exit 2
+# every stage after A reads the tree's types module and kernel beside itself
+cp -R "$tree/wap/types" "$tree/wap/kernel" "$scratch/" || exit 2
 
 # stage <compiler> <output>: the compiler compiling wap's source; its cost in user + system CPU seconds
 stage() {
@@ -56,14 +56,14 @@ if [ -n "$check" ]; then
 fi
 
 # the seed and what it reads beside it, installed and published
-cp "$chosen" "$seed" && cp -R "$tree/wap/preload" "$tree/wap/kernel" "$(dirname "$seed")/" && echo "refresh-seed: replaced $seed"
+cp "$chosen" "$seed" && cp -R "$tree/wap/types" "$tree/wap/kernel" "$(dirname "$seed")/" && echo "refresh-seed: replaced $seed"
 # the native wap beside the warp binary, the command that runs the seed (wap/extensions/native/driver.wap), built by it
 native=$(dirname "$(dirname "$seed")")
 WARP=$warp "$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" \
 	-L"$native/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib && echo "refresh-seed: installed $native/wap" ||
 	echo "refresh-seed: the native wap was not built; $native/wap stays" >&2
 beside=$scratch/wap-seed-beside.tar.gz
-tar -czf "$beside" -C "$tree/wap" preload kernel || { echo "refresh-seed: the preload and kernel were not packed" >&2; exit 1; }
+tar -czf "$beside" -C "$tree/wap" types kernel || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
 release=wap-seed-$(date +%Y-%m-%d)-$(shasum -a 256 "$seed" | cut -c1-8)
 source_commit=$(git -C "$tree" rev-parse HEAD)
 gh release create "$release" "$seed" "$beside" --repo "$REPOSITORY" --prerelease --title "$release" --target "$source_commit" \

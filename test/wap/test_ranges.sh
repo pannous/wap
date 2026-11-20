@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # wap's ranges (wiki/range.md, wiki/keyword.md for): `a to b` includes b, `a .. b` stops before it; both are the
-# preload's Range. Run it with bash test/wap/test_ranges.sh
+# types module's Range. Run it with bash test/wap/test_ranges.sh
 source "$(dirname "$0")/compile.sh"
 
 check "a range includes its end" "$(ran to 'r = 2 to 5
