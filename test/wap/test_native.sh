@@ -26,6 +26,14 @@ c = yes
 if c { 5 }
 match 3 { 3 => 1; _ => ø }
 exit(7)' >/dev/null; echo $?)" "7"
+check "a native program with an if as a while body's last statement" "$(native_ran dropped_loop 'exit(code: int) := prim proc_exit(code)
+k = 0
+n = 0
+while n < 5 {
+	n = n + 1
+	if n > 2 { k = k + 1 }
+}
+exit(k)' >/dev/null; echo $?)" "3"
 # the native wap (driver.wap, built by wap): `wap <program>` compiles with the wap.wasm beside it and runs the module
 native_wap="$stage/bin/wap"
 mkdir -p "$stage/bin/wap-seed" && cp -R "$(dirname "$compiler")/types" "$(dirname "$compiler")/kernel" "$stage/bin/wap-seed/" && cp "$compiler" "$stage/bin/wap-seed/wap.wasm"
