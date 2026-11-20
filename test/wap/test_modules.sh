@@ -117,4 +117,8 @@ called_export() {
 }
 check "a host calls an exported overload by its header line" "$(called_export overloads 'add(a: int, b: int = 1) as int := a + b
 add(a: text, b: text) as text := a + b' 'add(a: int, b: int = 1) → int' 2 3)" "5"
+check "a program uses a compiled module as it uses its source" "$(printf '%s\n' 'add(a: int, b: int = 1) as int := a + b' 'twice(t: text) as text := t + t' >"$stage/compiled.wap" && $warp "$compiler" "$stage/compiled.wap" "$stage/compiled.wasm" 2>&1 && ran uses_compiled "use \"$stage/compiled.wasm\"
+print text(add(2, 3) + add(4))
+print twice(\"ab\")")" "10
+abab"
 exit $((failures > 0))
