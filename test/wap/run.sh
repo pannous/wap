@@ -28,6 +28,8 @@ all_run() {
 	started=$(date +%s)
 	printf '%s\n' "$@" | xargs -P "$cores" -I{} bash -c '"$3" bash "$1" ${4:+--compiler "$4"} >"$2/$(basename "$1" .sh).txt" 2>&1' _ {} "$results" "$job_slot" "$module"
 	summed "$@" | tee "$SUMMARY"
+	# the run's exit status: 0 only when no check failed
+	grep -q ' 0 ✗' "$SUMMARY"
 }
 
 [ "$1" = all_run ] && { shift; all_run "$@"; exit; }
@@ -41,6 +43,7 @@ while [ $# -gt 0 ]; do
 	esac
 done
 [ $# -gt 0 ] || set -- "$here"/test_*.sh
+for script in "$@"; do [ -f "$script" ] || { echo "no test script $script" >&2; exit 2; }; done
 mkdir -p "$results" && rm -f $(outputs "$@") "$SUMMARY"
 source "$here/compile.sh"
 # --stage <n>: the compiler under test is wap<n>, wap built by itself n times (milestone 2: the tests pass with wap2)

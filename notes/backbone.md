@@ -52,7 +52,7 @@ lead first, as a change of this table.
 | read | core/parse/reader.wap | wap-reader | text | notation |
 | operators | core/parse/operators.wap, table in the preload | wap-reader | notation | operated |
 | shape rules (stage 1) | core/rules/, preload/sugar/ | wap-reader | operated | surface |
-| declare | core/analyze/declarations.wap | wap-binding | surface | declared, and Module.signatures: one Signature per function, value and record |
+| declare | core/analyze/declarations.wap | wap-binding | surface | declared, and Module.signatures: one Signature per function, value and record (the record: core/bindings.wap) |
 | lower | core/rules/lowering.wap | wap-reader | declared | kernel |
 | bind | core/analyze/scope.wap | wap-binding | kernel | bound kernel |
 | type | core/analyze/types.wap | wap-binding | bound kernel | typed kernel |
@@ -554,6 +554,11 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   spelling in the source to rewrite: a typed rule's hole can't ask for a value that is no list, and narrowing writes
   the `!` itself. Paid off when a typed hole can ask for "not this type" and narrowing marks a found read that a
   preload rule rewrites.
+
+- **A Signature's parameters are three parallel lists, `parameters`, `names` and `defaults`, indexed alike**
+  (core/bindings.wap). Reason: export names (wiki/wasm-representation.md "Export names") added the names and defaults
+  beside the types without reshaping every reader. Paid off the next time a reader of the record is touched: one
+  `list<Parameter>` of name, type and default.
 
 - **Two records of a definition until phase 2 moves stage 2 and modules to Signature** (core/analyze/declarations.wap):
   declare writes a function's Signature into Module.signatures beside its `declares` fact and the program's
