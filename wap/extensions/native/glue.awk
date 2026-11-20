@@ -1,0 +1,47 @@
+# The C glue of a native wap program (build.sh), written from wasm2c's header of its module: each function the module
+# imports from a module other than WASI, `u64 w2c_c_strlen(struct w2c_c*, u32);`, calls the C function of that name,
+# found in the process, with each value as C takes it by one rule over wasm's types: an i32 (u32) is an address in
+# the module's memory, given as a pointer to it, an i64 (u64) an int or a host handle as it is, a float a float. A
+# u32 result is C's int as it is. Then the instantiation, which takes the imported modules in the header's order.
+#   awk -f glue.awk program.h > glue.c
+BEGIN { WASI = "w2c_wasi__snapshot__preview1"; module_count = 0 }
+
+# the C type an argument of this wasm2c type is given to the C function as
+function c_type(wasm_type) { return wasm_type == "u32" ? "void*" : wasm_type }
+function c_value(wasm_type, name) { return wasm_type == "u32" ? "wasi_memory(library) + " name : name }
+
+# `u64 w2c_c_strlen(struct w2c_c*, u32);`: an import of the module c
+/^(void|u32|u64|f32|f64) w2c_[a-z0-9_]+_[A-Za-z0-9_]+\(struct w2c_[a-z0-9_]+\*/ && $0 !~ WASI {
+	result = $1
+	match($0, /struct w2c_[a-z0-9_]+\*/); module = substr($0, RSTART + 7, RLENGTH - 8)
+	match($0, / w2c_[A-Za-z0-9_]+\(/); full = substr($0, RSTART + 1, RLENGTH - 2)
+	name = substr(full, length(module) + 2)
+	if (!(module in modules)) { modules[module] = 1; order[++module_count] = module }
+	listed = $0; sub(/^[^,)]*/, "", listed); sub(/\);.*$/, "", listed)
+	count = split(listed, types, /, */)
+	parameters = "struct " module "* library"; c_parameters = ""; arguments = ""
+	for (i = 2; i <= count; i++) {
+		parameters = parameters ", " types[i] " value" i
+		c_parameters = c_parameters (i > 2 ? ", " : "") c_type(types[i])
+		arguments = arguments (i > 2 ? ", " : "") c_value(types[i], "value" i)
+	}
+	if (c_parameters == "") c_parameters = "void"
+	call = "function(" arguments ")"
+	glue = glue sprintf("%s %s(%s) {\n", result, full, parameters)
+	glue = glue sprintf("\tstatic %s (*function)(%s);\n", result, c_parameters)
+	glue = glue sprintf("\tif (!function) function = c_function(\"%s\");\n", name)
+	glue = glue sprintf("\t%s%s;\n}\n", (result == "void" ? "" : "return "), call)
+}
+# the instantiation, the imported modules' instances in the header's order: WASI's, and each other module's wrapping it
+/^void wasm2c_[a-z0-9_]+_instantiate\(/ {
+	listed = $0; sub(/^[^,]*, */, "", listed); sub(/\);.*$/, "", listed)
+	count = split(listed, instances, /, */)
+	given = ""
+	for (i = 1; i <= count; i++) given = given ", " (instances[i] ~ WASI ? "wasi" : "(" instances[i] ")wasi")
+	instantiation = "void instantiate(w2c_program* program, struct " WASI "* wasi) { wasm2c_program_instantiate(program" given "); }"
+}
+# each imported module's instance wraps WASI's, whose memory its pointers are in (main.c wasi_memory)
+END {
+	for (i = 1; i <= module_count; i++) printf "struct %s { struct %s wasi; };\n", order[i], WASI
+	printf "%s%s\n", glue, instantiation
+}

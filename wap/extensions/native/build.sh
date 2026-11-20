@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A wap program built to a native executable: compiled by wap to a module, which wasm2c writes as C, which cc
-# builds with wasm2c's runtime and lib/native/wasi.c (main.c beside this script). The program uses no GC value: no
+# builds with wasm2c's runtime, lib/native/wasi.c and the C glue of its imports (main.c, glue.awk beside this script). The program uses no GC value: no
 # text, list or raise; it prints through WASI with its texts as data_address C strings.
 #   wap/extensions/native/build.sh <compiler.wasm> <program.wap> <executable>
 # The warp that runs the compiler is WARP (default the warp on PATH). The build's files go in <executable>.build/
@@ -22,6 +22,7 @@ building="$executable.build"
 mkdir -p "$building"
 "$WARP" --no-window "$compiler" "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
+awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"
 "$C_COMPILER" $C_FLAGS -I"$building" -I"$wabt/$WASM2C_RUNTIME" -I"$wabt/$WABT_HEADERS" -I"$library" -o "$executable" \
 	"$building/$MODULE_NAME.c" "$here/main.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-impl.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-mem-impl.c" -lm
 rm -rf "$building"
