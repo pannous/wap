@@ -1,0 +1,115 @@
+# wap's emitter: functions, locals and globals (notes/kernel.md: Define, Set, Call, a name's value). A function's value
+# is its body's, as warp has it. Part two: function values of a signature, returns, raises and try (part one:
+# test_functions_calls.wap)
+use "check.wap"
+
+check("a bare function parameter takes any function value", twice(x => x + 1, 3), 5)
+twice(f: function, x: int) := f(f(x))
+inc(x: int): int := x + 1
+double(x: int): int := x * 2
+chosen: list<(int) -> int> = [inc, double, x => x * 3]
+chosen_results = []
+for g in chosen { chosen_results.add(g(5)) }
+check("functions of one signature in one list, called as chosen", [chosen_results#1, chosen_results#2, chosen_results#3, (chosen#2)(7)], [6, 10, 15, 14])
+made(n: int): list<(int) -> int> := [x => x + n, x => x * n]
+captured = made(10)
+check("function values of a signature keep what they capture", [(captured#1)(1), (captured#2)(2)], [11, 20])
+times_two(x: int): int := x * 2
+ops: map<text, (int) -> int> = {"inc": inc, "twice": times_two}
+check("a map of functions by name", (ops["twice"])(21), 42)
+first_big(xs: list<int>) as int? := {
+	for x in xs { if x > 1 { return x } }
+	ø
+}
+check("an early return of an int in a function giving int?", "${first_big([1, 5, 2])} ${first_big([1])}", "5 ø")
+items_of(n: Node) as list := match n {
+	List(items, bracket, separator) => items
+	Empty => []
+	_ => [n]
+}
+listed(n: Node) as list? := match n {
+	List(items, bracket, separator) => items
+	_ => ø
+}
+check("a result written bare list takes the body's own list type", "${#items_of(symbol("a"))} ${listed(symbol("a")) == ø}", "1 yes")
+named(n: text): text := n + "!"
+letters: list<text> = ["a", "b"]
+outer(n: text): text := shown(n, part => named(part))
+shown(n: text, f: (text) -> text): text := [n].map(f).join("")
+check("a function value given to map over a list is typed by the list's items", [letters.map(item => named(item)).join(" "), outer("c")], ["a! b!", "c!"])
+class P { a: int }
+made_p(n: int) as P? := {
+	m = if n > 0 then n else ø
+	k = m ?? return ø
+	P(k)
+}
+check("an early return of ø in a function giving an optional", "${(made_p(3) ?? P(0)).a} ${made_p(-1) == ø}", "3 yes")
+H = {"a": late}
+X = 1
+late(n: int) as int := X + n
+taken = H["a"]
+check("a function taken as a value reads a global set after it when it is called", taken(2), 3)
+read_first() as int := read_global() + 1
+read_global() as int := set_later
+set_later = 3
+check("a function reading a global set before the program calls it", read_first(), 4)
+check("a λ of a signature called where it is written", ([x => x * 5]#1)(2), 10)
+nothing_taken: list<() -> int> = [() => 5]
+check("a λ of a signature taking nothing", (nothing_taken#1)(), 5)
+made_nested(n: int): list<(int) -> list<(int) -> int>> := [x => {
+	inner: list<(int) -> int> = [y => x + y + n]
+	inner
+}]
+check("a λ of a signature keeps what the λ around it captured", ((made_nested(1)#1)(2)#1)(3), 6)
+found(x: int) := {
+	if x > 2 { return ø }
+	Text("small")
+}
+class R { error: text = "" }
+fail(r: R, why: text) := {
+	if r.error != "" { return ø }
+	r.error = why
+}
+r = R()
+fail(r, "one")
+fail(r, "two")
+check("a function with no written result joins its returns as an if joins its arms: return ø beside a Node gives a Node?, in one giving nothing it just returns", [if found(1) then "some" else "none", if found(5) then "some" else "none", r.error], ["some", "none", "one"])
+non_negative(x: int) as int := if x < 0 then raise("neg") else x
+check("try gives its body's value, or its else part's where the body raises", [try raise("x") else 7, try non_negative(-1) else 0, try non_negative(5) else 0], [7, 0, 5])
+safe(t: text) as int := {
+	n = try { if t == "bad" { raise "no" }; 5 } catch e { return 0 }
+	n + 1
+}
+check("try's handler takes the caught Error, its message the raised text, and runs in the function around it: its return returns from that function", "${try { raise "boom" } catch e { e.message }} ${try { raise "y" } catch { 3 }} ${safe("ok")} ${safe("bad")}", "boom 3 6 0")
+raising(x: int) := if x < 0 then raise("neg") else x
+went_on(c: bool) := { if c { try raising(-1) catch e { } }; "went on" }
+went = went_on(yes)
+if no { }
+check("an empty catch inside a block drops the error and goes on, as an empty then part does", [went, "done"], ["went on", "done"])
+counted_down = []
+countdown(n: int) := {
+	if n > 0 {
+		counted_down.add(n)
+		countdown(n - 1)
+	}
+}
+countdown(3)
+check("a function that calls itself and gives no value needs no written result type", counted_down, [3, 2, 1])
+pattern Pair = (Pair $left: Node $right: Node)
+first_name(items: list<T>, name_of: (T) -> text) as text := name_of(items#1)
+pair_name(pair: Pair) as text := "a pair"
+pairs: list<Node> = [Pair(Text("a"), Number(1))]
+check("a function taking a shape is a value where one taking the shape's type is wanted, the shape checked when called", first_name(pairs, pair_name), "a pair")
+refusing(n: int) := raise "no ${n}"
+doubled(n: int) as int := {
+	if n < 0 { return refusing(n) }
+	n * 2
+}
+check("a return of a call that never finishes gives nothing back, beside the function's own values", doubled(8), 16)
+applied(n: Node, rewrite: (Node) -> Node) as Node := rewrite(n)
+check("a function value giving a shape fits where one giving its type is wanted", text(applied(Text("a"), whole => Pair(whole, Number(1)))), '(Pair "a" 1)')
+once(f: function, x: int) := f(x)
+steps: map<text, (int) -> int> = {"inc": inc}
+check("a bare function parameter takes a function of a written type", once(steps["inc"], 3), 4)
+empty_arms(w: int) as int? := if w == 0 then ø else { if w > 1 { return w }; ø }
+check("an if giving only ø beside an early return of an int, in a function giving int?", "${empty_arms(2)} ${empty_arms(1)}", "2 ø")
