@@ -15,10 +15,10 @@ check "a character given where a text is wanted" "$(ran char_as_text 'greet() :=
 print greet()
 print "a" + greet()')" "x
 ax"
-check "a text's bytes and characters' codes by primitives" "$(ran bytes 'code_of(c: char): int := prim i64_extend_i32_u(c)
-char_of(n: int): char := prim i32_wrap_i64(n)
-byte_count(t: text): int := prim array_len(t)
-byte_at(t: text, at: int): int := prim array_get_u(t, at)
+check "a text's bytes and characters' codes by primitives" "$(ran bytes 'code_of(c: char): int := prim i64.extend_i32_u(c)
+char_of(n: int): char := prim i32.wrap_i64(n)
+byte_count(t: text): int := prim array.len(t)
+byte_at(t: text, at: int): int := prim array.get_u(t, at)
 bytes_between(t: text, start: int, stop: int): text := prim array_slice(t, start, stop - start)
 print text(code_of(char_of(97)))
 print text(byte_count("é"))
