@@ -18,12 +18,10 @@ Worker.
 Even when 99% of code is written by AI, we can aim for the perfect programming language: ideal for humans and AI
 alike, type safe but not verbose, universal and fast (compiled ahead of time to WebAssembly), highly structured and
 expressive. Agents benefit from clean abstractions too.  
-- **Data is code.** Like Lisp, but with types and maps.
-  JSON-like, but no quotes around keys or symbols.
+- **Data is code.** Like Lisp, but with types and maps. JSON/ecma superset.
 - **Wasm GC first.** A `class Person{name:String age:i64}` becomes a real `(struct …)` type
 - **No [Footguns](https://github.com/pannous/wap/wiki/Footguns)** When code could mean two things, the compiler warns
-- **Beauty and Batteries** Implicit `it`, inferred parameter and return types, Unicode operators, and English words for
-  operators where they read better:
+- **Beauty and batteries** inferred types, Unicode operators, and English words for operators where they read better:
   ```wap
   square := it²
   square(3) + square 4              // 25
@@ -38,7 +36,7 @@ expressive. Agents benefit from clean abstractions too.
 
 ## Install
 
-**Nothing to install:** [wap.pannous.com](https://wap.pannous.com/) runs the compiler in your browser.
+**Nothing to install:** [warp.pannous.com](https://wap.pannous.com/) runs the compiler in your browser.
 
 **Homebrew** (macOS, Linux):
 ```bash
@@ -109,20 +107,22 @@ the `Node` enum (`Text`, `Symbol`, `Number`, `Char`, `Key`, `List`, `Type`, `Met
 
 ## Status
 
-Proven to be (almost) **production ready** by being able to compile the whole language written in wap [itself](https://en.wikipedia.org/wiki/Self-hosting_(compilers))! Experimental and moving fast. Tests 100% samples passing, general progress viewable in this [dashboard](https://claude.ai/artifact/PupNqVoBxQGvBjVxkqxGuq)  
+Warp Proven to be (almost) **production ready** by being able to compile the whole language written in wap [itself](https://en.wikipedia.org/wiki/Self-hosting_(compilers))! Wap rewrite Experimental and moving fast. Tests 100% samples passing, general progress viewable in this [dashboard](https://claude.ai/artifact/PupNqVoBxQGvBjVxkqxGuq)  
 
-The language spec lives in the
-[wiki](https://github.com/pannous/wap/wiki), and parts of it are not implemented yet. Wap began as a Rust rewrite of  
+The language spec lives in the  
+[wiki](https://github.com/pannous/wap/wiki), and parts of it are not implemented yet.  
+**Wap** is now a **self-hosted**, meaning the compiler compiles itself.  
+[Warp] began as a Rust rewrite of  
 [Wasp](https://github.com/pannous/wasp) (C++), which followed the Python experiments  
 [Angle](https://github.com/pannous/angle) and [english-script](https://github.com/pannous/english-script);  
-its compiler is now written in Wap itself ([core](core)), and so is the native `wap` command, which runs programs through wasmtime's C API ([core/native](core/native)). The old Rust compiler is preserved on the branch [rust-bootstrap](https://github.com/pannous/wap/tree/rust-bootstrap).
+<!-- its compiler is now written in Wap itself ([core](core)), and so is the native `wap` command, which runs programs through wasmtime's C API ([core/native](core/native)). The old Rust compiler is preserved on the branch [rust-bootstrap](https://github.com/pannous/wap/tree/rust-bootstrap). -->
 
 The compiler has three layers:
 - **core**: just enough for wap to compile itself
 - **extensions**: every other language feature
 - **libraries**: modules programs import
 
-**[Try it in your browser](https://wap.pannous.com/)**: 
+**[Try it in your browser](https://warp.pannous.com/)**: 
 Feedback and issue reports are welcome.
 
 ## License
