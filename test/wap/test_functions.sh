@@ -267,4 +267,9 @@ check "a bare function parameter takes a function of a written type" "$(ran bare
 inc(x: int): int := x + 1
 steps: map<text, (int) -> int> = {"inc": inc}
 print text(once(steps["inc"], 3))')" "4"
+# a module names its functions (wiki/wasm-representation.md: names by wasm convention), so a host's backtrace shows them
+check "a crash's backtrace names the function it happened in" "$(ran crash 'class P { n: int }
+g(x: int) as P? := if x > 0 then P(x) else ø
+reads(x: int) as int := g(x)!.n
+print text(reads(0))' | grep -o 'reads(x: int) → int')" "reads(x: int) → int"
 exit $((failures > 0))
