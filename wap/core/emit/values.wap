@@ -23,6 +23,9 @@ class Code {
 WORD_LAYOUTS = {"int": I64, "float": F64, "bool": I32, "char": I32, "pointer": I32, "number": ANYREF, "any": ANYREF}
 # a case's tag, the first field of an enum's struct: its place among the cases, from 0
 TAG_FIELD = field_type(I32, IMMUTABLE)
+# a class tag's hash: its base and the largest i32 prime, so every tag is a positive i32
+TAG_BASE = 31
+TAG_RANGE = 2147483647
 # the type a plain enum's value fits, one whose cases carry no fields: `==(a: enum, b: enum)` compares their tags
 ENUM_WORD = "enum"
 
@@ -135,16 +138,19 @@ LIST_ITEMS_AT = 1
 # the GC array of a list's items, ø for a type that is no list
 items_index(type: Node, m: WasmModule, records: Records) as int? := item_array(item_type(type) ?? return ø, m, records)
 item_array(item: Node, m: WasmModule, records: Records) as int? := added_type(m, array_type(field_type(layout_of(item, m, records) ?? return ø, MUTABLE)))
-# The GC type of a record: a struct of its fields' layouts, in the order the class writes them. An enum's is open to
-# its cases, its tag first; a case with fields extends it with them. Records that refer to each other are one
-# recursion group.
+# The GC type of a record: its tag first, then a struct of its fields' layouts, in the order the class writes them.
+# An enum's is open to its cases, a case with fields extending it with them; a class is as an enum of one case, its
+# tag its name's (class_tag), so two classes of one shape stay apart, in every module. Records that refer to each
+# other are one recursion group.
 struct_of(record: Node, m: WasmModule, records: Records) as int := {
 	key = place_key(record_declared(record))
 	built = named_index(m, key)
 	if built != ø { return built }
 	fields = field_layouts(fields_of(record), m, records)
-	named_added(m, key, if cases_of(record) is empty then struct_type(fields) else open_type([enum_base(m)], struct_type([TAG_FIELD] + fields)))
+	named_added(m, key, open_type([enum_base(m)], struct_type([TAG_FIELD] + fields)))
 }
+# a class's tag, its name's hash: the same in every module declaring the class
+class_tag(record: Node) as int := text(record_declared(record)).bytes.fold(0, (hash, byte) -> (hash * TAG_BASE + byte) % TAG_RANGE)
 # the GC type every enum's extends: its case's tag, which the instructions of `tagged` read
 enum_base(m: WasmModule) as int := added_type(m, open_type([], struct_type([TAG_FIELD])))
 tagged(m: WasmModule) as list<int> := instruction(STRUCT_GET, [enum_base(m), 0])
