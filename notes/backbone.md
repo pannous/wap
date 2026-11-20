@@ -318,11 +318,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   are left (card note). Paid off once wap compiles itself.
 
 
-- **Boxed `any` in wap's own source** (user 2026-11-19): a value of wap's source whose type typing can't name yet is
-  boxed as `any` and checked where it enters a typed place, though the compiler's source should stay fully typed
-  (first_principles.md). Only analyze/types.wap decides what is boxed; the emitter never infers it. Each boxed spot
-  is one entry in test/wap/guardrails_allowed.txt, which may only shrink. Paid off when that list is empty, which
-  milestone 2 requires.
 
 - **A decimal literal is a binary float (f64), not exact:** `0.1 + 0.2` is 0.30000000000000004 in wap and 0.3 in warp,
   whose decimal literals are exact (notes/decisions.md core-round-untyped-half, exact-decimal-big; tests
@@ -345,10 +340,7 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **Glued names read as operators** (`a-b` is `(Call - a b)`). Kebab names are stage 2 by notes/reader.md, but the
   operator stage decides the glued run first, before declarations say whether `a-b` is a name. Paid off when the
   stage leaves a glued run of declared-name candidates for stage 2, or the user drops kebab names.
-- **A program-level call through a function value can read a global before its statement** (wap/core/analyze/types.wap
-  called_reads): `H = {"a": f}; H["a"](2); X = 1` reads X's default, since a value's possible functions' late reads are
-  not known at the call. Paid off by refusing a program-level call through a value whose functions read late, or a
-  run-time check, when code meets it.
+
 - **`format` prints no comments yet** (wap/core/format.wap). Comments ride in Meta; the printer reads only shapes.
 
 
@@ -359,10 +351,7 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   go first in the program's Block), while the types module's uncalled definitions are left out. Bends "smaller and faster".
   Reason: a module is code whose statements must run, so it joins the program whole. Paid off when typing leaves out
   the module definitions nothing calls, as it does the types module's.
-- **In a cycle of modules, a top-level statement may read the other module's value before it is set**
-  (core/analyze/declarations.wap modules_used): of two modules that use each other, the one reached first runs last,
-  so a statement of the other reading its variable sees it unset. Should be refused at that read, like the late-read
-  rule for globals; functions are unaffected. Reason: the late-read check sees one program, not the module order.
+
 - **Ints have no `÷` or `%` yet** (wap/types/floats.wap holds only the truncated quotient and rem, which programs do
   not see): warp's `÷` and its floored `%` (`-7 % 2` is 1) are to be defined on top of them, and `quotient` is warp's
   exact division (3.5), so the truncated one keeps that name hidden. Paid off when the types module defines `÷` and `%`.
@@ -370,21 +359,9 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   into one table, so once a module is shaped its rules also apply to every file shaped after it, the types module's and
   the census's included. Bends "use builds the language the program is written in": the scope should follow `use`.
   Paid off by a rule table per program, the language's rules plus those of the modules it uses.
-- **Each function value is a type of its own** (wap/core/analyze/types.wap `function_value_typed`): a call of a value
-  calls its one function directly, typed for that call's arguments, so a variable or a parameter holds one `x => …`
-  only, and an `if` choosing between two function values gives none; a function's name is a value the same way, one
-  of several overloads not yet. Its captures
-  are copied when it is made, so a change of one afterwards is refused. Paid off by function references (a funcref
-  beside the captures, call_ref), for values chosen at run time.
-- **Protocols fit structurally, by specialisation only** (wap/core/analyze/calls.wap `conforms`): a function of a
-  protocol parameter is typed anew for each type given, so a list of mixed protocol values (run-time dispatch through
-  function references), a protocol's default bodies (decision traits-are-protocols), `x is shape`, and a class's field
-  counting as a word are not there yet. Paid off by slice B's function references in core/emit/ and the typing of
-  defaults in core/analyze/; `map default ListMap` waits for its declaration rule.
-- **A method's bare field names come from the classes of its Block only** (wap/core/analyze/scope.wap
-  `receiver_fields`): a method of a types module or used module's class still writes `self.c`, and a function value inside
-  a method that reads a bare field is not given self as a capture. Paid off when the binding sees the library's
-  Records beside its declarations, and a field's capture captures its receiver.
+
+
+
 - **any compares other references by identity:** inside an `any`, refs other than boxes and texts compare by
   identity (a record compared directly compares by fields); by type via dispatch, as show does, when code needs it.
 - **A rewrite that loops forever hangs the compiler instead of being refused** (wap/core/rules/stages.wap): letting
@@ -408,19 +385,9 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   a template's glued call of an enum's fieldless case builds that case. Reason: templates are built before the
   types module's Records are declared, so they can't look the cases up. Paid off when templates see the declared Records:
   the table goes for that lookup.
-- **Overloads rank by weights, not by subsumption** (wap/core/analyze/calls.wap most_specific, ranked: typing weight,
-  written structure, derived), and `text(1 to 3)` is refused as reading two ways. Reason: paused for the self-build
-  census (user 2026-11-19). The subsumption ranking under the one conversion is built and parked on branch
-  subsumption-ranking: one order for the static and the dynamic choice, an unconverted fit and then the instance of
-  the other's parameters breaking ties; it still leaves 4 more functions untyped than main. Paid off when wap compiles
-  itself: that branch lands.
-- **An overloaded function is not a value yet**: `parts.map(text)` types only as `parts.map(each => text(each))`
-  (shape_taking in analyze/function_values.wap). Reason: a value of a name with several definitions is refused until
-  a written function type picks one; the self-build census needs the function typed now. Paid off when the expected
-  `(Node) -> text` picks the overload: shape_taking goes back to `.map(text)`.
-- **A local named like a method shadows it**: a parameter `map` made `fields_of(record).map(…)` call the Node, so
-  instance_from_map (analyze/data.wap) names its map `source`. Reason: the self-build census needs the function typed
-  now. Paid off when `xs.map(…)` finds the list's method past a local of that name: the parameter is `map` again.
+
+
+
 - **A named function is refused where a function type is written for a variable** (found 2026-11-19, off-census):
   `g: (int) -> int = inc` says it gives fn<"… inc">, while the same `inc` in a `map<text, (int) -> int>` literal is
   taken. Paid off when a function's value fits a written function type wherever it is given.
@@ -441,20 +408,11 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   of_shape, stages.wap rule_applied's best as a list), because the seed's emitter compares records field by field.
   Paid off at the next seed refresh, once the seed compares an optional with ø: `!= ø` and `best: Rule? = ø` again.
 
-- **analyze/types.wap reaches rules/ (typed.wap) through a use**, because wap cannot call a function value read from
-  a field (`this holds a function, no function to call`). Paid off when a field's function value can be called; then
-  it is a function value on TypingState.
 
 - **stage.wap without_fact rebuilds the Meta itself**, a copy of nodes.wap with_attribute's layout, because the
   compiler may use only the seed's types words. Paid off at the next seed refresh: nodes.wap gets one
   without_attribute that with_attribute uses too, and without_fact calls it.
 
-- **calls.wap still names two types words, `#` (PLACE_WORD) and `!` (REQUIRED_WORD)**: typing writes a call of
-  `#` for an item or an entry read from a value that is no list (analyze/data.wap), and of `!` where a condition found
-  an optional present (analyze/types.wap as_found). Reason: both are chosen by the type typing finds, and `!` has no
-  spelling in the source to rewrite: a typed rule's hole can't ask for a value that is no list, and narrowing writes
-  the `!` itself. Paid off when a typed hole can ask for "not this type" and narrowing marks a found read that a
-  types rule rewrites.
 
 - **A rule's output names resolve where the rule fires** (types/sugar/conditions.wap `x != ø` → `not missing(x)`).
   Reason: a template's words are bound in the program's scope, so a local named `missing` hid the types module's predicate
