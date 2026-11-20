@@ -37,4 +37,14 @@ check "a native wap run of a program through a link" "$("$native_wap" "$stage/li
 mkdir -p "$stage/tested/test/wap" && printf '%s\n' 'echo "$@"' 'exit 3' >"$stage/tested/test/wap/run.sh" && chmod +x "$stage/tested/test/wap/run.sh"
 check "wap test runs the areas' scripts" "$(cd "$stage/tested" && "$native_wap" test hello raise; echo "exit $?")" "--wait test/wap/test_hello.sh test/wap/test_raise.sh
 exit 3"
+# an argument that names no program file is code, run as a program is (core/native/warp.warp is_warp_file)
+check "wap runs code given in place of a file" "$("$native_wap" '1+1' 2>&1)" "2"
+check "a program file stays after its run" "$(cd "$stage" && "$native_wap" hello.wap >/dev/null && ls hello.wap)" "hello.wap"
+# `wap` alone, the console: each line a module of its own, linked to the earlier lines' kept instances, so a definition
+# stays for the lines after it and an effect happens once
+check "the console keeps a definition and runs each line once" "$(printf '%s\n' 'f(x: int) as int := x * 2' 'print "once"' 'f(21)' | "$native_wap" 2>&1)" "once
+42"
+# a program using a compiled module (use "m.wasm", extensions/wasm/modules.wap): the native wap links its instance
+check "a native wap run links a module the program uses" "$(printf '%s\n' 'add(a: int, b: int) as int := a + b' >"$stage/adding.wap" && $warp "$compiler" "$stage/adding.wap" "$stage/adding.wasm" 2>&1 && "$native_wap" "use \"$stage/adding.wasm\"
+add(40, 2)" 2>&1)" "42"
 exit $((failures > 0))

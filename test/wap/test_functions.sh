@@ -272,4 +272,8 @@ check "a crash's backtrace names the function it happened in" "$(ran crash 'clas
 g(x: int) as P? := if x > 0 then P(x) else ø
 reads(x: int) as int := g(x)!.n
 print text(reads(0))' | grep -o 'reads(x: int) → int')" "reads(x: int) → int"
+check "an if giving only ø beside an early return of an int, in a function giving int?" "$(ran empty_arms_return 'f(w: int) as int? := if w == 0 then ø else { if w > 1 { return w }; ø }
+print(text(f(2)))
+print(text(f(1)))')" "2
+ø"
 exit $((failures > 0))
