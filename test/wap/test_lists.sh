@@ -117,4 +117,7 @@ count = 4
 print text(scaled(length, count)) + " " + text(length) + " " + text([1, 2].size)')" "34 3 2"
 check "a list of items that have an order sorts by itself" "$(ran sorted_items 'keys: list<text> = ["b", "c", "a"]
 print text(keys.sorted()) + " " + text([3, 1, 2].sorted())')" "[a, b, c] [1, 2, 3]"
+check "a variable named length hides no list word: xs.length still counts" "$(ran length_beside 'length = 3
+counting = [4, 5, 6, 7]
+print(text(counting.length + length))')" "7"
 exit $((failures > 0))
