@@ -27,6 +27,8 @@ https://github.com/pannous/wap
 - A feature is a preload function or a rule in sugar/ before it is core code; a core diff that adds names of
   a domain is the sign a mechanism is missing: card it.
   <!-- todo (card move-sugar) move preload/sugar to sugar/  -->
+- wap/core and wap/kernel are semi-frozen: every change there goes to warp-interviewer first. A new feature goes
+  into wap/extensions/ (first case: the native binary).
 
 ## How it compiles (notes/backbone.md "Stage languages")
 read = parse → shape rules (stage 1) → declare → declaration rules (stage 2) → lower → bind → type, with the kind rules
