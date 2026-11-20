@@ -91,7 +91,7 @@ Round Penny"
 # (wiki/enum.md "Cases with spellings")
 check "a case is spelled by its text, or else its name" "$(ran spelled 'enum Level { Error, Warning = "warn", Hint }
 print "${Level.Warning as text} ${Level.Error as text}"
-print text("warn" as Level)
+print show("warn" as Level)
 if Level.Warning == "warn" then print "equal" else print "unequal"')" "warn Error
 Warning
 equal"
