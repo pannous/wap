@@ -21,6 +21,8 @@ class WasmModule {
 	exports: list<list<int>> = []
 	# passive segments, each its bytes, for `array.new_data`; numbered first, so an index is final when added
 	texts: list<list<int>> = []
+	# the bytes of the memory's data, each text a C string, from DATA_ADDRESS on (data_placed)
+	memory_data: list<int> = []
 	# exception tags, each its bytes
 	tags: list<list<int>> = []
 	# the functions `ref.func` refers to, declared once each
@@ -96,7 +98,9 @@ referenced(reference: list<int>) as int? := if #reference < 2 or reference#1 != 
 counted(items: list<list<int>>) as list<int> := unsigned(#items) + items.flat_map(item => item)
 bytes_vector(bytes: list<int>) as list<int> := unsigned(#bytes) + bytes
 named(name: text) as list<int> := bytes_vector(name.bytes)
+# (an empty section is left out, as wasm allows)
 section(id: int, items: list<list<int>>) as list<int> := {
+	if #items == 0 { return [] }
 	content = counted(items)
 	[id] + unsigned(#content) + content
 }
@@ -208,6 +212,13 @@ added_tag(m: WasmModule, parameters: list<list<int>>) as int := {
 }
 # a block of a type running `body`, an exception of the tag thrown in it caught: its values taken to the label that far out
 try_table(type: list<int>, tag: int, label: int, body: list<int>) as list<int> := TRY_TABLE + type + unsigned(1) + [CATCH] + unsigned(tag) + unsigned(label) + body + END
+# A text's bytes in the memory, a zero after them (a C string): their address. The data lies past the first page, whose
+# bytes from 16 on the host's words borrow (core/emit/host.wap BYTES_ADDRESS)
+data_placed(m: WasmModule, bytes: list<int>) as int := {
+	address = DATA_ADDRESS + #m.memory_data
+	m.memory_data += bytes + [0]
+	address
+}
 # Bytes kept passive, for `array.new_data`: their segment index.
 added_text(m: WasmModule, bytes: list<int>) as int := {
 	m.texts += [bytes]
@@ -225,8 +236,8 @@ declared_references(m: WasmModule) as list<int> := if m.referenced is empty then
 module_bytes(m: WasmModule) as list<int> := {
 	declarations = m.functions.map(function => unsigned(function.type_index))
 	codes = m.functions.map(function => function.code)
-	passive = m.texts.map(bytes => [PASSIVE_SEGMENT] + bytes_vector(bytes))
-	memory_pages = [[0x00] + unsigned(1)]
+	passive = m.texts.map(bytes => [PASSIVE_SEGMENT] + bytes_vector(bytes)) + (if #m.memory_data == 0 then [] else [[ACTIVE_SEGMENT] + i32_const(DATA_ADDRESS) + END + bytes_vector(m.memory_data)])
+	memory_pages = [[0x00] + unsigned(1 + (#m.memory_data + PAGE_BYTES - 1) ÷ PAGE_BYTES)]
 	segment_count = [DATA_COUNT_SECTION] + unsigned(#unsigned(#passive)) + unsigned(#passive)
 	MAGIC + VERSION + section(TYPE_SECTION, type_entries(m)) + section(IMPORT_SECTION, m.imports) + section(FUNCTION_SECTION, declarations) + section(MEMORY_SECTION, memory_pages) + section(TAG_SECTION, m.tags) + section(GLOBAL_SECTION, m.globals) + section(EXPORT_SECTION, m.exports) + declared_references(m) + segment_count + section(CODE_SECTION, codes) + section(DATA_SECTION, passive)
 }
