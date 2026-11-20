@@ -116,5 +116,5 @@ called_export() {
 	$warp "$compiler" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && wasmtime run -W gc=y,function-references=y,exceptions=y --invoke "$3" "$stage/$1.wasm" "${@:4}" 2>/dev/null
 }
 check "a host calls an exported overload by its header line" "$(called_export overloads 'add(a: int, b: int = 1) as int := a + b
-add(a: text, b: text) as text := a + b' 'add(a: int, b: int = 1) as int' 2 3)" "5"
+add(a: text, b: text) as text := a + b' 'add(a: int, b: int = 1) → int' 2 3)" "5"
 exit $((failures > 0))
