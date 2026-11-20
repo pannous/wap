@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wap's texts compared and joined (wap/preload/prelude.wap; wiki/text.md): `==` and `!=` compare the characters, `+`
+# wap's texts compared and joined (wap/types/prelude.wap; wiki/text.md): `==` and `!=` compare the characters, `+`
 # joins two texts. Run it with bash test/wap/test_texts.sh
 source "$(dirname "$0")/compile.sh"
 

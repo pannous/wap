@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wap's arithmetic and comparisons (wap/preload/prelude.wap; wiki/operator.md): each operator is a preload function,
+# wap's arithmetic and comparisons (wap/types/prelude.wap; wiki/operator.md): each operator is a types function,
 # overloaded by the types of its operands. Run it with bash test/wap/test_numbers.sh
 source "$(dirname "$0")/compile.sh"
 
