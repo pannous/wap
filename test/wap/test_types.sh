@@ -141,7 +141,7 @@ print(g(0) ?? "none")')" "b
 a
 a
 none"
-check "a program's own class shadows the preload's of the same name" "$(ran own_program_class 'class Program { m: int }
+check "a program's own class shadows the types module's of the same name" "$(ran own_program_class 'class Program { m: int }
 p = Program(3)
 print(text(p.m))')" "3"
 check "a kind word after is on a Node tests its case, beside a maker of that name; on a text it is the type" "$(ran kind_test 'f(t: Node?) as text := if t is text then "text" else if t is symbol then text(t) else "other"

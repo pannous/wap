@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wap's text words (wap/preload/texts.wap): characters counted and taken, searched, compared, and their kinds, as
+# wap's text words (wap/types/texts.wap): characters counted and taken, searched, compared, and their kinds, as
 # warp's runtime text words give them (core/runtime/text_words.warp; wiki/string.md).
 # Run it with bash test/wap/test_texts_words.sh; the warp under test is WARP (default the warp on PATH)
 source "$(dirname "$0")/compile.sh"

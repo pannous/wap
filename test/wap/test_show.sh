@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wap's shown values (wap/preload numbers, texts, lists): a value in warp notation, as old warp shows a program's
+# wap's shown values (wap/types numbers, texts, lists): a value in warp notation, as old warp shows a program's
 # result: texts in quotes with their quote and backslash escaped, characters in single quotes, lists of shown items.
 # Run it with bash test/wap/test_show.sh; the warp under test is WARP (default the warp on PATH)
 source "$(dirname "$0")/compile.sh"

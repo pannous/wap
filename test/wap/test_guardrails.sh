@@ -4,13 +4,13 @@
 #                    (a yes/no or Conversion with a parameter `wanted`, two of given, held, these, those, or named same_type(s) or fits_type)
 #   emit-infers-type core/emit computes no type: it reads the TYPE and BINDING facts typing and binding wrote and may
 #                    choose by them, but calls no word of core/analyze and builds no type node (type_notation's builders)
-#   dynamic-prim     a dynamic call is kernel typing writes: no `prim dispatched` anywhere, no `prim cast` in the preload
+#   dynamic-prim     a dynamic call is kernel typing writes: no `prim dispatched` anywhere, no `prim cast` in the types module
 #   one-ranking      definitions are ordered only by `ranked` (analyze/calls.wap): no other sort in core/analyze or core/emit
 #   long-file        no wap file over 300 lines: its owner splits it along a real seam
 #   repeated-code    no line or list written twice in a file (scripts/repeated-code.sh)
 #   same-shape       no function body or { } block of SHAPE_FLOOR tokens or more with the shape of another, names,
 #                    numbers and texts erased (guardrail_shapes.awk): two such are one function or one table
-#   boxed-any        `any` written as a type in wap's own source, outside preload/ (whose `any` is the language's
+#   boxed-any        `any` written as a type in wap's own source, outside types/ (whose `any` is the language's
 #                    dynamic type, the Node enum's Data among them): each spot a debt, the list empty before milestone 2
 #                    (notes/decisions.md wap-boxed-any-debt); a place typing infers as any is ratchet_census.sh's
 #   emit-boxes       only typing decides what is boxed (types.wap writes `prim box`): no struct.new of a box in core/emit
@@ -66,7 +66,7 @@ emit_infers_type() {
 	grep -nE "(^|[^a-z_.])($(analyze_words | paste -sd'|' -)|$TYPE_BUILDERS)\(" wap/core/emit/*.wap | filed emit-infers-type
 }
 dynamic_prim() {
-	{ grep -nE 'prim dispatched\b' $wap_files; grep -nE 'prim cast\b' wap/preload/*.wap; } | filed dynamic-prim
+	{ grep -nE 'prim dispatched\b' $wap_files; grep -nE 'prim cast\b' wap/types/*.wap; } | filed dynamic-prim
 }
 one_ranking() {
 	grep -nE 'sorted|min_by|max_by' wap/core/analyze/*.wap wap/core/emit/*.wap | grep -vE '^[^:]+:[0-9]+:ranked\(' | filed one-ranking
@@ -81,7 +81,7 @@ same_shape() {
 	LC_ALL=C awk -v least=$SHAPE_FLOOR -f test/wap/guardrail_shapes.awk $wap_files
 }
 boxed_any() {
-	grep -nE "$ANY_TYPE" $(printf '%s\n' $wap_files | grep -v '^wap/preload/') | filed boxed-any | awk -F'\t' -v any="$ANY_TYPE" '{ code = $4; gsub(/"[^"]*"|#.*/, "", code) } code ~ any'
+	grep -nE "$ANY_TYPE" $(printf '%s\n' $wap_files | grep -v '^wap/types/') | filed boxed-any | awk -F'\t' -v any="$ANY_TYPE" '{ code = $4; gsub(/"[^"]*"|#.*/, "", code) } code ~ any'
 }
 emit_boxes() {
 	grep -nE 'STRUCT_NEW.*\bbox|\bbox.*STRUCT_NEW' wap/core/emit/*.wap | grep -v 'name == BOXED_VALUE' | filed emit-boxes
