@@ -312,13 +312,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 
 (Each compromise against a principle, with its reason. Empty at the start.)
 
-- **A name a program defines is read as its alias's canonical word** (wap/core/parse/operators.wap word_read: `length`
-  and `size` read as `count`), so two variables `length` and `count` in one scope are one variable. Reason: found in
-  the stage-2 self-build; host.wap placing_function names its local `measure` instead. Paid off when an alias applies
-  only to a word nothing in the program defines. Paid off: an alias reads only a word nothing in scope defines
-  (core/parse/operator_table.wap words_defined, test_lists "a program's own length and count are two names"); the
-  local is `length` again.
-
 - **A function value read from a map, called twice through a parameter, traps** (wap/core/emit/function_values.wap;
   reported by warp-wap-reader 2026-11-19): `m: map<text, (int) -> int>`, then `f(f(x))` inside a function taking
   `f: (int) -> int` given `m["inc"]` stops on a null reference. Called once it works, and so does `twice(inc, 3)`.
@@ -360,17 +353,9 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   word in the reader; paid off when a program meets one.
 - **`for` is two rules, a `to` range and a list walked by index** (wap/types/sugar/loops.wap), not the iterator of
   notes/kernel.md:82: wap's own source walks only these two; paid off by the first third kind of thing to walk.
-- **A list's brackets and separator are spelled twice**, in wap/types/nodes.wap (opening, closing, separator_text) and
-  wap/core/format.wap: warp, which compiles the compiler, refuses the types module's own Node enum, so format.wap cannot use
-  nodes.wap. Paid off when wap compiles itself and the compiler sees the types module: format.wap's three go.
-  Paid off: format.wap uses the types module's opening, closing and separator_text (wap-debts-front).
 - **Stage 3 serves only the rules programs write** (decision hole-types): no rewrite of wap's own moves into it. The
   char read as a text depends on the type its place wants (binding's conversion), `x is w` on what w means (scope);
   a typed rule sees only its hole's type.
-- **wap's reader refuses instead of returning an `Error` node** (wap/core/parse/reader.wap). Bends notes/reader.md
-  §1, which promises `Error` in the notation. Reason: in warp (which runs wap) an `Error` node cannot be told apart:
-  `match` takes a Key or a List for `Error(…)`, and `is Error` says no. Paid off when the reader runs on wap.
-  Paid off: the reader writes `Error(why: where)` and the compiler refuses it where it reads a file (wap-debts-front).
 - **Ints longer than 18 digits read as floats** (wap/core/parse/reader.wap `whole`). Reason: warp's `int(text)`
   wraps beyond 64 bits. Paid off by an unbounded int reading.
 - **Glued names read as operators** (`a-b` is `(Call - a b)`). Kebab names are stage 2 by notes/reader.md, but the
@@ -410,10 +395,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   text, so typing looks f up among the definitions it holds, and a library word declared by signature (`print`) is
   not one of them; `x.f(y)` is a plain call and finds both. Paid off when host words are definitions typing holds.
   **Paid 2026-11-20 (checked):** `t = "hi"; t.print` prints hi.
-- **A bare `break`, `continue` or `return` is lowering's word form, not a rule** (wap/core/rules/lowering.wap
-  `WORD_FORMS`), while `while c { b }` and `return x` are rules (wap/types/sugar/loops.wap). Reason: a rule whose
-  pattern is a word alone has no head, so the termination check (core/rules/stages.wap `terminating`) sees it fire
-  anywhere and refuses it. Paid off when a lone word is its own head. Paid off: S3, wap-rules-statements d313356f76.
 - **Ints have no `÷` or `%` yet** (wap/types/floats.wap holds only the truncated quotient and rem, which programs do
   not see): warp's `÷` and its floored `%` (`-7 % 2` is 1) are to be defined on top of them, and `quotient` is warp's
   exact division (3.5), so the truncated one keeps that name hidden. Paid off when the types module defines `÷` and `%`.
@@ -441,11 +422,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   **Paid 2026-11-20 (checked):** `m = {"b": 2}; m#"b"` gives 2.
 - **any compares other references by identity:** inside an `any`, refs other than boxes and texts compare by
   identity (a record compared directly compares by fields); by type via dispatch, as show does, when code needs it.
-- **The types copies core/node.warp's enums instead of reading the file** (wap/types/nodes.wap). wap reads
-  core/node.warp whole, but its `List(items: list, …)` gives an untyped list whose items wap can't read (`data#1` is
-  refused: no # takes (list, int)). Reading it needs a bare `list` to mean list<any> and an `any` read back as a Node by
-  a match. Until then nodes.wap types the items list<Node>, and the two copies must change together.
-  Paid off: wap compiles its own source, so nodes.wap's Node is wap's own; core/node.warp is old warp's (wap-debts-front).
 - **A rewrite that loops forever hangs the compiler instead of being refused** (wap/core/rules/stages.wap): letting
   any rule read a square list as one phrase made `xs = [1 2 3]` hang, some rule rewriting the phrase `1 2 3` again and
   again (the loop was not traced). A list is now one phrase only when its first word leads a rule. A rewrite whose
@@ -467,23 +443,12 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   a template's glued call of an enum's fieldless case builds that case. Reason: templates are built before the
   types module's Records are declared, so they can't look the cases up. Paid off when templates see the declared Records:
   the table goes for that lookup.
-- **A rule that writes nothing writes the mark `()`** (wap/core/rules/stages.wap NOTHING_WRITTEN): a symbol its list
-  drops, where an empty statement sequence would say it. Reason: old warp, which runs wap's source, reads an empty
-  List node as ø, which a rule may also write as a value, `rule ø => Empty()`. Paid off when old warp retires: the
-  mark becomes the empty sequence.
-  Paid off: NOTHING_WRITTEN is the empty statement sequence, and spread needs no mark (wap-debts-front).
-
 - **Overloads rank by weights, not by subsumption** (wap/core/analyze/calls.wap most_specific, ranked: typing weight,
   written structure, derived), and `text(1 to 3)` is refused as reading two ways. Reason: paused for the self-build
   census (user 2026-11-19). The subsumption ranking under the one conversion is built and parked on branch
   subsumption-ranking: one order for the static and the dynamic choice, an unconverted fit and then the instance of
   the other's parameters breaking ties; it still leaves 4 more functions untyped than main. Paid off when wap compiles
   itself: that branch lands.
-- **`{}` is its own kernel form, EmptyMap** (wap/kernel/forms.wap), not Empty typed as the map wanted, as `[]` is an
-  empty list (decided 2026-11-19). Reason: Empty carries no facts in warp's Node, so no TYPE can sit on it while old
-  warp reads wap's source. Paid off when old warp no longer reads wap's source: `{}` reads as Empty, the form goes.
-  Paid off: `{}` reads as an empty curly list, typed by map_typed as `[]` by list_typed; EmptyMap and EMPTY_BRACES
-  are gone (wap-empty-map).
 - **An overloaded function is not a value yet**: `parts.map(text)` types only as `parts.map(each => text(each))`
   (shape_taking in analyze/function_values.wap). Reason: a value of a name with several definitions is refused until
   a written function type picks one; the self-build census needs the function typed now. Paid off when the expected
@@ -534,12 +499,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   can drop no fact (its with_attribute only appends), so removing the fact breaks the reference compiler. Paid off when
   old warp can drop a fact: then without_fact, beside with_fact in core/stage.wap.
   **Paid (wap-debts-binding):** scope.wap drops the name's DEFINED_AT with without_fact; one_definer is gone.
-- **A number is compared with 0 by its narrowed type** (wap/core/format.wap below_zero, read by led_by_sign). Reason:
-  under wap2 `value < 0` on a `number` raises "<: no definition takes these values' types" (typing or dispatch gives
-  no `<` for a number and an int; reported to warp-wap-binding). Paid off when that compares: led_by_sign's arm is
-  `Number(value) => value < 0` again and below_zero goes. Paid off: binding's number-compare (445d612b1c) widens the
-  int, and led_by_sign reads `value < 0` again.
-
 - **The source avoids comparing an optional record with ø** (core/rules/patterns.wap names_pattern, matcher.wap
   of_shape, stages.wap rule_applied's best as a list), because the seed's emitter compares records field by field.
   Paid off at the next seed refresh, once the seed compares an optional with ø: `!= ø` and `best: Rule? = ø` again.
