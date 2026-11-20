@@ -311,20 +311,12 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 
 (Each compromise against a principle, with its reason. Empty at the start.)
 
-- **A function value read from a map, called twice through a parameter, traps** (wap/core/emit/function_values.wap;
-  reported by warp-wap-reader 2026-11-19): `m: map<text, (int) -> int>`, then `f(f(x))` inside a function taking
-  `f: (int) -> int` given `m["inc"]` stops on a null reference. Called once it works, and so does `twice(inc, 3)`.
-  Reason: off the self-build census (user 2026-11-19). Paid off once wap compiles itself.
 
 - **`use "m.wasm"` is not read yet** (card wasm-module-import, wiki/wasm-representation.md): a compiled module can't
   be used as its source is. Reason: paused for the self-build census (user 2026-11-19). Branch wasm-module-import has
   the exports and the `wap` section of header lines; the reader, the body-less `export` declaration and the import
   are left (card note). Paid off once wap compiles itself.
 
-- **A failed write traps without naming itself** (wap/core/emit/host.wap writing_function): a write that fails or
-  takes none (a closed stdout, `| head`) stops the program with wasm's bare "unreachable", not a raise naming it.
-  Reason: a raise there pulls its text and the raise helper into every program, hello 432 → 476 B. Paid off when a
-  raise from a helper costs a program nothing it does not use.
 
 - **Boxed `any` in wap's own source** (user 2026-11-19): a value of wap's source whose type typing can't name yet is
   boxed as `any` and checked where it enters a typed place, though the compiler's source should stay fully typed
@@ -339,9 +331,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   exact numbers as types warp) comes after self-build. No test pins the f64 value. Where: core/parse/atoms.wap
   number_read, types/floats.wap; `1e21` likewise shows 1e21 where warp gives 1000000000000000000000.
 
-- **A slice past a list's end traps** (array_slice, wap/core/emit/primitives.wap): wasm's array.copy stops the
-  program without naming the user's line. Refusing it by name would need bounds checks the slice's caller writes, for
-  example the types module's `slice` taking a Range and raising when it does not fit.
 
 - **The class rule's helper words are ordinary words** (wap/types/sugar/records.wap `member_as "field"`,
   `member_of`, `shown_case`): a program writing them is rewritten too. Words only rule files may write need a private
@@ -361,14 +350,8 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   not known at the call. Paid off by refusing a program-level call through a value whose functions read late, or a
   run-time check, when code meets it.
 - **`format` prints no comments yet** (wap/core/format.wap). Comments ride in Meta; the printer reads only shapes.
-- **A program's value is shown only when it is an int** (wap/core/emit/emitter.wap). Bends "refuse, never guess"
-  mildly: any other value is dropped, not shown. Reason: an int is the one value the host shows as warp does (main's
-  i64 result); a float would show the host's digits (0.1 as 0.10000000000000001), a char or yes/no as a number.
-  Paid off when values show themselves through the runtime's show words, boxed into a $Node.
-- **The emitter learns a value's type by emitting it** (wap/core/emit/emitter.wap), though the typing stage gives
-  each one: it reads the functions' signatures, but an `if` still joins its arms' types and a primitive takes its
-  operands' emitted layouts. Bends "meaning is typed" (the types are there, but read late). Paid off when the emitter
-  reads each form's `type` fact.
+
+
 - **An int and a float mixed are refused** (`1 + 2.5`: no `+` takes (int, float); wap/types/prelude.wap). warp
   gives 3.5. Reason: the overloads are chosen by exact types, and no conversion of an int to a float where one is
   wanted exists yet. Paid off by that conversion, in typing, not by mixed overloads.
