@@ -189,4 +189,12 @@ print(text(first_or([4, ø])) + " " + text(first_or([ø, 2])) + " " + text(first
 check "a is not b is not (a is b)" "$(ran is_not 'ys = [5]
 zs: list<int> = []
 print(text(ys is not empty) + " " + text(zs is not empty) + " " + text(3 is not text))')" "yes no yes"
+check "a comparison with ø tests whether the value is missing, whatever its type compares by" "$(ran missing_compare 'class D { by_name: map<text, list<int>> }
+class P { d: D }
+f(x: int) as P? := if x > 1 then P(D({})) else ø
+if f(2) != ø { print("some") }
+if f(0) == ø { print("none") }
+if f(0) is ø { print("is none") }')" "some
+none
+is none"
 exit $((failures > 0))
