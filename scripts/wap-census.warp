@@ -57,7 +57,7 @@ declared_once(module: Node) as Node := {
 }
 # the files of modules, and the functions among statements as the typing stage holds them
 files_of(modules: list<Module>) as list<text> := modules.map(module => module.file)
-functions_in(statements: list) as list<Function> := statements.filter(statement => statement is Define).map(function_of)
+functions_in(statements: list) as list<Signature> := statements.filter(statement => statement is Define).map(function_of)
 # a file with the modules it uses, theirs first, as declared_modules gives them
 modules_of(file: text) as list<Module> := {
 	code = operated_once(file)
@@ -89,7 +89,7 @@ typing_joined(modules: list<Module>) := {
 		statements = []
 		try statements = prepared_once(module, modules) catch e { statements = bound_alone(module, modules) }
 		run.joined[key] = statements
-		run.state.definitions += functions_in(statements)
+		definitions_held(statements.filter(statement => statement is Define), run.state)
 		run.state.records = added_records(run.state.records, statements)
 	}
 	for key in joining {
@@ -164,7 +164,7 @@ whole_once(file: text) as Outcome := {
 typed_whole(file: text) as Block := {
 	modules = modules_of(file)
 	whole = Block(modules.flat_map(module => prepared_once(module, modules)))
-	typed_by_rules(language, whole, declarations_of(preload), library_code)
+	typed_by_rules(language, whole, declarations_of(preload), library_code, modules.flat_map(module => module.signatures))
 }
 
 report(stage: text, message: text) := {
@@ -252,7 +252,7 @@ parts_of(n: Node) as list := match n { Key(left, op, right) => [left, right]; Li
 # (core/analyze/types.wap block_typed), in the run's state, so a refusal names its function and hides no other; a
 # function of letters or untyped parameters is typed by its calls. What it finds is printed with the module's file.
 class Probed { functions: int = 0, typed: int = 0, by_calls: int = 0, anys: int = 0, lines: list<text> = [] }
-module_probed(key: text, own: list<Function>) as Probed := {
+module_probed(key: text, own: list<Signature>) as Probed := {
 	global run
 	if run.probed.has(key) { return run.probed[key] }
 	p = Probed()
@@ -263,7 +263,7 @@ module_probed(key: text, own: list<Function>) as Probed := {
 			p.functions += 1
 			before = copied(run.state)
 			try {
-				typed = function_typed(held, held.parameters, run.state, held.definer)
+				typed = function_typed(held, held.parameters, run.state, define_of(held, run.state))
 				# counted before the unknowns left open default to any: typed alone, a global's empty `{}` is settled by
 				# the other functions that fill it, as the whole program types it
 				found = anys_in(typed.define)
@@ -296,7 +296,7 @@ functions_probe(file: text) as Probed := {
 # a typing state that knows the library's definitions and records
 typing_state(library: Library) as TypingState := {
 	s = TypingState()
-	s.definitions = functions_in(statements_in(library.code))
+	definitions_held(statements_in(library.code).filter(statement => statement is Define), s)
 	s.records = added_records(Records(), statements_in(library.code))
 	s.library_scope = library.scope
 	s
@@ -308,7 +308,7 @@ typing_state(library: Library) as TypingState := {
 named_in(refusal: Refusal, s: TypingState) as text := {
 	lambda = s.lambdas.filter(each => function_key_of(each) == refusal.key)
 	definition = definition_keyed(refusal.key, s) ?? (if lambda is empty then ø else function_of(lambda#1))
-	if definition == ø then refusal.key else called_name(definition)
+	if definition == ø then refusal.key else called_name(definition, s)
 }
 rolled_back(before: TypingState) as TypingState := {
 	global refused_names
@@ -330,6 +330,7 @@ truncated(index: NameIndex, count: int) := {
 copied(base: TypingState) as TypingState := {
 	s = TypingState()
 	s.definitions = base.definitions + []
+	s.defines = base.defines
 	s.definition_names = base.definition_names
 	s.definition_keys = base.definition_keys
 	s.records = base.records

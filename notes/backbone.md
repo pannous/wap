@@ -52,7 +52,7 @@ lead first, as a change of this table.
 | read | core/parse/reader.wap | wap-reader | text | notation |
 | operators | core/parse/operators.wap, table in the preload | wap-reader | notation | operated |
 | shape rules (stage 1) | core/rules/, preload/sugar/ | wap-reader | operated | surface |
-| declare | core/analyze/declarations.wap | wap-binding | surface | declared |
+| declare | core/analyze/declarations.wap | wap-binding | surface | declared, and Module.signatures: one Signature per function |
 | lower | core/rules/lowering.wap | wap-reader | declared | kernel |
 | bind | core/analyze/scope.wap | wap-binding | kernel | bound kernel |
 | type | core/analyze/types.wap | wap-binding | bound kernel | typed kernel |
@@ -93,7 +93,9 @@ The languages, each a set of Node shapes:
   is either kernel or needs a declaration to decide.
 - **declared:** surface, unchanged, plus facts: each top-level definition's `declares`, `name: signature` (`f: [a, b]`,
   a value's signature ø), and on the program `declarations`, the list of them, and `uses`, the files its `use "path"`
-  statements bring in (core/analyze/declarations.wap). Each used file is declared once, after the files it uses; a
+  statements bring in (core/analyze/declarations.wap). Beside the code, the Module holds each function's one record,
+  its Signature (name, key, parameter types, written result, module), which typing holds by key and reads the
+  definition as it is now through (core/analyze/types.wap define_of). Each used file is declared once, after the files it uses; a
   program is bound inside the preload's declarations and those of the modules it uses itself, and the modules'
   statements run before its own. Modules may use each other: a cycle is cut where it closes, so of two such modules
   the one reached first runs last. A used `.wasm` that wap compiled is declared from its wap section, the module's
@@ -545,3 +547,21 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **stage.wap without_fact rebuilds the Meta itself**, a copy of nodes.wap with_attribute's layout, because the
   compiler may use only the seed's preload words. Paid off at the next seed refresh: nodes.wap gets one
   without_attribute that with_attribute uses too, and without_fact calls it.
+
+- **calls.wap still names two preload words, `#` (PLACE_WORD) and `!` (REQUIRED_WORD)**: typing writes a call of
+  `#` for an item or an entry read from a value that is no list (analyze/data.wap), and of `!` where a condition found
+  an optional present (analyze/types.wap as_found). Reason: both are chosen by the type typing finds, and `!` has no
+  spelling in the source to rewrite: a typed rule's hole can't ask for a value that is no list, and narrowing writes
+  the `!` itself. Paid off when a typed hole can ask for "not this type" and narrowing marks a found read that a
+  preload rule rewrites.
+
+- **Two records of a definition until phase 2 moves stage 2 and modules to Signature** (core/analyze/declarations.wap):
+  declare writes a function's Signature into Module.signatures beside its `declares` fact and the program's
+  `declarations` list, which stage-2 rules (rules/matcher.wap) and modules.wap still read. Reason: step 4 moves its
+  readers one phase at a time, typing first. Paid off in phase 2: stage 2 and modules read the Signatures, and
+  DECLARES/DECLARATIONS go.
+
+- **A rule's output names resolve where the rule fires** (preload/sugar/conditions.wap `x != ø` → `not missing(x)`).
+  Reason: a template's words are bound in the program's scope, so a local named `missing` hid the preload's predicate
+  (core/analyze/calls.wap words_missing, renamed to `lacking`). Paid off when a template's names bind in the rule's
+  own file, as a hygienic macro's do.
