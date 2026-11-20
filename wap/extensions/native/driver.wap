@@ -1,0 +1,177 @@
+# The native wap command (wap/extensions/native, built by build.sh to ~/dev/bin/wap): `wap hello.wap [arguments…]`
+# compiles the program with wap.wasm, wap's compiler in wap-seed/ beside this executable with its preload and kernel,
+# then runs the module it wrote with the arguments, each a wasm module run by wasmtime's C API with WASI (the program's
+# arguments, standard input and output, the current folder and the root). Its exit status is the program's.
+use "c.wap"
+
+# --- the program's memory: where the driver keeps its own words, below the data at 65536 (core/emit/opcodes.wap) ---
+STATUS_AT := 1032
+ARGUMENT_COUNT_AT := 1040
+ARGUMENT_BYTES_COUNT_AT := 1044
+SIZE_AT := 1048
+ARGUMENTS_AT := 2048
+ARGUMENT_BYTES_AT := 4096
+COMPILER_AT := 32768
+MODULE_AT := 40960
+PATH_BYTES := 4096
+# the host's records the C API fills, by their sizes in bytes: a byte vector (size, data), an instance, an extern
+VECTOR_BYTES := 16
+INSTANCE_BYTES := 16
+EXTERN_BYTES := 24
+# a func's place in its extern, past the kind
+EXTERN_VALUE_OFFSET := 8
+# wasmtime's limits for a run: the compiler's GC heap and its wasm stack (core/native/driver.warp's)
+GC_HEAP_BYTES := 134217728
+WASM_STACK_BYTES := 251658240
+# C's whence for fseek, a C bool's byte, the file descriptor of standard error, the slash
+FROM_START := 0
+FROM_END := 2
+BOOL_BYTE := 256
+STANDARD_ERROR := 2
+SLASH := 47
+FAILED := 1
+# the texts the driver names, each a C string in its memory
+compiler_beside(): pointer := prim data_address("/wap-seed/wap.wasm")
+module_template(): pointer := prim data_address("/wap-XXXXXX.wasm")
+MODULE_SUFFIX_BYTES := 5
+temporary_folder(): pointer := prim data_address("TMPDIR")
+current_folder(): pointer := prim data_address(".")
+root_folder(): pointer := prim data_address("/")
+reading(): pointer := prim data_address("rb")
+main_name(): pointer := prim data_address("main")
+MAIN_NAME_BYTES := 4
+own_path_link(): pointer := prim data_address("/proc/self/exe")
+no_module(): pointer := prim data_address("wap: no module at that path\n")
+NO_MODULE_BYTES := 28
+
+# the program's own arguments, by WASI, into its memory: the count; each argument's address
+args_sizes_get(count_at: int, bytes_at: int): int := prim args_sizes_get(count_at, bytes_at)
+args_get(addresses_at: int, bytes_at: int): int := prim args_get(addresses_at, bytes_at)
+argument(at: int): pointer := pointer_at(word_at(ARGUMENTS_AT + 4 * at))
+
+# a failure said on standard error and the run ended: the C API's error, a trap
+said_vector(vector: int) := write(STANDARD_ERROR, long_at(vector + 8), long_at(vector))
+failed_by_error(error: int) := {
+	if wasmtime_error_exit_status(error, host_of(pointer_at(STATUS_AT))) % BOOL_BYTE != 0 { exit(word_at(STATUS_AT)) }
+	message = host_block(VECTOR_BYTES)
+	wasmtime_error_message(error, message)
+	said_vector(message)
+	exit(FAILED)
+}
+checked(error: int) := if error != 0 then failed_by_error(error)
+trap_checked(trap_at: int) := {
+	trap = long_at(trap_at)
+	if trap != 0 {
+		message = host_block(VECTOR_BYTES)
+		wasm_trap_message(trap, message)
+		said_vector(message)
+		exit(FAILED)
+	}
+}
+
+# the bytes of a file in a block of the host's memory, its size written at the host's size_at
+file_read(path: pointer, size_at: int): int := {
+	file = fopen(host_of(path), reading())
+	if file == 0 {
+		write(STANDARD_ERROR, host_of(no_module()), NO_MODULE_BYTES)
+		exit(FAILED)
+	}
+	fseek(file, 0, FROM_END)
+	size = ftell(file)
+	fseek(file, 0, FROM_START)
+	block = malloc(size)
+	fread(block, 1, size, file)
+	fclose(file)
+	set_long_at(size_at, size)
+	block
+}
+
+# the module at `path` run with the host argument list given, as wasmtime runs it: a GC module with exceptions, WASI
+# set up for it, its main called; a trap or error said and the run ended, an exit() ending the run with its status
+module_ran(path: pointer, count: int, arguments: int) := {
+	config = wasm_config_new()
+	wasmtime_config_wasm_gc_set(config, 1)
+	wasmtime_config_wasm_function_references_set(config, 1)
+	wasmtime_config_wasm_exceptions_set(config, 1)
+	warp_config_gc_heap_initial_size_set(config, GC_HEAP_BYTES)
+	warp_config_wasm_stack_set(config, WASM_STACK_BYTES)
+	engine = wasm_engine_new_with_config(config)
+	store = wasmtime_store_new(engine, 0, 0)
+	context = wasmtime_store_context(store)
+	wasi = wasi_config_new()
+	wasi_config_set_argv(wasi, count, arguments)
+	wasi_config_inherit_stdin(wasi)
+	wasi_config_inherit_stdout(wasi)
+	wasi_config_inherit_stderr(wasi)
+	wasi_config_inherit_env(wasi)
+	wasi_config_preopen_dir(wasi, current_folder(), current_folder(), 1)
+	wasi_config_preopen_dir(wasi, root_folder(), root_folder(), 1)
+	checked(wasmtime_context_set_wasi(context, wasi))
+	linker = wasmtime_linker_new(engine)
+	checked(wasmtime_linker_define_wasi(linker))
+	size_at = host_block(8)
+	bytes = file_read(path, size_at)
+	module_slot = host_block(8)
+	checked(wasmtime_module_new(engine, bytes, long_at(size_at), module_slot))
+	instance = host_block(INSTANCE_BYTES)
+	trap_at = host_block(8)
+	checked(wasmtime_linker_instantiate(linker, context, long_at(module_slot), instance, trap_at))
+	trap_checked(trap_at)
+	item = host_block(EXTERN_BYTES)
+	wasmtime_instance_export_get(context, instance, main_name(), MAIN_NAME_BYTES, item)
+	checked(wasmtime_func_call(context, item + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, trap_at))
+	trap_checked(trap_at)
+}
+
+# this executable's path (Linux's link, else macOS's dyld) with its file name replaced by the compiler's, at COMPILER_AT
+compiler_found() := {
+	length = readlink(own_path_link(), pointer_at(COMPILER_AT), PATH_BYTES - 1)
+	if length > 0 then set_word(COMPILER_AT + length, 0) else {
+		set_word(SIZE_AT, PATH_BYTES)
+		_NSGetExecutablePath(pointer_at(COMPILER_AT), pointer_at(SIZE_AT))
+	}
+	slash = strrchr(pointer_at(COMPILER_AT), SLASH) - host_of(pointer_at(COMPILER_AT))
+	strcpy(pointer_at(COMPILER_AT + slash), compiler_beside())
+}
+# a new file in the temporary folder the program's module goes to, at MODULE_AT
+module_path_made() := {
+	set_word(MODULE_AT, 0)
+	strcat(pointer_at(MODULE_AT), getenv(temporary_folder()))
+	strcat(pointer_at(MODULE_AT), host_of(module_template()))
+	close(mkstemps(pointer_at(MODULE_AT), MODULE_SUFFIX_BYTES))
+}
+# a program's path as the compiler reads it, its links followed; as written where nothing is there, for the compiler
+# to say so
+program_path(written: pointer): int := {
+	resolved = realpath(written, 0)
+	if resolved == 0 then host_of(written) else resolved
+}
+# a host list of these addresses' C strings
+host_list(addresses: int, count: int): int := {
+	list = host_block(8 * count)
+	i = 0
+	while i < count {
+		set_long_at(list + 8 * i, host_of(pointer_at(word_at(addresses + 4 * i))))
+		i = i + 1
+	}
+	list
+}
+
+args_sizes_get(ARGUMENT_COUNT_AT, ARGUMENT_BYTES_COUNT_AT)
+args_get(ARGUMENTS_AT, ARGUMENT_BYTES_AT)
+count = word_at(ARGUMENT_COUNT_AT)
+compiler_found()
+module_path_made()
+# compile: the compiler, the program, the module; then run: the module, the program's arguments after its file
+COMPILE_COUNT := 3
+compiled = host_block(8 * COMPILE_COUNT)
+set_long_at(compiled, host_of(pointer_at(COMPILER_AT)))
+# (its links followed: WASI follows none out of a folder it opened, and data/ often is one)
+set_long_at(compiled + 8, program_path(argument(1)))
+set_long_at(compiled + 16, host_of(pointer_at(MODULE_AT)))
+module_ran(pointer_at(COMPILER_AT), COMPILE_COUNT, compiled)
+set_word(ARGUMENTS_AT + 4, MODULE_AT)
+module_ran(pointer_at(MODULE_AT), count - 1, host_list(ARGUMENTS_AT + 4, count - 1))
+unlink(pointer_at(MODULE_AT))
+# (an exit, not a value: the program shows none, so its module holds no text)
+exit(0)

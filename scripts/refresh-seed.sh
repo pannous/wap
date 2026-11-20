@@ -5,6 +5,7 @@
 # beside the tree's preload, C is B compiling it again. The last stage built is the new seed once it compiles and runs
 # hello: no identical bytes asked (user 2026-11-20), a fixpoint is only reported. A compiler source word new in the
 # tree's preload reaches the source a seed later: such a change lands after a refresh.
+# The native wap beside the warp binary is rebuilt from the tree's driver by the new seed.
 # The new seed is published as the pre-release wap-seed-<date>-<sha8> on pannous/wap, built from the tree's HEAD, and
 # wap-seed.lock names it, committed in the tree.
 # usage: scripts/refresh-seed.sh [--check] [<tree>, default this checkout]   (--check: run the stages, replace nothing)
@@ -56,6 +57,11 @@ fi
 
 # the seed and what it reads beside it, installed and published
 cp "$chosen" "$seed" && cp -R "$tree/wap/preload" "$tree/wap/kernel" "$(dirname "$seed")/" && echo "refresh-seed: replaced $seed"
+# the native wap beside the warp binary, the command that runs the seed (wap/extensions/native/driver.wap), built by it
+native=$(dirname "$(dirname "$seed")")
+WARP=$warp "$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" \
+	-L"$native/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib && echo "refresh-seed: installed $native/wap" ||
+	echo "refresh-seed: the native wap was not built; $native/wap stays" >&2
 beside=$scratch/wap-seed-beside.tar.gz
 tar -czf "$beside" -C "$tree/wap" preload kernel || { echo "refresh-seed: the preload and kernel were not packed" >&2; exit 1; }
 release=wap-seed-$(date +%Y-%m-%d)-$(shasum -a 256 "$seed" | cut -c1-8)

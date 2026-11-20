@@ -146,8 +146,11 @@ wap/
       records.wap             class, enum → Record
       types.wap               list of int, x as text → bracketed types and conversions
 
-  extensions/                 rule files no compiler needs, one per topic, loaded like modules: no hook table; none yet
+  extensions/                 rule files no compiler needs, one per topic, loaded like modules: no hook table
                               (units 3km, durations 2 weeks, inline html … as the forms arrive)
+    native/                   a wap program built to a native executable (build.sh: wasm2c, cc, glue.awk, main.c)
+      c.wap                   libc's and wasmtime's C functions, foreign primitives of the module c
+      driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
 
 lib/                          the library, warp's own, shared and used as it is
 test/wap/                     wap's outcome tests: a program compiled by wap, run, its output checked
@@ -188,6 +191,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 | front: read, operators, rules, lowering | warp-wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, preload/ |
 | types: declare, bind, type | warp-wap-binding | core/analyze/, core/paths.wap |
 | back: emitter, runtime | warp-wap-emitter | core/emit/; test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
+| native: the wap command, programs built to executables | warp-host-fixer | extensions/native/; test/wap/test_native.sh |
 | simplification: wap smaller by its Node count (Meta excluded) | warp-simplifier | any file, by review of its stage owner |
 
 ## Rules for every file
