@@ -578,10 +578,3 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   Reason: a template's words are bound in the program's scope, so a local named `missing` hid the types module's predicate
   (core/analyze/calls.wap words_missing, renamed to `lacking`). Paid off when a template's names bind in the rule's
   own file, as a hygienic macro's do.
-
-- **Two function-value forms the seam spells around** (core/pipeline.wap source_of, compiler.wap readers).
-  `language.readers[ending](file)` reads as a method call of `readers` on language; `(language.readers)[ending](file)`
-  works, so source_of names the map first. `language.readers[".wasm"] = wasm_source` is refused (a named function
-  does not fit a `(text) -> text` map item, though a map literal holding it does), so compiler.wap gives the whole map.
-  Principle bent: never degrade the input to suit a tool. Paid off when a call after an index binds to the indexed
-  value and a named function fits a function type wherever it is given.
