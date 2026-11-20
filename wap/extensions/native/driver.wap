@@ -2,7 +2,7 @@
 # compiles the program with wap.wasm, wap's compiler in wap-seed/ beside this executable with its preload and kernel,
 # then runs the module it wrote with the arguments, each a wasm module run by wasmtime's C API with WASI (the program's
 # arguments, standard input and output, the current folder and the root). Its exit status is the program's.
-# `wap test [<area>…]` runs wap's tests instead (tested, below).
+# `wap test [<area>…]` runs wap's tests instead (tested, below); an argument naming no program file is code (program_of).
 use "c.wap"
 
 # --- the program's memory: where the driver keeps its own words, below the data at 65536 (core/emit/opcodes.wap) ---
@@ -14,6 +14,7 @@ ARGUMENTS_AT := 2048
 ARGUMENT_BYTES_AT := 4096
 COMPILER_AT := 32768
 MODULE_AT := 40960
+SOURCE_AT := 45056
 COMMAND_AT := 49152
 PATH_BYTES := 4096
 # the host's records the C API fills, by their sizes in bytes: a byte vector (size, data), an instance, an extern
@@ -36,6 +37,12 @@ FAILED := 1
 compiler_beside(): pointer := prim data_address("/wap-seed/wap.wasm")
 module_template(): pointer := prim data_address("/wap-XXXXXX.wasm")
 MODULE_SUFFIX_BYTES := 5
+# code given in place of a program file goes to a file of its own, compiled as a file is
+source_template(): pointer := prim data_address("/wap-XXXXXX.wap")
+SOURCE_SUFFIX_BYTES := 4
+program_suffixes(): pointer := prim data_address(".wap")
+warp_suffix(): pointer := prim data_address(".warp")
+usage(): pointer := prim data_address("usage: wap <program.wap | code> [arguments…] · wap test [<area>…]\n")
 temporary_folder(): pointer := prim data_address("TMPDIR")
 current_folder(): pointer := prim data_address(".")
 root_folder(): pointer := prim data_address("/")
@@ -44,7 +51,6 @@ main_name(): pointer := prim data_address("main")
 MAIN_NAME_BYTES := 4
 own_path_link(): pointer := prim data_address("/proc/self/exe")
 no_module(): pointer := prim data_address("wap: no module at that path\n")
-NO_MODULE_BYTES := 28
 # `wap test [<area>…]`: wap's tests in the current folder, test/wap/run.sh, all of them or test_<area>.sh of each area
 test_word(): pointer := prim data_address("test")
 tests_run(): pointer := prim data_address("test/wap/run.sh --wait")
@@ -59,13 +65,20 @@ args_get(addresses_at: int, bytes_at: int): int := prim args_get(addresses_at, b
 argument(at: int): pointer := pointer_at(word_at(ARGUMENTS_AT + 4 * at))
 
 # a failure said on standard error and the run ended: the C API's error, a trap
+# the run ended with this status, its temporary files gone (a path not made yet is an empty one, unlinking nothing)
+ended(status: int) := {
+	unlink(pointer_at(MODULE_AT))
+	unlink(pointer_at(SOURCE_AT))
+	exit(status)
+}
+said(t: pointer) := write(STANDARD_ERROR, host_of(t), strlen(host_of(t)))
 said_vector(vector: int) := write(STANDARD_ERROR, long_at(vector + 8), long_at(vector))
 failed_by_error(error: int) := {
-	if wasmtime_error_exit_status(error, host_of(pointer_at(STATUS_AT))) % BOOL_BYTE != 0 { exit(word_at(STATUS_AT)) }
+	if wasmtime_error_exit_status(error, host_of(pointer_at(STATUS_AT))) % BOOL_BYTE != 0 { ended(word_at(STATUS_AT)) }
 	message = host_block(VECTOR_BYTES)
 	wasmtime_error_message(error, message)
 	said_vector(message)
-	exit(FAILED)
+	ended(FAILED)
 }
 checked(error: int) := if error != 0 then failed_by_error(error)
 trap_checked(trap_at: int) := {
@@ -74,7 +87,7 @@ trap_checked(trap_at: int) := {
 		message = host_block(VECTOR_BYTES)
 		wasm_trap_message(trap, message)
 		said_vector(message)
-		exit(FAILED)
+		ended(FAILED)
 	}
 }
 
@@ -82,8 +95,8 @@ trap_checked(trap_at: int) := {
 file_read(path: pointer, size_at: int): int := {
 	file = fopen(host_of(path), reading())
 	if file == 0 {
-		write(STANDARD_ERROR, host_of(no_module()), NO_MODULE_BYTES)
-		exit(FAILED)
+		said(no_module())
+		ended(FAILED)
 	}
 	fseek(file, 0, FROM_END)
 	size = ftell(file)
@@ -142,12 +155,24 @@ compiler_found() := {
 	slash = strrchr(pointer_at(COMPILER_AT), SLASH) - host_of(pointer_at(COMPILER_AT))
 	strcpy(pointer_at(COMPILER_AT + slash), compiler_beside())
 }
-# a new file in the temporary folder the program's module goes to, at MODULE_AT
-module_path_made() := {
-	set_word(MODULE_AT, 0)
-	strcat(pointer_at(MODULE_AT), getenv(temporary_folder()))
-	strcat(pointer_at(MODULE_AT), host_of(module_template()))
-	close(mkstemps(pointer_at(MODULE_AT), MODULE_SUFFIX_BYTES))
+# a new file in the temporary folder, its path at `at` by the template, `suffix_bytes` of it kept; its open descriptor
+temporary_made(at: int, template: pointer, suffix_bytes: int): int := {
+	set_word(at, 0)
+	strcat(pointer_at(at), getenv(temporary_folder()))
+	strcat(pointer_at(at), host_of(template))
+	mkstemps(pointer_at(at), suffix_bytes)
+}
+# whether the C string ends in the suffix
+ends_in(t: pointer, suffix: pointer): bool := strlen(host_of(t)) >= strlen(host_of(suffix)) and strcmp(pointer_at(address(t) + strlen(host_of(t)) - strlen(host_of(suffix))), suffix) == 0
+# a program file, as warp tells one (core/native/warp.warp is_warp_file): its name ends in .wap or .warp, or a file of
+# that name is there; any other argument is code
+is_program_file(name: pointer): bool := ends_in(name, program_suffixes()) or ends_in(name, warp_suffix()) or realpath(name, 0) != 0
+# the program the argument names: the file, or the code written to a file of its own at SOURCE_AT
+program_of(argument: pointer): pointer := if is_program_file(argument) then argument else {
+	source = temporary_made(SOURCE_AT, source_template(), SOURCE_SUFFIX_BYTES)
+	write(source, host_of(argument), strlen(host_of(argument)))
+	close(source)
+	pointer_at(SOURCE_AT)
 }
 # a program's path as the compiler reads it, its links followed; as written where nothing is there, for the compiler
 # to say so
@@ -183,19 +208,23 @@ tested(count: int) := {
 args_sizes_get(ARGUMENT_COUNT_AT, ARGUMENT_BYTES_COUNT_AT)
 args_get(ARGUMENTS_AT, ARGUMENT_BYTES_AT)
 count = word_at(ARGUMENT_COUNT_AT)
-if count > 1 and strcmp(argument(1), test_word()) == 0 { tested(count) }
+if count < 2 {
+	said(usage())
+	exit(FAILED)
+}
+if strcmp(argument(1), test_word()) == 0 { tested(count) }
 compiler_found()
-module_path_made()
+close(temporary_made(MODULE_AT, module_template(), MODULE_SUFFIX_BYTES))
+program = program_of(argument(1))
 # compile: the compiler, the program, the module; then run: the module, the program's arguments after its file
 COMPILE_COUNT := 3
 compiled = host_block(8 * COMPILE_COUNT)
 set_long_at(compiled, host_of(pointer_at(COMPILER_AT)))
 # (its links followed: WASI follows none out of a folder it opened, and data/ often is one)
-set_long_at(compiled + 8, program_path(argument(1)))
+set_long_at(compiled + 8, program_path(program))
 set_long_at(compiled + 16, host_of(pointer_at(MODULE_AT)))
 module_ran(pointer_at(COMPILER_AT), COMPILE_COUNT, compiled)
 set_word(ARGUMENTS_AT + 4, MODULE_AT)
 module_ran(pointer_at(MODULE_AT), count - 1, host_list(ARGUMENTS_AT + 4, count - 1))
-unlink(pointer_at(MODULE_AT))
 # (an exit, not a value: the program shows none, so its module holds no text)
-exit(0)
+ended(0)

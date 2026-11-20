@@ -37,4 +37,7 @@ check "a native wap run of a program through a link" "$("$native_wap" "$stage/li
 mkdir -p "$stage/tested/test/wap" && printf '%s\n' 'echo "$@"' 'exit 3' >"$stage/tested/test/wap/run.sh" && chmod +x "$stage/tested/test/wap/run.sh"
 check "wap test runs the areas' scripts" "$(cd "$stage/tested" && "$native_wap" test hello raise; echo "exit $?")" "--wait test/wap/test_hello.sh test/wap/test_raise.sh
 exit 3"
+# an argument that names no program file is code, run as a program is (core/native/warp.warp is_warp_file)
+check "wap runs code given in place of a file" "$("$native_wap" '1+1' 2>&1)" "2"
+check "a program file stays after its run" "$(cd "$stage" && "$native_wap" hello.wap >/dev/null && ls hello.wap)" "hello.wap"
 exit $((failures > 0))
