@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wap's Node (wap/types/nodes.wap): warp's node built and taken apart in plain warp (core/node.warp), its position
+# wap's Node (wap/nodes.wap): warp's node built and taken apart in plain warp (core/node.warp), its position
 # and facts kept in a Meta, as wap's own stages read them.
 # Run it with bash test/wap/test_nodes.sh; the warp under test is WARP (default the warp on PATH)
 source "$(dirname "$0")/compile.sh"
