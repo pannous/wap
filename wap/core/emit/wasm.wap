@@ -32,15 +32,14 @@ class WasmModule {
 	named: map<text, int> = {}
 	naming: list<text> = []
 	reserved: list<int> = []
-	# the functions' names, for the name section profilers and backtraces show
-	names: list<FunctionName> = []
+	# the imported functions' names, for the name section profilers and backtraces show
+	import_names: list<text> = []
 }
-class FunctionName { index: int, name: text }
 # a recursion group: the index of its first type, how many it holds, and whether its types are distinct from the
 # same shapes elsewhere; those of records that refer to each other are not, so they are found again by shape
 class RecursionGroup { first: int, count: int, distinct: bool }
 # a function of the module: its type's index, and its code, empty while only its place is reserved
-class DefinedFunction { type_index: int, code: list<int> }
+class DefinedFunction { type_index: int, code: list<int>, name: text = "" }
 
 # An unsigned number as LEB128, 7 bits a byte, the low bits first, each byte but the last with its high bit set:
 # 624485 → [0xE5, 0x8E, 0x26]
@@ -177,7 +176,7 @@ type_entries(m: WasmModule) as list<list<int>> := {
 # An imported function, `wasi_snapshot_preview1.fd_write`: its index among the functions.
 imported(m: WasmModule, module: text, name: text, parameters: list<list<int>>, results: list<list<int>>) as int := {
 	m.imports += [named(module) + named(name) + [FUNCTION_KIND] + unsigned(added_type(m, function_type(parameters, results)))]
-	m.names += [FunctionName(#m.imports - 1, name)]
+	m.import_names += [name]
 	#m.imports - 1
 }
 
@@ -209,7 +208,12 @@ added_global(m: WasmModule, type: list<int>, mutability: int, initial: list<int>
 
 exported(m: WasmModule, name: text, kind: int, index: int) := {
 	m.exports += [named(name) + [kind] + unsigned(index)]
-	if kind == FUNCTION_KIND and not m.names.any(each => each.index == index) { m.names += [FunctionName(index, name)] }
+	if kind == FUNCTION_KIND and index >= #m.imports { named_function(m, index, name) }
+}
+# a defined function's name in the name section, its first one kept
+named_function(m: WasmModule, index: int, name: text) := {
+	function = m.functions[index - #m.imports]
+	if function.name is empty { function.name = name }
 }
 
 # An exception tag whose exceptions carry values of these types: its index
@@ -252,8 +256,8 @@ module_bytes(m: WasmModule) as list<int> := {
 NAME_SECTION = "name"
 FUNCTION_NAMES = 1
 names_section(m: WasmModule) as list<int> := {
-	if m.names is empty { return [] }
-	names = counted(sorted(m.names, each => each.index).map(each => unsigned(each.index) + named(each.name)))
+	known = m.import_names + m.functions.map(function => function.name)
+	names = counted((0 to #known - 1).filter(index => known[index] is not empty).map(index => unsigned(index) + named(known[index])))
 	content = named(NAME_SECTION) + [FUNCTION_NAMES] + unsigned(#names) + names
 	[CUSTOM_SECTION] + unsigned(#content) + content
 }
