@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # A wap program built to a native executable: compiled by wap to a module, which wasm2c writes as C, which cc
-# builds with wasm2c's runtime, lib/native/wasi.c and the C glue of its imports (main.c, glue.awk beside this script). The program uses no GC value: no
-# text, list or raise; it prints through WASI with its texts as data_address C strings.
-#   wap/extensions/native/build.sh <compiler.wasm> <program.wap> <executable>
+# builds with wasm2c's runtime, lib/native/wasi.c and the C glue of its imports (main.c, glue.awk beside this
+# script). The program uses no GC value: no text, list or raise; its texts are data_address C strings.
+#   wap/extensions/native/build.sh <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]
+# the arguments after the executable are the C compiler's, the libraries the program's C functions are in:
+# `-Llib -lwarp_wasmtime -Wl,-rpath,@executable_path/lib` for the native wap (driver.wap)
 # The warp that runs the compiler is WARP (default the warp on PATH). The build's files go in <executable>.build/
 set -euo pipefail
 WARP=${WARP:-warp}
@@ -12,8 +14,9 @@ MODULE_NAME=program
 WASM2C_RUNTIME=share/wabt/wasm2c
 WABT_HEADERS=include
 
-[ $# -eq 3 ] || { echo "usage: $0 <compiler.wasm> <program.wap> <executable>" >&2; exit 2; }
+[ $# -ge 3 ] || { echo "usage: $0 <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]" >&2; exit 2; }
 compiler=$1 program=$2 executable=$3
+shift 3
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 library="$(cd -P "$here/../../../lib" && pwd -P)"
 wasm2c=$(command -v wasm2c) || { echo "no wasm2c on the PATH (brew install wabt)" >&2; exit 1; }
@@ -24,5 +27,5 @@ mkdir -p "$building"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
 awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"
 "$C_COMPILER" $C_FLAGS -I"$building" -I"$wabt/$WASM2C_RUNTIME" -I"$wabt/$WABT_HEADERS" -I"$library" -o "$executable" \
-	"$building/$MODULE_NAME.c" "$here/main.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-impl.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-mem-impl.c" -lm
+	"$building/$MODULE_NAME.c" "$here/main.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-impl.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-mem-impl.c" -lm "$@"
 rm -rf "$building"

@@ -20,4 +20,13 @@ check "a native program calls C" "$(native_ran strlen 'strlen(s: pointer): int :
 exit(code: int) := prim proc_exit(code)
 name(): pointer := prim data_address("wap")
 exit(strlen(name()))' >/dev/null; echo $?)" "3"
+# the native wap (driver.wap, built by wap): `wap <program>` compiles with the wap.wasm beside it and runs the module
+native_wap="$stage/bin/wap"
+mkdir -p "$stage/bin/wap-seed" && cp -R "$(dirname "$compiler")/preload" "$(dirname "$compiler")/kernel" "$stage/bin/wap-seed/" && cp "$compiler" "$stage/bin/wap-seed/wap.wasm"
+wasmtime_library="$(cd -P "$(dirname "$(command -v "$warp")")/lib" && pwd -P)"
+WARP=$warp "$tree/wap/extensions/native/build.sh" "$compiler" "$tree/wap/extensions/native/driver.wap" "$native_wap" -L"$wasmtime_library" -lwarp_wasmtime -Wl,-rpath,"$wasmtime_library" >/dev/null 2>&1
+printf '%s\n' 'print "Hello"' >"$stage/hello.wap"
+check "wap hello.wap prints Hello" "$(cd "$stage" && "$native_wap" hello.wap 2>&1)" "Hello"
+printf '%s\n' 'x = 40000000000' 'x + 2' >"$stage/value.wap"
+check "a native wap run shows the program's value" "$(cd "$stage" && "$native_wap" value.wap 2>&1)" "40000000002"
 exit $((failures > 0))

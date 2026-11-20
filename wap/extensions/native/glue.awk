@@ -6,6 +6,16 @@
 #   awk -f glue.awk program.h > glue.c
 BEGIN { WASI = "w2c_wasi__snapshot__preview1"; module_count = 0 }
 
+# a name as C knows it, wasm2c's escapes decoded: a character no C name takes written 0x and its hex code, `0x5F` `_`
+function unescaped(name,    decoded, code) {
+	decoded = ""
+	while (match(name, /0x[0-9A-F][0-9A-F]/)) {
+		code = index("0123456789ABCDEF", substr(name, RSTART + 2, 1)) * 16 + index("0123456789ABCDEF", substr(name, RSTART + 3, 1)) - 17
+		decoded = decoded substr(name, 1, RSTART - 1) sprintf("%c", code)
+		name = substr(name, RSTART + RLENGTH)
+	}
+	return decoded name
+}
 # the C type an argument of this wasm2c type is given to the C function as
 function c_type(wasm_type) { return wasm_type == "u32" ? "void*" : wasm_type }
 function c_value(wasm_type, name) { return wasm_type == "u32" ? "wasi_memory(library) + " name : name }
@@ -29,7 +39,7 @@ function c_value(wasm_type, name) { return wasm_type == "u32" ? "wasi_memory(lib
 	call = "function(" arguments ")"
 	glue = glue sprintf("%s %s(%s) {\n", result, full, parameters)
 	glue = glue sprintf("\tstatic %s (*function)(%s);\n", result, c_parameters)
-	glue = glue sprintf("\tif (!function) function = c_function(\"%s\");\n", name)
+	glue = glue sprintf("\tif (!function) function = c_function(\"%s\");\n", unescaped(name))
 	glue = glue sprintf("\t%s%s;\n}\n", (result == "void" ? "" : "return "), call)
 }
 # the instantiation, the imported modules' instances in the header's order: WASI's, and each other module's wrapping it
