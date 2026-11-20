@@ -327,11 +327,8 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   number_read, types/floats.wap; `1e21` likewise shows 1e21 where warp gives 1000000000000000000000.
 
 
-- **The class rule's helper words are ordinary words** (wap/types/sugar/records.wap `member_as "field"`,
-  `member_of`, `shown_case`): a program writing them is rewritten too. Words only rule files may write need a private
-  word in the reader; paid off when a program meets one.
-- **`for` is two rules, a `to` range and a list walked by index** (wap/types/sugar/loops.wap), not the iterator of
-  notes/kernel.md:82: wap's own source walks only these two; paid off by the first third kind of thing to walk.
+
+
 - **Stage 3 serves only the rules programs write** (decision hole-types): no rewrite of wap's own moves into it. The
   char read as a text depends on the type its place wants (binding's conversion), `x is w` on what w means (scope);
   a typed rule sees only its hole's type.
@@ -344,9 +341,7 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **`format` prints no comments yet** (wap/core/format.wap). Comments ride in Meta; the printer reads only shapes.
 
 
-- **An int and a float mixed are refused** (`1 + 2.5`: no `+` takes (int, float); wap/types/prelude.wap). warp
-  gives 3.5. Reason: the overloads are chosen by exact types, and no conversion of an int to a float where one is
-  wanted exists yet. Paid off by that conversion, in typing, not by mixed overloads.
+
 - **A used module's functions are emitted even when nothing calls them** (wap/compiler.wap: a module's bound statements
   go first in the program's Block), while the types module's uncalled definitions are left out. Bends "smaller and faster".
   Reason: a module is code whose statements must run, so it joins the program whole. Paid off when typing leaves out
@@ -363,13 +358,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   identity (a record compared directly compares by fields); by type via dispatch, as show does, when code needs it.
 
 
-- **Every operator's spelling is written twice**: in the table of wap/types/operators.wap and in `text(op: Op)` of
-  wap/types/nodes.wap. Reason: the Op enum is declared case for case as core/node.warp declares it, so old warp
-  reads wap's source the same; the table can't build it, and naming each Op in its row would save about 15 nodes for a
-  second mechanism (warp-simplifier measured it, 2026-11-19). Paid off when old warp no longer reads wap's source: Op
-  then comes from the table.
-  Found (wap-debts-front): 48 of 63 cases have no row of their name (sub/subtract, lt/less, the derived compound
-  assignments, Div / vs ÷); paid off by renaming the cases after the rows, plus a rule for the derived ones.
 
 - **The literals a template writes are named twice** (wap/kernel/forms.wap literal_named): `True()`, `False()` and
   `Empty()` are spelled out beside types/nodes.wap's declaration of Node's fieldless cases. The general rule is that
@@ -392,9 +380,7 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   (types/floats.wap, host, texts, types.wap, prelude.wap) and nodes.wap lists `text(n: Node)` twice. Off the
   census: a types file is library, typed function by function, never a program of its own. Paid off when a program
   that is a types file is bound inside the rest of the types module only.
-- **`===` is value equality in the prelude** (wap/types/prelude.wap `===(a: T, b: T) := a == b`), where warp's `===`
-  is identity (the user, 2026-11-18; wiki/equality.md): two separately built `[1]` are `===` under wap. Off the
-  census: wap's own compiler compares definitions by their DEFINER id instead. Paid off when `===` is ref.eq identity.
+
 
 
 - **stage.wap without_fact rebuilds the Meta itself**, a copy of nodes.wap with_attribute's layout, because the
@@ -402,7 +388,3 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   without_attribute that with_attribute uses too, and without_fact calls it.
 
 
-- **A rule's output names resolve where the rule fires** (types/sugar/conditions.wap `x != ø` → `not missing(x)`).
-  Reason: a template's words are bound in the program's scope, so a local named `missing` hid the types module's predicate
-  (core/analyze/calls.wap words_missing, renamed to `lacking`). Paid off when a template's names bind in the rule's
-  own file, as a hygienic macro's do.
