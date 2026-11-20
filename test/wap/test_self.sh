@@ -4,7 +4,7 @@
 # as written and its functions give under wap what they give under warp. Source: warp-lead's self-build plan,
 # 2026-11-18. Run it with bash test/wap/test_self.sh; the warp under test is WARP (default the warp on PATH)
 source "$(dirname "$0")/compile.sh"
-root="$(cd "$(dirname "$0")/../.." && pwd)"
+root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
 # how many CPU seconds wap1 may take to compile wap's compiler (milestone 2, notes/backbone.md)
 SELF_COMPILE_SECONDS=60
 

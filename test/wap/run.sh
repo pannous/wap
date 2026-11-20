@@ -5,7 +5,7 @@
 # data/wap-tests/summary.txt, read later. --wait runs them in the foreground and prints the summary. The warp under
 # test is WARP (default the warp on PATH). The self-build ratchet, ratchet_census.sh (about 4 min), is no default
 # script: run it by name, test/wap/run.sh --wait test/wap/ratchet_census.sh, after each wap landing
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 results="$here/../../data/wap-tests"
 SUMMARY="$results/summary.txt"
 cores=$(getconf _NPROCESSORS_ONLN)

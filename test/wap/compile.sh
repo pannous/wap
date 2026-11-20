@@ -1,8 +1,11 @@
 # the helper of wap's shell tests (source it): ran <name> <program> is what the program printed, compiled by wap, the
 # new compiler, and run, or the compiler's error. The warp under test is WARP (default the warp on PATH)
 source "$(dirname "${BASH_SOURCE[0]}")/../native/checks.sh"
-tree="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+tree="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 source_compiler="$tree/wap/compiler.wap"
+# the folder builds and runs go in, by its real path: a module's WASI follows no link to an absolute path (data/ is often
+# one, to a scratch volume)
+data="$(mkdir -p "$tree/data/wap-tests" && cd -P "$tree/data/wap-tests" && pwd -P)"
 # wap's seed, wap built by itself, beside the warp binary with its preload and kernel (scripts/refresh-seed.sh --wap)
 seed="$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm"
 [ -f "$seed" ] || { echo "no wap seed at $seed: scripts/refresh-seed.sh --wap installs it" >&2; exit 2; }
@@ -35,10 +38,10 @@ folder_built() {
 if [ "$1" = --compiler ]; then compiler="$2"; shift 2
 else
 	sources=$(cd "$tree" && { cat "$seed"; find wap -name '*.wap' | sort | xargs cat; } | shasum | cut -c1-16)
-	compiler=$(compiler_built "$tree/data/wap-tests/wap1-$sources" 1) || { echo "wap1: $compiler" >&2; exit 1; }
+	compiler=$(compiler_built "$data/wap1-$sources" 1) || { echo "wap1: $compiler" >&2; exit 1; }
 fi
 # each test script its own folder in the tree's data/ (never the system's temporary folder)
-stage="$tree/data/wap-tests/$$"
+stage="$data/$$"
 mkdir -p "$stage" || exit 1
 trap 'rm -rf "$stage"' EXIT
 

@@ -37,7 +37,7 @@ TYPE_BUILDERS="generic_type|type_built|function_type_of|optional_type|list_type|
 SAME_TYPE_NAMES='^(same|fits)_types?$'
 TYPE_PARAMETERS="given|held|these|those"
 
-root="$(cd "$(dirname "$0")/../.." && pwd)"
+root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
 allowed="$root/test/wap/guardrails_allowed.txt"
 cd "$root" || exit 1
 failures=0

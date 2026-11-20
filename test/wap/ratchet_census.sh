@@ -13,7 +13,7 @@ FILES_TYPED_WHOLE=53
 FUNCTIONS_UNTYPED=0
 
 source "$(dirname "$0")/compile.sh"
-root="$(cd "$(dirname "$0")/../.." && pwd)"
+root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
 
 # one census of every file, in one process: the files share their modules and their typing (scripts/wap-census.warp),
 # compiled by the compiler under test (--compiler <module>, or wap's source run by the old compiler), and run from the
