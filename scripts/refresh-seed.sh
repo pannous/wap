@@ -24,8 +24,9 @@ seed=$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm
 [ -f "$seed" ] || { echo "refresh-seed: no seed at $seed" >&2; exit 2; }
 mkdir -p "$tree/data" && scratch=$(mktemp -d "$tree/data/refresh-seed.XXXXXX") || exit 2
 trap 'rm -rf "$scratch"' EXIT
+source "$(dirname "$0")/lib/wap-beside.sh"
 # every stage after A reads the tree's types module and kernel beside itself
-cp -R "$tree/wap/types" "$tree/wap/kernel" "$scratch/" || exit 2
+(cd "$tree/wap" && cp -R "${WAP_BESIDE[@]}" "$scratch/") || exit 2
 
 # stage <compiler> <output>: the compiler compiling wap's source; its cost in user + system CPU seconds
 stage() {
@@ -56,7 +57,7 @@ if [ -n "$check" ]; then
 fi
 
 # the seed and what it reads beside it, installed and published
-cp "$chosen" "$seed" && cp -R "$tree/wap/types" "$tree/wap/kernel" "$(dirname "$seed")/" && echo "refresh-seed: replaced $seed"
+cp "$chosen" "$seed" && (cd "$tree/wap" && cp -R "${WAP_BESIDE[@]}" "$(dirname "$seed")/") && echo "refresh-seed: replaced $seed"
 # (the old compiler's machine code goes with it: the native wap writes the new one's at its first run)
 rm -f "$(dirname "$seed")"/wap-*.cwasm
 # the native wap beside the warp binary, the command that runs the seed (wap/extensions/native/driver.wap), built by it
@@ -65,7 +66,7 @@ WARP=$warp "$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/
 	-L"$native/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib && echo "refresh-seed: installed $native/wap" ||
 	echo "refresh-seed: the native wap was not built; $native/wap stays" >&2
 beside=$scratch/wap-seed-beside.tar.gz
-tar -czf "$beside" -C "$tree/wap" types kernel || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
+tar -czf "$beside" -C "$tree/wap" "${WAP_BESIDE[@]}" || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
 release=wap-seed-$(date +%Y-%m-%d)-$(shasum -a 256 "$seed" | cut -c1-8)
 source_commit=$(git -C "$tree" rev-parse HEAD)
 gh release create "$release" "$seed" "$beside" --repo "$REPOSITORY" --prerelease --title "$release" --target "$source_commit" \
