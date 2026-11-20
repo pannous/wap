@@ -1,4 +1,4 @@
-# Function values in the typing stage (core/analyze/types.wap): `x => x + 1` and a function's name as values. Each
+# Signature values in the typing stage (core/analyze/types.wap): `x => x + 1` and a function's name as values. Each
 # has a type of its own, fn<key, capture types…> (core/stage.wap function_value_type), naming the function a call of
 # the value calls, so that call is a direct call, typed for its arguments like any other (core/analyze/calls.wap).
 # A function value's own function, its λ, takes the value as its first parameter, a struct of what it captures.
@@ -13,6 +13,7 @@ use "../type_notation.wap"
 use "../../kernel/forms.wap"
 use "fits.wap"
 use "dispatch.wap"
+use "declarations.wap"
 
 # the names of a function value's own function and of its first parameter, the value itself
 LAMBDA_NAME = "λ"
@@ -29,11 +30,11 @@ function_value_typed(n: Node, parameters: Node, body: Node, s: TypingState, f: T
 	with_type_of(n, function_value_type(lambda.key, captures))
 }
 # the function of a function value, made once: named and placed where the value is written
-lambda_of(n: Node, parameters: Node, body: Node, s: TypingState) as Function := {
+lambda_of(n: Node, parameters: Node, body: Node, s: TypingState) as Signature := {
 	name = name_for(LAMBDA_NAME, n)
 	definition_keyed(place_key(name), s) ?? lambda_made(name, n, parameters, body, s)
 }
-lambda_made(name: Node, n: Node, parameters: Node, body: Node, s: TypingState) as Function := {
+lambda_made(name: Node, n: Node, parameters: Node, body: Node, s: TypingState) as Signature := {
 	lambda = refitted(Define(name, with_items(parameters, [name_for(CLOSURE_NAME, n)] + items_of(parameters)), body), n)
 	s.lambdas += [lambda]
 	function_added(lambda, s)
@@ -56,7 +57,7 @@ value_call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: Type
 	parts = function_value_parts(type) ?? refused(called, "this holds a ${type ?? "nothing"}, no function to call")
 	key = text(parts#1)
 	definition = definition_keyed(key, s) ?? refused(called, "the typing stage found no function of this value")
-	name = declared_name(written_name(definition.definer))
+	name = declared_name(written_name(define_of(definition, s)))
 	given = if is_lambda_key(key, s) then [called] + arguments else arguments
 	call_typed(n, with_fact(with_binding(name, DefinitionKind.Function), DEFINED_AT, name), given, s, f, expected)
 }
@@ -79,7 +80,7 @@ as_function_type(value: Node, wanted: Node, s: TypingState) as Node? := {
 	typed = value_function_typed(parts.parameters, own, s) ?? return ø
 	if not same_types(typed.arguments[#typed.arguments - #parts.parameters ..], parts.parameters) { return shape_taking(value, typed, parts, s, wanted) }
 	if typed.result == ø or not conversion(typed.result, parts.result, s) in STATIC_CONVERSIONS { return ø }
-	with_fact(with_fact(with_type_of(value, wanted), FUNCTION_VALUE, own), DEFINED_AT, declared_name(signed_name(typed)))
+	with_fact(with_fact(with_type_of(value, wanted), FUNCTION_VALUE, own), DEFINED_AT, declared_name(signed_name(typed, s)))
 }
 # A function taking shapes where one taking their types is wanted, `pair_name(pair: Pair)` where `(Node) -> text` is:
 # a function the typing stage writes once, taking those types and calling it, so each shape is checked where the value
@@ -90,8 +91,8 @@ shape_taking(value: Node, typed: TypedFunction, parts: FunctionType, s: TypingSt
 	name = name_once("${word}(${parts.parameters.map(each => text(each)).join(", ")})", value, s)
 	made = definitions_named(text(name), s)
 	reads = parameters_of(name, parts.parameters)
-	taking = if made is empty then dispatcher_made(name, reads, named_call(word, [definition], reads, name), [typed.result], s) else made#1
-	called = declared_name(written_name(taking.definer))
+	taking = if made is empty then dispatcher_made(name, reads, named_call(word, [definition], reads, name, s), [typed.result], s) else made#1
+	called = declared_name(written_name(define_of(taking, s)))
 	as_function_type(with_type_of(with_fact(placed_like(symbol(text(called)), value), DEFINED_AT, called), function_value_type(place_key(called), [])), wanted, s) ?? refused(value, "the function written for these shapes takes others")
 }
 # the function type a function value's written signature gives, `(int) -> int` of `inc(a: int) as int`: ø unless
@@ -99,7 +100,7 @@ shape_taking(value: Node, typed: TypedFunction, parts: FunctionType, s: TypingSt
 written_function_type(type: Node?, s: TypingState) as Node? := {
 	key = text((function_value_parts(type) ?? return ø)#1)
 	definition = definition_keyed(key, s) ?? return ø
-	taken = parameters_in(definition.definer)[(if is_lambda_key(key, s) then 1 else 0) ..]
+	taken = parameters_in(define_of(definition, s))[(if is_lambda_key(key, s) then 1 else 0) ..]
 	result = definition.result ?? return ø
 	types: list<Node> = []
 	for parameter in taken {
