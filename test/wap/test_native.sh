@@ -16,9 +16,9 @@ set_word(4, 6)
 written = fd_write(1, 0, 1, 8)
 set_word(8, written)')" "Hello"
 # a C function the program imports, its pointer an address in the program's memory
-check "a native program calls C" "$(native_ran strlen 'strlen(s: pointer): int := prim foreign("c", "strlen", s)
+check "a native program calls C" "$(native_ran strlen 'strlen(s: int32): int := prim foreign("c", "strlen", s)
 exit(code: int) := prim proc_exit(code)
-name(): pointer := prim data_address("wap")
+name(): int32 := prim data_address("wap")
 exit(strlen(name()))' >/dev/null; echo $?)" "3"
 # a statement's value that is dropped is no value: an if or a match as a statement boxes nothing, so no GC type
 check "a native program with an if and a match as statements" "$(native_ran dropped 'exit(code: int) := prim proc_exit(code)
