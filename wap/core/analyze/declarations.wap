@@ -18,6 +18,7 @@
 use "../errors.wap"
 use "../rules/lowering.wap"
 use "../stage.wap"
+use "../bindings.wap"
 use "definers.wap"
 use "../../kernel/forms.wap"
 
@@ -27,13 +28,8 @@ USE_WORD = "use"
 
 declared_program(program: Node) as Node := {
 	ids = definers_of(program)
-	statements = top_level_statements(program).map(statement => declared_statement(names_identified(statement, ids)))
-	declarations: list<Node> = []
-	for statement in statements {
-		declares = fact_of(statement, DECLARES)
-		if declares != ø { declarations += [declares] }
-	}
-	declared = with_fact(refitted(rebuilt_statements(program, statements), program), DECLARATIONS, List(declarations, Bracket.Square, Separator.Comma))
+	statements = top_level_statements(program).map(statement => names_identified(statement, ids))
+	declared = refitted(rebuilt_statements(program, statements), program)
 	with_definers(with_fact(declared, USES, List(used_files(program).map(file => Text(file)), Bracket.Square, Separator.Comma)), ids)
 }
 # the files a program's `use` lines name, each once however often named, resolved against its own folder: plain
@@ -78,42 +74,44 @@ modules_reached(code: Node, read_file: function, reached: Reached) := {
 		}
 	}
 }
-# A declared module: its file, its code, the files its `use` lines name and the records of the functions it declares
+# A declared module: its file, its code, the files its `use` lines name and the records of what it declares
 class Module { file: text; code: Node; uses: list<text>; signatures: list<Signature> = [] }
 # a declared program as a module
 module_declared(code: Node) as Module := Module(file_of(code) ?? "", code, uses_of(code), signatures_of(code))
 
-# A function as every stage after declare knows it, its one record: its name, the key of its place, its parameters'
-# types, its written result, its module's file, and whether typing has shaped its types. It holds no body: a stage
-# finds the definition as it is now by the key (core/analyze/types.wap define_of)
-class Signature { name: text; key: text; parameters: list<Node?>; result: Node?; module: text; shaped: bool = no }
+# What a program's top level declares, as every stage after declare knows it, its one record: its name, the key of its
+# place, its kind (a function, a value or a record), the name that defines it, its parameters' types, its written
+# result, its module's file, and whether typing has shaped its types. It holds no body: a stage finds the definition as
+# it is now by the key (core/analyze/types.wap define_of). record: a record's own Record node, held only because its
+# readers take its fields and cases from it today, never a second copy of its code
+class Signature { name: text; key: text; kind: DefinitionKind; definer: Node; parameters: list<Node?> = []; result: Node? = ø; module: text = ""; record: Node? = ø; shaped: bool = no }
 # the record of a function named, with its parameters and its written result
-signature_from(name: Node, parameters: list<Node>, result: Node?) as Signature := Signature(text(name), place_key(name), parameters.map(type_given), result, file_of(name) ?? "")
-# the records of the functions a declared program declares
-signatures_of(program: Node) as list<Signature> := declarations_of(program).filter(declares_function).map(declaration => signature_from(declaration_name(declaration), declared_parameters(declaration), declared_result(declaration)))
-# a parameter's type, written or given by an earlier typing: typing a typed program again changes nothing
-type_given(parameter: Node) as Node? := declared_type(parameter) ?? fact_of(declared_name(parameter), TYPE)
+signature_from(name: Node, parameters: list<Node>, result: Node?) as Signature := Signature(text(name), place_key(name), DefinitionKind.Function, name, parameters.map(type_given), result, file_of(name) ?? "")
+# the record of what a top-level statement declares: a function `f(a, b) := …`, a value `x = 1`, a class or an enum
+signature_declared(declaration: Node) as Signature := {
+	name = declaration_name(declaration)
+	if declares_function(declaration) { return signature_from(name, declared_parameters(declaration), declared_result(declaration)) }
+	record = if declaration is Record then declaration else ø
+	Signature(text(name), place_key(name), if record == ø then DefinitionKind.Global else DefinitionKind.Record, name, module: file_of(name) ?? "", record: record)
+}
+# the records of what a declared program's top level declares, in the order written
+signatures_of(program: Node) as list<Signature> := top_level_statements(program).filter(statement => declaration_of(statement) != ø).map(statement => signature_declared(declaration_of(statement)!))
+# the top-level statement of a program that defines what a record describes
+defining_statement(program: Node, signature: Signature) as Node? := top_level_statements(program).find(statement => declaration_of(statement) != ø and place_key(declaration_name(declaration_of(statement)!)) == signature.key)
+# the name a declaration declares
 declaration_name(declaration: Node) as Node := match declaration {
 	Key(name, Op.Colon, signature) => name
 	Record(name, fields, variants) => name
 	_ => refused(declaration, "a module declares a name with its signature, or a type")
 }
-# the modules' code, in their order
-codes_of(modules: list<Module>) as list<Node> := modules.map(module => module.code)
+# a parameter's type, written or given by an earlier typing: typing a typed program again changes nothing
+type_given(parameter: Node) as Node? := declared_type(parameter) ?? fact_of(declared_name(parameter), TYPE)
 # the module of that file among the declared ones
 module_of(file: text, modules: list<Module>) as Module := {
 	for module in modules { if module.file == file { return module } }
 	refused(Text(file), "this module was never declared")
 }
 
-# what a declared program declares, `name: signature` each
-declarations_of(program: Node) as list := fact_items(program, DECLARATIONS)
-
-# a statement with what it declares, if it defines a name
-declared_statement(statement: Node) as Node := {
-	declaration = declaration_of(statement)
-	if declaration == ø then statement else with_fact(statement, DECLARES, declaration)
-}
 
 # name: signature of a definition, ø of any other statement: `f(a, b) := …`, `n := 1`, `x = 1` as operated code reads
 # them, (Call := f(a, b) …), (Call = x 1); a class or an enum declares itself, its cases as lowering writes them

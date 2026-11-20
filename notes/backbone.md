@@ -52,7 +52,7 @@ lead first, as a change of this table.
 | read | core/parse/reader.wap | wap-reader | text | notation |
 | operators | core/parse/operators.wap, table in the preload | wap-reader | notation | operated |
 | shape rules (stage 1) | core/rules/, preload/sugar/ | wap-reader | operated | surface |
-| declare | core/analyze/declarations.wap | wap-binding | surface | declared, and Module.signatures: one Signature per function |
+| declare | core/analyze/declarations.wap | wap-binding | surface | declared, and Module.signatures: one Signature per function, value and record |
 | lower | core/rules/lowering.wap | wap-reader | declared | kernel |
 | bind | core/analyze/scope.wap | wap-binding | kernel | bound kernel |
 | type | core/analyze/types.wap | wap-binding | bound kernel | typed kernel |
@@ -91,11 +91,11 @@ The languages, each a set of Node shapes:
   `global` are rules (preload/sugar/).
 - **surface:** any warp: operated, with the spellings of stage 1 rewritten (`for`, `unless`, `a if c` …). What remains
   is either kernel or needs a declaration to decide.
-- **declared:** surface, unchanged, plus facts: each top-level definition's `declares`, `name: signature` (`f: [a, b]`,
-  a value's signature ø), and on the program `declarations`, the list of them, and `uses`, the files its `use "path"`
-  statements bring in (core/analyze/declarations.wap). Beside the code, the Module holds each function's one record,
-  its Signature (name, key, parameter types, written result, module), which typing holds by key and reads the
-  definition as it is now through (core/analyze/types.wap define_of). Each used file is declared once, after the files it uses; a
+- **declared:** surface, unchanged, plus the fact `uses` on the program, the files its `use "path"` statements bring
+  in (core/analyze/declarations.wap). Beside the code, the Module holds one record of each top-level function, value
+  and record, its Signature (name, key, kind, defining name, parameter types, written result, module), which stage 2,
+  binding and modules read, and which typing holds by key and reads the definition as it is now through
+  (core/analyze/types.wap define_of). Each used file is declared once, after the files it uses; a
   program is bound inside the preload's declarations and those of the modules it uses itself, and the modules'
   statements run before its own. Modules may use each other: a cycle is cut where it closes, so of two such modules
   the one reached first runs last. A used `.wasm` that wap compiled is declared from its wap section, the module's
@@ -560,6 +560,9 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   `declarations` list, which stage-2 rules (rules/matcher.wap) and modules.wap still read. Reason: step 4 moves its
   readers one phase at a time, typing first. Paid off in phase 2: stage 2 and modules read the Signatures, and
   DECLARES/DECLARATIONS go.
+  **Paid 2026-11-20 (function-record-single phase 2):** one Signature per top-level function, value and record;
+  stage 2, binding and modules read Module.signatures, and the `declares`/`declarations` facts are gone. Two modules
+  defining one word alike now compare parameter types as types (fits.wap same_types), no longer as text.
 
 - **A rule's output names resolve where the rule fires** (preload/sugar/conditions.wap `x != ø` → `not missing(x)`).
   Reason: a template's words are bound in the program's scope, so a local named `missing` hid the preload's predicate
