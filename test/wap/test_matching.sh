@@ -85,4 +85,9 @@ counted(n: Node) as int := match n {
 	_ => 0
 }
 print text(counted(Duo(symbol("a"), List([symbol("x"), symbol("y")], Bracket.Square, Separator.Comma))) + counted(symbol("b")))')" "2"
+# a parameter of a declared pattern's type reads its parts by their holes' names (wiki/pattern-matching.md "Named
+# patterns as types")
+check "a named pattern's parts read by name" "$(ran pattern_parts 'pattern Pair = [$a: int, $b: int]
+area(r: Pair) := r.a * r.b
+print text(area(Pair(3, 4)))')" "12"
 exit $((failures > 0))
