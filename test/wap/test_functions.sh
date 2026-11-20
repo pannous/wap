@@ -276,4 +276,13 @@ check "an if giving only ø beside an early return of an int, in a function givi
 print(text(f(2)))
 print(text(f(1)))')" "2
 ø"
+check "a generic function's instance chooses the overload its types make most specific: map<text, V> over map<K, V>" "$(ran instance_specific 'which(m: map<K, V>) as text := "any keys"
+which(m: map<text, V>) as text := "text keys"
+named(key: K, of: map<K, V>) as text := which(of)
+m: map<text, int> = {}
+k: text = "a"
+print(named(k, m))
+n: map<int, int> = {}
+print(named(1, n))')" "text keys
+any keys"
 exit $((failures > 0))

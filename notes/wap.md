@@ -130,6 +130,7 @@ wap/
     operators.wap             the operator table: precedence groups and their relations, operators, aliases
     nodes.wap                 warp's Node, case for case as core/node.warp declares it, and the words over it
     lists.wap                 list words over function values: map, filter, contains …
+    maps.wap                  map words: a key's value, set, has, remove; text keys found by their hash
     texts.wap                 text words over a text's UTF-8 bytes
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
@@ -150,6 +151,7 @@ wap/
                               (units 3km, durations 2 weeks, inline html … as the forms arrive)
     native/                   a wap program built to a native executable (build.sh: wasm2c, cc, glue.awk, main.c)
       c.wap                   libc's and wasmtime's C functions, foreign primitives of the module c
+      compiler.wap            wap.wasm found beside the executable, its machine code kept beside it by its hash
       console.wap             `wap` alone: each line a module, linked to the earlier lines' kept instances
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
