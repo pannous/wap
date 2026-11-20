@@ -56,11 +56,11 @@ emitted(program: Block, file: text) as WasmModule := {
 	m = WasmModule()
 	p = Program(m, file)
 	for name in host_calls(program) { p.host[name] = imported(m, WASI, name, HOST_FUNCTIONS[name]#1, HOST_FUNCTIONS[name]#2) }
-	added_tag(m, [text_layout(m)])
+	for call in foreign_calls(program) { foreign_imported(call, p) }
 	p.records = added_records(Records(), match program { Block(statements) => statements })
 	f = Frame()
 	body = code(program, p, f)
-	exported(m, "main", FUNCTION_KIND, function_of(m, [], Code([], uncaught_ended(dropped(body), p)), f))
+	exported(m, "main", FUNCTION_KIND, function_of(m, [], Code([], if #m.tags == 0 then dropped(body) else uncaught_ended(dropped(body), p)), f))
 	functions_exported(match program { Block(statements) => statements }, p)
 	exported(m, "memory", MEMORY_KIND, 0)
 	m
@@ -138,7 +138,7 @@ code(form: Node, p: Program, f: Frame) as Code := match form {
 	Get(subject, key) => if fact_of(form, DEFINED_AT) != ø then call_code(form, form, [subject], p, f) else read_code(layout(form, p), place_of(subject, key, p, f))
 	Record(name, fields, variants) => Code([], [])
 	Key(head, Op.None, List(items, Bracket.Curly, separator)) => instance_code(form, record_named(p.records, head) ?? refused(head, "an instance of a type the program declares no record for"), items, p, f)
-	Prim(operation, arguments) => primitive_code(form, operation, arguments.map(argument => code(argument, p, f)), p)
+	Prim(operation, arguments) => if text(operation) == FOREIGN then foreign_code(form, p, f) else if text(operation) == DATA_TEXT then data_code(form, p) else primitive_code(form, operation, arguments.map(argument => code(argument, p, f)), p)
 	Fn(parameters, body) => function_value_code(form, p, f)
 	Symbol(name) => name_code(form, p, f)
 	_ => literal(form, p.m) ?? refused(form, "not a kernel form")
@@ -170,13 +170,13 @@ try_code(form: Node, body: Node, handler: Node, p: Program, f: Frame) as Code :=
 		error = slotted(f, items_of(parameters)#1, known_layout(symbol(NODE_TYPE), p.m, p.records))
 		instead = arm_code(form, handling, p, f)
 		type = typed_layout(form, p)
-		caught = BLOCK + text_layout(p.m) + try_table(block_type(type), RAISED_TAG, 0, kept(tried, type)) + instruction(BRANCH, [1]) + END
+		caught = BLOCK + text_layout(p.m) + try_table(block_type(type), raised_tag(p), 0, kept(tried, type)) + instruction(BRANCH, [1]) + END
 		Code(type, BLOCK + block_type(type) + caught + instruction(CALL, [helper(p, "error_node", error_node_function)]) + local_set(error.index) + kept(instead, type) + END)
 	}
 	_ => refused(handler, "a Try's handler is a function written in place, `error => …`")
 }
 # the program's code, a raise no Try caught written and the program ended
-uncaught_ended(body: list<int>, p: Program) as list<int> := BLOCK + text_layout(p.m) + try_table(VOID_BLOCK, RAISED_TAG, 0, body) + RETURN + END + uncaught(p)
+uncaught_ended(body: list<int>, p: Program) as list<int> := BLOCK + text_layout(p.m) + try_table(VOID_BLOCK, raised_tag(p), 0, body) + RETURN + END + uncaught(p)
 # a structured instruction's type: the value it leaves, or none
 block_type(type: list<int>) as list<int> := if valued(type) then type else VOID_BLOCK
 # a part's code where its choice has the type: its value kept, or dropped when the choice has none
