@@ -545,3 +545,10 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **stage.wap without_fact rebuilds the Meta itself**, a copy of nodes.wap with_attribute's layout, because the
   compiler may use only the seed's preload words. Paid off at the next seed refresh: nodes.wap gets one
   without_attribute that with_attribute uses too, and without_fact calls it.
+
+- **calls.wap still names two preload words, `#` (PLACE_WORD) and `!` (REQUIRED_WORD)**: typing writes a call of
+  `#` for an item or an entry read from a value that is no list (analyze/data.wap), and of `!` where a condition found
+  an optional present (analyze/types.wap as_found). Reason: both are chosen by the type typing finds, and `!` has no
+  spelling in the source to rewrite: a typed rule's hole can't ask for a value that is no list, and narrowing writes
+  the `!` itself. Paid off when a typed hole can ask for "not this type" and narrowing marks a found read that a
+  preload rule rewrites.
