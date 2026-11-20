@@ -344,10 +344,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   program without naming the user's line. Refusing it by name would need bounds checks the slice's caller writes, for
   example the types module's `slice` taking a Range and raising when it does not fit.
 
-- **Stage 3 retypes the whole program after each round** (wap/core/rules/typed.wap): a typed rule's output is bound
-  and typed again from scratch, under a limit of rounds. Simple, and the output is checked like any code; paid off by
-  a per-subtree re-entry if the cost shows. A rule's new call of a function without parameter types finds only the
-  versions typing made before, not a new one. Paid (typed-rules-ordering): rules fire in the type walk.
 - **The class rule's helper words are ordinary words** (wap/types/sugar/records.wap `member_as "field"`,
   `member_of`, `shown_case`): a program writing them is rewritten too. Words only rule files may write need a private
   word in the reader; paid off when a program meets one.
@@ -374,12 +370,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   each one: it reads the functions' signatures, but an `if` still joins its arms' types and a primitive takes its
   operands' emitted layouts. Bends "meaning is typed" (the types are there, but read late). Paid off when the emitter
   reads each form's `type` fact.
-- **A written result type is not declared** (wap/core/analyze/declarations.wap): `f(a): int := …` declares
-  `f: [a]`, so only the typing stage knows the result. Paid off when signature rules need it.
-  **Paid 2026-11-20 (function-record-single):** the record (core/bindings.wap Signature) holds the written result.
-- **Function values and captures are refused by the typing stage** (wap/core/analyze/types.wap), as by the emitter.
-  Paid off with closures.
-  **Paid 2026-11-20 (checked):** `n = 2; add = x => x + n; add(3)` gives 5.
 - **An int and a float mixed are refused** (`1 + 2.5`: no `+` takes (int, float); wap/types/prelude.wap). warp
   gives 3.5. Reason: the overloads are chosen by exact types, and no conversion of an int to a float where one is
   wanted exists yet. Paid off by that conversion, in typing, not by mixed overloads.
@@ -391,10 +381,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   (core/analyze/declarations.wap modules_used): of two modules that use each other, the one reached first runs last,
   so a statement of the other reading its variable sees it unset. Should be refused at that read, like the late-read
   rule for globals; functions are unaffected. Reason: the late-read check sees one program, not the module order.
-- **`x.f` finds only functions written in warp, not host words** (wap/core/analyze/types.wap part_typed): the key is
-  text, so typing looks f up among the definitions it holds, and a library word declared by signature (`print`) is
-  not one of them; `x.f(y)` is a plain call and finds both. Paid off when host words are definitions typing holds.
-  **Paid 2026-11-20 (checked):** `t = "hi"; t.print` prints hi.
 - **Ints have no `÷` or `%` yet** (wap/types/floats.wap holds only the truncated quotient and rem, which programs do
   not see): warp's `÷` and its floored `%` (`-7 % 2` is 1) are to be defined on top of them, and `quotient` is warp's
   exact division (3.5), so the truncated one keeps that name hidden. Paid off when the types module defines `÷` and `%`.
@@ -417,9 +403,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   `receiver_fields`): a method of a types module or used module's class still writes `self.c`, and a function value inside
   a method that reads a bare field is not given self as a capture. Paid off when the binding sees the library's
   Records beside its declarations, and a field's capture captures its receiver.
-- **A one-letter literal key on a map read fails** (wap/core/analyze/data.wap): `m#"b"` gives the key as a char, so
-  the wasm does not validate; `m#"bb"`, `m["b"]` and `m#k` work. Edge case, no wap source writes it.
-  **Paid 2026-11-20 (checked):** `m = {"b": 2}; m#"b"` gives 2.
 - **any compares other references by identity:** inside an `any`, refs other than boxes and texts compare by
   identity (a record compared directly compares by fields); by type via dispatch, as show does, when code needs it.
 - **A rewrite that loops forever hangs the compiler instead of being refused** (wap/core/rules/stages.wap): letting
@@ -476,10 +459,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   types/lists.wap with a test_lists line. Old warp no longer builds wap's tests (wap-facts-replace): the tests'
   compiler starts from the seed beside the seed's own types module, which lacks `compact` too, so the move waits for a seed
   whose types module holds it.
-- **A shape's value is named a Node before it joins a list of Nodes** (wap/core/analyze/matching.wap shape_missing,
-  list_missing): `[Call(…)] + inner` binds `+`'s T to Call and to Node, which bound_as refuses, so the witness is
-  written `shape: Node = Call(…)` first. Paid off when a letter bound to a shape and to the type it narrows binds that type.
-  **Paid 2026-11-20 (census-shape-join):** a letter bound to a shape and its base binds the base.
 - **Helpers named apart from same-named ones** (wap/core/analyze: `within` became part_of beside names.wap's scope
   `within`, `valued` value_bearing beside the emitter's): a
   program's definitions dispatch across all its modules, and a Node parameter dispatches as any, so analyze's
@@ -518,20 +497,7 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   the `!` itself. Paid off when a typed hole can ask for "not this type" and narrowing marks a found read that a
   types rule rewrites.
 
-- **A Signature's parameters are three parallel lists, `parameters`, `names` and `defaults`, indexed alike**
-  (core/bindings.wap). Reason: export names (wiki/wasm-representation.md "Export names") added the names and defaults
-  beside the types without reshaping every reader. Paid off the next time a reader of the record is touched: one
-  `list<Parameter>` of name, type and default. **Paid 2026-11-20 (names and defaults left the record):** the export
-  name reads them from the definition's parameter nodes; the record holds only the types.
 
-- **Two records of a definition until phase 2 moves stage 2 and modules to Signature** (core/analyze/declarations.wap):
-  declare writes a function's Signature into Module.signatures beside its `declares` fact and the program's
-  `declarations` list, which stage-2 rules (rules/matcher.wap) and modules.wap still read. Reason: step 4 moves its
-  readers one phase at a time, typing first. Paid off in phase 2: stage 2 and modules read the Signatures, and
-  DECLARES/DECLARATIONS go.
-  **Paid 2026-11-20 (function-record-single phase 2):** one Signature per top-level function, value and record;
-  stage 2, binding and modules read Module.signatures, and the `declares`/`declarations` facts are gone. Two modules
-  defining one word alike now compare parameter types as types (fits.wap same_types), no longer as text.
 
 - **A rule's output names resolve where the rule fires** (types/sugar/conditions.wap `x != ø` → `not missing(x)`).
   Reason: a template's words are bound in the program's scope, so a local named `missing` hid the types module's predicate
