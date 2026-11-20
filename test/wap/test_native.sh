@@ -20,6 +20,12 @@ check "a native program calls C" "$(native_ran strlen 'strlen(s: pointer): int :
 exit(code: int) := prim proc_exit(code)
 name(): pointer := prim data_address("wap")
 exit(strlen(name()))' >/dev/null; echo $?)" "3"
+# a statement's value that is dropped is no value: an if or a match as a statement boxes nothing, so no GC type
+check "a native program with an if and a match as statements" "$(native_ran dropped 'exit(code: int) := prim proc_exit(code)
+c = yes
+if c { 5 }
+match 3 { 3 => 1; _ => ø }
+exit(7)' >/dev/null; echo $?)" "7"
 # the native wap (driver.wap, built by wap): `wap <program>` compiles with the wap.wasm beside it and runs the module
 native_wap="$stage/bin/wap"
 mkdir -p "$stage/bin/wap-seed" && cp -R "$(dirname "$compiler")/types" "$(dirname "$compiler")/kernel" "$stage/bin/wap-seed/" && cp "$compiler" "$stage/bin/wap-seed/wap.wasm"

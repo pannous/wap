@@ -9,31 +9,31 @@ reason (to warp-interviewer) instead of quietly obeying or breaking it.
 wap: a data format and WebAssembly programming language, warp's successor. Its specification is ./wiki.
 https://github.com/pannous/wap
 - The compiler is written in wap and compiles itself (wap/compiler.wap): The native warp runs the modules (soon wap too)
-- The seed: wap.wasm beside the warp binary, with the preload and kernel it reads beside it (published as
+- The seed: wap.wasm beside the warp binary, with the types module and kernel it reads beside it (published as
   pre-releases wap-seed-<date>-<sha8>, named by wap-seed.lock; scripts/refresh-seed.sh refreshes it). The tests'
-  compiler is built from it (test/wap/compile.sh): the seed beside its own preload makes wap0, wap0 beside the tree's
-  preload makes wap1.
-- The seed rule: the compiler's source uses only preload words the seed's preload holds, and a new rule or syntax form
-  appears in the preload only where the source does not use it; a change that needs more lands after a seed refresh.
+  compiler is built from it (test/wap/compile.sh): the seed beside its own types module makes wap0, wap0 beside the tree's
+  types module makes wap1.
+- The seed rule: the compiler's source uses only types words the seed's types module holds, and a new rule or syntax form
+  appears in the types module only where the source does not use it; a change that needs more lands after a seed refresh.
 - Throwaway programs in the session scratchpad or data/<topic>/, never the repo; every kept test in test/wap/.
 
 ## Layers (notes/wap.md "Layers", notes/backbone.md)
 - **wap/kernel/**: the kernel forms (forms.wap) and the primitives, the emitter's whole input.
 - **wap/core/**: the machinery only, one folder per stage: parse/, rules/, analyze/, emit/, and the walker
   (stage.wap), the pipeline and the errors. core knows no library word by name (user 2026-11-20).
-- **wap/preload/**: the language every program gets, in plain wap: lists, texts, numbers, nodes, the operator table
+- **wap/types/**: the language every program gets, in plain wap: lists, texts, numbers, nodes, the operator table
   (operators.wap) and the sugar rules (sugar/). known
-  <!-- todo (card preload-rename-types) ^^ rename to types? -->
-- A feature is a preload function or a rule in sugar/ before it is core code; a core diff that adds names of
+  <!-- DONE (card preload-rename-types) ^^ rename to types? -->
+- A feature is a types function or a rule in sugar/ before it is core code; a core diff that adds names of
   a domain is the sign a mechanism is missing: note it.
-  <!-- todo (card move-sugar) move preload/sugar to sugar/  -->
+  <!-- todo (card move-sugar) move types/sugar to sugar/  -->
 - wap/core and wap/kernel are semi-frozen: every change there goes to warp-interviewer first. A new feature goes
   into wap/extensions/ (first case: the native binary).
 
 ## How it compiles (notes/backbone.md "Stage languages")
 read = parse → shape rules (stage 1) → declare → declaration rules (stage 2) → lower → bind → type, with the kind rules
 (stage 3) firing on each node as typing writes it → elaborate → emit → encode. 
-A stage writes facts on nodes (core/stage.wap), never new holes. The Node: wap/preload/nodes.wap.
+A stage writes facts on nodes (core/stage.wap), never new holes. The Node: wap/types/nodes.wap.
 <!-- todo (card move-node): move to wap/nodes.wap -->
 
 ## Build and test
