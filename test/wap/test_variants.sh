@@ -87,4 +87,12 @@ check "an enum's value as text is its case's name" "$(ran case_text 'enum Coin {
 print text(Coin.Dime)
 print "${Bracket.Round} ${Coin.Penny}"')" "Dime
 Round Penny"
+# a case with a spelling converts to that text and back and equals it; a case without one is spelled by its name
+# (wiki/enum.md "Cases with spellings")
+check "a case is spelled by its text, or else its name" "$(ran spelled 'enum Level { Error = "error", Warning = "warning", Hint }
+print "${Level.Warning as text} ${Level.Hint as text}"
+print text("error" as Level)
+if Level.Error == "error" then print "equal" else print "unequal"')" "warning Hint
+error
+equal"
 exit $((failures > 0))
