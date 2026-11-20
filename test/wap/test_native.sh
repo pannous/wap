@@ -29,4 +29,7 @@ printf '%s\n' 'print "Hello"' >"$stage/hello.wap"
 check "wap hello.wap prints Hello" "$(cd "$stage" && "$native_wap" hello.wap 2>&1)" "Hello"
 printf '%s\n' 'x = 40000000000' 'x + 2' >"$stage/value.wap"
 check "a native wap run shows the program's value" "$(cd "$stage" && "$native_wap" value.wap 2>&1)" "40000000002"
+# a program named by an absolute path through a link, which WASI alone would not follow
+mkdir -p "$stage/real" && cp "$stage/hello.wap" "$stage/real/" && ln -s "$stage/real" "$stage/linked"
+check "a native wap run of a program through a link" "$("$native_wap" "$stage/linked/hello.wap" 2>&1)" "Hello"
 exit $((failures > 0))
