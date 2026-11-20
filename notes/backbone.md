@@ -309,64 +309,20 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 
 ## Debts
 
-(Each compromise against a principle, with its reason. Empty at the start.)
-
+open debts are `# DEBT:` comments at their code, `grep -rn 'DEBT:' wap/`
 
 - **`use "m.wasm"` is not read yet** (card wasm-module-import, wiki/wasm-representation.md): a compiled module can't
   be used as its source is. Reason: paused for the self-build census (user 2026-11-19). Branch wasm-module-import has
   the exports and the `wap` section of header lines; the reader, the body-less `export` declaration and the import
   are left (card note). Paid off once wap compiles itself.
-
-
-
-
-
-
-
 - **Stage 3 serves only the rules programs write** (decision hole-types): no rewrite of wap's own moves into it. The
   char read as a text depends on the type its place wants (binding's conversion), `x is w` on what w means (scope);
   a typed rule sees only its hole's type.
-
 - **Glued names read as operators** (`a-b` is `(Call - a b)`). Kebab names are stage 2 by notes/reader.md, but the
   operator stage decides the glued run first, before declarations say whether `a-b` is a name. Paid off when the
   stage leaves a glued run of declared-name candidates for stage 2, or the user drops kebab names.
-
-
-
-
-
-- **A used module's functions are emitted even when nothing calls them** (wap/compiler.wap: a module's bound statements
-  go first in the program's Block), while the types module's uncalled definitions are left out. Bends "smaller and faster".
-  Reason: a module is code whose statements must run, so it joins the program whole. Paid off when typing leaves out
-  the module definitions nothing calls, as it does the types module's.
-
-- **Ints have no `÷` or `%` yet** (wap/types/floats.wap holds only the truncated quotient and rem, which programs do
-  not see): warp's `÷` and its floored `%` (`-7 % 2` is 1) are to be defined on top of them, and `quotient` is warp's
-  exact division (3.5), so the truncated one keeps that name hidden. Paid off when the types module defines `÷` and `%`.
-
-
-
-
 - **any compares other references by identity:** inside an `any`, refs other than boxes and texts compare by
   identity (a record compared directly compares by fields); by type via dispatch, as show does, when code needs it.
-
-
-
-- **The literals a template writes are named twice** (wap/kernel/forms.wap literal_named): `True()`, `False()` and
-  `Empty()` are spelled out beside types/nodes.wap's declaration of Node's fieldless cases. The general rule is that
-  a template's glued call of an enum's fieldless case builds that case. Reason: templates are built before the
-  types module's Records are declared, so they can't look the cases up. Paid off when templates see the declared Records:
-  the table goes for that lookup.
-
-
-
 - **A named function is refused where a function type is written for a variable** (found 2026-11-19, off-census):
   `g: (int) -> int = inc` says it gives fn<"… inc">, while the same `inc` in a `map<text, (int) -> int>` literal is
   taken. Paid off when a function's value fits a written function type wherever it is given.
-
-
-
-
-
-
-
