@@ -28,7 +28,7 @@ match 3 { 3 => 1; _ => ø }
 exit(7)' >/dev/null; echo $?)" "7"
 # the native wap (driver.wap, built by wap): `wap <program>` compiles with the wap.wasm beside it and runs the module
 native_wap="$stage/bin/wap"
-mkdir -p "$stage/bin/wap-seed" && cp -R "$(dirname "$compiler")/types" "$(dirname "$compiler")/kernel" "$stage/bin/wap-seed/" && cp "$compiler" "$stage/bin/wap-seed/wap.wasm"
+mkdir -p "$stage/bin/wap-seed" && (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$stage/bin/wap-seed/") && cp "$compiler" "$stage/bin/wap-seed/wap.wasm"
 wasmtime_library="$(cd -P "$(dirname "$(command -v "$warp")")/lib" && pwd -P)"
 WARP=$warp "$tree/wap/extensions/native/build.sh" "$compiler" "$tree/wap/extensions/native/driver.wap" "$native_wap" -L"$wasmtime_library" -lwarp_wasmtime -Wl,-rpath,"$wasmtime_library" >/dev/null 2>&1
 printf '%s\n' 'print "Hello"' >"$stage/hello.wap"
