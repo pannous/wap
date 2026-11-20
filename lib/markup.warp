@@ -1,0 +1,916 @@
+// The standard library module markup (card web-ssr, notes/web_framework.md "Built sites"): `use markup` (not `html`,
+// which samples/web/html.warp would shadow). to_html(value) is the HTML of a markup value,
+// `div{ class:"box" h1{"Hi"} }` → <div class="box"><h1>Hi</h1></div>, any other value as escaped text. Written in warp, so a page renders itself: the same function makes a built site's index.html at build
+// time and its updates in the browser (page·html). An element is an Html, what markup written in a markup scope makes
+// (extensions/markup_values.warp); inside it a key named after an attribute with a plain value is an attribute
+// (`style: { fontSize: 12 }` inline CSS), anything else a child in order.
+use html
+use host_io
+// Markup is written inside html{…}, in a place typed html (`f(): html := b{"bold"}`) or as an argument for a
+// parameter typed html (to_html(div{…})) (decisions markup-needs-html, html-value): html{…} brings this module without
+// its use, the one tag of the global list; there each element is an Html, anywhere else a tag-named key is data,
+// `{p: {c: 1}}` stays {p: {c: 1}} beside a page
+global html_scopes = ["html"]
+type html = any
+// an element: its pair as written, `div: { class: "box" … }` (decision html-value: a cheap class, no mark)
+class Html {
+	element: any
+	// its HTML wherever it shows: the value shown, print, text(h), "$h"
+	format as text := to_html(this)
+}
+// an Html's pair, any other value as it is
+html_pair(value: any) := if value is Html then value.element else value
+html_elements = ["html", "head", "body", "title", "meta", "link", "style", "script", "base",
+	"header", "footer", "main", "nav", "section", "article", "aside", "div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6",
+	"a", "em", "strong", "b", "i", "u", "small", "code", "pre", "blockquote", "br", "hr", "img", "figure", "figcaption",
+	"ul", "ol", "li", "dl", "dt", "dd", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption",
+	"form", "label", "input", "button", "select", "option", "textarea", "fieldset", "legend",
+	"canvas", "svg", "video", "audio", "source", "iframe", "details", "summary", "dialog", "template", "slot", "js"]
+// elements whose content is their own language as written (JavaScript, CSS), not escaped text
+html_raw_text_elements = ["script", "style"]
+// elements without content or closing tag
+html_void_elements = ["br", "hr", "img", "input", "meta", "link", "base", "source", "col"]
+html_attributes = ["class", "id", "href", "src", "alt", "title", "style", "type", "name", "value", "for", "rel", "charset",
+	"content", "lang", "dir", "width", "height", "placeholder", "action", "method", "target", "disabled", "checked",
+	"selected", "readonly", "required", "multiple", "autofocus", "min", "max", "step", "rows", "cols", "colspan", "rowspan",
+	"role", "tabindex", "hidden", "download", "label", "media"]
+// attributes that are present or absent: `checked: done`
+html_boolean_attributes = ["checked", "disabled", "selected", "readonly", "required", "hidden", "multiple", "autofocus"]
+// a meta element's own attributes: `meta{ charset: "utf-8" }` stays the element, `meta: { author: "Ann" }` names metas
+html_meta_attributes = ["charset", "name", "content", "http-equiv", "property", "media"]
+html_starting_style = "data-warp-starting-style"
+// where an element's one style attribute goes among its attributes, its styles joined: a "<" no attribute holds
+html_style_mark = "<style>"
+// CSS properties whose number has no unit; any other number is pixels
+html_unitless_properties = ["opacity", "z-index", "font-weight", "line-height", "flex", "flex-grow", "flex-shrink", "order", "zoom", "tab-size"]
+
+to_html(value: html) as text := html_render(value, ø, ø)
+// literal HTML, `<div>one</div>`, as markup wherever it stands (extensions/inline_html.warp)
+html_written(value: html) := value
+
+// `ul{ li all fruits }`: a tag word before all/each makes that tag of each item; only the tags an item repeats in, so
+// `await all jobs` (lib/tasks.warp) stays the tasks' word
+rewrite $tag $every $xs => $xs.map($e -> {$tag: $e}) where $every in [all, each] and $tag in [li, tr, td, th, option, dt, dd, p, div, span, a, img, button, label, section, article, figure, pre, code, h1, h2, h3, h4, h5, h6] and $tag is unbound
+
+// A page's markup keeps its live parts as code (card markup-keeps): `p{ "count: " + count }` reading a variable a
+// handler changes is the part `() => …`, recomputed each time the markup renders; `on click { count += 1 }` is the
+// attribute `onclick: (event => …)`. The page renders the program's value with page_render, whose HTML names each
+// handler by its number, data-warp-click="1", and runs one with page_event; then it renders again and morphs.
+global page_handlers = []
+handler_prefix = "on"
+handler_attribute_prefix = "data-warp-"
+// how a handler shows, its code left out: `on click {…}`
+handler_body_shown = "{" + "…" + "}"
+
+// whether the page shows the program's value as its HTML: markup does; a text stays a text, quoted as natively
+export page_rendered(value: any) as bool := not (value is text)
+// the HTML of the page's value, its handlers numbered anew from 1 in render order
+export page_render(value: html) := {
+	page_handlers = []
+	page_handler_events = []
+	page_handler_labels = []
+	page_fields = []
+	component_calls = {}
+	component_order = []
+	component_current = ø
+	let html = to_html(value)
+	component_moments_run()
+	if page_in_js { foreign_call("js", "globalThis", JS_PAGE_SHOWN, 1, [html]) }
+	html
+}
+// a program reaching the page's js (`who.focus()`, `document.title`, extensions/foreign_globals.warp) has its page in the js
+// runtime's document after each render: natively the hidden web view's (lib/host/native_host/webview_bridge.js), the page
+// shows it itself (web/playground/host-foreign.js). Other programs never start the js runtime
+JS_PAGE_SHOWN = "warpShowPage"
+global page_in_js = no
+page_shown_in_js() := { page_in_js = yes }
+// handler n of the last page_render run with the event's detail (value, checked, fields, key …) as `event`
+// a program's value as the page it is, its HTML, when it is markup, else ø: how `warp` prints a program ending in
+// markup (decision html-render-mode; the emitter's _start)
+export page_of(value: html): any := if html_is_page(value) then page_after_steps(value) else ø
+// the page after the steps of a sample's check line (`# check: click "+1", type "name" "Ann" → …`, card
+// scripts-samples), which `warp app check` gives as the page-steps option, one a line, its words by tabs: click⇥+1
+page_after_steps(value: any) as text := {
+	steps = run_option(PAGE_STEPS_OPTION) ?? ""
+	html = render(value)
+	for step in steps.split("\n").filter(line => line != "") { html = page_step(step.split("\t")) }
+	if run_option(APP_WINDOW_OPTION) != ø { page_window_run(html) }
+	html
+}
+// `warp app` (lib/app/command.warp) runs the program so, natively: its page in a window of the system's web view, as
+// the page's site.js runs it: each event of the page runs its handler (page_event), a key pressed the program's `on
+// key` (lib/keys.warp), its timers fire when due (lib/timers.warp hears each tick), and the page is rendered anew after
+// each; closing the window ends the run, the HTML shown last its output (lib/host/native_host/webview.warp warpWindow)
+APP_WINDOW_OPTION = "app-window"
+PAGE_STEPS_OPTION = "page-steps"
+APP_WINDOW = "warpWindow"
+EVENT_JOINER = "·"
+PAGE_KEY_EVENT = "key"
+PAGE_TICK = "tick"
+WAIT_FOR_EVENT = -1
+page_window_run(html: text) := {
+	page_shown_in_js()
+	foreign_call("js", "globalThis", JS_PAGE_SHOWN, 1, [html])
+	foreign_call("js", APP_WINDOW, "show", 1, [])
+	shown = html
+	happened = page_window_event(0)
+	while happened != ø {
+		wait = page_happened(happened)
+		shown = page_render(page_shown)
+		happened = page_window_event(wait)
+	}
+	// (the timers the host was told of are the window's: they end with it)
+	print shown
+	exit(0)
+}
+// the window's next event, {event: "click·1", detail, wall}, else a tick once the milliseconds are over; ø once it is
+// closed
+page_window_event(milliseconds: int) as any := foreign_call("js", APP_WINDOW, "next", 1, [milliseconds])
+// what happened on the page, done: the milliseconds till a timer is due, WAIT_FOR_EVENT when none is
+page_happened(happened: any) as int := {
+	event = happened["event"]
+	if event == PAGE_KEY_EVENT { emitted(PAGE_KEY_EVENT, happened["detail"]) }
+	else if event != PAGE_TICK { page_event(int(event.split(EVENT_JOINER)[1]), happened["detail"]) }
+	emitted(PAGE_TICK, happened["wall"]) ?? WAIT_FOR_EVENT
+}
+page_step(words: list) as text := {
+	if words[0] == "click" and #words == 2 { return click(words[1]) }
+	if words[0] == "type" and #words == 3 { return type_into(words[1], words[2]) }
+	raise "a check's step is click \"<label>\" or type \"<label>\" \"<text>\", not " + words.join(" ")
+}
+// an element, or a group of nothing but elements (`{div{…}}`, `[li{…} li{…}]`)
+html_is_page(value: any) as bool := html_is_element(value) or (html_is_group(value) and #html_elements_in(value) > 0 and #html_elements_in(value) == #value)
+export page_event(n: int, detail: any) := {
+	if detail is map and detail.has(page_ids_key) { for id in detail[page_ids_key].keys { page_values[id] = detail[page_ids_key][id] } }
+	action = page_handlers#n
+	action(detail)
+}
+
+// `use web; render page`, then `click "+1"` or `click plus` (card use-web, decisions click-by-label, click-by-id): the
+// page acts as the Rust page tests did, on the element showing a label (its text, else its placeholder, aria-label,
+// name or id) among those handling the event; the value is the page's HTML after it
+global page_shown = ø
+global page_handler_events = []
+global page_handler_labels = []
+handler_label_attributes = ["placeholder", "aria-label", "name", "id"]
+
+render(value: html) := {
+	page_shown = value
+	page_render(value)
+}
+click(label: any) := page_act("click", name_of(label), ø)
+// `type_into("name", "Ann")`, a check's `type "name" "Ann"` (`type` is the word of types): the text typed into the
+// field showing that label (its placeholder, aria-label, name or id, as click finds an element), its value `$who`
+// then; the page's HTML after it
+type_into(label: any, typed: text) := {
+	for field in page_fields {
+		if label in field#2 {
+			page_values[field#1] = typed
+			return page_render(page_shown)
+		}
+	}
+	raise "no field showing " + label + " to type into; the page: " + page_render(page_shown)
+}
+// [id, its labels] of each field of the last render with an id (`input{ id: "who" placeholder: "name" }`)
+global page_fields = []
+// `$who` (decision page-ids, extensions/page_values.warp): the value of the page's field with the id who, what was
+// typed into it, which every element event brings as its detail's ids (web/playground/markup.js idValues); `$who =
+// "Ann"` writes it, shown as the field's value
+page_ids_key = "ids"
+global page_values = {}
+page_value(id: text) := if page_values.has(id) then page_values[id] else ""
+page_value_set(id: text, value: any) := { page_values[id] = value }
+// ` value="…"` of a field whose id has a value written or typed, unless the markup writes its own
+html_page_value(items: list, tag: any, written: any) as text := {
+	if written != ø { return "" }
+	for item in items { if html_is_attribute(item, tag) and html_name(item) == "id" and page_values.has(html_plain(html_content(item))) { return " value=\"" + html_escaped(text(page_values[html_plain(html_content(item))])) + "\"" } }
+	""
+}
+// `click plus`: an id, a word the program binds nothing to
+rewrite click $who => click(data $who) where $who is symbol and $who is unbound
+
+page_act(event: text, label: text, detail: any) := {
+	for handler_number in 1 to #page_handlers {
+		labels = page_handler_labels#handler_number
+		if page_handler_events#handler_number == event and label in labels {
+			page_event(handler_number, detail)
+			return page_render(page_shown)
+		}
+	}
+	raise "no element showing " + label + " handles " + event + "; the page: " + page_render(page_shown)
+}
+
+// A component's instances (extensions/components.warp): `component("Counter", key)` is the instance a call of
+// Counter renders with, kept across renders by its key, else by its place among this render's Counter calls; its
+// state its entries, each made once (component_state). `Counter.instances` lists this render's in page order
+global component_states = {}
+global component_calls = {}
+global component_order = []
+component(name: text, key: any) as map := {
+	calls = (if component_calls.has(name) then component_calls[name] else 0) + 1
+	component_calls[name] = calls
+	id = name + "·" + text(key ?? calls)
+	if not component_states.has(id) { component_states[id] = {} }
+	instance = component_states[id]
+	component_order.add([name, instance, id])
+	component_current = id
+	instance
+}
+component_state(instance: map, name: text, made: function) := { if not instance.has(name) { instance[name] = made() } }
+component_instances(name: text) as list := component_order.filter(entry => entry#1 == name).map(entry => entry#2)
+
+// `on mount {…}` and `on cleanup {…}` (card mount-cleanup-handlers): in a component's body the instance's own moments,
+// run once when it appears on the page and when it leaves it; outside any, the page's, which appears at its first
+// render. A body runs right after its component call and before the components it shows, so the moment is the
+// instance's whose call ran last
+page_moments_id = "·page"
+global component_current = ø
+global component_moments = {}
+// the instances on the page after the last render, by id
+global component_shown = []
+rewrite listen(data $moment, $action, $once) => component_moment(data $moment, $action) where $moment in [mount, cleanup]
+component_moment(moment: any, action: function) := {
+	let id = component_current ?? page_moments_id
+	var moments = if component_moments.has(id) then component_moments[id] else {}
+	moments[name_of(moment)] = action
+	component_moments[id] = moments
+}
+component_moments_run() := {
+	let shown = [page_moments_id] + component_order.map(entry => entry#3)
+	for id in shown { if id not in component_shown { component_moment_run(id, "mount") } }
+	for id in component_shown {
+		if id not in shown {
+			component_moment_run(id, "cleanup")
+			if id != page_moments_id {
+				if component_states.has(id) { component_states.remove(id) }
+				if component_moments.has(id) { component_moments.remove(id) }
+			}
+		}
+	}
+	component_shown = shown
+}
+component_moment_run(id: text, moment: text) := {
+	if component_moments.has(id) and component_moments[id].has(moment) {
+		let action = component_moments[id][moment]
+		action(ø)
+	}
+}
+
+// what an element shows to be found by: its text, its tags left out, and its labelling attributes
+html_labels(tag: any, items: list, children: text) as list := [html_shown_text(children)] + items.filter(item => html_is_attribute(item, tag) and html_name(item) in handler_label_attributes).map(item => html_plain(html_content(item)))
+html_shown_text(html: text) as text := {
+	var shown = ""
+	var inside = no
+	for c in html {
+		if c == "<" { inside = yes }
+		else if c == ">" { inside = no }
+		else if not inside { shown = shown + c }
+	}
+	trim(shown)
+}
+
+// a live part's value as it is now
+// (`x as html` is an Html holding x, extensions/markup_values.warp: `p{"hi"} as html` the markup itself)
+html_now(value: any) := if value is Live then html_now(value.now()) else if value is function then html_now(value()) else if value is Html and value.element is Html then html_now(value.element) else value
+
+// `button{ "+1", on click {…} }`: an item `on e {…}` of an element is that element's own handler, kept in it as a
+// value (no listener of the whole program); markup's own class, which its module sees when built on its own
+class Handler {
+	event: text
+	action: function
+	format as text := "on " + event + " " + handler_body_shown
+}
+handler(name: any, action: function) as Handler := Handler(name_of(name), action)
+// a live value: code kept to run each time its value is wanted, shown as its value now; an item reading a variable a
+// handler writes is one (extensions/sugar/events.warp), `p{ "count: " + count }`. A general library type, here beside
+// Handler until a module built on its own sees the prelude's classes (card prelude-class-visibility)
+class Live {
+	compute: function
+	now() := { value = compute; value() }
+	format as text := text(now())
+}
+live(compute: function) as Live := Live(compute)
+
+// `input{ bind: name }`: a two-way binding, the field showing the variable and setting it from what is typed; the
+// item rule (extensions/sugar/bindings.warp) keeps the variable as code to read and to write (card input-bind-name)
+class Binding {
+	read: function
+	write: function
+	now() := { value = read; value() }
+	set(entered: any) := { change = write; change(entered) }
+}
+binding(read: function, write: function) as Binding := Binding(read, write)
+
+// an element's handler: `on click {…}` among its items (a Handler), or HTML's own spelling
+// `onclick: (event => …)`
+html_is_handler(item: any) as bool := item is Handler or html_is_handler_pair(item)
+html_is_handler_pair(item: any) as bool := html_pair(item) is pair and html_is_handler_name(html_name(item)) and html_raw_content(item) is function
+html_is_handler_name(name: any) as bool := name is text and starts_with(name, handler_prefix) and #name > #handler_prefix
+html_handler(item: any) := if item is Handler then html_handler_attribute(item.event, item.action) else html_handler_attribute(html_name(item)[#handler_prefix ..], html_raw_content(item))
+html_handler_attribute(event: text, action: function) := {
+	if event == "mount" or event == "cleanup" {
+		component_moment(event, action)
+		return ""
+	}
+	page_handlers.add(action)
+	page_handler_events.add(event)
+	page_handler_labels.add([])
+	" " + handler_attribute_prefix + event + "=\"" + #page_handlers + "\""
+}
+
+// a pair's name and content, `div{…}` or `class: "box"` (a one-entry map as Rust's pair)
+html_name(written: any) := {
+	pair = html_pair(written)
+	if pair is map then keys(pair)#1 else text(key_of(pair))
+}
+html_raw_content(written: any) := {
+	pair = html_pair(written)
+	if pair is map then values(pair)#1 else value_of(pair)
+}
+html_content(pair: any) := if html_is_handler_pair(pair) then html_raw_content(pair) else html_now(html_raw_content(pair))
+
+// `scope`: the component whose elements a style sheet styles (data-warp-scope, card web-scoped); `chosen`: the value
+// of the select around, whose option is selected (`select{ bind: fruit }`, card web-bind-select)
+html_render(live: html, scope: any, chosen: any) := {
+	value = html_now(live)
+	# `read("tags.html") as html`: a text as html is the page's own HTML, written as it is (card read-tags-html)
+	if value is Html and value.element is text { return value.element }
+	if html_is_element(value) { return html_element(html_tag(html_name(value)), html_content(value), scope, chosen) }
+	if html_is_group(value) {
+		var out = ""
+		for item in value { out = out + html_render(item, scope, chosen) }
+		return out
+	}
+	if value == ø { return "" }
+	if html_is_listed_element(value) { html_warning_once(html_name(value) + ": {…} here is data, shown as text: markup is made inside html{…} or in a place typed html (`bars: html = [div{…} for l in lengths]`)") }
+	html_escaped(html_plain(value))
+}
+
+// the warnings a render gave, each given once (a thousand data bars warn once)
+html_warned = []
+html_warning_once(message: text) := if not contains(html_warned, message) {
+	html_warned.add(message)
+	warning(message)
+}
+
+// an Html named as an element (one of computed name, `("h" + level): title`, may name none: data)
+html_is_element(value: any) as bool := value is Html and (html_is_listed_element(value) or html_is_custom_element(html_name(value)))
+
+html_is_listed_element(value: any) as bool := html_pair(value) is pair and contains(html_elements, html_name(value))
+
+// `my-card{…}`: a page's own element is named with a dash, unlike data-, aria- and the listed attributes (decision unknown-tag)
+// text(name): a one-letter key (`"s": "small"`) is a Char, which contains refuses (card contains-fails)
+html_is_custom_element(name: any) as bool := name is text and contains(text(name), "-") and not starts_with(name, "data-") and not starts_with(name, "aria-") and not contains(html_attributes, name)
+
+html_element(tag: any, content: any, scope: any, chosen: any) := {
+	// a live item as it is now: `style: { color: (if dark …) }` live as a whole is an attribute again
+	let items = html_shorthands_spread(html_items(content).map(item => if item is Live then html_now(item) else item))
+	var own_scope = scope
+	var own_chosen = chosen
+	var value = ø
+	for item in items {
+		if html_is_attribute(item, tag) and html_name(item) == "data-warp-scope" { own_scope = html_plain(html_content(item)) }
+		if html_is_attribute(item, tag) and html_name(item) == "value" { value = html_plain(html_content(item)) }
+		if html_is_binding(item) { value = html_plain(html_content(item).now()) }
+	}
+	if tag == "select" { own_chosen = value }
+	var attributes = ""
+	var children = ""
+	var facts = ""
+	// `style: { color: red }` and a transition's style: one attribute
+	var styles = []
+	var own_handlers = []
+	for item in items {
+		if html_is_handler(item) {
+			added = html_handler(item)
+			attributes = attributes + added
+			if added != "" { own_handlers.add(#page_handlers) }
+		}
+		else if html_is_binding(item) {
+			attributes = attributes + html_bound(tag, items, html_content(item))
+			own_handlers.add(#page_handlers)
+		}
+		else if tag == "html" and html_is_page_fact(item) { facts = facts + html_page_fact(html_name(item), html_content(item)) }
+		else if html_is_attribute(item, tag) and html_name(item) == "style" {
+			if #styles == 0 { attributes = attributes + html_style_mark }
+			styles.add(if html_is_declarations(html_content(item)) then html_css(html_content(item)) else html_attribute_value(html_content(item)))
+		}
+		else if html_is_attribute(item, tag) { attributes = attributes + html_attribute(item) }
+		else if tag == "style" { children = children + html_style_rule(item, scope) + " " }
+		else if tag == "script" { children = children + html_plain(item) }
+		else if tag == "select" and not html_is_element(item) { children = children + html_options(item, own_chosen) }
+		else { children = children + html_render(item, own_scope, own_chosen) }
+	}
+	for own in own_handlers { page_handler_labels#own = html_labels(tag, items, children) }
+	for item in items { if html_is_attribute(item, tag) and html_name(item) == "id" { page_fields.add([html_plain(html_content(item)), html_labels(tag, items, children)]) } }
+	attributes = attributes + html_page_value(items, tag, value)
+	// the option whose value, else text, is the select's
+	if #styles > 0 { attributes = replace(attributes, html_style_mark, " style=\"" + html_escaped(join(styles, "; ")) + "\"") }
+	if tag == "option" and chosen != ø and (if value == ø then children else html_escaped(value)) == html_escaped(chosen) { attributes = attributes + " selected" }
+	if contains(html_void_elements, tag) { return "<" + tag + attributes + ">" }
+	if tag == "style" { children = trim(children) }
+	// the page's facts lead its head, which they make when it has none (card html-meta)
+	if facts { children = if contains(children, "<head>") then replace(children, "<head>", "<head>" + facts) else "<head>" + facts + "</head>" + children }
+	// `</script>` inside a script would end it
+	if contains(html_raw_text_elements, tag) { children = replace(children, "</", "<\\/") }
+	"<" + tag + attributes + ">" + children + "</" + tag + ">"
+}
+
+html_is_binding(item: any) as bool := html_pair(item) is pair and html_name(item) == "bind" and html_content(item) is Binding
+
+// a bound field's attributes: its kind and step from the variable's type unless the element names its type, the
+// value it shows and its input handler (card web-validate: the browser refuses 2.5 for an int, a bool is a checkbox)
+html_bound(tag: any, items: list, binding: Binding) as text := {
+	let shown = binding.now()
+	let field = tag == "input"
+	let kind = if field and not html_names_any(items, ["type"]) then html_field_type(shown) else ""
+	let step = if field and shown is number then " step=\"" + (if shown is int then "1" else "any") + "\"" else ""
+	let state = if shown is bool then (if shown then " checked" else "") else " value=\"" + html_escaped(shown) + "\""
+	kind + step + state + html_handler_attribute("input", detail => binding.set(html_entered_like(shown, if shown is bool then detail.checked else detail.value)))
+}
+html_field_type(value: any) as text := if value is bool then " type=\"checkbox\"" else if value is number then " type=\"number\"" else ""
+// what was entered, an int variable's kept an int
+html_entered_like(shown: any, entered: any) := if shown is int and entered is number then int(entered) else entered
+
+// `select{ "apple" "pear" }`, `select{ ["apple" "pear"] }`, `select{ fruits }`: what a select holds besides elements
+// is its options, a pair `"s": "small"` an option's value and label (card select-shorthand)
+html_options(listed: any, chosen: any) := {
+	if html_is_element(listed) { return html_render(listed, ø, chosen) }
+	if listed is pair { return html_render(option{ value: html_name(listed); html_content(listed) }, ø, chosen) }
+	if not html_is_group(listed) { return html_render(option{ listed }, ø, chosen) }
+	var out = ""
+	for item in listed { out = out + html_options(item, chosen) }
+	out
+}
+
+// `html{ title: "Shop" description: "…" meta: { author: "Ann" } }`: facts about the page, for its head (card html-meta)
+html_is_page_fact(item: any) as bool := {
+	if not (html_pair(item) is pair) { return false }
+	let name = html_name(item)
+	let value = html_content(item)
+	if name == "meta" { return (value is pair or html_is_group(value) and html_holds_pairs(value)) and not html_names_any(value, html_meta_attributes) }
+	(name == "title" or name == "description") and not html_is_group(value)
+}
+
+html_page_fact(name: any, value: any) := {
+	if name == "title" { return "<title>" + html_escaped(html_plain(value)) + "</title>" }
+	if name != "meta" { return "<meta name=\"" + name + "\" content=\"" + html_escaped(html_attribute_value(value)) + "\">" }
+	var facts = ""
+	for item in html_items(value) { facts = facts + html_page_fact(html_name(item), html_content(item)) }
+	facts
+}
+
+// does a block of pairs name any of `names`
+html_names_any(value: any, names: any) as bool := {
+	for item in html_items(value) { if html_pair(item) is pair and contains(names, html_name(item)) { return true } }
+	false
+}
+
+// the items of an element's block, or its one item; a line of pairs (`form{ method:"post" action:"/t"` before more
+// lines) is its pairs, attributes among them
+html_items(content: any) as list := {
+	if content == ø { return [] }
+	if not html_is_group(content) or html_is_element(content) { return [content] }
+	var items = []
+	for item in content {
+		if html_is_group(item) and not html_is_element(item) and html_holds_pairs(item) { for entry in item { items.add(entry) } }
+		else { items.add(item) }
+	}
+	items
+}
+
+// a block `{…}` or a list `[…]`: at run time a block is a map, no list (card inside-function)
+html_is_group(value: any) as bool := value is list or value is map
+
+// `class:"box"` inside an element: an attribute when its name is one and its value plain (or inline CSS for style)
+html_is_attribute(item: any, tag: any) as bool := {
+	if not (html_pair(item) is pair) { return false }
+	let name = html_name(item)
+	let value = html_content(item)
+	named = starts_with(name, "data-") or starts_with(name, "aria-") or name == "key" or name == "starting-style" or (contains(html_attributes, name) and not (tag == "head" and contains(html_elements, name)))
+	if not named { return false }
+	if html_is_dotted_name(value) { raise "an attribute value has no dot: " + name + ": \"" + text(value_of(value)) + "\"; fix: write the class name as text" }
+	if (name == "style" or html_attribute_name(name) == html_starting_style) and tag != "head" and html_is_declarations(value) { return true }
+	not html_is_nested(value) and (not html_is_group(value) or not html_holds_pairs(value))
+}
+
+// `class: .card`, the CSS selector's spelling of a class name: the parser's member `.card` of nothing
+html_is_dotted_name(value: any) as bool := value is pair and text(value.op) == "." and key_of(value) == ø
+
+// a pair nests markup; an instance of a class, a pair of its class and fields, is one value: `title: 200ms` an attribute
+// shown as its text (card quantity-element)
+html_is_nested(value: any) as bool := value is pair and class_name(value) == "key"
+
+// `class:["btn" "btn-info"]` is an attribute, `style{ ".card": {…} }` an element: its items are rules, `label{ "Name " b{…} }`
+// one too, its child element an Html (a class's instance, no pair)
+html_holds_pairs(value: any) as bool := {
+	for item in value { if html_pair(item) is pair { return true } }
+	false
+}
+
+html_attribute(item: any) as text := {
+	let name = html_attribute_name(html_name(item))
+	let value = html_content(item)
+	if html_is_declarations(value) { return " " + name + "=\"" + html_escaped(html_css(value)) + "\"" }
+	if contains(html_boolean_attributes, name) { return if html_is_true(value) then " " + name else "" }
+	" " + name + "=\"" + html_escaped(html_attribute_value(value)) + "\""
+}
+
+// `li{ key: todo.id … }` names a list item: the attribute data-warp-key, by which the page moves its element
+// `starting-style: { opacity: 0 }`, the state an element enters from (CSS @starting-style, which an inline style cannot
+// hold): the attribute the page applies (markup-transitions.js)
+html_attribute_name(name: any) := if name == "key" then "data-warp-key" else if name == "starting-style" then html_starting_style else name
+
+// `{ color: theme padding: 8 }`: a block of CSS properties with plain values; a dashed one (`color-scheme: dark`) is
+// no custom element
+html_is_declarations(value: any) as bool := {
+	if html_is_listed_element(value) { return false }
+	let items = html_items(value)
+	if #items == 0 { return false }
+	for item in items {
+		if not (item is pair) { return false }
+		let inner = html_content(item)
+		if html_is_nested(inner) or html_is_group(inner) { return false }
+	}
+	true
+}
+
+// `color: red; padding: 8px`: camelCase names in kebab-case, numbers in pixels unless the property has no unit
+html_css(value: any) as text := join([html_declaration(item) for item in html_items(value)], "; ")
+
+html_declaration(item: any) as text := {
+	let property = html_kebab(html_name(item))
+	property + ": " + html_css_value(property, html_content(item))
+}
+
+// a number in pixels unless the property has no unit
+html_css_value(property: any, value: any) as text := {
+	if value is number and not contains(html_unitless_properties, property) { return text(value) + "px" }
+	html_attribute_value(value)
+}
+
+// `style{ ".card": { padding: 8 } }`: a rule `selector { declarations }`; a text is CSS as written
+html_style_rule(rule: any, scope: any) := {
+	if not (rule is pair) { return html_plain(rule) }
+	let body = html_content(rule)
+	if html_is_declarations(body) { return html_scoped(html_name(rule), scope) + " { " + html_css(body) + " }" }
+	var nested = ""
+	for inner in html_items(body) { nested = nested + html_style_rule(inner, scope) + " " }
+	html_name(rule) + " { " + trim(nested) + " }"
+}
+
+// `h2, p` in the component Card: `[data-warp-scope="Card"] h2, [data-warp-scope="Card"] p`
+html_scoped(selectors: any, scope: any) := {
+	if scope == ø { return selectors }
+	join(["[data-warp-scope=\"" + scope + "\"] " + trim(selector) for selector in split(selectors, ",")], ", ")
+}
+
+// CSS names are ASCII: lowered by hand, so a page carries no Unicode case table (card web-bundle-growth)
+html_kebab(name: any) as text := {
+	var out = ""
+	for c in name { out = if c >= 'A' and c <= 'Z' then out + "-" + chr(ord(c) - ord('A') + ord('a')) else out + c }
+	out
+}
+
+// `class:['btn' 'btn-info']` is the attribute `btn btn-info`
+html_attribute_value(value: any) as text := {
+	if not html_is_group(value) { return html_plain(value) }
+	join([html_plain(item) for item in value], " ")
+}
+
+// a value as the text it shows: a text without quotes, anything else as warp writes it
+html_plain(value: any) as text := if value is text then value else text(value)
+
+html_is_true(value: any) as bool := value == true or (value is number and value != 0)
+
+// lib/html.warp's five escapes, ' as &#39; included, of any value's plain text (card core-use-in-tag-module)
+html_escaped(text: any) as text := html_escape(html_plain(text))
+
+// `js{…}` is the element script
+html_tag(name: any) := if name == "js" then "script" else name
+
+// The playground reads a component's holes from the page's rendering (card web-fine-components,
+// lowering/component_state.rs): the element at `path`, its element indices from the root down as the page's
+// `children` count them, and the text after `after` of its child elements
+html_element_at(value: any, path: any) := {
+	var element = value
+	for index in path { element = html_child_elements(element)#(index + 1) }
+	element
+}
+
+html_text_at(value: any, path: any, after: any) := {
+	let element = html_element_at(value, path)
+	var before = 0
+	for item in html_child_items(element) {
+		let shown = html_elements_in(item)
+		if before == after and #shown == 0 { return item }
+		before = before + #shown
+	}
+	ø
+}
+
+html_child_elements(element: any) := {
+	var children = []
+	for item in html_child_items(element) { for child in html_elements_in(item) { children.add(child) } }
+	children
+}
+
+// an element's items that are no attributes
+html_child_items(element: any) as list := {
+	let tag = html_name(element)
+	var items = []
+	for item in html_items(html_content(element)) { if not html_is_attribute(item, tag) { items.add(item) } }
+	items
+}
+
+// the elements an item shows: itself, or those of a group
+html_elements_in(item: any) as list := {
+	if html_is_element(item) { return [item] }
+	var elements = []
+	if html_is_group(item) { for part in item { for child in html_elements_in(part) { elements.add(child) } } }
+	elements
+}
+
+// `style{ .card { padding: 8px } }` a style sheet, `style: { color: theme }` an element's inline style: the element
+// with its selectors and lengths as the texts CSS writes, the tree as the parser read it (decisions.md data-parameter)
+// (an Html, decision html-value: wherever it stands it is the style element or attribute)
+style(sheet: data) as html := Html(element: key(symbol("style"), ":", if sheet is text then sheet else style_body(sheet)))
+
+// `form post "/todos" { button{ "add" } }`: a form named by the route it sends to, as the route is written
+// (decisions.md markup-plain-library); `form{ method: "post" action: "/todos" … }` spells the attributes
+form(method: symbol, action: text, body: any) := {
+	let route = [key(symbol("method"), ":", text(method)), key(symbol("action"), ":", action)]
+	key(symbol("form"), ":", bracketed(route + html_items(body), "{"))
+}
+
+// lengths CSS writes with a unit, where warp reads `8px` as 8 * px
+style_units = ["px", "em", "rem", "vh", "vw", "vmin", "vmax", "pt", "ch", "ex", "fr", "deg", "turn", "ms", "s", "cm", "mm"]
+// how a selector joins the parts the parser read as operators: `ul > li`, `a:hover`, `div.card`, `#main`
+style_combinators = {">": " > ", "+": " + ", "~": " ~ ", "≈": " ~ ", ".": ".", ":": ":", "#": "#"}
+
+style_combinator(node: any) := if contains(keys(style_combinators), text(node.op)) then style_combinators[text(node.op)] else ø
+
+style_body(body: any) := bracketed(style_items(if style_is_block(body) then body else [body]), "{")
+
+style_is_block(node: any) as bool := not (node is pair) and text(node.bracket) == "{"
+// a bracketless group of items (`li {…} .box {…}` as one value)
+style_is_group(node: any) as bool := not (node is pair or node is symbol or node is text or node is number or node == ø) and text(node.bracket) is empty
+// style_is_block for a node that may be a plain word, number or text (which have no bracket)
+style_is_block_node(node: any) as bool := not (node is symbol or node is text or node is number or node == ø) and style_is_block(node)
+
+// the items of a block: rules with their selectors as texts, declarations with their lengths as texts; selector
+// words wait for their block (`ul li`, `h1, h2`)
+style_items(block: any) := {
+	var output = []
+	var pending = []
+	for entry in style_entries(block, block.separator, ø) {
+		let item = entry#1
+		let joiner = entry#2
+		let rule = style_rule_parts(item)
+		let selector_value = style_selector_value(item)
+		if rule != ø {
+			output.add(style_rule(style_joined(pending, rule#1, joiner), rule#2))
+			pending = []
+		} else if #pending > 0 and style_is_block(item) {
+			// `.card { … }`: a leading-dot name stays apart from its block
+			output.add(style_rule(style_joined(pending, "", ""), item))
+			pending = []
+		} else if selector_value != ø {
+			output.add(style_rule(selector_value#1, key(symbol("color"), ":", selector_value#2)))
+		} else if style_is_declaration(item) {
+			let length = style_length(item.value)
+			output.add(key(item.key, ":", if length == ø then item.value else length))
+		} else if #output > 0 and style_is_declaration(output#(#output)) and style_continued(output#(#output).value, item) != ø {
+			let last = output.pop()
+			output.add(key(last.key, ":", style_continued(last.value, item)))
+		} else if style_selector_text(item) != ø {
+			pending.add([style_selector_text(item), joiner, item])
+		} else {
+			output.add(item)
+		}
+	}
+	for selector in pending { output.add(selector#3) }
+	output
+}
+
+// the items of a block with the joiner before each, a group's (`h1, .x { … }` is h1 and the group `.x { … }`) among
+// them: a selector started before the group continues in it
+style_entries(items: any, separator: any, leading: any) := {
+	let list_joiner = if text(separator) == "," then ", " else " "
+	var entries = []
+	for item in items {
+		for part in style_unchained(item) {
+			let joiner = if #entries == 0 and leading != ø then leading else list_joiner
+			if not (part is pair) and text(part.bracket) is empty { entries = entries + style_entries(part, part.separator, joiner) }
+			else { entries.add([part, joiner]) }
+		}
+	}
+	entries
+}
+
+// `a ~ b`: an operator only a declaration gives its meaning (lib/aliases.warp `declared: yes`) reaches the data as
+// its call, operator_~(a, b); a selector reads it as written, as it reads `a > b`
+style_as_written(node: any) := {
+	if node is pair { return key(style_as_written(node.key), node.op, style_as_written(node.value)) }
+	if node is symbol or node is text or node is number or node == ø or text(node.bracket) != "(" or count(node) != 3 { return node }
+	let head = text(node#1)
+	if head.starts_with("operator_") then key(style_as_written(node#2), head.remove_prefix("operator_"), style_as_written(node#3)) else node
+}
+
+// `ul li { … }` and `.a { … }` on the next line: the parser chains the leading dot onto the rule before it
+// (`rule.a{…}`), as it does `#main` on the same line (`rule#main{…}`); the rules apart again
+style_unchained(written: any) := {
+	let node = style_as_written(written)
+	if node is pair and style_combinator(node) != ø and contains([" > ", " + ", " ~ "], style_combinator(node)) and style_is_group(node.value) {
+		// `ul > li { … } .box { … }`: the parser hangs the rest of the sheet off the combinator's right side, a group
+		// [li, {…}.box, {…}]; the rule `ul > li {…}` apart from the rules after it
+		var parts = []
+		for item in node.value { parts = parts + style_unchained(item) }
+		if #parts < 2 or not style_is_block_node(parts#2) or style_selector_text(parts#1) == ø { return [node] }
+		return [key(node.key, node.op, key(parts#1, ":", parts#2))] + parts[2:]
+	}
+	if not (node is pair) or not (text(node.op) == "." or text(node.op) == "#") { return [node] }
+	var parts = style_unchained(node.key)
+	let last = parts.pop()
+	if style_rule_parts(last) != ø or style_is_block_node(last) {
+		parts.add(last)
+		parts.add(key(ø, node.op, node.value))
+	} else if #parts == 0 { return [node] }
+	else { parts.add(key(last, node.op, node.value)) }
+	parts
+}
+
+// `ul li`, `h1, h2`: the selector words waiting for their block, joined with the last one
+style_joined(pending: any, last: any, last_joiner: any) := {
+	var text = ""
+	for selector in pending { text = text + (if text is empty then "" else selector#2) + selector#1 }
+	text + (if text is empty then "" else last_joiner) + last
+}
+
+style_rule(selector: any, body: any) := key(selector, ":", style_body(body))
+
+// `color: theme`: a property name and a value that is no block
+style_is_declaration(node: any) as bool := node is pair and text(node.op) == ":" and (node.key is symbol or node.key is text) and not style_is_block(node.value)
+
+// `#done = "red"`, `.done: "red"`: a class or id selector and a value that is no block, nor the one declaration the
+// parser chains onto it (`.done{color:red}` reads `.done:color:red`)
+style_selector_value(node: any) := {
+	if not (node is pair) or not (text(node.op) == ":" or text(node.op) == "=") { return ø }
+	let selector = style_selector_text(node.key)
+	if selector == ø or not (starts_with(selector, ".") or starts_with(selector, "#")) { return ø }
+	if style_is_block(node.value) or (node.value is pair and text(node.value.op) == ":") { return ø }
+	[selector, node.value]
+}
+
+// `padding: 8px` followed by `4px`: the value `8px 4px`, when both parts are constants; a bare number in a value of
+// several words stays as written, as CSS reads it (`flex: 1 1 auto`, `margin: 0 auto`)
+style_continued(value: any, next: any) := {
+	let first = style_piece(value)
+	let second = style_piece(next)
+	if first == ø or second == ø { return ø }
+	first + " " + second
+}
+
+style_piece(node: any) := if node is number or node is text or node is symbol then text(node) else style_length(node)
+
+// `8px`, `1.5em`, `50%`, `-2px`: the length as CSS writes it
+style_length(node: any) := {
+	if not (node is pair) { return ø }
+	let op = text(node.op)
+	if op == "*" and node.key is number and node.value is symbol and contains(style_units, text(node.value)) { return text(node.key) + text(node.value) }
+	if op == "%" and node.value == ø and node.key is number { return text(node.key) + "%" }
+	if op == "-" and node.key == ø {
+		let length = style_length(node.value)
+		if length != ø { return "-" + length }
+	}
+	ø
+}
+
+// `ul > li`: a rule, its selector as CSS text and its block of declarations
+style_rule_parts(node: any) := {
+	if not (node is pair) { return ø }
+	if text(node.op) == ":" and style_is_block(node.value) {
+		let selector = style_selector_text(node.key)
+		return if selector == ø then ø else [selector, node.value]
+	}
+	let rest = style_rule_parts(node.value)
+	let joiner = style_combinator(node)
+	let left = style_selector_text(node.key)
+	if rest == ø or joiner == ø or left == ø { return ø }
+	[left + joiner + rest#1, rest#2]
+}
+
+// `ul`, `.card`, `#main`, `div.card`, `"@media …"`: the selector a node spells
+style_selector_text(node: any) := {
+	if node is symbol or node is text { return text(node) }
+	if node == ø { return "" }
+	if not (node is pair) { return ø }
+	let joiner = style_combinator(node)
+	let left = style_selector_text(node.key)
+	let right = style_selector_text(node.value)
+	if joiner == ø or left == ø or right == ø { return ø }
+	left + joiner + right
+}
+
+// `li{ transition: opacity 200ms ease-out }`, `animation: pop 400ms`: the element's inline CSS, its words as data,
+// durations in milliseconds, a text as written (decisions.md transitions-data). fade, scale and slide are the CSS
+// transitions of opacity and transform, from the starting style the kind names
+transition(spec: data) := css_shorthand("transition", css_items(spec))
+animation(spec: data) := css_shorthand("animation", css_items(spec))
+// `leave: pop 400ms reverse`: the animation the page plays before it removes the element (CSS has no waiting removal)
+leave(spec: data) := css_shorthand("leave", css_items(spec))
+css_shorthands = ["transition", "animation", "leave"]
+
+// a shorthand's items, its words then the element's children: the style or attribute they give, the children after it
+css_shorthand(name: text, items: list) := {
+	let parts = css_parts(items)
+	let words = parts#1
+	if name == "leave" { return [key(symbol("data-warp-leave"), ":", words)] + parts#2 }
+	if name == "animation" { return [css_style("animation", words)] + parts#2 }
+	let kind = css_kind(words)
+	if kind == ø { return [css_style("transition", words)] + parts#2 }
+	[key(symbol("starting-style"), ":", css_kinds[kind]), css_style("transition", css_of_kind(words))] + parts#2
+}
+
+// `li{ transition: "opacity 150ms" key: 1 … }`, `transition: opacity 200ms ease-out`: an element's item naming a
+// shorthand is its style, the words after it up to the children included (card li-transition-render)
+html_shorthands_spread(items: list) as list := {
+	var spread = []
+	var at = 1
+	while at <= #items {
+		let item = items#at
+		if item is pair and html_name(item) in css_shorthands {
+			let value = html_raw_content(item)
+			var spec = if value is text or not html_is_group(value) then [value] else [part for part in value]
+			while not (value is text) and at < #items and css_is_word(items#(at + 1)) {
+				at += 1
+				spec.add(items#at)
+			}
+			spread = spread + css_shorthand(html_name(item), spec)
+		} else { spread.add(item) }
+		at += 1
+	}
+	spread
+}
+
+// the starting style each kind before CSS enters from
+css_kinds = {fade: {opacity: "0"}, scale: {opacity: "0", transform: "scale(0.8)"}, slide: {opacity: "0", transform: "translateY(-1em)"}}
+css_default_duration = "200ms"
+
+css_style(property: any, value: any) := key(symbol("style"), ":", bracketed([key(symbol(property), ":", value)], "{"))
+
+// the words of a spec's items as CSS writes them, and the element's children after them (`opacity 1s "a"`): `fade 1s
+// ease-out` → "fade 1000ms ease-out"; a text leading the spec as written
+css_parts(items: list) := {
+	if items#1 is text { return [items#1, [items#i for i in 2 to #items]] }
+	var words = []
+	var children = []
+	for item in items {
+		if #children == 0 and css_is_word(item) { words.add(css_word(item)) }
+		else { children.add(item) }
+	}
+	[join(words, " "), children]
+}
+
+// a spec's items, its lines of words one by one
+css_items(spec: any) := {
+	if spec is pair or text(spec.bracket) { return [spec] }
+	var items = []
+	for item in spec { items = items + css_items(item) }
+	items
+}
+
+// `ease-out`, `200ms`, `2`, a measure held in a variable (`q = 400ms`)
+css_is_word(item: any) := item is symbol or item is number or (item is pair and text(item.op) == "*" and item.key is number and item.value is symbol) or css_is_measure(item)
+
+// a value of a unit, `400ms` or `3km` computed or held in a variable: no word, number or tree, its text a number
+// and a CSS unit (card css-shorthand-quantity)
+css_is_measure(item: any) as bool := not (item is text or item is symbol or item is number or item is pair or html_is_group(item) or item == ø) and css_measure_unit(text(item)) != ø
+// the CSS unit a measure's text ends with, `ms` of "400ms", ø when the text before it is no number
+css_measure_unit(t: text) := {
+	for unit in style_units { if t.ends_with(unit) and #t > #unit and is_numeric(t[0: #t - #unit]) { return unit } }
+	ø
+}
+
+// `2s`, `200ms` as written: the page reads a transition's duration off the computed style, in any unit
+css_word(word: any) := if css_is_measure(word) or not (word is pair) or text(word.op) != "*" then text(word) else text(word.key) + text(word.value)
+
+// the kind a spec's first word names, ø for CSS
+css_kind(words: any) := {
+	let first = split(words, " ")#1
+	if contains(keys(css_kinds), first) then first else ø
+}
+
+// `fade 1s ease-out` → `opacity 1s ease-out, transform 1s ease-out`, 200ms when it names no duration
+css_of_kind(words: any) := {
+	var timing = []
+	var timed = false
+	for word in split(words, " ") {
+		if css_kind(word) == ø {
+			timing.add(word)
+			if contains("0123456789", text(word#1)) { timed = true }
+		}
+	}
+	let rest = join(if timed then timing else [css_default_duration] + timing, " ")
+	"opacity " + rest + ", transform " + rest
+}

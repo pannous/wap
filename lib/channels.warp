@@ -1,0 +1,64 @@
+// Channels (P155, wiki/async.md): a channel inside one run, written in warp, and `channel "chat"`, the
+// machine-wide channel (rust-harness:src/host/channels.rs). The words are rewrite rules (card compiler-modules): every program
+// mentioning them gets them, no `use` needed. A task `go {…}` is cooperative (lib/tasks.warp): `ch.receive()` lets
+// the tasks run until one sent a value and takes the oldest, `for v in ch {…}` receives until the channel is closed or
+// no task is left to send.
+use units
+use timers
+use tasks
+// how often `on message from …` looks for messages that arrived
+MESSAGE_POLL = 20ms
+rewrite channel() => Channel()
+
+class Channel {
+	waiting: list = []
+	closed: bool = no
+	send(value) := {
+		if closed { raise "send on a closed channel" }
+		waiting += [value]
+	}
+	// the tasks run until one sent a value or the channel closed
+	more() := {
+		tasks_run_while(() => #waiting == 0 and not closed, ø)
+		#waiting > 0
+	}
+	receive() := {
+		if not more() { raise "receive on a channel no task sends to: every task has ended" }
+		oldest = waiting#1
+		waiting = waiting[1..]
+		oldest
+	}
+	close() := { closed = yes }
+	// `for v in ch {…}` receives until the channel is closed or no task is left to send (decision for-over-iterator)
+	next() := if more() then receive() else ø
+}
+
+// `send v to: c` (decision named-argument-phrases): to a channel of this run, to a machine-wide one (`channel "chat"`,
+// its name and listener) or to the machine-wide channel of a name
+send(value, to) := if to is text then channel_send(to, value) else if to is list then channel_send(to#1, value) else to.send(value)
+
+// the machine-wide channel listens from its assignment on: a variable holds its name and its listener
+rewrite channel $name => machine_channel($name)
+rewrite $c.send($v) => channel_send($c#1, $v) where $c = channel $name
+rewrite $c.receive() => machine_receive($c#2) where $c = channel $name
+
+// `on message from "chat" {…}`: the block runs for each message that arrives on the machine-wide channel, the message as
+// `event`; a timer looks for them (lib/timers.warp: the page runs it, natively none starts)
+rewrite on message from $name $body: block => message_listened($name, event => $body)
+
+// listener ids of channel variables, apart from those system_signals counts from 0
+global last_listener = 1048576
+
+machine_channel(name) := { last_listener += 1; channel_listen(last_listener, name); [name, last_listener] }
+// a receive looks for a message every 5 ms
+machine_receive(listener) := { while channel_pending(listener) == 0 { sleep(5 ms) }; channel_next(listener) }
+message_listened(name, handler: function) as int := {
+	listener = machine_channel(name)#2
+	timer_every(MESSAGE_POLL, () => { while channel_pending(listener) > 0 { handler(channel_next(listener)) } })
+}
+
+// the host words of this module, which the host answers (natively core/native/driver.warp, the playground its JS)
+channel_listen(listener: int, name: node) from host
+channel_pending(listener: int): int from host
+channel_next(listener: int): node from host
+channel_send(name: node, value: node) from host
