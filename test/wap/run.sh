@@ -3,7 +3,7 @@
 # script test/wap/test_*.sh; a test is a path or an area, `run.sh nodes`): first wap's compiler compiled and run once,
 # or its error, the first signal a worker waits for; then the tests run detached, niced, as many at once as the
 # machine's job slots allow (scripts/job-slot.sh, shared by every worktree), each one's output in
-# data/wap-tests/<test>.txt and one summary line in data/wap-tests/summary.txt, read later. --wait runs them in the
+# data/wap-tests/<test file>.txt and one summary line in data/wap-tests/summary.txt, read later. --wait runs them in the
 # foreground and prints the summary. The warp under test is WARP (default the warp on PATH). The self-build ratchet,
 # ratchet_census.sh (about 4 min), is no default script: run it by name, test/wap/run.sh --wait
 # test/wap/ratchet_census.sh, after each wap landing
@@ -13,8 +13,8 @@ SUMMARY="$results/summary.txt"
 cores=$(getconf _NPROCESSORS_ONLN)
 job_slot="$here/../../scripts/job-slot.sh"
 
-# the outputs of the tests run, each data/wap-tests/<test>.txt
-outputs() { for test in "$@"; do test=$(basename "$test"); echo "$results/${test%.*}.txt"; done; }
+# the outputs of the tests run, each data/wap-tests/<test file>.txt
+outputs() { for test in "$@"; do echo "$results/$(basename "$test").txt"; done; }
 # the tests' outputs read into one line: checks passed and failed, the tests that failed
 summed() {
 	local passed failed
@@ -53,16 +53,19 @@ while [ $# -gt 0 ]; do
 		*) break ;;
 	esac
 done
-# the tests named: each a path, or an area, its test program test/test_<area>.wap, else its script; default all of them
+# the tests named: each a path, or an area, its test programs test/test_<area>.wap and test_<area>_<part>.wap and
+# its script test/wap/test_<area>.sh; default all of them
 programs="$(cd -P "$here/.." && pwd -P)"
+shopt -s nullglob
 tests=()
 for test in "$@"; do
 	case $test in
 		*/*) tests+=("$test") ;;
-		*) [ -f "$programs/test_$test.wap" ] && tests+=("$programs/test_$test.wap") || tests+=("$here/test_$test.sh") ;;
+		*) found=${#tests[@]}
+			for file in "$programs/test_$test.wap" "$programs/test_$test"_*.wap "$here/test_$test.sh"; do [ -f "$file" ] && tests+=("$file"); done
+			[ ${#tests[@]} -gt "$found" ] || { echo "no test of $test" >&2; exit 2; } ;;
 	esac
 done
-shopt -s nullglob
 [ $# -gt 0 ] && set -- "${tests[@]}" || set -- "$programs"/test_*.wap "$here"/test_*.sh
 for test in "$@"; do [ -f "$test" ] || { echo "no test $test" >&2; exit 2; }; done
 mkdir -p "$results" && rm -f $(outputs "$@") "$SUMMARY"
