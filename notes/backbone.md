@@ -545,3 +545,8 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **stage.wap without_fact rebuilds the Meta itself**, a copy of nodes.wap with_attribute's layout, because the
   compiler may use only the seed's preload words. Paid off at the next seed refresh: nodes.wap gets one
   without_attribute that with_attribute uses too, and without_fact calls it.
+
+- **A rule's output names resolve where the rule fires** (preload/sugar/conditions.wap `x != ø` → `not missing(x)`).
+  Reason: a template's words are bound in the program's scope, so a local named `missing` hid the preload's predicate
+  (core/analyze/calls.wap words_missing, renamed to `lacking`). Paid off when a template's names bind in the rule's
+  own file, as a hygienic macro's do.
