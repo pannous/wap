@@ -1,0 +1,89 @@
+# warp fix and warp beautify (card fix-in-lib): the code with its hints' replacements (rewrites.warp), then laid out
+# (layout.warp), read as text only, without the parser or the compiler; warp format and warp lint the layout only. The
+# command line around it (files, the diff, "apply? y/n", check and yes) is command.warp.
+use "scan.warp"
+use "layout.warp"
+use "rewrites.warp"
+# inline HTML written as the warp markup it reads as (decision jsx), as the compiler reads it
+use "../compiler/parsing/lexer.warp"
+use "../extensions/inline_html/markup.warp"
+
+final_newline_rule = "final newline"
+inline_html_rule = "inline html"
+HTML_TYPE = ": html"
+STATEMENT_STARTS = ['\n', ';', '{']
+STATEMENT_ENDS = ['\n', ';', '}']
+COMPARISON_FIRSTS = ['=', '!', '<', '>']
+
+# the code fixed and what changed: [text, changes], each change "<line> <rule>", the line in the code as given; by
+# the layout rules given, after the hints' replacements when rewriting (warp format lays out only); with a rule named
+# by only, that rule's hints alone (`warp fix only "result type"`), the markup and layout left as written
+fixed(code: text, rules: list = layout_rules, rewriting: bool = yes, only: text = "") as list := {
+	markup = if only == "" then markup_of_inline_html(code, no, typed_element) else [code, ø, []]
+	changes = markup#3.map(found => "" + found#2#1 + " " + inline_html_rule)
+	lines = markup#1.split("\n")
+	if code.ends_with("\n") { lines = lines[0 ..< #lines - 1] }
+	numbers = []
+	for k in 0 ..< #lines { numbers += [k + 1] }
+	hints = if rewriting then hints_of(scanned(lines)).filter(hint => hint.rule.contains(only)) else []
+	for hint in hints { changes += ["" + hint.line_number + " " + hint.rule] }
+	lines = with_hints_applied(lines, hints)
+	for rule in rules {
+		scans = scanned(lines)
+		if rule == "blank lines" {
+			deleted = deleted_blank_lines(scans)
+			kept = []
+			kept_numbers = []
+			for k in 0 ..< #lines {
+				if deleted[k] {
+					changes += ["" + numbers[k] + " " + rule]
+				} else {
+					kept += [lines[k]]
+					kept_numbers += [numbers[k]]
+				}
+			}
+			lines = kept
+			numbers = kept_numbers
+		} else {
+			edited = scans.map(line => laid_out(rule, line))
+			for k in 0 ..< #lines {
+				if edited[k] != lines[k] { changes += ["" + numbers[k] + " " + rule] }
+			}
+			lines = edited
+		}
+	}
+	if code != "" and not code.ends_with("\n") { changes += ["" + #code.split("\n") + " " + final_newline_rule] }
+	text = ""
+	for line in lines { text += line + "\n" }
+	[text, changes]
+}
+
+# (decision html-value, card inline-div-format) an element that is a place's whole value, `p = <p>Hi</p>` or
+# `f() := <div/>`, written as the markup it reads as with its place typed html, `p: html = p{ "Hi" }`, so that it stays
+# markup; any other inline element as written (literal HTML is markup wherever it stands)
+typed_element(points: list, at: int, read: list) as list? := {
+	n = points.length
+	after = read#2 + blanks_after(points, read#2)
+	if after < n and not (points[after] in STATEMENT_ENDS) { return ø }
+	equals = at - 1 - blanks_before(points, at)
+	if equals < 1 or points[equals] != '=' { return ø }
+	operator = if points[equals - 1] == ':' then equals - 1 else equals
+	if operator == equals and points[equals - 1] in COMPARISON_FIRSTS { return ø }
+	head_end = operator - blanks_before(points, operator)
+	head_start = head_end
+	while head_start > 0 and not (points[head_start - 1] in STATEMENT_STARTS) { head_start -= 1 }
+	head = points_text(points, head_start, head_end).trim()
+	if head == "" { return ø }
+	if not is_typed_head(head) { return [head_end, HTML_TYPE + points_text(points, head_end, at) + read#1] }
+	if head.ends_with(HTML_TYPE) then [at, read#1] else ø
+}
+# `x: int`, `f(a): text`: a head giving its type, a colon outside its parentheses
+is_typed_head(head: text) as bool := {
+	depth = 0
+	for c in code_points(head) {
+		if c == '(' or c == '[' { depth += 1 }
+		else if c == ')' or c == ']' { depth -= 1 }
+		else if c == ':' and depth == 0 { return yes }
+	}
+	no
+}
