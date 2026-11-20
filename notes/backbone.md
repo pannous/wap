@@ -562,7 +562,8 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **A Signature's parameters are three parallel lists, `parameters`, `names` and `defaults`, indexed alike**
   (core/bindings.wap). Reason: export names (wiki/wasm-representation.md "Export names") added the names and defaults
   beside the types without reshaping every reader. Paid off the next time a reader of the record is touched: one
-  `list<Parameter>` of name, type and default.
+  `list<Parameter>` of name, type and default. **Paid 2026-11-20 (names and defaults left the record):** the export
+  name reads them from the definition's parameter nodes; the record holds only the types.
 
 - **Two records of a definition until phase 2 moves stage 2 and modules to Signature** (core/analyze/declarations.wap):
   declare writes a function's Signature into Module.signatures beside its `declares` fact and the program's
