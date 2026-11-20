@@ -186,7 +186,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 | lead: the queue, the contracts | warp-lead | compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap; the test/wap/ scripts no other row names |
 | self-build: wap compiled by wap, file by file | warp-wap-operators | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp; edits any file to write its types and `use` lines |
 | front: read, operators, rules, lowering | warp-wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, preload/ |
-| types: declare, bind, type | warp-wap-binding | core/analyze/, core/paths.wap |
+| types: declare, bind, type | warp-wap-binding | core/analyze/, core/paths.wap, core/signature.wap |
 | back: emitter, runtime | warp-wap-emitter | core/emit/; test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
 | simplification: wap smaller by its Node count (Meta excluded) | warp-simplifier | any file, by review of its stage owner |
 
