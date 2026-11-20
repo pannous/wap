@@ -25,7 +25,7 @@ https://github.com/pannous/wap
   (operators.wap) and the sugar rules (sugar/). known
   <!-- todo (card preload-rename-types) ^^ rename to types? -->
 - A feature is a preload function or a rule in sugar/ before it is core code; a core diff that adds names of
-  a domain is the sign a mechanism is missing: card it.
+  a domain is the sign a mechanism is missing: note it.
   <!-- todo (card move-sugar) move preload/sugar to sugar/  -->
 - wap/core and wap/kernel are semi-frozen: every change there goes to warp-interviewer first. A new feature goes
   into wap/extensions/ (first case: the native binary).
@@ -132,7 +132,7 @@ before asking a question). After a context swap, this file and your role file be
 - Vocabulary is library: the names and values of a domain (keys, units, colors, system values, months …) are
   declared in lib/ as an enum or as values of a class, found through `use` or names from the expected type; never a
   table in core/, never one rewrite rule per name. core/ holds mechanisms only. A core diff that adds names of a domain
-  is the sign that a mechanism is missing: card it.
+  is the sign that a mechanism is missing: note it.
 - Emptiness is tested loosely: `is empty`, `if no x`, `if x`; `x is ø` only tests missing.
 - JSON5 or warp notation for anything people or agents write; strict JSON only where a tool requires it.
 - NO environment variables as an interface, configure exclusively via:
