@@ -52,7 +52,7 @@ lead first, as a change of this table.
 | read | core/parse/reader.wap | wap-reader | text | notation |
 | operators | core/parse/operators.wap, table in the preload | wap-reader | notation | operated |
 | shape rules (stage 1) | core/rules/, preload/sugar/ | wap-reader | operated | surface |
-| declare | core/analyze/declarations.wap | wap-binding | surface | declared, and Module.signatures: one Signature per function, value and record (the record: core/signature.wap) |
+| declare | core/analyze/declarations.wap | wap-binding | surface | declared, and Module.signatures: one Signature per function, value and record (the record: core/bindings.wap) |
 | lower | core/rules/lowering.wap | wap-reader | declared | kernel |
 | bind | core/analyze/scope.wap | wap-binding | kernel | bound kernel |
 | type | core/analyze/types.wap | wap-binding | bound kernel | typed kernel |
