@@ -4,7 +4,6 @@ Preliminary draft, 2026-11-17, from the user's decisions in the supervisor sessi
 backbone starts from this file with fresh context. Read first: notes/first_principles.md. Inputs: notes/kernel.md (the 13-form kernel, the census, what rule
 patterns need), notes/layers.md, wiki/Philosophy.md, wiki/guiding-principles.md, notes/taste.md.
 
-
 **Names (user 2026-11-17):** **warp** is the old compiler (core/, frozen), **wap** the new one built here. The few
 language extensions wap needs to be written (named patterns that build, bind by place and read, see Layers) are built into warp first,
 and small parts of warp may be rewritten with them as a trial.
@@ -439,32 +438,14 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **A local named like a method shadows it**: a parameter `map` made `fields_of(record).map(…)` call the Node, so
   instance_from_map (analyze/data.wap) names its map `source`. Reason: the self-build census needs the function typed
   now. Paid off when `xs.map(…)` finds the list's method past a local of that name: the parameter is `map` again.
-- **A function read from a map traps when its parameter calls it twice** (found 2026-11-19, off-census):
-  `steps: map<text, (int) -> int> = {"inc": inc}`, then `twice(f: (int) -> int, x: int) := f(f(x))` with
-  `twice(steps["inc"], 3)` traps with a null reference; `f(x)` once works, and `twice(inc, 3)` does too. Paid off
-  when the nested call of such a parameter runs.
 - **A named function is refused where a function type is written for a variable** (found 2026-11-19, off-census):
   `g: (int) -> int = inc` says it gives fn<"… inc">, while the same `inc` in a `map<text, (int) -> int>` literal is
   taken. Paid off when a function's value fits a written function type wherever it is given.
-- **stage.wap's `replaced` is `staged`'s Node form, named apart** (wap/core/stage.wap): old warp cannot tell a Node
-  parameter from a function-typed one, so `staged(n, built: Node)` beside `staged(n, rewrite: (Node) -> Node)` is
-  refused. Paid off when old warp retires: one overloaded `staged`. Paid (wap-facts-replace): one function,
-  `replaced(n, built)`; a stage that rewrites n passes what it built from n.
-- **A parameter's default of ø reads as no default** (wap/core/analyze/calls.wap defaults_given): old warp's
-  `fact_of` gives ø for an Empty fact, so `pattern: Declared? = ø` and a parameter without a default look alike, and
-  defaults_given reads a missing default as Empty. Paid off when old warp retires: a missing default is refused there.
-  **Paid (wap-debts-binding):** calls.wap parameter_default refuses a missing default; `= ø` is the fact Empty.
 - **`compact` lives in core/stage.wap, not the types module** (wap/core/stage.wap): old warp's prelude lacks it, and wap
   can't hold two same-arity definitions of one name. Paid off when old warp retires: it moves to
   types/lists.wap with a test_lists line. Old warp no longer builds wap's tests (wap-facts-replace): the tests'
   compiler starts from the seed beside the seed's own types module, which lacks `compact` too, so the move waits for a seed
   whose types module holds it.
-- **Helpers named apart from same-named ones** (wap/core/analyze: `within` became part_of beside names.wap's scope
-  `within`, `valued` value_bearing beside the emitter's): a
-  program's definitions dispatch across all its modules, and a Node parameter dispatches as any, so analyze's
-  `valued(type: Node?)` beside emit's `valued(type: list<int>)` is refused though each call site's types tell them
-  apart. Paid off when a call is resolved statically wherever its argument types decide it.
-  **Paid (wap-debts-binding):** the seed and wap tell them apart by their types: `within` and `valued` again.
 - **A types file compiled as the program brings its definitions twice** (wap/core/pipeline.wap typed_file): the
   file is the program and also part of the library around it, so calls.wap refuses "two definitions share the key"
   (types/floats.wap, host, texts, types.wap, prelude.wap) and nodes.wap lists `text(n: Node)` twice. Off the
@@ -473,11 +454,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **`===` is value equality in the prelude** (wap/types/prelude.wap `===(a: T, b: T) := a == b`), where warp's `===`
   is identity (the user, 2026-11-18; wiki/equality.md): two separately built `[1]` are `===` under wap. Off the
   census: wap's own compiler compares definitions by their DEFINER id instead. Paid off when `===` is ref.eq identity.
-- **The binder forgets a definer with an Empty marker** (wap/core/analyze/scope.wap resolved_taking writes DEFINED_AT
-  Empty beside a name's CANDIDATES; wap/core/analyze/types.wap one_definer is its one reader). Reason: old warp's core
-  can drop no fact (its with_attribute only appends), so removing the fact breaks the reference compiler. Paid off when
-  old warp can drop a fact: then without_fact, beside with_fact in core/stage.wap.
-  **Paid (wap-debts-binding):** scope.wap drops the name's DEFINED_AT with without_fact; one_definer is gone.
 - **The source avoids comparing an optional record with ø** (core/rules/patterns.wap names_pattern, matcher.wap
   of_shape, stages.wap rule_applied's best as a list), because the seed's emitter compares records field by field.
   Paid off at the next seed refresh, once the seed compares an optional with ø: `!= ø` and `best: Rule? = ø` again.
@@ -496,8 +472,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   spelling in the source to rewrite: a typed rule's hole can't ask for a value that is no list, and narrowing writes
   the `!` itself. Paid off when a typed hole can ask for "not this type" and narrowing marks a found read that a
   types rule rewrites.
-
-
 
 - **A rule's output names resolve where the rule fires** (types/sugar/conditions.wap `x != ø` → `not missing(x)`).
   Reason: a template's words are bound in the program's scope, so a local named `missing` hid the types module's predicate
