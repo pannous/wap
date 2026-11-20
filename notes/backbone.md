@@ -391,8 +391,10 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   reads each form's `type` fact.
 - **A written result type is not declared** (wap/core/analyze/declarations.wap): `f(a): int := …` declares
   `f: [a]`, so only the typing stage knows the result. Paid off when signature rules need it.
+  **Paid 2026-11-20 (function-record-single):** the record (core/bindings.wap Signature) holds the written result.
 - **Function values and captures are refused by the typing stage** (wap/core/analyze/types.wap), as by the emitter.
   Paid off with closures.
+  **Paid 2026-11-20 (checked):** `n = 2; add = x => x + n; add(3)` gives 5.
 - **An int and a float mixed are refused** (`1 + 2.5`: no `+` takes (int, float); wap/preload/prelude.wap). warp
   gives 3.5. Reason: the overloads are chosen by exact types, and no conversion of an int to a float where one is
   wanted exists yet. Paid off by that conversion, in typing, not by mixed overloads.
@@ -407,6 +409,7 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **`x.f` finds only functions written in warp, not host words** (wap/core/analyze/types.wap part_typed): the key is
   text, so typing looks f up among the definitions it holds, and a library word declared by signature (`print`) is
   not one of them; `x.f(y)` is a plain call and finds both. Paid off when host words are definitions typing holds.
+  **Paid 2026-11-20 (checked):** `t = "hi"; t.print` prints hi.
 - **A bare `break`, `continue` or `return` is lowering's word form, not a rule** (wap/core/rules/lowering.wap
   `WORD_FORMS`), while `while c { b }` and `return x` are rules (wap/preload/sugar/loops.wap). Reason: a rule whose
   pattern is a word alone has no head, so the termination check (core/rules/stages.wap `terminating`) sees it fire
@@ -435,6 +438,7 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
   Records beside its declarations, and a field's capture captures its receiver.
 - **A one-letter literal key on a map read fails** (wap/core/analyze/data.wap): `m#"b"` gives the key as a char, so
   the wasm does not validate; `m#"bb"`, `m["b"]` and `m#k` work. Edge case, no wap source writes it.
+  **Paid 2026-11-20 (checked):** `m = {"b": 2}; m#"b"` gives 2.
 - **any compares other references by identity:** inside an `any`, refs other than boxes and texts compare by
   identity (a record compared directly compares by fields); by type via dispatch, as show does, when code needs it.
 - **The preload copies core/node.warp's enums instead of reading the file** (wap/preload/nodes.wap). wap reads
