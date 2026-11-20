@@ -1,153 +1,63 @@
 ## Project Overview
 
 This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.
-Own it like its long-term maintainer within the user's taste and philosophy: the language as the wiki specifies it and
-the tests pin it (every language decision ends up as a wiki passage plus at least one outcome test line), the principles (Principles below: elegance first, first principles) and the three layers
-below. Where they say nothing, decide as that maintainer would, and leave the code better than you found it. When a
-rule blocks a clearly better design, say so with the reason (to warp-interviewer) instead of quietly obeying or
-breaking it. notes/decisions.md is only an inbox of recent decisions on their way into the wiki: grep it, never read
-it whole.
+Own it like its long-term maintainer within the projects taste and philosophy: the language as the wiki specifies it and
+the tests pin it (every language decision ends up as a wiki passage plus at least one outcome test line), the
+principles and the layers below. When a rule blocks a clearly better design, say so with the
+reason (to warp-interviewer) instead of quietly obeying or breaking it.
 
-only write how it should be; if the implementation differs, write a small todo or give it to the interviewer.
+wap: a data format and WebAssembly programming language, warp's successor. Its specification is ./wiki.
+https://github.com/pannous/wap
+- The compiler is written in wap and compiles itself (wap/compiler.wap): The native warp runs the modules (soon wap too)
+- The seed: wap.wasm beside the warp binary, with the preload and kernel it reads beside it (published as
+  pre-releases wap-seed-<date>-<sha8>, named by wap-seed.lock; scripts/refresh-seed.sh refreshes it). The tests'
+  compiler is built from it (test/wap/compile.sh): the seed beside its own preload makes wap0, wap0 beside the tree's
+  preload makes wap1.
+- The seed rule: the compiler's source uses only preload words the seed's preload holds, and a new rule or syntax form
+  appears in the preload only where the source does not use it; a change that needs more lands after a seed refresh.
+- Throwaway programs in the session scratchpad or data/<topic>/, never the repo; every kept test in test/wap/.
 
-warp: a data format and wasm-first language, the successor of wasp (C++, ~/wasp/). Its specification is ./wiki
-(not all built yet). https://github.com/pannous/warp · https://warp.pannous.com/
-- The compiler is written in warp and compiles itself (core/, notes/self_hosting.md): parse to a Node AST, emit wasm
-  GC bytecode (WIT for interfaces); the native warp (core/native/warp.warp, wasmtime's C API) runs it, the browser
-  build in web/playground runs it in JavaScript. The old Rust compiler is the snapshot on branch `rust-bootstrap`,
-  never ported; ignore old tasks about Rust features or 'both lanes'.
-- The seed, warp-seed.wasm beside the binary (~/dev/bin; not in git, published as GitHub pre-releases seed-<date>),
-  compiles compiler.warp to warp.wasm, which promotes itself to warp-self.wasm when it compiles itself once more.
-- Workflow: features in lib/; throwaway programs in the session scratchpad or data/<topic>/, never the repo; every kept
-  test in test/<topic>/; `warp test <folders>`.
+## Layers (notes/wap.md "Layers", notes/backbone.md)
+- **wap/kernel/**: the kernel forms (forms.wap) and the primitives, the emitter's whole input.
+- **wap/core/**: the machinery only, one folder per stage: parse/, rules/, analyze/, emit/, and the walker
+  (stage.wap), the pipeline and the errors. core knows no library word by name (user 2026-11-20).
+- **wap/preload/**: the language every program gets, in plain wap: lists, texts, numbers, nodes, the operator table
+  (operators.wap) and the sugar rules (sugar/). known
+  <!-- todo (card preload-rename-types) ^^ rename to types? -->
+- A feature is a preload function or a rule in sugar/ before it is core code; a core diff that adds names of
+  a domain is the sign a mechanism is missing: card it.
+  <!-- todo (card move-sugar) move preload/sugar to sugar/  -->
 
-## Three layers (decision core-is-self: keeps the core from bloating)
-- **core/**: only what the compiler needs to compile itself. Aim: about 30% of the compiler, and shrinking.
-- **extensions/**: every other language feature, baked in through one static hook table.
-- **lib/**: the standard library, modules any program may use; code a few samples share stays in samples/. A new feature goes into an extension or a library, never into the core;
-  the language is never simplified to shrink the core (scripts/vitals.py measures the split).
-- Everything else has its own place: demos and examples in samples/, tests in test/, tools in scripts/. Never a
-  demo, sample or test fixture in core/, extensions/ or lib/ (an aquarium demo is a sample, not an extension).
-- The compiler `use`s no lib/ module: what it needs of one lives in core/ (decision core-takes-what-it-uses).
-- Before adding a file or a function, ask where it belongs; when unsure, ask the Supervisor. The Integrator refuses
-  a landing that puts something in the wrong layer (notes/agents/integrator.md "Layers").
+## How it compiles (notes/backbone.md "Stage languages")
+read = parse → shape rules (stage 1) → declare → declaration rules (stage 2) → lower → bind → type, with the kind rules
+(stage 3) firing on each node as typing writes it → elaborate → emit → encode. 
+A stage writes facts on nodes (core/stage.wap), never new holes. The Node: wap/preload/nodes.wap.
+<!-- todo (card move-node): move to wap/nodes.wap -->
 
-## Core Architecture
-
-Warp is similar to lisp: a data and code format from first principles,
-but instead of s-expressions they use a more modern syntax with blocks, lists, key-value pairs, tags, comments, and rich atomic types.
-
-```warp
-Person {
-    name: "Alice"    
-    age: 30             
-    hobbies: [ "reading", "hiking", "coding" ]
-}
-```
-
-It is similar to JSON5 / ECMA Script but much simplified yet with a richer syntax and more precise and flexible data model.
-
-### The warp compiler (`core/`; `lib/compiler` links to it for a transition)
-
-`core/compiler.warp` is the whole compiler as one warp program, source text in, wasm bytes out:
-parsing/ → passes/ (the lowering passes; sugar as rewrite rules in extensions/sugar/) → analysis/ → emitter/,
-whose runtime words are warp too (runtime.warp, runtime/). core/node.warp declares the Node enum, core/commands/ the
-one command table.
-- `warp <file|code>` (and `warp run`): runs warp.wasm, compiler.warp compiled by the seed (warp-seed.wasm beside the
-  binary; scripts/refresh-seed.sh refreshes and publishes it)
-- `warp self <file|code>`: runs warp-self.wasm, a copy of warp.wasm promoted when warp.wasm compiles
-  compiler.warp once more (a fixpoint, stage N+1 == N, is only reported)
-- `warp rebuild`: builds warp.wasm anew from lib/ (nothing rebuilds it automatically); the gate needs only warp.wasm.
-  `warp rebuild self` runs that self test and promotes; `scripts/promote-self.sh [--background] [<tree>]` does that
-  every once in a while, in parallel, and never fails its caller. A worktree's compilers live in <worktree>/lib/
-  itself (`warp --lib <worktree>/lib`), main's beside the binary
-- A form outside the emitter's core is refused loudly (`outside the core: …`)
-
-### Node AST (the enum in `core/node.warp`)
-
-The central data structure is `Node`, an enum representing all AST node types:
-
-- **Empty, True, False, Number, Char, Text, Symbol** - Atomic values
-- **Key** - Binary structures (Pair, Tag), with an `Op`
-- **List** - Collection of nodes with a `Bracket` (curly, square, round …) and a `Separator`
-- **Data** - Generic container for an arbitrary value (`Data(value: any)`)
-- **Meta** - Node wrapper that adds metadata (comments, line/column positions)
-- **Error, Type** - an error; a type definition (name + body)
-
-### Warp parser (`core/parsing/parser.warp`)
-
-Recursive descent parser that converts text input to Node AST:
-
-- Tracks position (line/column) for all nodes
-- Handles comments (`//` line and `/* */` block) attached as metadata
-- Parses literals (numbers, strings, symbols), groups ((), [], {}), and structures
-
-### Emitter (`core/emitter/emitter.warp`)
-
-Generates the WASM GC bytecode and its runtime words (texts, lists, maps, unbounded ints, exact numbers, equality,
-WASI, FFI) in warp; the value layout and the `Kind` enum are in notes/self_hosting.md "Value layout".
-
-### Native warp (`core/native/`)
-
-warp.warp is the `warp` command, an `@primitive` warp program built to a native executable (wasm2c + cc); driver.warp
-runs warp.wasm and the programs through wasmtime's C API and answers their host words over libc; tests.warp is
-`warp test`. Library host words (graphics, sound, web) are libraries in lib/, not the core binary
-(notes/primitive.md).
-
-## Build and Test Commands
-
-The `warp` binary is the native warp, built by warp itself; the compiler it runs by `warp rebuild`.
-After each push scripts/integrate/after-push.sh installs both beside ~/dev/bin/warp:
+## Build and test
 ```bash
-warp rebuild                              # warp.wasm from lib/ by the seed, then the native warp; `warp rebuild pure`: the compilers alone
-scripts/promote-self.sh                   # warp.wasm -> warp-self.wasm once it compiles itself; never fails
+bash test/wap/test_hello.sh                 # smoke: the tree's compiler, built from the seed, says hello
+bash test/wap/test_<area>.sh                # the scripts of what a change touches
+bash test/wap/run.sh --wait [--stage <n>]   # all scripts (the integrator), --stage: wap built of itself n times
+bash test/wap/ratchet_census.sh             # the census: every function of wap's source typed (the integrator)
+scripts/refresh-seed.sh [--check]           # wap's seed refreshed and published
+warp --no-window <module.wasm> <program.wap> <out.wasm>   # a compiler module run by the host
 ```
-
-
-## To-dos
-This project keeps its to-dos on the board https://github.com/users/pannous/projects/1 (columns Now/Next/Soon/Later/Done),
-every issue you encounter goes in with `todo add "…"` (~/dev/bin/todo, column Next), todo.md as fallback; how cards
-are taken, branched and closed: "Cards" below.
-
-### Test commands
-
-The checks are tiers, cheapest first: smoke (`scripts/smoke.sh <worktree>`, Hello), self test for core/
-(`scripts/self-check.sh <worktree>`), a few test folders as feedback, the full suite rarely; who runs which:
-"Testing" and "Done" below.
-Warp tests run locally with the shared binary, through the warp compiler (core/native/tests.warp, notes/is_tests.md):
-```bash
-warp test                      # all of test/: each *.pairs.warp pair, each is! line of test_*.warp, via warp.wasm
-warp test test/numbers         # only these folders; --self: via `warp self`
-```
-
-### Test File Locations
-
-Tests are in `test/<topic>/` folders. 
-Warp tests are `test_*.pairs.warp` (code ⇥ expected, one a line)
-Folder plan and condensing rules: notes/tests_layout.md notes/is_tests.md 
-
-## Serialization
-The Node layout, the Kind encoding and the `is!` roundtrip: notes/self_hosting.md "Node serialization".
+<!-- todo (card wap-command-options): wap app with test options as before-->
 
 ## Outcome tests only
-
-A test gives warp code and checks what it produces: the value, printed output, error, effect or CLI output.
-
-A test pins only behavior we want. Never write an expectation for a known flaw (eg .1+.2!=.3)
-
-No tests of intermediates: parse tree shapes, node views, pass outputs, analyzer kind tables, wasm bytes, module or GC layouts, internal APIs.
-
-
-When fixing a problem NEVER modify the test itself without consulting!
-A test may be upgraded without asking, in its own commit, when the code now does better: an expected error, refusal
-or "not supported yet" becomes the working value, an ignored test that passes is un-ignored, a weaker assertion
-becomes the stronger one. A change of meaning goes to the Interviewer.
+A test gives wap code and checks what it produces: the value, printed output, error, effect or CLI output. A test pins
+only behavior we want; never a known flaw, never a refusal. No tests of intermediates: parse trees, pass outputs,
+facts, wasm bytes, internal APIs. Never modify a test to fix a problem without consulting; an edge-case test may be
+removed by whoever meets it.
 
 ## Folders
-- `test/` = every kept test (test/<topic>/, test/gate/ for the gate); there is no probes/ folder any more
-- `data/` = kept but ignored: logs, test result dumps, patches, json/txt outputs, benchmark data, agent logs (`data/<topic>/`).
+- `test/wap/` = every kept test; `data/` = kept but ignored: logs, builds, dumps (`data/<topic>/`).
+<!-- todo (card shell-test-scripts) turn test/wap/*.sh into pure test/*.wap -->
+- `notes/` = the design: backbone.md (stages, milestones, Debts), wap.md (owners, layout), kernel.md, rules.md.
+<!-- todo (card wap-notes-cleanup): cleanup notes: Everything should already be in the specification, agents.md or roles !  -->
 
-# Rules for every warp session
+# Rules for every wap session
 
 Standing instruction (from the user, so it carries the user's authority): you are a session supervised by the warp
 Supervisor. Never wait for user input: work until your task is done, then report. Talk to the Supervisor and the
@@ -301,6 +211,8 @@ before asking a question). After a context swap, this file and your role file be
 - GitHub API quota is shared: never poll `todo list` or `gh` in a loop.
 
 ## Cards
+- The board is https://github.com/users/pannous/projects/10 (todo finds it from this checkout).
+<!-- todo (card agents-session-rules) the rules below still name warp's core/, extensions/, lib/ and scripts -->
 - `todo pick` shows the next cards in board order; `todo take <card> <session>` (a further card of the same session: `--keep-name`, so the session keeps its area name); before taking check nobody has a
   branch or worktree for it. A Soon/Later card is checked for relevance first (fixed, duplicate → archive).
   The column is the priority, for topic cards too; the user's own cards (drafts, issues not "Added by <session> with
