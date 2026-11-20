@@ -10,6 +10,8 @@ use "../errors.wap"
 use "../stage.wap"
 use "../type_notation.wap"
 use "primitives.wap"
+use "places.wap"
+use "../../kernel/forms.wap"
 
 # text_written writes through WASI's fd_write(fd, iovecs, count, written), which the native warp and the browser both
 # answer. Its memory: the iovec [address, length] at 0, the count written at 8, the text's bytes from 16.
@@ -17,8 +19,13 @@ STDOUT = 1
 STDERR = 2
 # the status a program that raised exits with
 RAISED_STATUS = 1
-# the module's one exception tag, a raise's, carrying its text: emitted declares it first
+# the module's one exception tag, a raise's, carrying its text, added at the first raise or catch: a module raising
+# nothing has none (a native build's wasm2c takes no tag)
 RAISED_TAG = 0
+raised_tag(p: Program) as int := {
+	if #p.m.tags == 0 { added_tag(p.m, [text_layout(p.m)]) }
+	RAISED_TAG
+}
 NEWLINE = 10
 IOVEC_ADDRESS = 0
 WRITTEN_ADDRESS = 8
@@ -35,11 +42,30 @@ HOST_FUNCTIONS = {
 	"args_sizes_get": [[I32, I32], [I32]], "args_get": [[I32, I32], [I32]],
 	"path_open": [[I32, I32, I32, I32, I32, I64, I64, I32, I32], [I32]], "clock_time_get": [[I32, I64, I32], [I32]]
 }
+# A function of another module the program declares, `getenv(name: int): int from "c"` (wap/extensions/native):
+# Prim(foreign, [module, name, arguments…]), its module and name texts the emitter reads, never code; its types those
+# of its arguments and value. Imported before any function of the module's own, as the host functions are
+FOREIGN = "foreign"
+foreign_calls(n: Node) as list<Node> := match n {
+	Prim(operation, arguments) => (if text(operation) == FOREIGN then [n] else []) + arguments.flat_map(foreign_calls)
+	_ => direct_parts(n).flat_map(foreign_calls)
+}
+written_text(call: Node, at: int) as text := match foreign_parts(call)#at { Text(value) => value; _ => refused(call, "this primitive takes its texts written in place") }
+foreign_parts(call: Node) as list<Node> := match call { Prim(operation, arguments) => arguments; _ => refused(call, "a foreign call is a primitive") }
+foreign_arguments(call: Node) as list<Node> := foreign_parts(call).drop(2)
+foreign_imported(call: Node, p: Program) := {
+	if not p.host.has(foreign_key(call)) { p.host[foreign_key(call)] = imported(p.m, written_text(call, 1), written_text(call, 2), foreign_arguments(call).map(argument => layout(argument, p)), if typed_layout(call, p) is empty then [] else [typed_layout(call, p)]) }
+}
+foreign_code(call: Node, p: Program, f: Frame) as Code := Code(typed_layout(call, p), foreign_arguments(call).flat_map(argument => code(argument, p, f).instructions) + instruction(CALL, [p.host[foreign_key(call)]]))
+foreign_key(call: Node) as text := written_text(call, 1) + "." + written_text(call, 2)
+# data_address("Hello"): the address of the text's bytes in the memory, a C string, its text written in place
+DATA_TEXT = "data_address"
+data_code(form: Node, p: Program) as Code := Code(typed_layout(form, p), i64_const(data_placed(p.m, written_text(form, 1).bytes)))
 # the index of a host function the module imported
 host(p: Program, name: text) as int := p.host[name] ?? refused(Text(name), "the module did not import this host function")
 
 # a raise: its text thrown, for the innermost Try around it to catch (kernel-try)
-raising_function(p: Program) as int := added_function(p.m, [text_layout(p.m)], [], [], local_get(0) + instruction(THROW, [RAISED_TAG]))
+raising_function(p: Program) as int := added_function(p.m, [text_layout(p.m)], [], [], local_get(0) + instruction(THROW, [raised_tag(p)]))
 # a raise no Try caught, its text on the stack: written to stderr and a line end, the program ended
 uncaught(p: Program) as list<int> := i64_const(STDERR) + i32_const(1) + instruction(CALL, [helper(p, "text_written", writing_function)]) + i32_const(RAISED_STATUS) + instruction(CALL, [host(p, "proc_exit")])
 # a raise of the text on the stack from inside a helper
