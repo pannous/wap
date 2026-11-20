@@ -1,0 +1,100 @@
+# The console of the native wap, `wap` alone (driver.wap): each line read is the source <session>/<n>.wap, which uses
+# the modules of the lines before it, 1.wasm to <n-1>.wasm, compiled to <n>.wasm and run once in the session's store,
+# linked to their kept instances: a definition stays, an effect happens once, a value is shown. A line that fails or
+# defines nothing leaves nothing; the next line is <n> again.
+use "c.wap"
+use "run.wap"
+
+# the standard files the console reads and prompts on, the newline, the sources' file mode (rw-r--r--), the base of
+# the line numbers
+STANDARD_INPUT := 0
+STANDARD_OUTPUT := 1
+NEWLINE := 10
+FILE_MODE := 420
+DECIMAL := 10
+session_template(): pointer := prim data_address("/wap-console-XXXXXX")
+prompt(): pointer := prim data_address("› ")
+use_before(): pointer := prim data_address("use \"")
+use_after(): pointer := prim data_address("\"\n")
+newline(): pointer := prim data_address("\n")
+digits(): pointer := prim data_address("0123456789")
+
+console(compiler: int) := {
+	temporary_path(NAME_AT, session_template())
+	mkdtemp(pointer_at(NAME_AT))
+	# (by its real path: WASI follows no link out of the root, and the temporary folder often is one)
+	set_word(SESSION_AT, 0)
+	strcat(pointer_at(SESSION_AT), realpath(pointer_at(NAME_AT), 0))
+	linker = linker_made()
+	context = context_made(1, host_list(ARGUMENTS_AT, 1))
+	lines = 0
+	while line_read() {
+		line_path(SOURCE_AT, lines + 1, wap_suffix())
+		line_path(MODULE_AT, lines + 1, module_suffix())
+		source_written(lines)
+		lines = if compiled(compiler, pointer_at(SOURCE_AT), pointer_at(MODULE_AT)) and instance_defined(linker, context, pointer_at(MODULE_AT)) then lines + 1 else lines
+	}
+	n = 1
+	while n <= lines + 1 {
+		line_path(SOURCE_AT, n, wap_suffix())
+		unlink(pointer_at(SOURCE_AT))
+		line_path(MODULE_AT, n, module_suffix())
+		unlink(pointer_at(MODULE_AT))
+		n = n + 1
+	}
+	rmdir(pointer_at(SESSION_AT))
+}
+# a line of standard input at LINE_AT, its newline dropped, the prompt shown first on a terminal; whether one came
+line_read(): bool := {
+	# (an else of no write: an If without one would give an optional, a GC value, card wap-command-options)
+	if isatty(STANDARD_INPUT) % BOOL_BYTE != 0 then written(STANDARD_OUTPUT, host_of(prompt())) else 0
+	length = 0
+	got = bytes_read(STANDARD_INPUT, pointer_at(LINE_AT), 1)
+	while got > 0 and memory_byte(LINE_AT + length) != NEWLINE and length < LINE_BYTES - 1 {
+		length = length + 1
+		got = bytes_read(STANDARD_INPUT, pointer_at(LINE_AT + length), 1)
+	}
+	set_word(LINE_AT + length, 0)
+	got > 0 or length > 0
+}
+# <session>/<n><suffix> at `at`
+line_path(at: int, n: int, suffix: pointer) := {
+	set_word(at, 0)
+	strcat(pointer_at(at), host_of(pointer_at(SESSION_AT)))
+	strcat(pointer_at(at), host_of(root()))
+	strcat(pointer_at(at), host_of(decimal(n)))
+	strcat(pointer_at(at), host_of(suffix))
+}
+# the line's source at SOURCE_AT: the line, then a use of each earlier line's module (after it, so what the compiler
+# says of the line is of its line 1)
+source_written(lines: int) := {
+	source = creat(pointer_at(SOURCE_AT), FILE_MODE)
+	written(source, host_of(pointer_at(LINE_AT)))
+	written(source, host_of(newline()))
+	n = 1
+	while n <= lines {
+		written(source, host_of(use_before()))
+		line_path(NAME_AT, n, module_suffix())
+		written(source, host_of(pointer_at(NAME_AT)))
+		written(source, host_of(use_after()))
+		n = n + 1
+	}
+	close(source)
+}
+# the decimal digits of a count, a C string at DIGITS_AT
+decimal(n: int): pointer := {
+	count = 1
+	rest = n ÷ DECIMAL
+	while rest > 0 {
+		count = count + 1
+		rest = rest ÷ DECIMAL
+	}
+	set_word(DIGITS_AT + count, 0)
+	rest = n
+	while count > 0 {
+		count = count - 1
+		memmove(pointer_at(DIGITS_AT + count), pointer_at(address(digits()) + rest % DECIMAL), 1)
+		rest = rest ÷ DECIMAL
+	}
+	pointer_at(DIGITS_AT)
+}
