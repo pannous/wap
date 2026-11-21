@@ -176,4 +176,9 @@ printf '%s\n' 'use "cycle_a.wap"' 'checked(t: text) as text := if #t > 100 then 
 check "a function of a file that uses another reads its own computed constant, whichever file runs first" "$(ran cycle_constant 'use "cycle_a.wap"
 use "cycle_b.wap"
 print(early + quoted("x"))')" "bx …"
+# files that use each other: a top-level statement reading a constant the other file gives runs after it
+printf '%s\n' 'use "cycle_d.wap"' 'WORDS = [NAME, "b"]' >"$stage/cycle_c.wap"
+printf '%s\n' 'use "cycle_c.wap"' 'NAME = "a"' >"$stage/cycle_d.wap"
+check "a top-level statement reads a constant of a file that uses its own, whichever file runs first" "$(ran cycle_statement 'use "cycle_d.wap"
+print(WORDS.join(""))')" "ab"
 exit $((failures > 0))

@@ -92,11 +92,16 @@ class TypingState {
 	globals: list<Binding> = []
 	# the keys of the globals functions read before the statements that give them their values, until those statements
 	unset: list<text> = []
-	# the top-level statements that give the globals their first values, by the global's key, and those typed ahead of
-	# their turn, where a function read the global first (files that use each other run in an order typing doesn't keep)
+	# the top-level statements that give the globals their first values, by the global's key; those typed ahead of
+	# their turn, where something read the global first; the keys being typed ahead; those whose statement has run,
+	# and those moved to run before the top-level statement now typed (files that use each other run by need)
 	givers: map<text, Node> = {}
 	typed_ahead: map<text, Node> = {}
-	ahead: int = 0
+	ahead: list<text> = []
+	ran: list<text> = []
+	run_ahead: list<text> = []
+	moving: bool = no
+	at_program: bool = yes
 	# the functions of the function values met, and the keys of the variables they capture
 	lambdas: list<Node> = []
 	# the functions dynamic calls dispatch through (core/analyze/dispatch.wap)
@@ -264,7 +269,9 @@ block_typed(n: Node, written: list, s: TypingState, f: TypeFrame, expected: Node
 	# may come after a definition naming its type
 	statements = written.map(statement => if statement is Define then define_of(held_function(statement, s), s) else statement)
 	# a statement wap refuses still lets the definitions beside it be typed, so their refusals are said with its own
-	typed = try (1 to #statements).map(at => statement_typed(statements#at, s, f, if at == #statements then expected else EMPTY_SYMBOL)) catch e {
+	at_program = s.at_program
+	s.at_program = no
+	typed = try statements_typed(statements, s, f, expected, at_program) catch e {
 		typed_alone(statements, s)
 		raise e.message
 	}
@@ -272,11 +279,30 @@ block_typed(n: Node, written: list, s: TypingState, f: TypeFrame, expected: Node
 	block = refitted(Block(typed), n)
 	if typed is empty then block else typed_like(block, typed.last)
 }
-# a statement typed, or as typed ahead of its turn
-statement_typed(statement: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := if given_key(statement) != ø and s.typed_ahead.has(given_key(statement)!) then s.typed_ahead[given_key(statement)!] else typed_form(statement, s, f, expected)
+# a block's statements typed, the last as expected; in the program, those moved to run first before the statement
+# that read their globals
+statements_typed(statements: list, s: TypingState, f: TypeFrame, expected: Node?, at_program: bool) as list := {
+	typed = []
+	for at in 1 to #statements {
+		one = statement_typed(statements#at, s, f, if at == #statements then expected else EMPTY_SYMBOL)
+		if at_program {
+			typed += s.run_ahead.map(key => s.typed_ahead[key])
+			s.run_ahead = []
+		}
+		if one != ø { typed += [one] }
+	}
+	typed
+}
+# a statement typed in its turn, or as typed ahead of it; ø when it was moved to run earlier
+statement_typed(statement: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node? := {
+	key = given_key(statement) ?? return typed_form(statement, s, f, expected)
+	if s.ran.contains(key) { return ø }
+	s.ran += [key]
+	if s.typed_ahead.has(key) then s.typed_ahead[key] else typed_form(statement, s, f, expected)
+}
 # the key of the global a statement gives a value, `x = 1` at the top; ø for any other statement
 given_key(statement: Node) as text? := match statement {
-	Set(place, value) => if place is symbol and is_bound(place, DefinitionKind.Global) then place_key(defined_at(place)) else ø
+	Set(place, value) => if place is symbol and is_bound(place, DefinitionKind.Global) and is_definer(place) then place_key(place) else ø
 	_ => ø
 }
 # each definition whose parameters all have their types typed, even when nothing calls it, unless TYPED_WHEN_CALLED;
@@ -403,28 +429,42 @@ name_typed(n: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
 		if case != ø { return case_call_typed(case, case, [], s, f) }
 		return if names_constant(n, expected, s) then call_typed(n, n, [], s, f, expected) else function_named_typed(n)
 	}
-	type = variable_type(n, s, f) ?? read_before_given(n, s, f)
+	type = read_before_given(n, s, f)
 	if is_bound(n, DefinitionKind.Global) and f.function != ø and place_key(defined_at(n)) in s.unset { f.late = f.late + [n] }
 	if type == ø and is_bound(n, DefinitionKind.Capture) { refused(n, "a named function inside a function reads the variables around it with closures, not yet; a function value `x => …` can") }
 	as_found(n, with_fact(n, TYPE, type ?? refused(n, "this name is read before any value is given to it")), s, f)
 }
-# a global a function reads before the statement that gives it its value is read when the function is called
-# (wiki/Footguns.md: free variables are read at call time): of a type its statement settles
+# A global read before the statement that gives it its first value has run. A function reads it when called
+# (wiki/Footguns.md: free variables are read at call time), of the type its statement settles, typed now. At the top,
+# one that another file gives runs first, so files that use each other run in the order their values need; one its
+# own file gives later is refused, that order is the written one.
 read_before_given(n: Node, s: TypingState, f: TypeFrame) as Node? := {
-	if not is_bound(n, DefinitionKind.Global) or f.function == ø and s.ahead == 0 { return ø }
-	# the statement that gives it typed now, so the function reads its type, and so do the statements typed ahead for
-	# it; it still runs in its turn
-	key = place_key(defined_at(n))
-	if s.givers.has(key) and not s.typed_ahead.has(key) {
-		s.ahead += 1
+	key = if is_bound(n, DefinitionKind.Global) then place_key(defined_at(n)) else ""
+	if not s.givers.has(key) or s.ran.contains(key) { return variable_type(n, s, f) ?? read_unset(n, key, s, f) }
+	top = s.moving or f.function == ø and s.ahead is empty
+	moved = s.moving or top and file_of(s.givers[key]) != file_of(n)
+	if top and not moved or s.ahead.contains(key) { return ø }
+	if not s.typed_ahead.has(key) {
+		ahead = s.ahead
+		was_moving = s.moving
+		s.moving = moved
+		s.ahead += [key]
 		s.typed_ahead[key] = typed_form(s.givers[key], s, TypeFrame(), EMPTY_SYMBOL)
-		s.ahead -= 1
-		return variable_type(n, s, f)
+		s.ahead = ahead
+		s.moving = was_moving
 	}
-	if f.function == ø { return ø }
+	if moved {
+		s.ran += [key]
+		s.run_ahead += [key]
+	}
+	variable_type(n, s, f)
+}
+# a global no top-level statement gives, read by a function: of a type settled later
+read_unset(n: Node, key: text, s: TypingState, f: TypeFrame) as Node? := {
+	if key == "" or f.function == ø { return ø }
 	type = unknown_type(s)
 	remembered(n, type, s, f)
-	s.unset = s.unset + [place_key(defined_at(n))]
+	s.unset = s.unset + [key]
 	type
 }
 # A path's read as a condition around finds it: an optional's value where it is known present, `x!`, a boxed value of
