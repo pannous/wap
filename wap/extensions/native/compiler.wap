@@ -9,12 +9,12 @@ compiler_beside(): int32 := prim data_address("/wap-seed/wap.wasm")
 own_path_link(): int32 := prim data_address("/proc/self/exe")
 # the compiler compiled to machine code, beside it: wap-<hash>.cwasm; a part written before it takes that name
 cached_suffix(): int32 := prim data_address(".cwasm")
-hash_mark(): int32 := prim data_address("-")
+compiler_cache(): int32 := prim data_address("wap-")
 part_template(): int32 := prim data_address(".XXXXXX")
-stale(): int32 := prim data_address("wap: the machine code of wap.wasm beside it is not this wasmtime's; compiled again\n")
+stale(): int32 := prim data_address("wap: this machine code is not this wasmtime's, so it is compiled again: ")
 digit_table(): int32 := prim data_address("0123456789abcdef")
 HEXADECIMAL := 16
-# a hash of a file's bytes: a polynomial over its 32-bit words below HASH_RANGE, read a chunk at a time
+# a hash of bytes: a polynomial over their 32-bit words below HASH_RANGE, read a chunk at a time
 HASH_BASE := 31
 HASH_RANGE := 72057594037927931
 CHUNK_BYTES := 4096
@@ -29,49 +29,53 @@ compiled(compiler: int, source: int32, module: int32): bool := {
 	module_ran(compiler, COMPILE_COUNT, arguments)
 }
 
-# wap.wasm's module: its machine code read from beside it, where this wasmtime wrote it for these bytes, else compiled
-# and its machine code written there for the next run; a stale one (another wasmtime's) said and replaced
-compiler_loaded(): int := {
+# wap.wasm's hash, which its machine code and every program's are named by
+compiler_hash(): int := {
 	size_at = host_block(8)
-	bytes = file_read(pointer_at(COMPILER_AT), size_at)
-	if bytes == 0 { return 0 }
-	cache_path_made(hash_of(bytes, long_at(size_at)))
-	cached = if realpath(pointer_at(CACHE_AT), 0) != 0 then deserialized() else 0
+	bytes = file_read(host_of(pointer_at(COMPILER_AT)), size_at)
+	if bytes == 0 then 0 else hash_of(0, bytes, long_at(size_at))
+}
+# wap.wasm's module of this hash: its machine code read from beside it, where this wasmtime wrote it for these bytes,
+# else compiled and its machine code written there for the next run
+compiler_loaded(hash: int): int := {
+	cached = cached_module(CACHE_AT, compiler_cache(), hash)
 	if cached != 0 { return cached }
-	module = module_of(bytes, long_at(size_at))
-	if module != 0 then cache_written(module) else 0
+	module = module_compiled(pointer_at(COMPILER_AT))
+	if module != 0 then cache_written(module, CACHE_AT) else 0
 	module
 }
-# CACHE_AT: wap.wasm's path, wap-<hash>.cwasm in place of wap.wasm
-cache_path_made(hash: int) := {
-	strcpy(pointer_at(CACHE_AT), pointer_at(COMPILER_AT))
-	set_word(CACHE_AT + strlen(host_of(pointer_at(CACHE_AT))) - strlen(host_of(module_suffix())), 0)
-	strcat(pointer_at(CACHE_AT), host_of(hash_mark()))
-	strcat(pointer_at(CACHE_AT), host_of(digits_of(hash, HEXADECIMAL)))
-	strcat(pointer_at(CACHE_AT), host_of(cached_suffix()))
-}
-# the module of the machine code at CACHE_AT, 0 where this wasmtime refuses it, said
-deserialized(): int := {
+# the module whose machine code beside wap.wasm the hash names, its path made at `at`: <prefix><hash>.cwasm in its
+# folder; 0 where there is none, or where this wasmtime refuses it (another's), said
+cached_module(at: int, prefix: int32, hash: int): int := {
+	strcpy(pointer_at(at), pointer_at(COMPILER_AT))
+	set_word(at + strrchr(pointer_at(at), SLASH) + 1 - host_of(pointer_at(at)), 0)
+	strcat(pointer_at(at), host_of(prefix))
+	strcat(pointer_at(at), host_of(digits_of(hash, HEXADECIMAL)))
+	strcat(pointer_at(at), host_of(cached_suffix()))
+	if realpath(pointer_at(at), 0) == 0 { return 0 }
 	module_at = host_block(8)
-	if wasmtime_module_deserialize_file(engine, pointer_at(CACHE_AT), module_at) == 0 then long_at(module_at) else said_none(stale())
+	if wasmtime_module_deserialize_file(engine, pointer_at(at), module_at) == 0 then long_at(module_at) else stale_said(at)
 }
-said_none(t: int32): int := {
-	said(t)
-	0
+stale_said(at: int): int := {
+	said(stale())
+	said(pointer_at(at))
+	said_none(newline())
 }
-# the module's machine code written to CACHE_AT, through a part of its own, so a run reading it never reads half of it
-cache_written(module: int): int := {
+# the module's machine code written to the path at `at`, through a part of its own, so a run reading it never reads half
+# of it
+cache_written(module: int, at: int): int := {
 	code = host_block(VECTOR_BYTES)
 	if wasmtime_module_serialize(module, code) != 0 { return 0 }
-	strcpy(pointer_at(PART_AT), pointer_at(CACHE_AT))
+	strcpy(pointer_at(PART_AT), pointer_at(at))
 	strcat(pointer_at(PART_AT), host_of(part_template()))
 	part = mkstemps(pointer_at(PART_AT), 0)
 	write(part, long_at(code + 8), long_at(code))
 	close(part)
-	rename(pointer_at(PART_AT), pointer_at(CACHE_AT))
+	rename(pointer_at(PART_AT), pointer_at(at))
 }
-hash_of(bytes: int, size: int): int := {
-	hash = 0
+# a hash gone on over these bytes of the host's memory: a polynomial over their 32-bit words below HASH_RANGE
+hash_of(start: int, bytes: int, size: int): int := {
+	hash = start
 	at = 0
 	while at < size {
 		count = if size - at < CHUNK_BYTES then size - at else CHUNK_BYTES
