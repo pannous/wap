@@ -148,4 +148,12 @@ add(a: int, b: int) as int := a + b
 add(a: text, b: text) as text := a + b' twice 21)" "42"
 check "a program uses a compiled module whose one function is exported by its plain word too" "$(printf '%s\n' 'twice(x: int) as int := x * 2' >"$stage/plain_twice.wap" && $warp "$compiler" "$stage/plain_twice.wap" "$stage/plain_twice.wasm" 2>&1 && ran uses_plain_twice "use \"$stage/plain_twice.wasm\"
 print(text(twice(21)))")" "42"
+# a recursive record's recursion group holds only the types that refer to it, so a list or text the module shares
+# with the program is the program's own type
+check "a program calls a list and a text function of a module declaring a recursive record" "$(printf '%s\n' 'class Tree { kids: list<Tree>; name: text }' 'total(xs: list<int>) as int := xs.sum()' 'shout(t: text) as text := t + "!"' 'size(t: Tree) as int := 1 + t.kids.map(size).sum()' >"$stage/recursive_module.wap" && $warp "$compiler" "$stage/recursive_module.wap" "$stage/recursive_module.wasm" 2>&1 && ran uses_recursive_module "use \"$stage/recursive_module.wasm\"
+print(text(total([1, 2, 3])))
+print(shout(\"hi\"))
+print(text(size(Tree([Tree([], \"b\")], \"a\"))))")" "6
+hi!
+2"
 exit $((failures > 0))
