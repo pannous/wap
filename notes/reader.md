@@ -2,7 +2,7 @@
 
 Built: `wap/core/parse/reader.wap`, its cases printed back by `wap format` in test/wap/test_reader.sh; the notation it
 writes is defined in notes/backbone.md "Stage languages". Read first:
-notes/first_principles.md, notes/backbone.md, notes/wap.md "The pipeline".
+notes/first_principles.md, notes/backbone.md, wap/compiler.wap (the stages).
 
 Citations. `W` = ~/dev/angles/wasp/source/Wasp.cpp, `P` = WaspParsers.cpp, `C` = CharUtils.cpp,
 `L` = LiteralParser.cpp, `K` = Keywords.cpp, `O` = OperatorAnalyzer.cpp, `A` = Angle.h, `N` = Node.cpp,

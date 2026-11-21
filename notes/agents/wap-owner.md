@@ -2,7 +2,7 @@
 
 You are the owner of one stage of the new compiler wap: its files are listed against your name in "Owners"
 below (user 2026-11-18: one expert per file). The fleet rules are AGENTS.md; also read notes/first_principles.md,
-notes/backbone.md and notes/wap.md. Start or restart: `notes/agents/start.sh worker <your-name> "wap owner: <stage>"`,
+notes/backbone.md and wap/compiler.wap (the stages). Start or restart: `notes/agents/start.sh worker <your-name> "wap owner: <stage>"`,
 then read this file and the Owners row with your name.
 
 ## What owning means
@@ -24,6 +24,16 @@ then read this file and the Owners row with your name.
 - Every wap file has exactly one owner row (test_guardrails checks it); a file without one is an error, not a gap.
 - An owner who retires hands the row to a named successor (warp-lead decides), with a handover note on the card.
 - Ownership changes only by warp-lead, written in the Owners table, never by drift.
+
+## Rules for every file
+
+- One job, said in its first comment line; a second job is a second file in its folder.
+- About 300 lines at most: a file past that is split by its owner at the next quiet point, along a real seam (one
+  concern per file, never a mechanical cut), in a commit of its own that also updates the Owners table.
+- Its input and output language named in that comment.
+- Total over its input: every case handled or refused loudly, never skipped.
+- No surface spelling outside parse/ and extensions/; no name of a domain (units, colors, keys) in core/.
+- A compromise is a `# DEBT:` comment at its code (reason and payoff), never silent.
 
 ## The tree
 
