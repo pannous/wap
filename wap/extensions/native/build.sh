@@ -29,9 +29,10 @@ mkdir -p "$building" && building="$(cd -P "$building" && pwd -P)"
 source "$here/../../../scripts/lib/wap-beside.sh"
 mkdir -p "$building/compiler"
 (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$building/compiler/") && cp "$compiler" "$building/compiler/wap.wasm"
-# (a library the compiler compiled once, types/types.wasm, is the GC one: a native build's library is read anew)
+# (the library the compiler compiled once, types/types.wasm, and its warm state are the GC ones: a native build reads
+# its library anew, --sources)
 cp "$here/text_bytes.wap" "$building/compiler/types/text_bytes.wap" && rm -f "$building/compiler/types/types.wasm"
-"$WARP" --no-window "$building/compiler/wap.wasm" native "$program" "$building/$MODULE_NAME.wasm"
+"$WARP" --no-window "$building/compiler/wap.wasm" --sources native "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
 awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"
 "$C_COMPILER" $C_FLAGS -I"$building" -I"$wabt/$WASM2C_RUNTIME" -I"$wabt/$WABT_HEADERS" -I"$library" -o "$executable" \
