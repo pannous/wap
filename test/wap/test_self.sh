@@ -45,16 +45,16 @@ files=(
 	wap/types/lists.wap
 	wap/types/numbers.wap
 	wap/types/rules.wap
-	wap/types/sugar/calls.wap
-	wap/types/sugar/conditions.wap
-	wap/types/sugar/data.wap
-	wap/types/sugar/definitions.wap
-	wap/types/sugar/literals.wap
-	wap/types/sugar/loops.wap
-	wap/types/sugar/matching.wap
-	wap/types/sugar/ranges.wap
-	wap/types/sugar/records.wap
-	wap/types/sugar/types.wap
+	wap/sugar/calls.wap
+	wap/sugar/conditions.wap
+	wap/sugar/data.wap
+	wap/sugar/definitions.wap
+	wap/sugar/literals.wap
+	wap/sugar/loops.wap
+	wap/sugar/matching.wap
+	wap/sugar/ranges.wap
+	wap/sugar/records.wap
+	wap/sugar/types.wap
 	wap/core/format.wap
 	wap/core/language.wap
 	wap/core/parse/operator_table.wap
