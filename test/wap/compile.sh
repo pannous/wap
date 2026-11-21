@@ -30,8 +30,8 @@ folder_built() {
 		$warp "$built" "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
 		built="$building/wap$n.wasm"
 	done
-	# the library compiled once beside its source, which programs then read (extensions/wasm/library.wap)
-	$warp "$built" "$building/types/types.wap" "$building/types/types.wasm" 2>&1 || return 1
+	# the library compiled once beside the compiler, which programs then read (extensions/wasm/library.wap)
+	$warp "$built" "$building/types/types.wap" "$building/types.wasm" 2>&1 || return 1
 	# another script may have put the same folder in place meanwhile: the first one stays
 	[ -f "$1/wap$2.wasm" ] && { rm -rf "$building"; return; }
 	rm -rf "$1" && mv "$building" "$1"
@@ -47,6 +47,8 @@ fi
 # each test script its own folder in the tree's data/ (never the system's temporary folder)
 stage="$data/$$"
 mkdir -p "$stage" || exit 1
+# the programs compiled here import the library by its bare name, which the host finds beside them
+cp "$(dirname "$compiler")/types.wasm" "$stage/" 2>/dev/null
 trap 'rm -rf "$stage"' EXIT
 
 ran() {

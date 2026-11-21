@@ -17,6 +17,10 @@ PREAMBLE_BYTES = 8
 # what a header line writes before its result type, and the high bit of a LEB128 byte, set on all but the last
 RESULT_ARROW = " → "
 MORE_BYTES = 128
+# the endings of a source file and of a compiled module, and the name of a carried file's section before its name
+SOURCE_ENDING = ".wap"
+MODULE_ENDING = ".wasm"
+PART_SECTION = "wap "
 # the parts of the names of wasm's instructions on the linear memory
 MEMORY_OPERATIONS = [".load", ".store", "memory."]
 
@@ -74,21 +78,47 @@ inner_nodes(n: Node) as list<Node> := match n {
 defined_by(statement: Node, ids: list<text>) as bool := declaration_of(statement) != ø and ids.contains(definer_id(declaration_name(declaration_of(statement)!)))
 # the wap section's source: the module's files as written, each top-level statement but the definitions compiled
 # once, which their export names declare, and the includes, whose files follow in their place
-header_source(file: text, module: Module, exported: list<Signature>) as text := {
+header_source(file: text, module: Module, exported: list<Signature>, container: text, carried: list<text> = []) as text := {
 	cut = exported.map(signature => line_place(defining_statement(module.code, signature)!))
-	written_files(file).map(written => kept_lines(written, cut)).join("")
+	written_files(file).map(written => kept_lines(written, cut, container, carried)).join("")
 }
 line_place(statement: Node) as text := "${file_of(statement)}:${line_of(statement)}"
 # a file and the files it includes, in their order
 written_files(file: text) as list<text> := [file] + files_named(notation(read(file), file), INCLUDE_WORD).flat_map(written_files)
-# a file's text without the lines of the statements cut and of its includes, each statement up to the next one
-kept_lines(file: text, cut: list<text>) as text := {
+# A compiled module may carry the source files it uses, each in a custom section of its own (`wap host.wap`), its wap
+# section then using them inside it, `use "types.wasm/host.wap"`, so reading it reads no file beside it (the library,
+# library.wap); a carried file uses none itself
+carried_files(file: text) as list<text> := {
+	carried = written_files(file).flat_map(written => files_named(notation(read(written), written), USE_WORD)).filter(used => used.ends_with(SOURCE_ENDING)).unique
+	for used in carried { if files_named(notation(read(used), used), USE_WORD) { raise "a module carries the files it uses, which use none: ${used} does" } }
+	names = carried.map(file_name)
+	for name in names { if #names.filter(other => other == name) > 1 { raise "a module carries the files it uses by name, and two are named ${name}" } }
+	carried
+}
+carried_sections(files: list<text>) as list<int> := files.flat_map(file => custom_section(PART_SECTION + file_name(file), read(file).bytes))
+file_name(path: text) as text := path.split("/").last
+# the source of a file, or of a file a module carries, its path led by the module's: `types.wasm/host.wap`
+part_source(path: text) as text := {
+	parts = path.split("/")
+	at = index_where(parts.take(#parts - 1), part => part.ends_with(MODULE_ENDING))
+	if at == 0 { return read(path) }
+	container = parts.take(at).join("/")
+	name = parts.drop(at).join("/")
+	carried = custom_text(read(container), PART_SECTION + name)
+	if carried is empty { raise "${container} carries no ${name}" }
+	carried
+}
+# a file's text without the lines of the statements cut and of its includes, each statement up to the next one, a
+# use of a carried file as from inside the container
+kept_lines(file: text, cut: list<text>, container: text, carried: list<text>) as text := {
 	lines = read(file).split("\n")
 	statements = top_level_statements(notation(read(file), file)).filter(statement => line_of(statement) != ø)
 	starts = statements.map(statement => line_of(statement)!) + [#lines + 1]
 	kept = ""
 	for at in 0 to #statements - 1 {
-		if not cut.contains(line_place(statements[at])) and phrase_text(statements[at], INCLUDE_WORD) == ø { kept += lines[starts[at] - 1 .. starts[at + 1] - 1].join("\n") + "\n" }
+		used = phrase_text(statements[at], USE_WORD)
+		if used != ø and carried.contains(beside(file, used!)) { kept += "use \"${container}/${file_name(used!)}\"\n" }
+		else if not cut.contains(line_place(statements[at])) and phrase_text(statements[at], INCLUDE_WORD) == ø { kept += lines[starts[at] - 1 .. starts[at + 1] - 1].join("\n") + "\n" }
 	}
 	kept
 }
