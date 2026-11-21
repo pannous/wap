@@ -29,4 +29,18 @@ check "a crash's backtrace names the function it happened in" "$(ran crash 'clas
 g(x: int) as P? := if x > 0 then P(x) else ø
 reads(x: int) as int := g(x)!.n
 print text(reads(0))' | grep -o 'reads(x: int) → int')" "reads(x: int) → int"
+# a definition's modifiers (wiki/keyword.md Modifiers, wiki/constant.md)
+check "public and global before a definition change nothing" "$(ran modifiers 'public pad(t: text) := t + "."
+global twice(t: text) as text := t * 2
+print(twice(pad("a")))')" "a.a."
+check "a const is a constant" "$(ran constants 'const z = 7
+const tau := 2 * z
+print(text(z + tau))')" "21"
+check "a global given at the top is the program's variable" "$(ran top_global 'global n = 1
+bump() := {
+	global n
+	n = n + 1
+}
+bump()
+print(text(n))')" "2"
 exit $((failures > 0))
