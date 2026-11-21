@@ -42,6 +42,7 @@ wap/
 
   kernel/                     the kernel layer: the emitter's whole input language
     forms.wap                 the kernel forms, each a named pattern of Node
+    surface.wap               the forms rules write and typing turns into kernel forms (Item, Variable)
 
   core/                       the machinery: mechanisms only, no names of a domain
     pipeline.wap              one function per step from source to typed program, shared by compiler and census
@@ -180,7 +181,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 
 | stage | owner | files (under wap/) |
 |---|---|---|
-| lead: the queue, the contracts | warp-lead | compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap; the test/wap/ scripts no other row names |
+| lead: the queue, the contracts | warp-lead | compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap, kernel/surface.wap; the test/wap/ scripts no other row names |
 | self-build: wap compiled by wap, file by file | warp-wap-operators | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp; edits any file to write its types and `use` lines |
 | front: read, operators, rules, lowering | warp-wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, nodes.wap |
 | types: declare, bind, type | warp-wap-binding | core/analyze/, core/paths.wap |
