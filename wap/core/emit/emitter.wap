@@ -38,9 +38,7 @@ NEVER = [NEVER_LAYOUT]
 # the system interface the program prints and exits through
 WASI = "wasi_snapshot_preview1"
 # the labels wasm's structured instructions open, so a jump can count how far out its target is
-EXIT_LABEL = "exit"
-NEXT_LABEL = "next"
-OTHER_LABEL = "other"
+enum Label { Exit, Next, Other }
 # the bindings whose variables live in the function's frame
 FRAME_BINDINGS = [DefinitionKind.Local, DefinitionKind.Parameter, DefinitionKind.Capture]
 
@@ -113,7 +111,7 @@ class Frame {
 	# the layout of the function's result as its signature says, which a returned value is made to fit
 	signed: list<int> = []
 	# the labels open around the code being emitted, the innermost last
-	labels: list<text> = []
+	labels: list<Label> = []
 }
 # A definition where wasm keeps it: its index, the type of its value (a function's result) and, for a function,
 # its parameters' types. Its key is where it was defined: file, line and column.
@@ -137,8 +135,8 @@ code(form: Node, p: Program, f: Frame) as Code := match form {
 	While(condition, body) => while_code(form, condition, body, p, f)
 	Case(subject, arms) => case_code(form, code(subject, p, f), arms, p, f)
 	Return(value) => return_code(form, value, p, f)
-	Break() => Code(NEVER, instruction(BRANCH, [jump(form, f, EXIT_LABEL)]))
-	Continue() => Code(NEVER, instruction(BRANCH, [jump(form, f, NEXT_LABEL)]))
+	Break() => Code(NEVER, instruction(BRANCH, [jump(form, f, Label.Exit)]))
+	Continue() => Code(NEVER, instruction(BRANCH, [jump(form, f, Label.Next)]))
 	List(entries, Bracket.Curly, separator) => map_code(form, entries, p, f)
 	List(items, Bracket.Square, separator) => {
 		item = list_item(type_of(form))
@@ -175,7 +173,7 @@ if_code(form: Node, condition: Code, then_part: Code, else_part: Code, p: Progra
 #   local.set error  handler  end
 try_code(form: Node, body: Node, handler: Node, p: Program, f: Frame) as Code := match handler {
 	Fn(parameters, handling) => {
-		tried = choice_fitted(form, labelled(f, [OTHER_LABEL, OTHER_LABEL, OTHER_LABEL], () => code(body, p, f)), body, p)
+		tried = choice_fitted(form, labelled(f, [Label.Other, Label.Other, Label.Other], () => code(body, p, f)), body, p)
 		error = slotted(f, place_key(declared_name(items_of(parameters)#1)), known_layout(NODE_SYMBOL, p.m, p.records))
 		instead = arm_code(form, handling, p, f)
 		type = typed_layout(form, p)
@@ -190,7 +188,7 @@ uncaught_ended(body: list<int>, p: Program) as list<int> := BLOCK + text_layout(
 block_type(type: list<int>) as list<int> := if valued(type) then type else VOID_BLOCK
 # a part's code where its choice has the type: its value kept, or dropped when the choice has none
 kept(part: Code, type: list<int>) as list<int> := if valued(type) then part.instructions else dropped(part)
-arm_code(choice: Node, part: Node, p: Program, f: Frame) as Code := choice_fitted(choice, labelled(f, [OTHER_LABEL], () => code(part, p, f)), part, p)
+arm_code(choice: Node, part: Node, p: Program, f: Frame) as Code := choice_fitted(choice, labelled(f, [Label.Other], () => code(part, p, f)), part, p)
 # a part's value made to fit its choice's type, an If's or a Case's
 choice_fitted(choice: Node, given: Code, part: Node, p: Program) as Code := {
 	wanted = typed_layout(choice, p)
@@ -202,10 +200,10 @@ checked_condition(form: Node, condition: Code) := if condition.type != I32 { ref
 # A loop: its condition tested before each run of its body, the loop left when it is no. It has no value.
 #   block (exit)  loop (next)  condition, not, br_if exit; body; br next  end  end
 while_code(form: Node, condition: Node, body: Node, p: Program, f: Frame) as Code := {
-	inner = labelled(f, [EXIT_LABEL, NEXT_LABEL], () => {
+	inner = labelled(f, [Label.Exit, Label.Next], () => {
 		test = code(condition, p, f)
 		checked_condition(form, test)
-		Code([], test.instructions + I32_EQZ + instruction(BRANCH_IF, [jump(form, f, EXIT_LABEL)]) + dropped(code(body, p, f)) + instruction(BRANCH, [jump(form, f, NEXT_LABEL)]))
+		Code([], test.instructions + I32_EQZ + instruction(BRANCH_IF, [jump(form, f, Label.Exit)]) + dropped(code(body, p, f)) + instruction(BRANCH, [jump(form, f, Label.Next)]))
 	})
 	Code([], looped(inner.instructions))
 }
@@ -255,14 +253,14 @@ items_fitted(type: Node, items: list<Node>, p: Program, f: Frame) as list<Code> 
 # a function's value made to fit its signed result, a frame without one leaving it as it is
 signed_fit(given: Code, form: Node, f: Frame, p: Program) as Code := if valued(f.signed) then fitted(given, f.signed, form, p) else given
 # code emitted inside wasm's structured instructions, which open these labels
-labelled(f: Frame, labels: list<text>, emit: function) as Code := {
+labelled(f: Frame, labels: list<Label>, emit: function) as Code := {
 	f.labels += labels
 	emitted_code = emit()
 	f.labels = f.labels[.. #f.labels - #labels]
 	emitted_code
 }
 # how many labels out the innermost label of that kind is, as br counts
-jump(form: Node, f: Frame, label: text) as int := {
+jump(form: Node, f: Frame, label: Label) as int := {
 	innermost = 0
 	for at in 1 to #f.labels { if f.labels#at == label { innermost = at } }
 	if innermost == 0 { refused(form, "this jumps out of a loop, and no loop is around it") }
