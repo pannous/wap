@@ -35,7 +35,7 @@ arms_code(form: Node, arms: list<Node>, held: Placed, p: Program, f: Frame) as C
 	match arms#1 {
 		Arm(pattern, result) => {
 			if names_any(pattern) or #arms == 1 and fact_of(form, TYPE) != ø and only_names(pattern, p) { return arm_taken(form, pattern, result, held, p, f) }
-			test = Code(I32, pattern_test(pattern, fetched(held), held.type, p))
+			test = Code(I32, pattern_test(pattern, fetched(held), held.type, p, f))
 			if_code(form, test, labelled(f, [OTHER_LABEL], () => arm_taken(form, pattern, result, held, p, f)), labelled(f, [OTHER_LABEL], () => arms_code(form, arms[1 ..], held, p, f)), p)
 		}
 		_ => refused(arms#1, "a match's arm is written pattern => result")
@@ -83,12 +83,13 @@ item_part(item: Node, at: int, fixed: int, value: list<int>, type: Node, p: Prog
 # Whether the value fits a pattern, yes or no: a case by its tag, a list by its count, then each part by its own
 # pattern, tested only once the shape fits; a literal by equality. `value` is the code that gives the value, of the
 # layout `type`.
-pattern_test(pattern: Node, written: list<int>, type: list<int>, p: Program) as list<int> := {
-	value = seen(pattern, written, p)
+pattern_test(pattern: Node, written: list<int>, type: list<int>, p: Program, f: Frame) as list<int> := {
+	seeing = seen(pattern, written, p, f)
+	value = seeing.value
 	shape = shape_test(pattern, value, p)
 	if shape != ø {
 		tested = field_parts(pattern, value, p).filter(part => not names_any(part.pattern))
-		return tested.fold(shape, (fits, part) => fits + IF + I32 + pattern_test(part.pattern, part.value, part.type, p) + ELSE + i32_const(0) + END)
+		return seeing.before + tested.fold(shape, (fits, part) => fits + IF + I32 + pattern_test(part.pattern, part.value, part.type, p, f) + ELSE + i32_const(0) + END)
 	}
 	given = literal(pattern, p.m) ?? refused(pattern, "wap matches literals, names, cases and _ so far")
 	value + given.instructions + equality(type, p)
@@ -105,22 +106,34 @@ shape_test(pattern: Node, value: list<int>, p: Program) as list<int>? := {
 names_held(pattern: Node, value: list<int>, type: list<int>, p: Program, f: Frame) as list<int> := {
 	if text(pattern) == WILDCARD { return [] }
 	if names_any(pattern) { return value + kept(added_variable(pattern, type, p, f)) + DROP }
-	field_parts(pattern, seen(pattern, value, p), p).flat_map(part => names_held(part.pattern, part.value, part.type, p, f))
+	seeing = seen(pattern, value, p, f)
+	seeing.before + field_parts(pattern, seeing.value, p).flat_map(part => names_held(part.pattern, part.value, part.type, p, f))
 }
 # A node's facts live in Meta, never in its shape: a pattern of another Node case, `List(items, b, s)`, tests the node
-# inside the Meta wrappers, so a pattern written for one stage matches in the next (notes/backbone.md)
-seen(pattern: Node, value: list<int>, p: Program) as list<int> := {
-	if not is_case(case_name(pattern)) or text(case_name(pattern)) == META_CASE or record_name(enum_declaring(p.records, case_name(pattern))) != NODE_TYPE { return value }
-	value + instruction(CALL, [helper(p, "meta_unwrapped", meta_unwrapped_function)])
+# inside the Meta wrappers, so a pattern written for one stage matches in the next (notes/backbone.md). The node is
+# taken out once, into a local of its own, which every test and part of the pattern then reads
+class Seen { before: list<int>; value: list<int> }
+seen(pattern: Node, value: list<int>, p: Program, f: Frame) as Seen := {
+	if not is_case(case_name(pattern)) or text(case_name(pattern)) == META_CASE or record_name(enum_declaring(p.records, case_name(pattern))) != NODE_TYPE { return Seen([], value) }
+	f.slots += [Placed("node seen in slot ${#f.slots}", #f.slots, known_layout(NODE_SYMBOL, p.m, p.records), [], yes)]
+	node = local_get(f.slots.last.index)
+	# the helper called only for a node in a Meta, most nodes being in none
+	unwrapped = BLOCK + VOID_BLOCK + meta_left(node, 0, p) + node + instruction(CALL, [helper(p, "meta_unwrapped", meta_unwrapped_function)]) + local_set(f.slots.last.index) + END
+	Seen(value + local_set(f.slots.last.index) + unwrapped, node)
 }
 # The helper taking a node out of its Meta wrappers, ø as it is. Its local: 0 the node.
 meta_unwrapped_function(p: Program) as int := {
 	node = record_named(p.records, NODE_SYMBOL) ?? refused(Text(NODE_TYPE), "a Node pattern looks through Meta, and the program declares no Node")
 	meta = case_struct_of(node, node_case(node, META_CASE), p.m, p.records)
-	not_meta = local_get(0) + REF_IS_NULL + instruction(BRANCH_IF, [1]) + local_get(0) + tagged(p.m) + i32_const(declared_tag(node_case(node, META_CASE), p)) + I32_NE + instruction(BRANCH_IF, [1])
+	not_meta = meta_left(local_get(0), 1, p)
 	inner = local_get(0) + heap_instruction(REF_CAST_NULL, meta) + instruction(STRUCT_GET, [meta, 1 + #fields_of(node)]) + local_set(0)
 	layout = known_layout(NODE_SYMBOL, p.m, p.records)
 	added_function(p.m, [layout], [layout], [], BLOCK + VOID_BLOCK + LOOP + VOID_BLOCK + not_meta + inner + instruction(BRANCH, [0]) + END + END + local_get(0))
+}
+# the branch out of the block `depth` levels up unless the node is in a Meta: ø or any other case leaves
+meta_left(node: list<int>, depth: int, p: Program) as list<int> := {
+	record = record_named(p.records, NODE_SYMBOL) ?? refused(Text(NODE_TYPE), "a Node pattern looks through Meta, and the program declares no Node")
+	node + REF_IS_NULL + instruction(BRANCH_IF, [depth]) + node + tagged(p.m) + i32_const(declared_tag(node_case(record, META_CASE), p)) + I32_NE + instruction(BRANCH_IF, [depth])
 }
 # A case's value, `Dime` or `Circle(3)`: its tag and its fields' values in a new struct of its case, of its enum's type
 case_value_code(form: Node, called: Node, arguments: list<Node>, p: Program, f: Frame) as Code := {
