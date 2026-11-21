@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wap's emitter: functions, locals and globals (notes/kernel.md: Define, Set, Call, a name's value): the checks no
+# wap's emitter: functions, locals and globals (wap/kernel/forms.wap: Define, Set, Call, a name's value): the checks no
 # value can make, on what an uncaught raise, a refusal or a crash prints; the value checks are
 # test/test_functions_calls.wap and test/test_functions_returns.wap
 # Run it with bash test/wap/test_functions.sh
