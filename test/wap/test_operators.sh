@@ -66,12 +66,12 @@ z = f(0) ?? if 2 > 1 {7} else {8}
 print text(z)')" "7"
 format_check 'x = if c then 1
 	else 2' 'x = if c then 1 else 2'
-format_check 'x = if c then
-1
+check "a line ending in then or else takes the next line, and only that one" "$(ran trailing_then 'x = if 1 > 2 then
+"a"
 else
-2
-y = 3' 'x = if c then 1 else 2
-y = 3'
+"b"
+y = "c"
+print x + y')" "bc"
 format_check 'if c
 	print "a"' 'if c {print "a"}'
 format_check 'r = 2..' 'r = 2 ..'
