@@ -155,7 +155,7 @@ wap/
       compiler.wap            wap.wasm found beside the executable, its machine code kept beside it by its hash
       console.wap             `wap` alone: each line a module, linked to the earlier lines' kept instances
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
-      programs.wap            a program's machine code kept in programs/ beside wap.wasm, by the hash of its sources
+      programs.wap            a program's machine code kept beside wap.wasm, program-<hash>.cwasm by its sources
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
     wasm/                     a compiled wap module used as its source
       modules.wap             use "m.wasm": its functions declared from their export names, the rest (rules, enums,
