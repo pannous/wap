@@ -176,4 +176,10 @@ printf '%s\n' 'use "cycle_a.wap"' 'checked(t: text) as text := if #t > 100 then 
 check "a function of a file that uses another reads its own computed constant, whichever file runs first" "$(ran cycle_constant 'use "cycle_a.wap"
 use "cycle_b.wap"
 print(early + quoted("x"))')" "bx …"
+# a global given again: the later statement gives the later value, though a function typed the first one ahead
+printf '%s\n' 'use "cycle_f.wap"' 'SEP = "-"' 'SEP = "+"' 'joined(t: text) as text := t + SEP' >"$stage/cycle_e.wap"
+printf '%s\n' 'use "cycle_e.wap"' 'labelled(t: text) as text := if #t > 100 then joined(t) else t' 'early = labelled("a")' >"$stage/cycle_f.wap"
+check "a global given again by files that use each other holds its later value" "$(ran cycle_again 'use "cycle_e.wap"
+use "cycle_f.wap"
+print(early + joined("x"))')" "ax+"
 exit $((failures > 0))

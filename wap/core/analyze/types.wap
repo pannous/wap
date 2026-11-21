@@ -97,6 +97,8 @@ class TypingState {
 	givers: map<text, Node> = {}
 	typed_ahead: map<text, Node> = {}
 	ahead: int = 0
+	# the keys of the globals whose giving statement has had its turn
+	ran: list<text> = []
 	# the functions of the function values met, and the keys of the variables they capture
 	lambdas: list<Node> = []
 	# the functions dynamic calls dispatch through (core/analyze/dispatch.wap)
@@ -273,10 +275,14 @@ block_typed(n: Node, written: list, s: TypingState, f: TypeFrame, expected: Node
 	if typed is empty then block else typed_like(block, typed.last)
 }
 # a statement typed, or as typed ahead of its turn
-statement_typed(statement: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := if given_key(statement) != ø and s.typed_ahead.has(given_key(statement)!) then s.typed_ahead[given_key(statement)!] else typed_form(statement, s, f, expected)
+statement_typed(statement: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
+	key = given_key(statement) ?? return typed_form(statement, s, f, expected)
+	s.ran += [key]
+	if s.typed_ahead.has(key) then s.typed_ahead[key] else typed_form(statement, s, f, expected)
+}
 # the key of the global a statement gives a value, `x = 1` at the top; ø for any other statement
 given_key(statement: Node) as text? := match statement {
-	Set(place, value) => if place is symbol and is_bound(place, DefinitionKind.Global) then place_key(defined_at(place)) else ø
+	Set(place, value) => if place is symbol and is_bound(place, DefinitionKind.Global) and is_definer(place) then place_key(place) else ø
 	_ => ø
 }
 # each definition whose parameters all have their types typed, even when nothing calls it, unless TYPED_WHEN_CALLED;
@@ -403,7 +409,7 @@ name_typed(n: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
 		if case != ø { return case_call_typed(case, case, [], s, f) }
 		return if names_constant(n, expected, s) then call_typed(n, n, [], s, f, expected) else function_named_typed(n)
 	}
-	type = variable_type(n, s, f) ?? read_before_given(n, s, f)
+	type = if given_later(n, s, f) then ø else variable_type(n, s, f) ?? read_before_given(n, s, f)
 	if is_bound(n, DefinitionKind.Global) and f.function != ø and place_key(defined_at(n)) in s.unset { f.late = f.late + [n] }
 	if type == ø and is_bound(n, DefinitionKind.Capture) { refused(n, "a named function inside a function reads the variables around it with closures, not yet; a function value `x => …` can") }
 	as_found(n, with_fact(n, TYPE, type ?? refused(n, "this name is read before any value is given to it")), s, f)
@@ -427,6 +433,9 @@ read_before_given(n: Node, s: TypingState, f: TypeFrame) as Node? := {
 	s.unset = s.unset + [place_key(defined_at(n))]
 	type
 }
+# whether a top-level statement reads a global before the statement giving it its value had its turn, even one
+# typed ahead for a function
+given_later(n: Node, s: TypingState, f: TypeFrame) as bool := f.function == ø and s.ahead == 0 and is_bound(n, DefinitionKind.Global) and s.givers.has(place_key(defined_at(n))) and not s.ran.contains(place_key(defined_at(n)))
 # A path's read as a condition around finds it: an optional's value where it is known present, `x!`, a boxed value of
 # the type it is known to hold; as it is where nothing finds it
 as_found(n: Node, read: Node, s: TypingState, f: TypeFrame) as Node := {
