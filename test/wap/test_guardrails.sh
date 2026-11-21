@@ -15,10 +15,10 @@
 #                    (notes/decisions.md wap-boxed-any-debt); a place typing infers as any is ratchet_census.sh's
 #   emit-boxes       only typing decides what is boxed (types.wap writes `prim box`): no struct.new of a box in core/emit
 #                    outside that primitive; never allowlisted
-#   one-owner        every wap file and test/wap script falls under exactly one row of notes/wap.md "Owners": a path or
+#   one-owner        every wap file and test/wap script falls under exactly one row of notes/agents/wap-owner.md "Owners": a path or
 #                    folder in its files column (wap/'s own paths written without it), or a row's "<folder> … no other
 #                    row names"; a clause in words, a role row's "any file", owns nothing
-#   in-tree          every wap file has its line in notes/wap.md's tree, the block of "## The tree": a file `<name>.wap`
+#   in-tree          every wap file has its line in notes/agents/wap-owner.md's tree, the block of "## The tree": a file `<name>.wap`
 #                    two spaces deeper than its folder's line `<folder>/`; never allowlisted
 # Today's exceptions are in guardrails_allowed.txt, `<rule> <key> <count>`, key a function for one-fit and a file for
 # the others. The list only shrinks: a count above it fails naming file:line and the rule, a count below it fails
@@ -26,7 +26,7 @@
 RULES="one-fit emit-infers-type dynamic-prim one-ranking long-file repeated-code same-shape boxed-any emit-boxes one-owner in-tree"
 # the rules no allowlist line excuses: a spot of theirs is a failure at once
 UNLISTED="emit-boxes in-tree"
-OWNERS=notes/wap.md
+OWNERS=notes/agents/wap-owner.md
 RELATION=conversion
 LONGEST=300
 SHAPE_FLOOR=20
@@ -112,7 +112,7 @@ one_owner() {
 		if (count != 1) printf "one-owner\t%s\t%s:1\tunder %d rows of %s \"Owners\", not one\n", $0, $0, count, owners
 	}' <(owned_paths) -
 }
-# the wap files notes/wap.md's tree places, a path a line: a line's indent says its depth, a folder line ending in /
+# the wap files the tree of notes/agents/wap-owner.md places, a path a line: a line's indent says its depth, a folder line ending in /
 tree_paths() {
 	awk '/^## The tree/ { tree = 1 } tree && /^```/ { if (inside) exit; inside = 1; next }
 	inside && NF {
@@ -123,7 +123,7 @@ tree_paths() {
 	}' "$OWNERS"
 }
 in_tree() {
-	printf '%s\n' $wap_files | grep -vxF -f <(tree_paths) | awk '{ printf "in-tree\t%s\t%s:1\tno line in the tree of notes/wap.md\n", $0, $0 }'
+	printf '%s\n' $wap_files | grep -vxF -f <(tree_paths) | awk '{ printf "in-tree\t%s\t%s:1\tno line in the tree of notes/agents/wap-owner.md\n", $0, $0 }'
 }
 
 found=$(for rule in $RULES; do ${rule//-/_}; done)
