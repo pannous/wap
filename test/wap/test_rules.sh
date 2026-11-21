@@ -29,4 +29,8 @@ q"
 check "a comprehension lists a value for each item its condition keeps" "$(ran comprehension 'print(text([x * 2 for x in 1..4 if x > 1]))
 print(text([#w for w in ["a", "bb"]]))')" "[4, 6]
 [1, 2]"
+# a comprehension over two lists, the second walked for each item of the first (lib/list.warp cartesian)
+check "a comprehension over two lists" "$(ran pairs 'print(text([[x, y] for x in [1, 2] for y in [3, 4]]))
+print(text([x * y for x in [1, 2] for y in [1, 3] if x < y]))')" "[[1, 3], [1, 4], [2, 3], [2, 4]]
+[3, 6]"
 exit $((failures > 0))
