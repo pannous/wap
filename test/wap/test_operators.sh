@@ -66,12 +66,14 @@ z = f(0) ?? if 2 > 1 {7} else {8}
 print text(z)')" "7"
 format_check 'x = if c then 1
 	else 2' 'x = if c then 1 else 2'
-check "a line ending in then or else takes the next line, and only that one" "$(ran trailing_then 'x = if 1 > 2 then
-"a"
-else
-"b"
+check "a line ending in then or else takes the next line, and only that one" "$(ran trailing_then 'chosen(n: int) as text := {
+	if n > 2 then
+	"a"
+	else
+	"b"
+}
 y = "c"
-print x + y')" "bc"
+print chosen(1) + y')" "bc"
 check "a word inside a rule's phrase is the program's own outside that phrase" "$(ran own_out 'rule tagged out $x => 1
 f(xs: list<int>): list<int> := {
 	out: list<int> = []
