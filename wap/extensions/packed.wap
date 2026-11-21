@@ -5,20 +5,8 @@
 # referred to by its place after that. Data holds a runtime value no bytes can say: packing one is refused.
 use "../core/emit/wasm.wap"
 
-EMPTY_TAG = 0
-TRUE_TAG = 1
-FALSE_TAG = 2
-INT_TAG = 3
-FLOAT_TAG = 4
-CHAR_TAG = 5
-TEXT_TAG = 6
-SYMBOL_TAG = 7
-ERROR_TAG = 8
-KEY_TAG = 9
-LIST_TAG = 10
-META_TAG = 11
-TYPE_TAG = 12
-COPY_TAG = 13
+# a node's tag byte: its case's position counted from 0
+enum Tag { Empty, True, False, Int, Float, Char, Text, Symbol, Error, Key, List, Meta, Type, Copy }
 # a subtree not written yet
 NOT_DONE = -1
 
@@ -62,13 +50,13 @@ identified(p: Packer, n: Node) as int := {
 node_packed(p: Packer, n: Node) := {
 	id = p.subtree[p.at]
 	if p.done[id] != NOT_DONE {
-		p.bytes.add(COPY_TAG)
+		tag_packed(p, Tag.Copy)
 		number_packed(p, p.done[id])
 		p.at += p.size[p.at]
 		return
 	}
 	p.at += 1
-	p.bytes.add(tag_of(n))
+	tag_packed(p, tag_of(n))
 	match n {
 		Meta(node, data) => ø
 		Number(value) => bytes_added(p, signed(if value is int then value else float_bits(value)))
@@ -85,6 +73,7 @@ node_packed(p: Packer, n: Node) := {
 }
 
 number_packed(p: Packer, n: int) := bytes_added(p, unsigned(n))
+tag_packed(p: Packer, tag: Tag) := p.bytes.add((tag as int) - 1)
 bytes_added(p: Packer, more: list<int>) := { for b in more { p.bytes.add(b) } }
 
 # a text by its place, a new one by its length and bytes after the place it takes
@@ -96,19 +85,19 @@ text_packed(p: Packer, t: text) := {
 	bytes_added(p, bytes(t))
 }
 
-tag_of(n: Node) as int := match n {
-	Meta(node, data) => META_TAG
-	Empty => EMPTY_TAG
-	True => TRUE_TAG
-	False => FALSE_TAG
-	Number(value) => if value is int then INT_TAG else FLOAT_TAG
-	Char(value) => CHAR_TAG
-	Text(value) => TEXT_TAG
-	Symbol(name) => SYMBOL_TAG
-	Error(node) => ERROR_TAG
-	Key(left, op, right) => KEY_TAG
-	List(items, bracket, separator) => LIST_TAG
-	Type(name, body) => TYPE_TAG
+tag_of(n: Node) as Tag := match n {
+	Meta(node, data) => Tag.Meta
+	Empty => Tag.Empty
+	True => Tag.True
+	False => Tag.False
+	Number(value) => if value is int then Tag.Int else Tag.Float
+	Char(value) => Tag.Char
+	Text(value) => Tag.Text
+	Symbol(name) => Tag.Symbol
+	Error(node) => Tag.Error
+	Key(left, op, right) => Tag.Key
+	List(items, bracket, separator) => Tag.List
+	Type(name, body) => Tag.Type
 	Data(value) => raise "packed: a Data node holds a runtime value, which bytes cannot say"
 }
 
@@ -143,33 +132,33 @@ class Unpacker { blob: text; at: int; texts: list<text>; done: list<Node> }
 unpack(blob: text) as Node := node_unpacked(Unpacker{blob: blob, at: 0, texts: [], done: []})
 
 node_unpacked(u: Unpacker) as Node := {
-	tag = byte_read(u)
-	if tag == COPY_TAG { return u.done[number_unpacked(u, no)] }
+	tag = (byte_read(u) + 1) as Tag
+	if tag == Tag.Copy { return u.done[number_unpacked(u, no)] }
 	n = node_of(u, tag)
 	u.done.add(n)
 	n
 }
 
-node_of(u: Unpacker, tag: int) as Node := {
-	if tag == EMPTY_TAG { return Empty }
-	if tag == TRUE_TAG { return True }
-	if tag == FALSE_TAG { return False }
-	if tag == INT_TAG { return Number(number_unpacked(u, yes)) }
-	if tag == FLOAT_TAG { return Number(bits_float(number_unpacked(u, yes))) }
-	if tag == CHAR_TAG { return Char(char(number_unpacked(u, no))) }
-	if tag == TEXT_TAG { return Text(text_unpacked(u)) }
-	if tag == SYMBOL_TAG { return Symbol(text_unpacked(u)) }
-	if tag == ERROR_TAG { return Error(node_unpacked(u)) }
-	if tag == KEY_TAG { op = text_unpacked(u) as Op; left = node_unpacked(u); return Key(left, op, node_unpacked(u)) }
-	if tag == LIST_TAG {
+node_of(u: Unpacker, tag: Tag) as Node := match tag {
+	Empty => Node.Empty
+	True => Node.True
+	False => Node.False
+	Int => Number(number_unpacked(u, yes))
+	Float => Number(bits_float(number_unpacked(u, yes)))
+	Char => Char(char(number_unpacked(u, no)))
+	Text => Text(text_unpacked(u))
+	Symbol => Symbol(text_unpacked(u))
+	Error => Error(node_unpacked(u))
+	Key => { op = text_unpacked(u) as Op; left = node_unpacked(u); Key(left, op, node_unpacked(u)) }
+	List => {
 		count = number_unpacked(u, no)
 		bracket = text_unpacked(u) as Bracket
 		separator = text_unpacked(u) as Separator
-		return List((0 ..< count).map(i => node_unpacked(u)), bracket, separator)
+		List((0 ..< count).map(i => node_unpacked(u)), bracket, separator)
 	}
-	if tag == META_TAG { node = node_unpacked(u); return Meta(node, node_unpacked(u)) }
-	if tag == TYPE_TAG { name = node_unpacked(u); return Type(name, node_unpacked(u)) }
-	raise "packed: no node has the tag ${tag} at byte ${u.at - 1}"
+	Meta => { node = node_unpacked(u); Meta(node, node_unpacked(u)) }
+	Type => { name = node_unpacked(u); Type(name, node_unpacked(u)) }
+	Copy => raise "packed: a copy is no node of its own"
 }
 
 byte_read(u: Unpacker) as int := {
