@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# wap's reader (wap/core/parse/reader.wap, notes/reader.md): text read as notation, data and code alike, and printed
-# back by `wap format` in canonical warp. The cases are notes/reader.md §5 (wasp's tests) and its decisions (§6).
+# wap's reader (wap/core/parse/reader.wap; wiki/syntax.md): text read as notation, data and code alike, and printed
+# back by `wap format` in canonical warp. The cases are wasp's reader tests and the reader's decisions.
 # Run it with bash test/wap/test_reader.sh; the warp under test is WARP (default the warp on PATH)
 source "$(dirname "$0")/format_checks.sh"
 

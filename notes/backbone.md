@@ -59,7 +59,7 @@ lead first, as a change of this table.
 | emit | core/emit/ | wap-emitter | typed kernel (milestone 1: kernel) | Module (core/emit/wasm.wap) |
 
 The languages, each a set of Node shapes:
-- **notation:** what the reader makes and nothing else (notes/reader.md, wap/core/parse/reader.wap):
+- **notation:** what the reader makes and nothing else (wap/core/parse/reader.wap; wiki/syntax.md):
   - atoms: `Number` (int, or float when written with a point or a negative exponent; `-1` glued at an item's start
     is a negative Number, `a-1` is not), `Char` (a text of one code point), `Text` (escapes read; a template's `${…}`
     and an extension's `\:name` kept as written; a URL, a word glued to `://` up to a blank, bracket or separator),
@@ -178,7 +178,7 @@ checked) and a line here when its language changed. The lead reviews it against 
   - the host words and the native driver;
   - the test harness;
   - lib/, as far as it is plain warp.
-- **The reader** comes first and gets special care: notes/reader.md, a data reader inspired by wasp's node parsing
+- **The reader** comes first and gets special care: wap/core/parse/reader.wap, a data reader inspired by wasp's node parsing
   (not a copy). Three strictly separate steps: (1) the data reader parses any data into Node and knows no language;
   (2) then structural language matching (spelling rules); (3) then the analyzer (user 2026-11-17).
 - **The reader, settled:** wap has its own pure notation reader (core/parse/), knowing no keyword; the old reader's
@@ -317,9 +317,6 @@ open debts are `# DEBT:` comments at their code, `grep -rn 'DEBT:' wap/`
 - **Stage 3 serves only the rules programs write** (decision hole-types): no rewrite of wap's own moves into it. The
   char read as a text depends on the type its place wants (binding's conversion), `x is w` on what w means (scope);
   a typed rule sees only its hole's type.
-- **Glued names read as operators** (`a-b` is `(Call - a b)`). Kebab names are stage 2 by notes/reader.md, but the
-  operator stage decides the glued run first, before declarations say whether `a-b` is a name. Paid off when the
-  stage leaves a glued run of declared-name candidates for stage 2, or the user drops kebab names.
 - **any compares other references by identity:** inside an `any`, refs other than boxes and texts compare by
   identity (a record compared directly compares by fields); by type via dispatch, as show does, when code needs it.
 - **A named function is refused where a function type is written for a variable** (found 2026-11-19, off-census):
