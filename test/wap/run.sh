@@ -45,7 +45,16 @@ all_run() {
 	grep -q ' 0 ✗' "$SUMMARY"
 }
 
-[ "$1" = one_run ] && { shift; one_run "$@" >"$(outputs "$1")" 2>&1; exit; }
+# a test that fails without a ✗ of its own, by its exit status or by printing no check at all, fails as one ✗ (a script
+# that printed its ✗ lines exits 1 and is counted by them)
+[ "$1" = one_run ] && {
+	shift
+	output=$(outputs "$1")
+	one_run "$@" >"$output" 2>&1; status=$?
+	[ $status = 0 ] || grep -q '^✗' "$output" || echo "✗ $(basename "$1") exited $status" >>"$output"
+	grep -q '^[✓✗⊘]' "$output" || echo "✗ $(basename "$1") printed no check" >>"$output"
+	exit
+}
 [ "$1" = all_run ] && { shift; all_run "$@"; exit; }
 wait=no
 built=
