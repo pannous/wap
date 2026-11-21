@@ -92,6 +92,10 @@ class TypingState {
 	globals: list<Binding> = []
 	# the keys of the globals functions read before the statements that give them their values, until those statements
 	unset: list<text> = []
+	# the top-level statements that give the globals their first values, by the global's key (files that use each other
+	# run in an order typing doesn't keep)
+	givers: map<text, Giver> = {}
+	ahead: int = 0
 	# the functions of the function values met, and the keys of the variables they capture
 	lambdas: list<Node> = []
 	# the functions dynamic calls dispatch through (core/analyze/dispatch.wap)
@@ -169,6 +173,9 @@ class TypeFrame {
 
 # the program typed, after the types module's functions it calls, the typed rules firing as it is typed
 typed_program(program: Block, library: Library, rules: KindRules, signatures: list<Signature>) as Block := typed_among(program, statements_in(library.code), rules, library.scope, library.signatures + signatures)
+# a statement giving a global its first value: as typed ahead of its turn, where a function read the global first,
+# and whether its turn has come
+class Giver { statement: Node; typed: Node? = ø; ran: bool = no }
 # the program typed, after the library's records and those of its definitions it calls, each definition shaped and
 # bound when typing first reaches it (core/analyze/calls.wap reached)
 typed_among(program: Block, library: list, rules: KindRules, library_scope: Scope, signatures: list<Signature>) as Block := {
@@ -181,6 +188,7 @@ typed_among(program: Block, library: list, rules: KindRules, library_scope: Scop
 	s.definitions = signatures.filter(signature => is_function(signature))
 	definitions_held(defines, s)
 	s.records = added_records(Records(), library)
+	for statement in statements_in(program) { if given_key(statement) != ø { s.givers[given_key(statement)!] = Giver(statement) } }
 	typed = try typed_form(program, s, TypeFrame(), ø) catch e { refused_all(s, [e.message]) }
 	if s.refusals { refused_all(s, []) }
 	statements = statements_in(typed)
@@ -258,13 +266,25 @@ block_typed(n: Node, written: list, s: TypingState, f: TypeFrame, expected: Node
 	# may come after a definition naming its type
 	statements = written.map(statement => if statement is Define then define_of(held_function(statement, s), s) else statement)
 	# a statement wap refuses still lets the definitions beside it be typed, so their refusals are said with its own
-	typed = try (1 to #statements).map(at => typed_form(statements#at, s, f, if at == #statements then expected else EMPTY_SYMBOL)) catch e {
+	typed = try (1 to #statements).map(at => statement_typed(statements#at, s, f, if at == #statements then expected else EMPTY_SYMBOL)) catch e {
 		typed_alone(statements, s)
 		raise e.message
 	}
 	typed_alone(statements, s)
 	block = refitted(Block(typed), n)
 	if typed is empty then block else typed_like(block, typed.last)
+}
+# a statement typed, or as typed ahead of its turn
+statement_typed(statement: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
+	key = given_key(statement) ?? ""
+	if not s.givers.has(key) { return typed_form(statement, s, f, expected) }
+	s.givers[key].ran = yes
+	s.givers[key].typed ?? typed_form(statement, s, f, expected)
+}
+# the key of the global a statement gives a value, `x = 1` at the top; ø for any other statement
+given_key(statement: Node) as text? := match statement {
+	Set(place, value) => if place is symbol and is_bound(place, DefinitionKind.Global) and is_definer(place) then place_key(place) else ø
+	_ => ø
 }
 # each definition whose parameters all have their types typed, even when nothing calls it, unless TYPED_WHEN_CALLED;
 # one wap refuses ends alone. The catch is empty because function_typed has already kept its refusal for the end:
@@ -390,19 +410,33 @@ name_typed(n: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
 		if case != ø { return case_call_typed(case, case, [], s, f) }
 		return if names_constant(n, expected, s) then call_typed(n, n, [], s, f, expected) else function_named_typed(n)
 	}
-	type = variable_type(n, s, f) ?? read_before_given(n, s, f)
+	type = read_before_given(n, s, f)
 	if is_bound(n, DefinitionKind.Global) and f.function != ø and place_key(defined_at(n)) in s.unset { f.late = f.late + [n] }
 	if type == ø and is_bound(n, DefinitionKind.Capture) { refused(n, "a named function inside a function reads the variables around it with closures, not yet; a function value `x => …` can") }
 	as_found(n, with_fact(n, TYPE, type ?? refused(n, "this name is read before any value is given to it")), s, f)
 }
-# a global a function reads before the statement that gives it its value is read when the function is called
-# (wiki/Footguns.md: free variables are read at call time): of a type its statement settles
+# A variable's type. A global a function reads before the statement that gives it its value is read when the
+# function is called (wiki/Footguns.md: free variables are read at call time): that statement is typed now, so the
+# function reads its type, and so do the statements typed ahead for it; it still runs in its turn. A top-level read
+# before that turn is refused, even of one typed ahead.
 read_before_given(n: Node, s: TypingState, f: TypeFrame) as Node? := {
-	if not is_bound(n, DefinitionKind.Global) or f.function == ø { return ø }
-	type = unknown_type(s)
-	remembered(n, type, s, f)
-	s.unset = s.unset + [place_key(defined_at(n))]
-	type
+	key = if is_bound(n, DefinitionKind.Global) then place_key(defined_at(n)) else ""
+	at_top = f.function == ø and s.ahead == 0
+	if s.givers.has(key) {
+		giver = s.givers[key]
+		if at_top and not giver.ran { return ø }
+		if giver.typed == ø and not at_top {
+			s.ahead += 1
+			giver.typed = typed_form(giver.statement, s, TypeFrame(), EMPTY_SYMBOL)
+			s.ahead -= 1
+		}
+	}
+	type = variable_type(n, s, f)
+	if type != ø or key == "" or f.function == ø { return type }
+	unknown = unknown_type(s)
+	remembered(n, unknown, s, f)
+	s.unset = s.unset + [key]
+	unknown
 }
 # A path's read as a condition around finds it: an optional's value where it is known present, `x!`, a boxed value of
 # the type it is known to hold; as it is where nothing finds it
