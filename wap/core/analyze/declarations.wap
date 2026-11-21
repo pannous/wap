@@ -27,9 +27,13 @@ use "../paths.wap"
 
 USE_WORD = "use"
 INCLUDE_WORD = "include"
-# `use folder`: the source files beside the using file, by their endings
+# `use folder`: the source files beside the using file, by their endings; `use name`: the module of that name beside
+# the using file, else in the standard library's folder beside the compiler
 FOLDER_WORD = "folder"
 SOURCE_ENDINGS = [".wap", ".warp"]
+LIBRARY_FOLDER = "lib"
+# the scopes wiki/use.md names that are not built yet
+UNBUILT_SCOPES = ["package", "project"]
 # what a top-level statement that declares nothing is told
 NO_DECLARATION = "a module declares a name with its signature, or a type"
 
@@ -47,27 +51,40 @@ files_named(program: Node, word: text) as list<text> := {
 	files = []
 	for statement in top_level_statements(program) {
 		file = file_of(statement) ?? file_of(program) ?? "."
-		path = phrase_text(statement, word)
-		if path != ø { files += [beside(file, path)] }
-		if names_folder(statement, word) { files += folder_sources(file) }
+		named = phrase_part(statement, word)
+		if named is text { files += [beside(file, text(named))] }
+		if named is symbol { files += words_named(text(named), statement, file) }
 	}
 	files
+}
+# the files a word after `use` names: `use folder` every source file beside the using one, `use os` the module os
+words_named(word: text, statement: Node, file: text) as list<text> := {
+	if UNBUILT_SCOPES.contains(word) { refused(statement, "use ${word} is not built yet: write use folder, or use \"path\"") }
+	if word == FOLDER_WORD then folder_sources(file) else [module_named(word, statement, file)]
 }
 # every source file beside a file, by name, that file and hidden ones left out (wiki/use.md "folder, package and
 # project scope"); a file of inline code stands in the working folder
 folder_sources(file: text) as list<text> := names_beside(file).filter(name => not name.starts_with(".") and SOURCE_ENDINGS.any(ending => name.ends_with(ending))).map(name => beside(file, name)).filter(source => source != normalized_path(file))
-names_folder(statement: Node, word: text) as bool := match statement {
-	List(items, Bracket.None, Separator.Space) => #items == 2 and items#1 == symbol(word) and items#2 == symbol(FOLDER_WORD)
-	_ => no
+# the module a bare name names, `use os`: os.wap, else os.warp, beside the using file, else in the standard library
+# beside the compiler (wiki/use.md "Library folders")
+module_named(name: text, statement: Node, file: text) as text := {
+	folders = [folder_of(file), program.folder + "/" + LIBRARY_FOLDER]
+	for folder in folders {
+		listed = try { list_files(folder) } else []
+		for ending in SOURCE_ENDINGS { if listed.contains(name + ending) { return normalized_path(folder + "/" + name + ending) } }
+	}
+	refused(statement, "no module ${name}: neither ${name}.wap nor ${name}.warp in ${folders.join(" or ")}")
 }
 
 # `use "path"`: a statement that brings in a module, no code
-is_use(statement: Node) as bool := phrase_text(statement, USE_WORD) != ø or names_folder(statement, USE_WORD)
-# the text of a phrase `word "text"`: the path of a use or an include, a rule's refusal; ø for any other code
-phrase_text(phrase: Node, word: text) as text? := match phrase {
-	List(items, Bracket.None, Separator.Space) => if #items == 2 and items#1 == symbol(word) and items#2 is text then text(items#2) else ø
+is_use(statement: Node) as bool := phrase_part(statement, USE_WORD) != ø
+# what follows the word of a phrase `word "text"` or `word name`: a use's path or name, an include's path, a rule's
+# refusal; ø for any other code
+phrase_part(phrase: Node, word: text) as Node? := match phrase {
+	List(items, Bracket.None, Separator.Space) => if #items == 2 and items#1 == symbol(word) and (items#2 is text or items#2 is symbol) then items#2 else ø
 	_ => ø
 }
+phrase_text(phrase: Node, word: text) as text? := if phrase_part(phrase, word) is text then text(phrase_part(phrase, word)!) else ø
 # the files a declared program uses, in the order written
 uses_of(program: Node) as list<text> := fact_items(program, USES).map(item => text(item))
 

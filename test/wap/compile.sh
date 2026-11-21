@@ -24,7 +24,7 @@ compiler_built() {
 }
 folder_built() {
 	local building=$1.$$ built=$1.$$/wap0.wasm n
-	mkdir -p "$building" && (cd "$tree/wap" && cp -R "${WAP_BESIDE[@]}" "$building/") || return 1
+	mkdir -p "$building" && wap_beside_copied "$tree" "$building" || return 1
 	$warp "$seed" "$source_compiler" "$built" 2>&1 || return 1
 	for ((n = 1; n <= $2; n++)); do
 		$warp "$built" "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
