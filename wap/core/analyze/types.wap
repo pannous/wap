@@ -92,6 +92,10 @@ class TypingState {
 	globals: list<Binding> = []
 	# the keys of the globals functions read before the statements that give them their values, until those statements
 	unset: list<text> = []
+	# the top-level statements that give the globals their first values, by the global's key, and those typed ahead of
+	# their turn, where a function read the global first (files that use each other run in an order typing doesn't keep)
+	givers: map<text, Node> = {}
+	typed_ahead: map<text, Node> = {}
 	# the functions of the function values met, and the keys of the variables they capture
 	lambdas: list<Node> = []
 	# the functions dynamic calls dispatch through (core/analyze/dispatch.wap)
@@ -181,6 +185,7 @@ typed_among(program: Block, library: list, rules: KindRules, library_scope: Scop
 	s.definitions = signatures.filter(signature => is_function(signature))
 	definitions_held(defines, s)
 	s.records = added_records(Records(), library)
+	for statement in statements_in(program) { if given_key(statement) != ø and not s.givers.has(given_key(statement)!) { s.givers[given_key(statement)!] = statement } }
 	typed = try typed_form(program, s, TypeFrame(), ø) catch e { refused_all(s, [e.message]) }
 	if s.refusals { refused_all(s, []) }
 	statements = statements_in(typed)
@@ -258,13 +263,20 @@ block_typed(n: Node, written: list, s: TypingState, f: TypeFrame, expected: Node
 	# may come after a definition naming its type
 	statements = written.map(statement => if statement is Define then define_of(held_function(statement, s), s) else statement)
 	# a statement wap refuses still lets the definitions beside it be typed, so their refusals are said with its own
-	typed = try (1 to #statements).map(at => typed_form(statements#at, s, f, if at == #statements then expected else EMPTY_SYMBOL)) catch e {
+	typed = try (1 to #statements).map(at => statement_typed(statements#at, s, f, if at == #statements then expected else EMPTY_SYMBOL)) catch e {
 		typed_alone(statements, s)
 		raise e.message
 	}
 	typed_alone(statements, s)
 	block = refitted(Block(typed), n)
 	if typed is empty then block else typed_like(block, typed.last)
+}
+# a statement typed, or as typed ahead of its turn
+statement_typed(statement: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := if given_key(statement) != ø and s.typed_ahead.has(given_key(statement)!) then s.typed_ahead[given_key(statement)!] else typed_form(statement, s, f, expected)
+# the key of the global a statement gives a value, `x = 1` at the top; ø for any other statement
+given_key(statement: Node) as text? := match statement {
+	Set(place, value) => if place is symbol and is_bound(place, DefinitionKind.Global) then place_key(defined_at(place)) else ø
+	_ => ø
 }
 # each definition whose parameters all have their types typed, even when nothing calls it, unless TYPED_WHEN_CALLED;
 # one wap refuses ends alone. The catch is empty because function_typed has already kept its refusal for the end:
@@ -399,6 +411,12 @@ name_typed(n: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
 # (wiki/Footguns.md: free variables are read at call time): of a type its statement settles
 read_before_given(n: Node, s: TypingState, f: TypeFrame) as Node? := {
 	if not is_bound(n, DefinitionKind.Global) or f.function == ø { return ø }
+	# the statement that gives it typed now, so the function reads its type; it still runs in its turn
+	key = place_key(defined_at(n))
+	if s.givers.has(key) and not s.typed_ahead.has(key) {
+		s.typed_ahead[key] = typed_form(s.givers[key], s, TypeFrame(), EMPTY_SYMBOL)
+		return variable_type(n, s, f)
+	}
 	type = unknown_type(s)
 	remembered(n, type, s, f)
 	s.unset = s.unset + [place_key(defined_at(n))]

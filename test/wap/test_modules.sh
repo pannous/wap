@@ -170,4 +170,10 @@ say("by name")')" "loaded
 by name"
 check "use name brings in a standard module from the library beside the compiler" "$(ran use_library 'use ordering
 print(text(natural_compare("a2", "a10") < 0))')" "yes"
+# files that use each other: a function typed before its file's statements still reads its constant's type
+printf '%s\n' 'use "cycle_b.wap"' 'CUT = [" ", "…"].join("")' 'quoted(t: text) as text := t + CUT' >"$stage/cycle_a.wap"
+printf '%s\n' 'use "cycle_a.wap"' 'checked(t: text) as text := if #t > 100 then quoted(t) else t' 'early = checked("b")' >"$stage/cycle_b.wap"
+check "a function of a file that uses another reads its own computed constant, whichever file runs first" "$(ran cycle_constant 'use "cycle_a.wap"
+use "cycle_b.wap"
+print(early + quoted("x"))')" "bx …"
 exit $((failures > 0))
