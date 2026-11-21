@@ -22,7 +22,8 @@ tree=$(cd "${1:-$(git rev-parse --show-toplevel)}" && pwd) || exit 2
 warp=${WARP_BINARY:-warp}
 seed=$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm
 [ -f "$seed" ] || { echo "refresh-seed: no seed at $seed" >&2; exit 2; }
-mkdir -p "$tree/data" && scratch=$(mktemp -d "$tree/data/refresh-seed.XXXXXX") || exit 2
+# the scratch folder by its real path: a module's WASI follows no link, and data/ is often one (test/wap/compile.sh)
+mkdir -p "$tree/data" && scratch=$(cd -P "$(mktemp -d "$tree/data/refresh-seed.XXXXXX")" && pwd -P) || exit 2
 trap 'rm -rf "$scratch"' EXIT
 source "$(dirname "$0")/lib/wap-beside.sh"
 # every stage after A reads the tree's types module and kernel beside itself
