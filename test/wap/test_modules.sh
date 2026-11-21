@@ -134,4 +134,9 @@ b
 # a value assigned twice is one global, exported once
 check "a value a compiled module assigns twice is one value in the program using it" "$(printf '%s\n' 'LIMIT = 7' 'LIMIT = 8' >"$stage/twice.wap" && $warp "$compiler" "$stage/twice.wap" "$stage/twice.wasm" 2>&1 && ran uses_twice "use \"$stage/twice.wasm\"
 print text(LIMIT)")" "8"
+# the program changes a used module's variable, which the module's own functions then read
+check "a program changes a used module's variable" "$(ran reassign_used 'use "greet.wap"
+greeting = greeting + "!"
+welcome()')" "loaded
+hi!"
 exit $((failures > 0))

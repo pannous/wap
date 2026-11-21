@@ -3,6 +3,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/../native/checks.sh"
 tree="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 source_compiler="$tree/wap/compiler.wap"
+source "$tree/scripts/lib/wap-beside.sh"
 # the folder builds and runs go in, by its real path: a module's WASI follows no link to an absolute path (data/ is often
 # one, to a scratch volume)
 data="$(mkdir -p "$tree/data/wap-tests" && cd -P "$tree/data/wap-tests" && pwd -P)"
@@ -23,7 +24,7 @@ compiler_built() {
 }
 folder_built() {
 	local building=$1.$$ built=$1.$$/wap0.wasm n
-	mkdir -p "$building" && cp -R "$tree/wap/types" "$tree/wap/kernel" "$building/" || return 1
+	mkdir -p "$building" && (cd "$tree/wap" && cp -R "${WAP_BESIDE[@]}" "$building/") || return 1
 	$warp "$seed" "$source_compiler" "$built" 2>&1 || return 1
 	for ((n = 1; n <= $2; n++)); do
 		$warp "$built" "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1

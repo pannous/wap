@@ -33,8 +33,8 @@ https://github.com/pannous/wap
 ## How it compiles (notes/backbone.md "Stage languages")
 read = parse → shape rules (stage 1) → declare → declaration rules (stage 2) → lower → bind → type, with the kind rules
 (stage 3) firing on each node as typing writes it → elaborate → emit → encode. 
-A stage writes facts on nodes (core/stage.wap), never new holes. The Node: wap/types/nodes.wap.
-<!-- todo (card move-node): move to wap/nodes.wap -->
+A stage writes facts on nodes (core/stage.wap), never new holes. The Node: wap/nodes.wap.
+<!-- DONE (card move-node, c25ba63): move to wap/nodes.wap -->
 
 ## Build and test
 ```bash
