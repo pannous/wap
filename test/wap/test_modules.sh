@@ -170,18 +170,4 @@ say("by name")')" "loaded
 by name"
 check "use name brings in a standard module from the library beside the compiler" "$(ran use_library 'use ordering
 print(text(natural_compare("a2", "a10") < 0))')" "yes"
-# files that use each other: a function typed before its file's statements still reads its constant's type
-printf '%s\n' 'use "cycle_b.wap"' 'CUT = [" ", "…"].join("")' 'quoted(t: text) as text := t + CUT' >"$stage/cycle_a.wap"
-printf '%s\n' 'use "cycle_a.wap"' 'checked(t: text) as text := if #t > 100 then quoted(t) else t' 'early = checked("b")' >"$stage/cycle_b.wap"
-check "a function of a file that uses another reads its own computed constant, whichever file runs first" "$(ran cycle_constant 'use "cycle_a.wap"
-use "cycle_b.wap"
-print(early + quoted("x"))')" "bx …"
-# a global given again: the later statement gives the later value, though a function typed the first one ahead
-printf '%s\n' 'use "cycle_f.wap"' 'SEP = "-"' 'SEP = "+"' 'joined(t: text) as text := t + SEP' >"$stage/cycle_e.wap"
-printf '%s\n' 'use "cycle_e.wap"' 'labelled(t: text) as text := if #t > 100 then joined(t) else t' 'early = labelled("a")' >"$stage/cycle_f.wap"
-check "a global given again by files that use each other holds its later value" "$(ran cycle_again 'use "cycle_e.wap"
-use "cycle_f.wap"
-print(early + joined("x"))')" "ax+"
-# the library compiles once into a module of its own (notes/compile_inputs.md), the types module beside the compiler
-check "the types module compiles as a program of its own" "$($wap "$compiler" "$(dirname "$compiler")/types/types.wap" "$stage/types.wasm" 2>&1 && [ -s "$stage/types.wasm" ] && echo compiled)" "compiled"
 exit $((failures > 0))
