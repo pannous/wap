@@ -49,7 +49,7 @@ lead first, as a change of this table.
 |---|---|---|---|---|
 | read | core/parse/reader.wap | wap-reader | text | notation |
 | operators | core/parse/operators.wap, table in the types module | wap-reader | notation | operated |
-| shape rules (stage 1) | core/rules/, types/sugar/ | wap-reader | operated | surface |
+| shape rules (stage 1) | core/rules/, sugar/ | wap-reader | operated | surface |
 | declare | core/analyze/declarations.wap | wap-binding | surface | declared, and Module.signatures: one Signature per function, value and record (the record: core/bindings.wap) |
 | lower | core/rules/lowering.wap | wap-reader | declared | kernel |
 | bind | core/analyze/scope.wap | wap-binding | kernel | bound kernel |
@@ -86,7 +86,7 @@ The languages, each a set of Node shapes:
   holds no function. `=` keys are the call `(Call = x 1)`; a glue key `Key(f, Op.None, (args))` stays, for the
   lowering to read as a call or a constructor. core/rules/lowering.wap reads exactly these: a glued call, an operator
   call (`=` → Set, `:=` → Define, `=>` → Fn), a phrase headed by a word, `{…}`; words such as `yes`, `break` or
-  `global` are rules (types/sugar/).
+  `global` are rules (sugar/).
 - **surface:** any warp: operated, with the spellings of stage 1 rewritten (`for`, `unless`, `a if c` …). What remains
   is either kernel or needs a declaration to decide.
 - **declared:** surface, unchanged, plus the fact `uses` on the program, the files its `use "path"` statements bring
@@ -182,7 +182,7 @@ checked) and a line here when its language changed. The lead reviews it against 
   (not a copy). Three strictly separate steps: (1) the data reader parses any data into Node and knows no language;
   (2) then structural language matching (spelling rules); (3) then the analyzer (user 2026-11-17).
 - **The reader, settled:** wap has its own pure notation reader (core/parse/), knowing no keyword; the old reader's
-  keyword branches became spelling rules (types/sugar/).
+  keyword branches became spelling rules (sugar/).
 - **The old compiler** compiles the new backbone until the new backbone compiles itself, then retires.
 
 ## Milestones
@@ -233,7 +233,7 @@ review.
    - wap-binding: the binder's Empty marker (`without_fact`), a default of ø, helpers named apart;
    - wap-emitter: `===` as identity, so stage 1 and stage 3 agree on enum tags.
 3. **Stage 2 on the rule engine:** a hole test that reads declarations (`$f: function`, `$p: predicate`).
-   - wap-reader: the hole test (rules/stages.wap); `is pred` and `is not` as types/sugar/ rules (nothing rewrites by arity
+   - wap-reader: the hole test (rules/stages.wap); `is pred` and `is not` as sugar/ rules (nothing rewrites by arity
      today, so no arity rule);
      the parser's defined_words, local_words and double read gone (operator-spelling aliases stay there).
    - wap-binding: a word alias as binding's fallback for a name nothing in scope defines; the `is`/`not` rewrites gone

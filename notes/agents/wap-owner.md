@@ -40,7 +40,7 @@ then read this file and the Owners row with your name.
 A file is created only where this tree has a place for it; a file that does not fit any place means the tree is
 wrong, and the tree is changed here first, then the code.
 
-Layers as in notes/backbone.md: kernel, core, types (its sugar/ the surface rules every program gets), extensions,
+Layers as in notes/backbone.md: kernel, core, types and sugar (the surface rules every program gets), extensions,
 library. A folder holds one topic; its name is that topic,
 never two joined by an underscore.
 
@@ -121,7 +121,7 @@ wap/
 
   types/                    the standard language every program gets: whole definitions, data and rules
     types.wap               the word files below, included in place: the one library every program is bound in
-    rules.wap                 the kernel forms' patterns and the sugar/ files, used in load order
+    rules.wap                 the kernel forms' patterns and the ../sugar/ files, used in load order
     prelude.wap               the built-ins (print …), each a function whose body may be a Prim
     operators.wap             the operator table: precedence groups and their relations, operators, aliases
     lists.wap                 list words over function values: map, filter, contains …
@@ -130,17 +130,18 @@ wap/
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
     host.wap                  the host machinery the file and command-line words use, hidden from programs
-    sugar/                    the rules of the surface spellings wap's own source uses, one file per topic
-      calls.wap               x.f(y), x.f → calls and Get
-      conditions.wap          unless, a if c, a ? b : c → If
-      data.wap                xs#2 and other reaches → Get
-      definitions.wap         definitions written other ways
-      literals.wap            yes, no, ø → True, False, Empty; no x → x is empty
-      loops.wap               for, until, loop, n times, break, return → While and Return
-      matching.wap            match x { … } → Case
-      ranges.wap              a to b, a upto b → Range
-      records.wap             class, enum → Record
-      types.wap               list of int, x as text → bracketed types and conversions
+
+  sugar/                      the rules of the surface spellings wap's own source uses, one file per topic
+    calls.wap                 x.f(y), x.f → calls and Get
+    conditions.wap            unless, a if c, a ? b : c → If
+    data.wap                  xs#2 and other reaches → Get
+    definitions.wap           definitions written other ways
+    literals.wap              yes, no, ø → True, False, Empty; no x → x is empty
+    loops.wap                 for, until, loop, n times, break, return → While and Return
+    matching.wap              match x { … } → Case
+    ranges.wap                a to b, a upto b → Range
+    records.wap               class, enum → Record
+    types.wap                 list of int, x as text → bracketed types and conversions
 
   extensions/                 what no compiler needs: rule files loaded like modules, and code compiler.wap hands in
                               through a Language field (readers: a file ending → its reader)
@@ -166,11 +167,11 @@ What each file may know:
 - **core/analyze/** reads, never rewrites.
 - **core/emit/** reads only the kernel; `wasm.wap` reads not even that.
 - **core/** uses no file of extensions/ (guardrail core-no-extension); it walks Language's fields, compiler.wap fills them.
-- **types/sugar/** holds rules only; a rule that needs code calls a function in lib/.
+- **sugar/** holds rules only; a rule that needs code calls a function in lib/.
 
 Which of the two a rule file belongs in is measured, not argued: wap compiles itself with extensions/ switched off:
 no extension rule file loaded and Language.readers empty.
-A rule file is in types/sugar/ exactly when wap's own source uses its spelling; when that changes, the file moves.
+A rule file is in sugar/ exactly when wap's own source uses its spelling; when that changes, the file moves.
 
 ## Owners
 
@@ -193,7 +194,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 |---|---|---|
 | lead: the queue, the contracts | warp-lead | compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap, kernel/surface.wap; the test/wap/ scripts no other row names |
 | self-build: wap compiled by wap, file by file | warp-wap-operators | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp; edits any file to write its types and `use` lines |
-| front: read, operators, rules, lowering | warp-wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, nodes.wap |
+| front: read, operators, rules, lowering | warp-wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap |
 | types: declare, bind, type | warp-wap-binding | core/analyze/, core/paths.wap |
 | back: emitter, runtime | warp-wap-emitter | core/emit/, extensions/wasm/; test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
 | native: the wap command, programs built to executables | warp-host-fixer | extensions/native/; test/wap/test_native.sh |
