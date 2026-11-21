@@ -22,8 +22,14 @@ library="$(cd -P "$here/../../../lib" && pwd -P)"
 wasm2c=$(command -v wasm2c) || { echo "no wasm2c on the PATH (brew install wabt)" >&2; exit 1; }
 wabt="$(cd -P "$(dirname "$(readlink -f "$wasm2c")")/.." && pwd -P)"
 building="$executable.build"
-mkdir -p "$building"
-"$WARP" --no-window "$compiler" "$program" "$building/$MODULE_NAME.wasm"
+mkdir -p "$building" && building="$(cd -P "$building" && pwd -P)"
+# the compiler beside what it reads (scripts/lib/wap-beside.sh)
+source "$here/../../../scripts/lib/wap-beside.sh"
+mkdir -p "$building/compiler"
+(cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$building/compiler/") && cp "$compiler" "$building/compiler/wap.wasm"
+# (a library the compiler compiled once, types/types.wasm, is the GC one: a native build's library is read anew)
+rm -f "$building/compiler/types/types.wasm"
+"$WARP" --no-window "$building/compiler/wap.wasm" "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
 awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"
 "$C_COMPILER" $C_FLAGS -I"$building" -I"$wabt/$WASM2C_RUNTIME" -I"$wabt/$WABT_HEADERS" -I"$library" -o "$executable" \

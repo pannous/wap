@@ -160,6 +160,7 @@ wap/
     packed.wap                a Node as compact bytes and back, pack and unpack: each text and repeated subtree once
     warm.wap                  the compiler's warm state: the files it reads before a program, operated, packed
     wasm/                     a compiled wap module used as its source
+      library.wap             the library compiled once, types.wasm: read in place of its source when its stamp fits
       modules.wap             use "m.wasm": its functions declared from their export names, the rest (rules, enums,
                               classes, generic bodies) read from its wap section as source (Language.readers[".wasm"])
 
