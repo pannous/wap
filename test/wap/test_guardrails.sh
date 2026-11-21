@@ -10,9 +10,10 @@
 #   repeated-code    no line or list written twice in a file (scripts/repeated-code.sh)
 #   same-shape       no function body or { } block of SHAPE_FLOOR tokens or more with the shape of another, names,
 #                    numbers and texts erased (guardrail_shapes.awk): two such are one function or one table
-#   boxed-any        `any` written as a type in wap's own source, outside the types module (whose `any` is the language's
-#                    dynamic type, the Node enum's Data among them): each spot a debt, the list empty before milestone 2
-#                    (notes/decisions.md wap-boxed-any-debt); a place typing infers as any is ratchet_census.sh's
+#   boxed-any        `any` written as a type in wap's own source, outside the types module and sugar/ (whose `any` is
+#                    the language's dynamic type, the Node enum's Data among them): each spot a debt, the list empty
+#                    before milestone 2 (notes/decisions.md wap-boxed-any-debt); a place typing infers as any is
+#                    ratchet_census.sh's
 #   emit-boxes       only typing decides what is boxed (types.wap writes `prim box`): no struct.new of a box in core/emit
 #                    outside that primitive; never allowlisted
 #   get-reads-places a call has one kernel spelling: typing writes `f(x)` for a dot read naming a function, so the
@@ -87,9 +88,10 @@ repeated_code() {
 same_shape() {
 	LC_ALL=C awk -v least=$SHAPE_FLOOR -f test/wap/guardrail_shapes.awk $wap_files
 }
-# the types module's files: its folder's, and those its types.wap includes from elsewhere (wap/nodes.wap)
+# the language every program gets: the types module's files, those its types.wap includes from elsewhere
+# (wap/nodes.wap), and the sugar's rules, whose templates write the language's own types
 types_files() {
-	find wap/types -name "*.wap"
+	find wap/types wap/sugar -name "*.wap"
 	sed -n 's#^include "\(.*\)"$#wap/types/\1#p' wap/types/types.wap | sed -E 's#[^/]+/\.\./##'
 }
 boxed_any() {
