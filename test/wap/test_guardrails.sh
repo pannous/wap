@@ -31,7 +31,8 @@
 # Today's exceptions are in guardrails_allowed.txt, `<rule> <key> <count>`, key a function for one-fit and a file for
 # the others. The list only shrinks: a count above it fails naming file:line and the rule, a count below it fails
 # until the line is lowered or dropped. Run it with bash test/wap/test_guardrails.sh; it compiles nothing
-RULES="one-fit emit-infers-type dynamic-prim one-ranking long-file repeated-code same-shape boxed-any emit-boxes get-reads-places one-owner in-tree core-no-extension kernel-emitted copied-growth"
+# the rules are the ones the header above names, each checked by the finder of its name (one-fit: one_fit)
+RULES=$(sed -n 's/^#   \([a-z][a-z-]*\) .*/\1/p' "${BASH_SOURCE[0]}")
 # the rules no allowlist line excuses: a spot of theirs is a failure at once
 UNLISTED="emit-boxes get-reads-places in-tree core-no-extension kernel-emitted"
 OWNERS=notes/agents/wap-owner.md
@@ -153,7 +154,14 @@ in_tree() {
 	printf '%s\n' $wap_files | grep -vxF -f <(tree_paths) | awk '{ printf "in-tree\t%s\t%s:1\tno line in the tree of notes/agents/wap-owner.md\n", $0, $0 }'
 }
 
-found=$(for rule in $RULES; do ${rule//-/_}; done)
+# a finder that fails, a file or folder it reads missing (a renamed folder), fails its rule rather than finding nothing
+errors="$root/data/guardrail-errors.$$"
+mkdir -p "$root/data" && trap 'rm -f "$errors"' EXIT
+found=$(for rule in $RULES; do
+	${rule//-/_} 2>"$errors"; status=$?
+	[ $status -le 1 ] || echo "exited $status" >>"$errors"
+	sed "s/^/$rule\tfinder-error\t-:0\tthe finder failed: /" "$errors"
+done)
 # each rule and key, its count found and its count allowed
 counts=$(printf '%s\n' "$found" | awk -F'\t' 'NF { print $1 " " $2 }' | sort | uniq -c | awk '{ print $2, $3, $1 }')
 listed=$(grep -vE '^(#|$)' "$allowed")
