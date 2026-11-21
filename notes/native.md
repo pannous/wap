@@ -27,6 +27,12 @@ warp-host-fixer; this file is the inventory.
   webview (host_webview_page_text), C calls awaited (host_foreign_call, host_foreign_await, host_foreign_pending),
   the run's life (host_run_ended, host_waited, host_export, host_owns).
 
+## Parked
+- `import cbrt from "m"`, `import (getenv, strlen) from "c"` (warp's form; parked 2026-11-21 by warp-interviewer, samples
+  write `use m`, `use c`). If wanted: declarations.wap phrase_part reads `use <names> from <library>` as `use <library>`
+  (about 3 lines) and refuses a named function the module does not declare, naming the module to declare it in (about
+  4). samples/native/c_calls.warp keeps the form: warp's @primitive mode reads no `use c`.
+
 ## Who needs what
 - wap's tests: C functions of 'c' and 'm' only.
 - lib/'s C libraries by imports: wgpu_native 66, raylib 32, python 31, sqlite3 26, rs_regex 10, objc 8, mpg123 8, m 8,

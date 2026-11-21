@@ -24,4 +24,6 @@ check "a C struct given back by value, packed in its register" "$(ran struct_lin
 print(text(div(7, 2)))")" "4294967299"
 check "a C truth value given back as a bool" "$(ran bool_line "isatty(file: i32): bool from 'c'
 print(text(isatty(-1)))")" "no"
+check "libm's C functions come from its own module, use m" "$(ran libm_module 'use m
+print(text(cbrt(27.0)) + " " + text(hypot(3.0, 4.0)))')" "3 5"
 exit $((failures > 0))
