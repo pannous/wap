@@ -16,9 +16,9 @@ set_word(4, 6)
 written = fd_write(1, 0, 1, 8)
 set_word(8, written)')" "Hello"
 # a C function the program imports, its pointer an address in the program's memory
-check "a native program calls C" "$(native_ran strlen 'strlen(s: pointer): int := prim foreign("c", "strlen", s)
+check "a native program calls C" "$(native_ran strlen 'strlen(s: int32): int := prim foreign("c", "strlen", s)
 exit(code: int) := prim proc_exit(code)
-name(): pointer := prim data_address("wap")
+name(): int32 := prim data_address("wap")
 exit(strlen(name()))' >/dev/null; echo $?)" "3"
 # a statement's value that is dropped is no value: an if or a match as a statement boxes nothing, so no GC type
 check "a native program with an if and a match as statements" "$(native_ran dropped 'exit(code: int) := prim proc_exit(code)
@@ -26,9 +26,17 @@ c = yes
 if c { 5 }
 match 3 { 3 => 1; _ => ø }
 exit(7)' >/dev/null; echo $?)" "7"
+check "a native program with an if as a while body's last statement" "$(native_ran dropped_loop 'exit(code: int) := prim proc_exit(code)
+k = 0
+n = 0
+while n < 5 {
+	n = n + 1
+	if n > 2 { k = k + 1 }
+}
+exit(k)' >/dev/null; echo $?)" "3"
 # the native wap (driver.wap, built by wap): `wap <program>` compiles with the wap.wasm beside it and runs the module
 native_wap="$stage/bin/wap"
-mkdir -p "$stage/bin/wap-seed" && cp -R "$(dirname "$compiler")/types" "$(dirname "$compiler")/kernel" "$stage/bin/wap-seed/" && cp "$compiler" "$stage/bin/wap-seed/wap.wasm"
+mkdir -p "$stage/bin/wap-seed" && (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$stage/bin/wap-seed/") && cp "$compiler" "$stage/bin/wap-seed/wap.wasm"
 wasmtime_library="$(cd -P "$(dirname "$(command -v "$warp")")/lib" && pwd -P)"
 WARP=$warp "$tree/wap/extensions/native/build.sh" "$compiler" "$tree/wap/extensions/native/driver.wap" "$native_wap" -L"$wasmtime_library" -lwarp_wasmtime -Wl,-rpath,"$wasmtime_library" >/dev/null 2>&1
 printf '%s\n' 'print "Hello"' >"$stage/hello.wap"
@@ -53,6 +61,12 @@ check "the console keeps a definition and runs each line once" "$(printf '%s\n' 
 # a program using a compiled module (use "m.wasm", extensions/wasm/modules.wap): the native wap links its instance
 check "a native wap run links a module the program uses" "$(printf '%s\n' 'add(a: int, b: int) as int := a + b' >"$stage/adding.wap" && $warp "$compiler" "$stage/adding.wap" "$stage/adding.wasm" 2>&1 && "$native_wap" "use \"$stage/adding.wasm\"
 add(40, 2)" 2>&1)" "42"
+# a console value is the line's exported global, one x every later line reads and its functions use
+check "the console keeps a value for the lines after it" "$(printf '%s\n' 'x = 2' 'x + 1' 'f(a: int) as int := a * x' 'f(21)' 't = "ab"' 't + t' | "$native_wap" 2>&1)" "2
+3
+42
+\"ab\"
+\"abab\""
 # the compiler's machine code, written beside wap.wasm by the first run, read by the next ones
 check "the native wap keeps the compiler's machine code beside it" "$(ls "$stage/bin/wap-seed/" | grep -c '^wap-[0-9a-f]*\.cwasm$')" "1"
 exit $((failures > 0))

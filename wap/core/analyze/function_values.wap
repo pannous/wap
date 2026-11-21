@@ -22,6 +22,10 @@ CLOSURE_NAME = "closure"
 # A function value, `x => x + 1`: a function of its own, typed when a call of the value reaches it, whose first
 # parameter is the value itself, holding the captures: the variables of the functions around it that it reads. Its
 # type is its own, naming that function and the captures' types here, so a call of the value is a call of it.
+# DEBT: Each function value is a type of its own: a call of a value calls its one function directly, so a variable or
+#   parameter holds one `x => ...` only, an `if` choosing between two function values gives none, and a function's
+#   name is a value the same way (one of several overloads not yet). Captures are copied when it is made, so a later
+#   change of one is refused. Paid off by function references (a funcref beside the captures, call_ref).
 function_value_typed(n: Node, parameters: Node, body: Node, s: TypingState, f: TypeFrame) as Node := {
 	lambda = lambda_of(n, parameters, body, s)
 	captures = captures_of(n).map(definer => type_keyed(place_key(definer), f.variables) ?? refused(definer, "a function value reads this before any value is given to it"))
@@ -78,20 +82,24 @@ as_function_type(value: Node, wanted: Node, s: TypingState) as Node? := {
 	parts = function_parts(wanted) ?? return ø
 	own = value_type(value) ?? return ø
 	typed = value_function_typed(parts.parameters, own, s) ?? return ø
-	if not same_types(typed.arguments[#typed.arguments - #parts.parameters ..], parts.parameters) { return shape_taking(value, typed, parts, s, wanted) }
-	if typed.result == ø or not conversion(typed.result, parts.result, s) in STATIC_CONVERSIONS { return ø }
-	with_fact(with_fact(with_type_of(value, wanted), FUNCTION_VALUE, own), DEFINED_AT, declared_name(signed_name(typed, s)))
+	way = conversion(typed.result, parts.result, s)
+	if not way in STATIC_CONVERSIONS { return ø }
+	if way != Conversion.Same or not same_types(typed.arguments[#typed.arguments - #parts.parameters ..], parts.parameters) { return shape_taking(value, typed, parts, s, wanted) }
+	with_fact(with_fact(with_type_of(value, wanted), FUNCTION_VALUE, own), ADAPTED, declared_name(signed_name(typed, s)))
 }
 # A function taking shapes where one taking their types is wanted, `pair_name(pair: Pair)` where `(Node) -> text` is:
 # a function the typing stage writes once, taking those types and calling it, so each shape is checked where the value
 # is called, as a direct call checks it
+# DEBT: An overloaded function is not a value yet: `parts.map(text)` types only as `parts.map(each => text(each))`,
+#   since a value of a name with several definitions is refused until a written function type picks one. Paid off when
+#   the expected `(Node) -> text` picks the overload: this goes back to `.map(text)`.
 shape_taking(value: Node, typed: TypedFunction, parts: FunctionType, s: TypingState, wanted: Node) as Node := {
 	definition = typed.function
 	word = definition.name
 	name = name_once("${word}(${parts.parameters.map(each => text(each)).join(", ")})", value, s)
 	made = definitions_named(text(name), s)
 	reads = parameters_of(name, parts.parameters)
-	taking = if made is empty then dispatcher_made(name, reads, named_call(word, [definition], reads, name, s), [typed.result], s) else made#1
+	taking = if made is empty then dispatcher_made(name, reads, named_call(word, [definition], reads, name, s), [parts.result], s) else made#1
 	called = declared_name(written_name(define_of(taking, s)))
 	as_function_type(with_type_of(with_fact(placed_like(symbol(text(called)), value), DEFINED_AT, called), function_value_type(place_key(called), [])), wanted, s) ?? refused(value, "the function written for these shapes takes others")
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env warp
-# wap, the new compiler (notes/backbone.md, notes/wap.md, the file tree): a program's source in, a wasm module out.
+# wap, the new compiler (notes/backbone.md, notes/wap.md; the file tree: notes/agents/wap-owner.md): a program's source
+# in, a wasm module out.
 #
 #   warp wap/compiler.wap hello.wap hello.wasm      compile
 #   warp hello.wasm                                  run it
@@ -16,6 +17,10 @@
 #   typed rules typed → typed       core/rules/typed.wap, rules with holes of value types, typed again after each round
 #   emit      kernel → module       core/emit/emitter.wap, one case per kernel form
 #   encode    module → bytes        core/emit/wasm.wap, the wasm binary format (its codes: core/emit/opcodes.wap)
+# DEBT: A used module's functions are emitted even when nothing calls them (a module's bound statements go first in
+#   the program's Block), while the types module's uncalled definitions are left out (bends "smaller and faster"): a
+#   module is code whose statements must run, so it joins whole. Paid off when typing leaves out the module
+#   definitions nothing calls.
 use "core/pipeline.wap"
 use "core/parse/operators.wap"
 use "core/rules/stages.wap"
@@ -23,11 +28,25 @@ use "core/format.wap"
 use "core/emit/wasm.wap"
 use "core/emit/emitter.wap"
 use "core/language.wap"
+use "extensions/wasm/modules.wap"
+use "core/stage.wap"
+use "core/analyze/types.wap"
 
 language = base_language()
+# the extensions this compiler is built with: a compiled module read as the source it stands for
+language.readers[".wasm"] = wasm_source
 types = language_loaded(language, program.folder)
-compiled(file: text) as list := module_bytes(emitted(typed_file(language, file, types), file))
+# a module: its functions compiled once each and exported, the rest of its code as wap source in its wap section
+compiled(file: text) as list := {
+	modules = declared_modules(language, file)
+	typed = typed_modules(language, modules, types)
+	own = modules.last
+	exported = compiled_once(own, added_records(Records(), statements_in(typed)))
+	m = emitted(typed, file, exported.map(signature => definer_id(signature.definer)))
+	m.header = header_source(file, own, exported)
+	module_bytes(m)
+}
 
 # (the native `wap` compiles as the native warp does: the program's folder, its lib/ and runtime follow, unread here)
 if #args < 2 { raise "usage: warp wap/compiler.wap <program> <module.wasm>, or format <program>" }
-if args#1 == "format" { code = read_notation(args#2); program_words_defined(language, code); print formatted(language, groupings_written(language, operated_program(language, code))) } else { write_bytes(args#2, compiled(args#1)) }
+if args#1 == "format" { code = read_notation(language, args#2); program_words_defined(language, code); print formatted(language, groupings_written(language, operated_program(language, code))) } else { write_bytes(args#2, compiled(args#1)) }
