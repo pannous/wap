@@ -26,7 +26,7 @@ https://github.com/pannous/wap
   <!-- DONE (card preload-rename-types) ^^ rename to types? -->
 - A feature is a types function or a rule in sugar/ before it is core code; a core diff that adds names of
   a domain is the sign a mechanism is missing: note it.
-  <!-- todo (card move-sugar) move types/sugar to sugar/  -->
+  <!-- DONE (card move-sugar, b330a36) move types/sugar to sugar/  -->
 - wap/core and wap/kernel are semi-frozen: every change there goes to warp-interviewer first. A new feature goes
   into wap/extensions/ (first case: the native binary).
 
