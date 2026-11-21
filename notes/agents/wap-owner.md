@@ -42,6 +42,7 @@ wap/
 
   kernel/                     the kernel layer: the emitter's whole input language
     forms.wap                 the kernel forms, each a named pattern of Node
+    surface.wap               the forms rules write and typing turns into kernel forms (Item, Variable)
 
   core/                       the machinery: mechanisms only, no names of a domain
     pipeline.wap              one function per step from source to typed program, shared by compiler and census
