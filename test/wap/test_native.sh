@@ -81,4 +81,6 @@ check "a run names the word its module no longer exports" "$(cd "$stage" && prin
 # a used module's finished() runs when the run ends, after the program's own output (host.wap: the sound heard out)
 check "a used module's finished runs at the run's end" "$(cd "$stage" && printf '%s\n' 'finished() := print "done"' 'word() as int := 1' >ending.wap && "$native_wap" "$compiler" ending.wap ending.wasm && printf '%s\n' 'use "ending.wasm"' 'print text(word())' >ended.wap && "$native_wap" ended.wap 2>&1)" "1
 done"
+# a link to the native wap (as a package manager installs one) finds the wap-seed/ beside the file itself
+check "a link to the native wap runs a program" "$(ln -sf "$native_wap" "$stage/linked-wap" && "$stage/linked-wap" 'print "linked"' 2>&1)" "linked"
 exit $((failures > 0))
