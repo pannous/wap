@@ -156,4 +156,13 @@ print(shout(\"hi\"))
 print(text(size(Tree([Tree([], \"b\")], \"a\"))))")" "6
 hi!
 2"
+# wiki/use.md "folder, package and project scope": use folder brings in every source file beside the using one
+mkdir -p "$stage/shapes" && printf '%s\n' 'area(side: int) as int := side * side' >"$stage/shapes/square.wap"
+check "use folder brings in a word of a file beside it" "$(printf '%s\n' 'use folder' 'print(text(area(3)))' >"$stage/shapes/main.wap" && $warp "$compiler" "$stage/shapes/main.wap" "$stage/shapes/main.wasm" 2>&1 && $warp "$stage/shapes/main.wasm" 2>&1)" "9"
+# wiki/use.md "Library folders": use name brings in the module of that name, here the one beside the program
+check "use name brings in the module of that name beside the program" "$(ran use_name 'use speak
+say("by name")')" "loaded
+by name"
+check "use name brings in a standard module from the library beside the compiler" "$(ran use_library 'use ordering
+print(text(natural_compare("a2", "a10") < 0))')" "yes"
 exit $((failures > 0))
