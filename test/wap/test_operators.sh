@@ -71,6 +71,7 @@ format_check 'y = x!' 'y = x!'
 format_check 'z = !x' 'z = not x'
 # a word leading a rule's phrase after an infix takes the rest of the phrase, as at a phrase's start; other words stay operands
 format_check 'x = f(a) ?? return ø' 'x = f(a) ?? (return ø)'
+format_check 'x = f(a) ?? return text 0' 'x = f(a) ?? (return text 0)'
 format_check 'n = if s < 0 then 0 - s else s' 'n = if s < 0 then 0 - s else s'
 format_check 'z = a ?? if c {1} else {2}' 'z = a ?? (if c {1} else {2})'
 check "a match after an assignment keeps its arms" "$(ran assigned_match 'x = 2
@@ -81,6 +82,21 @@ z = f(0) ?? if 2 > 1 {7} else {8}
 print text(z)')" "7"
 format_check 'x = if c then 1
 	else 2' 'x = if c then 1 else 2'
+check "a line ending in then or else takes the next line, and only that one" "$(ran trailing_then 'chosen(n: int) as text := {
+	if n > 2 then
+	"a"
+	else
+	"b"
+}
+y = "c"
+print chosen(1) + y')" "bc"
+check "a word inside a rule's phrase is the program's own outside that phrase" "$(ran own_out 'rule tagged out $x => 1
+f(xs: list<int>): list<int> := {
+	out: list<int> = []
+	for x in xs { out.add(x) }
+	out
+}
+print(text(f([1, 2])))')" "[1, 2]"
 format_check 'if c
 	print "a"' 'if c {print "a"}'
 format_check 'r = 2..' 'r = 2 ..'
