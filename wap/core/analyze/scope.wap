@@ -22,7 +22,7 @@ use "definers.wap"
 use "../bindings.wap"
 use "library.wap"
 use "../parse/operator_table.wap"
-use "../../preload/operators.wap"
+use "../../types/operators.wap"
 use "types.wap"
 use "variables.wap"
 use "../../kernel/forms.wap"
@@ -33,23 +33,23 @@ use "declarations.wap"
 
 # depth of the program's own statements: names defined there are globals and top-level functions
 PROGRAM_DEPTH = 0
-# depth of the words of the modules the program uses, around it, and of the preload's declarations, around those
-# (core/analyze/declarations.wap): a name means the innermost, local > parameter > program > used module > preload
+# depth of the words of the modules the program uses, around it, and of the types module's declarations, around those
+# (core/analyze/declarations.wap): a name means the innermost, local > parameter > program > used module > types
 MODULE_DEPTH = -1
-PRELOAD_DEPTH = -2
+TYPES_DEPTH = -2
 
-# the program bound inside the modules it uses and the preload, whose declarations (`name: signature`) it may use;
+# the program bound inside the modules it uses and the types module, whose declarations (`name: signature`) it may use;
 # two modules defining one name are refused, used or not
-bound_program(program: Block, preload: list<Signature>, modules: list<Module>) as Block := {
-	known = identified_program(program, preload, modules)
+bound_program(program: Block, types: list<Signature>, modules: list<Module>) as Block := {
+	known = identified_program(program, types, modules)
 	finished(known, known.statements.map(statement => bound(statement, known.scope, PROGRAM_DEPTH)))
 }
-# the words around a program: the modules it uses, then the preload's, outermost
-scope_around(preload: list<Signature>, modules: list<Module>) as Scope := scope_of(modules_scope(modules) + preload_scope(preload))
-# the preload's words, outermost
-preload_scope(preload: list<Signature>) as list<Definition> := preload.flat_map(signature => library_words(signature, PRELOAD_DEPTH))
-# a library's words: a function of the preload or of a used module, or a used module's variable, `x = 1`, or a class
-# or an enum it declares, its cases and its fields for methods, as the program's own
+# the words around a program: the modules it uses, then the types module's, outermost
+scope_around(types: list<Signature>, modules: list<Module>) as Scope := scope_of(modules_scope(modules) + types_scope(types))
+# the types module's words, outermost
+types_scope(types: list<Signature>) as list<Definition> := types.flat_map(signature => library_words(signature, TYPES_DEPTH))
+# a library's words: a function of the types module or of a used module, or a used module's variable, `x = 1`, or a
+# class or an enum it declares, its cases and its fields for methods, as the program's own
 library_words(signature: Signature, depth: int) as list<Definition> := match signature.kind {
 	DefinitionKind.Record => definitions_made_by(signature.record!, Scope(), depth)
 	DefinitionKind.Function => [Definition(signature.name, DefinitionKind.Library, signature.definer, depth)]
@@ -153,7 +153,7 @@ pattern_variables(pattern: Node, scope: Scope, depth: int) as list<Definition> :
 
 # A type test, `x is T`: its value bound, its type a case, which binds as one, or a type's name, which stays a name as
 # in `x: int`; the word stays unbound, so typing reads the test (core/analyze/types.wap). A predicate's word, `xs is
-# empty`, and `a is not b` are rules of their own (preload/sugar/types.wap)
+# empty`, and `a is not b` are rules of their own (types/sugar/types.wap)
 is_type_test(called: Node, scope: Scope) as bool := called is symbol and text(called) == TYPE_TEST_WORD and definitions_meant(TYPE_TEST_WORD, scope) is empty
 type_test_bound(n: Node, called: Node, arguments: list, scope: Scope, depth: int) as Node := {
 	tested = arguments#2
@@ -192,6 +192,10 @@ handler_bound(handler: Fn, scope: Scope, depth: int) as Node := match handler { 
 } }
 # A method's receiver fields: in a function whose first parameter is `self` of a class, each field of the class by its
 # bare name, `c` for `self.c`, read and set; the function's parameters and locals hide them
+# DEBT: A method's bare field names come from the classes of its Block only: a method of a types or used module's
+#   class still writes `self.c`, and a function value inside a method that reads a bare field is not given self as a
+#   capture. Paid off when binding sees the library's Records beside its declarations and a field's capture captures
+#   its receiver.
 receiver_fields(parameters: List, scope: Scope, depth: int) as list<Definition> := {
 	receiver = match parameters { List(items, bracket, separator) => if items is empty then ø else items#1 }
 	if receiver == ø { return [] }
@@ -217,7 +221,7 @@ with_captures(function: Node, scope: Scope, depth: int) as Node := {
 	for definer in captured_definers(function) {
 		if from_enclosing_function(definer, scope, depth) and not captured.any(other => same_definer(other, definer)) { captured = captured + [definer] }
 	}
-	with_fact(function, CAPTURES, List(captured, Bracket.Square, Separator.Comma))
+	with_fact(function, CAPTURES, data_list(captured))
 }
 # the defining names of the captures read anywhere in n
 captured_definers(n: Node) as list<Node> := match n {
@@ -245,7 +249,7 @@ called_bound(called: Node, given: int, scope: Scope, depth: int) as Node := if c
 resolved_taking(name: Node, given: int?, scope: Scope, depth: int) as Node := {
 	meant = definitions_meant(text(name), scope)
 	if meant is empty {
-		# a name nothing defines is read as the word its alias gives, `length` count (preload/operators.wap aliases)
+		# a name nothing defines is read as the word its alias gives, `length` count (types/operators.wap aliases)
 		alias = aliased(text(name), Fixity.Anywhere)
 		if alias != text(name) and not definitions_meant(alias, scope) is empty { return resolved_taking(refitted(symbol(alias), name), given, scope, depth) }
 		refused(name, "nothing defines this name, neither the program nor the library")
@@ -255,7 +259,7 @@ resolved_taking(name: Node, given: int?, scope: Scope, depth: int) as Node := {
 	if fact_of(name, READ_WITH) != ø and not innermost.kind in [DefinitionKind.Function, DefinitionKind.Library] { refused(name, "a rule reads ${name} as the function ${fact_of(name, READ_WITH)}, but a variable of that name hides it: rename the variable") }
 	kind = if innermost.depth == depth or innermost.depth <= PROGRAM_DEPTH or innermost.kind == DefinitionKind.Global then innermost.kind else DefinitionKind.Capture
 	bound = with_binding(name, kind)
-	if #meant == 1 then with_fact(bound, DEFINED_AT, innermost.definer) else with_fact(without_fact(bound, DEFINED_AT), CANDIDATES, List(depths_of(meant).map(depth => List(meant.filter(definition => definition.depth == depth).map(definition => definition.definer), Bracket.Square, Separator.Comma)), Bracket.Square, Separator.Comma))
+	if #meant == 1 then with_fact(bound, DEFINED_AT, innermost.definer) else with_fact(without_fact(bound, DEFINED_AT), CANDIDATES, data_list(depths_of(meant).map(depth => data_list(meant.filter(definition => definition.depth == depth).map(definition => definition.definer)))))
 }
 # the depths of these definitions, each once, innermost first as they come
 depths_of(definitions: list) as list := {
@@ -274,8 +278,8 @@ qualified_case(n: Node, subject: Node, key: Node, scope: Scope) as Node? := {
 	}
 	ø
 }
-# A case name enums share: of the cases taking as many values as a call gives the innermost, `Key(k, op, v)` the
-# preload's Node.Key beside a used module's fieldless LexemeKind.Key; with none taking them the innermost of the name;
+# A case name enums share: of the cases taking as many values as a call gives the innermost, `Key(k, op, v)` the types
+# module's Node.Key beside a used module's fieldless LexemeKind.Key; with none taking them the innermost of the name;
 # two such of one depth read two ways and are refused naming both
 unambiguous_case(name: Node, meant: Definition, given: int?, scope: Scope) as Definition := {
 	named = named_in(scope, text(name)).filter(definition => definition.kind == DefinitionKind.Case)

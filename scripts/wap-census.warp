@@ -27,14 +27,14 @@ use "../wap/core/analyze/types.wap"
 use "../wap/core/analyze/variables.wap"
 use "../wap/core/emit/emitter.wap"
 
-# wap's folder and its preload's, from the tree's root, where the census runs and as its files are given and their
+# wap's folder and its types module's, from the tree's root, where the census runs and as its files are given and their
 # places spell them (git ls-files), wherever the census itself lies or was compiled to
 WAP_FOLDER = "wap"
-PRELOAD_FOLDER = WAP_FOLDER + "/preload/"
+TYPES_FOLDER = WAP_FOLDER + "/types/"
 language = base_language()
-preload = language_loaded(language, WAP_FOLDER)
-library_scope = scope_of(preload_scope(preload.signatures))
-library_code = library_code_of(language, preload)
+types = language_loaded(language, WAP_FOLDER)
+library_scope = scope_of(types_scope(types.signatures))
+library_code = library_code_of(language, types)
 library = statements_in(library_code.code)
 # the names every file given and the modules it uses define, known before any is read, as the compiler does
 # (core/pipeline.wap program_words_defined)
@@ -67,7 +67,7 @@ modules_of(file: text) as list<Module> := {
 prepared_once(module: Module, modules: list<Module>) as list := {
 	global shared
 	key = module.file
-	if not shared.prepared.has(key) { shared.prepared[key] = statements_in(prepared(language, module, modules, preload)) }
+	if not shared.prepared.has(key) { shared.prepared[key] = statements_in(prepared(language, module, modules, types)) }
 	shared.prepared[key]
 }
 # One typing state for the run, as the compiler types a program: the library's definitions and records, then each
@@ -105,7 +105,7 @@ typing_joined(modules: list<Module>) := {
 }
 # a module's statements bound one by one, as probe binds a file's (which reports their refusals)
 bound_alone(module: Module, modules: list<Module>) as list := {
-	words = scope_around(library_around(module, preload), modules_of_uses(module, modules))
+	words = scope_around(library_around(module, types), modules_of_uses(module, modules))
 	statements = statements_in(lowered_program(language, module.code))
 	bound_each(statements, within(words, defined_in(statements, words, PROGRAM_DEPTH)), no)
 }
@@ -165,7 +165,7 @@ whole_once(file: text) as Outcome := {
 typed_whole(file: text) as Block := {
 	modules = modules_of(file)
 	whole = Block(modules.flat_map(module => prepared_once(module, modules)))
-	typed_by_rules(language, whole, preload.signatures, library_code, modules.flat_map(module => module.signatures))
+	typed_by_rules(language, whole, types.signatures, library_code, modules.flat_map(module => module.signatures))
 }
 
 report(stage: text, message: text) := {
@@ -221,20 +221,22 @@ probe(file: text) as Tally := {
 	}
 	bound_ok = bound_each(lowered_ok, within(within(library_scope, used), defined_in(lowered_ok, library_scope, PROGRAM_DEPTH)), yes)
 	# typing: each function alone in the run's state (functions_probe), then the whole file as the compiler types it
-	# and emits it when no module of its closure refuses a form (whole_once); a preload file is no program of its own
+	# and emits it when no module of its closure refuses a form (whole_once); a types file is no program of its own
 	# but every program's library, typed function by function
 	counted = functions_probe(file)
-	outcome = if in_preload(file) then Outcome() else whole_once(file)
+	outcome = if in_types(file) then Outcome() else whole_once(file)
 	if outcome.refusal != "" { report(if outcome.typed then "emit" else "type", outcome.refusal) }
-	whole = if in_preload(file) then "typed: as every program's library, by function" else "typed: ${outcome.typed}, emitted: ${outcome.emitted}"
+	whole = if in_types(file) then "typed: as every program's library, by function" else "typed: ${outcome.typed}, emitted: ${outcome.emitted}"
 	print "ok\t${#statements} statements, ${#lowered_ok} lowered, ${#bound_ok} bound, " + whole
 	for line in counted.lines { print line }
 	print "functions\ttyped ${counted.typed} of ${counted.functions} functions (${counted.by_calls} typed by their calls), ${counted.anys} places typed any"
 	Tally(1, if outcome.typed then 1 else 0, counted.functions, counted.typed, counted.anys)
 }
 
-# whether a file is one of the preload's, the library every program is compiled with
-in_preload(file: text) as bool := file.starts_with(PRELOAD_FOLDER)
+# whether a file is one of the types module's, the library every program is compiled with: in its folder, or a file it
+# includes from elsewhere (wap/nodes.wap)
+library_files = functions_in(library).map(function => function.module).unique
+in_types(file: text) as bool := file.starts_with(TYPES_FOLDER) or library_files.contains(file)
 # the files probed, those typed whole, the functions found, those typed alone, and the places in them typed any
 class Tally { files: int = 0, whole: int = 0, functions: int = 0, typed: int = 0, anys: int = 0 }
 added(a: Tally, b: Tally) as Tally := Tally(a.files + b.files, a.whole + b.whole, a.functions + b.functions, a.typed + b.typed, a.anys + b.anys)
@@ -277,11 +279,11 @@ module_probed(key: text, own: list<Signature>) as Probed := {
 	p
 }
 # A file's functions probed, with those of every module of its closure, which decide whether it is typed whole; a
-# preload file's functions are the library's, in the run's state from its start: none has a second copy
+# types file's functions are the library's, in the run's state from its start: none has a second copy
 functions_probe(file: text) as Probed := {
 	modules = []
 	try modules = modules_of(file) catch e { report("declare", e.message); return Probed() }
-	if in_preload(file) { return module_probed(file, functions_in(library).filter(function => function.module == file)) }
+	if in_types(file) { return module_probed(file, functions_in(library).filter(function => function.module == file)) }
 	typing_joined(modules)
 	for module in modules {
 		key = module.file
@@ -371,11 +373,11 @@ family_of(root: Refusal, refusals: list<Refusal>) as Family := {
 	family
 }
 families = run.state.refusals.filter(each => called_refused(each) == "").map(root => family_of(root, run.state.refusals)).sorted(by: family => -family.size)
-# who unblocks a family: the owner of its root's file, by the longest path of the Owners table (notes/wap.md "Owners")
+# who unblocks a family: the owner of its root's file, by the longest path of the Owners table (notes/agents/wap-owner.md "Owners")
 # that the file starts with; a root no row names says so, for warp-lead to give it one
-OWNERS_TABLE = "notes/wap.md"
+OWNERS_TABLE = "notes/agents/wap-owner.md"
 OWNERS_COLUMN = " | "
-NO_OWNER = "no owner in notes/wap.md"
+NO_OWNER = "no owner in notes/agents/wap-owner.md"
 class Owned { path: text, owner: text }
 owned_in(row: text) as list<Owned> := {
 	cells = row.split(OWNERS_COLUMN)

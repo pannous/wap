@@ -80,7 +80,11 @@ RULE = "rule"
 # call chose. Each is a named entry in the node's metadata, never a hole of its shape, so a form keeps the same holes
 # from stage to stage. A later fact of the same name replaces the earlier.
 with_fact(n: Node, name: text, value: Node) as Node := with_attribute(n, Key(symbol(name), Op.Colon, value))
+# a list as data writes it, `[a, b]`: a fact's items, a call's arguments as data
+data_list(items: list<Node>) as Node := List(items, Bracket.Square, Separator.Comma)
 # n without the fact of that name, as no stage had learned it
+# DEBT: rebuilds the Meta, a copy of nodes.wap with_attribute's layout (the compiler uses only the seed's types words).
+#   Paid off at the next seed refresh: one without_attribute in nodes.wap, which with_attribute uses too.
 without_fact(n: Node, name: text) as Node := match n {
 	Meta(node, List(data, bracket, separator)) => Meta(node, List(data.take(META_FACTS - 1) + facts_in(data).filter(fact => fact_name(fact) != name), bracket, separator))
 	_ => n
@@ -172,10 +176,9 @@ identified(definer: Node, ids: Definers) as Node := {
 	ids.count += 1
 	with_fact(definer, DEFINER, Text("${ids.file}#${ids.count}"))
 }
-# A definition's key: its definer's id, the name, and the signature of a typed function, which tells its typed
-# versions apart
+# A definition's key: its definer's id (the same in each typed version), the name, and the signature of a typed
+# function, which tells its typed versions apart
 place_key(definer: Node) as text := "${definer_id(definer)} ${text(definer)}${signature_key(definer)}"
-# a definer's id, the same in each typed version of its definition
 definer_id(definer: Node) as text := text(fact_of(definer, DEFINER) ?? refused(definer, "a definition without an id"))
 signature_key(definer: Node) as text := if fact_of(definer, SIGNATURE) == ø then "" else " ${fact_of(definer, SIGNATURE)}"
 
@@ -183,7 +186,7 @@ signature_key(definer: Node) as text := if fact_of(definer, SIGNATURE) == ø the
 # facts are in core/bindings.wap)
 DEFINED_AT = "defined_at"
 # a type's name bound to the name of the Record declaring it, as the code writing it sees it: a module's class hides
-# the preload's of one name only inside the module (core/analyze/scope.wap type_bound)
+# the types module's of one name only inside the module (core/analyze/scope.wap type_bound)
 DECLARED_BY = "declared_by"
 SELF_WORD = "self"
 # on a Define a rule wrote for every class, as its show: typed only when something calls it, so a class whose field
@@ -232,7 +235,9 @@ SIGNATURE = "signature"
 # A list's places by name, for a list that only grows or is changed in place, as the typing state's definitions and a
 # program's records are: indexed up to `count`, extended for the items added since
 # the items of a list of optionals that hold a value: `[1, ø, 3]` gives [1, 3] (here until old warp, which compiles
-# the compiler, retires: then the preload's)
+# the compiler, retires: then the types module's)
+# DEBT: lives here, not in types/lists.wap, since the tests' compiler starts from the seed's types module, which
+#   lacks it. Paid off at the next seed refresh whose types module holds it: it moves, with a test_lists line.
 compact(xs: list<T?>) as list<T> := {
 	out: list<T> = []
 	for x in xs { if x != ø { out += [x] } }
@@ -259,11 +264,11 @@ added_records(records: Records, added: list<Node>) as Records := Records(records
 record_named(records: Records, type: Node?) as Node? := {
 	if type == ø or not type is symbol { return ø }
 	named = items_named(records.names, records.items, text(type), record => record_name(record))
-	# the one its code sees, else the one declared last: a program's own class, or a used module's, shadows the preload's
+	# the one its code sees, else the one declared last: a program's own class, or a used module's, shadows the types
+	# module's
 	declared = fact_of(type, DECLARED_BY)
 	if declared == ø { return if named is empty then ø else named.last }
-	for record in named { if place_key(record_declared(record)) == place_key(declared) { return record } }
-	refused(type, "this type names a record its scope declared at ${place_key(declared)}, but the program's records hold no record from that place")
+	named.find(record => place_key(record_declared(record)) == place_key(declared)) ?? refused(type, "this type names a record its scope declared at ${place_key(declared)}, but the program's records hold no record from that place")
 }
 record_name(record: Record) as text := text(record_declared(record))
 record_declared(record: Record) as Node := match record { Record(name, fields, variants) => name }
@@ -284,15 +289,10 @@ declaring(records: Records, name: Node) as list := {
 	for record in records.items { for case in cases_of(record) { if place_key(case_name(case)) == key { return [record, case] } } }
 	refused(name, "no enum the program declares has this case")
 }
-
 # a record's field of this name, ø when it has none
-field_named(record: Node, key: Node) as Node? := {
-	for field in fields_of(record) { if text(declared_name(field)) == text(key) { return field } }
-	ø
-}
+field_named(record: Node, key: Node) as Node? := fields_of(record).find(field => text(declared_name(field)) == text(key))
 # the one item of a list, ø for none, several or no list
 only(items: list<Node>?) as Node? := if items != ø and #items == 1 then items#1 else ø
-
 # on a program, the files it USES (`use "path"`), each a Text of the path resolved against the program's own folder
 USES = "uses"
 

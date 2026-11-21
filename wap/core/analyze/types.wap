@@ -18,7 +18,16 @@
 #
 # A function is typed when a call reaches it, with that call's argument types; one whose parameters all have their
 # types is typed even when nothing calls it, so its errors show. A function that calls itself needs its result type
-# written: `f(n: int): int := …`. The result is the program, the preload's functions it calls first.
+# written: `f(n: int): int := …`. The result is the program, the types module's functions it calls first.
+
+# DEBT: Boxed `any` in wap's own source: a value whose type typing can't name yet is boxed as `any` and checked where
+#   it enters a typed place, though the compiler's source should stay fully typed (first_principles.md). Only this
+#   file decides what is boxed, the emitter never infers it; each boxed spot is one entry of
+#   test/wap/guardrails_allowed.txt, which may only shrink. Paid off when that list is empty (milestone 2 requires
+#   it).
+# DEBT: This file reaches rules/ (typed.wap) through a `use`, because wap cannot call a function value read from a
+#   field (`this holds a function, no function to call`). Paid off when a field's function value can be called: it
+#   becomes a function value on TypingState.
 
 use "calls.wap"
 use "data.wap"
@@ -152,7 +161,7 @@ class TypeFrame {
 	late: list<Node> = []
 }
 
-# the program typed, after the preload's functions it calls, the typed rules firing as it is typed
+# the program typed, after the types module's functions it calls, the typed rules firing as it is typed
 typed_program(program: Block, library: Library, rules: KindRules, signatures: list<Signature>) as Block := typed_among(program, statements_in(library.code), rules, library.scope, library.signatures + signatures)
 # the program typed, after the library's records and those of its definitions it calls, each definition shaped and
 # bound when typing first reaches it (core/analyze/calls.wap reached)
@@ -205,7 +214,7 @@ form_typed(n: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := ma
 	Call(called, arguments) => call_typed(n, called, arguments, s, f, expected)
 	Prim(operation, arguments) => prim_typed(n, operation, arguments, s, f, expected)
 	If(condition, then_part, else_part) => if_typed(n, condition, then_part, else_part, s, f, expected)
-	While(condition, body) => refitted(While(condition_typed(condition, s, f), present_typed(body, [], s, f, ø)), n)
+	While(condition, body) => refitted(While(condition_typed(condition, s, f), present_typed(body, [], s, f, symbol(EMPTY_TYPE))), n)
 	# the body's value, or the otherwise part's where the body raises (wiki/Error.md "try"): joined as an if's arms
 	Try(body, handler) => try_typed(n, present_typed(body, [], s, f, expected), handler, s, f, expected)
 	Case(subject, arms) => case_typed(n, typed_form(subject, s, f, ø), arms, s, f, expected)
@@ -344,12 +353,15 @@ name_set_typed(n: Node, place: Node, value: Node, s: TypingState, f: TypeFrame) 
 # a list's item or a record's field given a value of its type; the Set itself gives none
 item_set_typed(n: Node, place: Node, value: Node, s: TypingState, f: TypeFrame) as Node := {
 	wanted = value_of(place, "as a place")
-	# a map's entry, read by a call of `#`, is given its value by the rule that calls `set` (preload/sugar/data.wap)
+	# a map's entry, read by a call of `#`, is given its value by the rule that calls `set` (types/sugar/data.wap)
 	refitted(Set(place, converted(typed_form(value, s, f, wanted), wanted, s, n, "the place holds")), n)
 }
 
 # A call's function known by its caller: a function calls the globals its callee reads late too; the program's call
 # runs it now, so one of those globals not given its value yet is refused
+# DEBT: A program-level call through a function value can read a global before its statement: `H = {"a": f};
+#   H["a"](2); X = 1` reads X's default, since a value's possible functions' late reads are not known at the call.
+#   Paid off by refusing such a call when its functions read late, or by a run-time check, when code meets it.
 called_reads(chosen: TypedFunction, at: Node, s: TypingState, f: TypeFrame) := {
 	if f.function != ø { f.late = f.late + chosen.late }
 	if f.function != ø { return }
