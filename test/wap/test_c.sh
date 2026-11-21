@@ -26,4 +26,11 @@ check "a C truth value given back as a bool" "$(ran bool_line "isatty(file: i32)
 print(text(isatty(-1)))")" "no"
 check "libm's C functions come from its own module, use m" "$(ran libm_module 'use m
 print(text(cbrt(27.0)) + " " + text(hypot(3.0, 4.0)))')" "3 5"
+check "an out-pointer is no argument, a slot C fills" "$(ran out_line "strtod(s: text, end: out): f64 from 'c'
+print(text(strtod(\"2.5kg\")))")" "2.5"
+check "a handle result is the pointer C put in the first out-pointer" "$(ran out_handle_line "posix_memalign(memory: out, alignment: i64, size: i64): handle from 'c'
+free(pointer: handle): void from 'c'
+memory = posix_memalign(16, 64)
+print(text(memory > 0))
+free(memory)")" "yes"
 exit $((failures > 0))

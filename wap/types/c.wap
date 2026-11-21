@@ -5,13 +5,19 @@
 # module's memory, which the native warp gives C as its pointer.
 use "host.wap"
 
-# where the next text of a C call goes
-c_texts_end = BYTES_AT
+# a call's out-pointers (`sqlite3 **`), each a C pointer's slot from BYTES_AT, its texts after them
+OUT_SLOTS := 4
+POINTER_BYTES := 8
+OUT_PARTS := 4294967296
+OUTS_END := BYTES_AT + OUT_SLOTS * POINTER_BYTES
+# where the next text of a C call goes; the out-pointers a call was given
+c_texts_end = OUTS_END
+c_outs = 0
 # the most bytes a text C gives back is read for
 C_TEXT_LIMIT := 1000000000
 
 # the texts of a new call, placed from the start again
-c_call_started() := { global c_texts_end = BYTES_AT }
+c_call_started() := { global c_texts_end = OUTS_END; global c_outs = 0 }
 c_text(t: text): int32 := {
 	global c_texts_end
 	at = c_texts_end
@@ -21,6 +27,23 @@ c_text(t: text): int32 := {
 	global c_texts_end = at + byte_count(t) + 1
 	prim i32.wrap_i64(at)
 }
+# an out-pointer for C to fill, the call's next slot, NULL until it does
+c_out(): int32 := {
+	global c_outs
+	at = BYTES_AT + c_outs * POINTER_BYTES
+	set_memory_word(at, 0)
+	set_memory_word(at + 4, 0)
+	global c_outs = c_outs + 1
+	prim i32.wrap_i64(at)
+}
+# a handle C gives back: the pointer its first out-pointer holds when it has one, C's status naming a NULL one
+c_handle(status: int): int := {
+	if c_outs == 0 { return status }
+	pointer = c_word(BYTES_AT) + c_word(BYTES_AT + 4) * OUT_PARTS
+	if pointer == 0 { raise "C gave no pointer, its status ${status}" }
+	pointer
+}
+c_word(at: int): int := prim i64.extend_i32_u(prim i32.load(at))
 c_text_from(pointer: int): text := {
 	if pointer == 0 { return "" }
 	count = c_length(pointer, C_TEXT_LIMIT)
