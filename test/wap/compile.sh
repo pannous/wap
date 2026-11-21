@@ -9,7 +9,7 @@ source "$tree/scripts/lib/wap-beside.sh"
 data="$(mkdir -p "$tree/data/wap-tests" && cd -P "$tree/data/wap-tests" && pwd -P)"
 # wap's seed, wap built by itself, beside the warp binary with its types module and kernel (scripts/refresh-seed.sh
 # --wap)
-seed="$(dirname "$(command -v "$warp")")/wap-seed/$WAP_FOLDER/wap.wasm"
+seed="$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm"
 [ -f "$seed" ] || { echo "no wap seed at $seed: scripts/refresh-seed.sh --wap installs it" >&2; exit 2; }
 # wap's compiler built by itself <n> times into <folder>, a folder holding it already kept; prints the module, or the
 # failed step's error. A module reads its types module beside itself (the host reads no link out of a folder): wap0.wasm
@@ -19,19 +19,19 @@ seed="$(dirname "$(command -v "$warp")")/wap-seed/$WAP_FOLDER/wap.wasm"
 # module or a types being copied
 compiler_built() {
 	local folder=$1 last=$2
-	[ -f "$folder/$WAP_FOLDER/wap$last.wasm" ] || folder_built "$folder" "$last" || return 1
-	echo "$folder/$WAP_FOLDER/wap$last.wasm"
+	[ -f "$folder/wap$last.wasm" ] || folder_built "$folder" "$last" || return 1
+	echo "$folder/wap$last.wasm"
 }
 folder_built() {
-	local building=$1.$$ built=$1.$$/$WAP_FOLDER/wap0.wasm n
+	local building=$1.$$ built=$1.$$/wap0.wasm n
 	mkdir -p "$building" && wap_beside_copied "$tree" "$building" || return 1
 	$warp "$seed" "$source_compiler" "$built" 2>&1 || return 1
 	for ((n = 1; n <= $2; n++)); do
-		$warp "$built" "$source_compiler" "$building/$WAP_FOLDER/wap$n.wasm" 2>&1 || return 1
-		built="$building/$WAP_FOLDER/wap$n.wasm"
+		$warp "$built" "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
+		built="$building/wap$n.wasm"
 	done
 	# another script may have put the same folder in place meanwhile: the first one stays
-	[ -f "$1/$WAP_FOLDER/wap$2.wasm" ] && { rm -rf "$building"; return; }
+	[ -f "$1/wap$2.wasm" ] && { rm -rf "$building"; return; }
 	rm -rf "$1" && mv "$building" "$1"
 }
 # the compiler under test: the module a test script is given as its first arguments, --compiler <module>
