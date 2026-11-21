@@ -96,7 +96,7 @@ boxed_any() {
 	grep -nE "$ANY_TYPE" $(printf '%s\n' $wap_files | grep -vxF -f <(types_files)) | filed boxed-any | awk -F'\t' -v any="$ANY_TYPE" '{ code = $4; gsub(/"[^"]*"|#.*/, "", code) } code ~ any'
 }
 emit_boxes() {
-	grep -nE 'STRUCT_NEW.*\bbox|\bbox.*STRUCT_NEW' wap/core/emit/*.wap | grep -v 'name == BOXED_VALUE' | filed emit-boxes
+	grep -nE 'STRUCT_NEW.*\bbox|\bbox.*STRUCT_NEW' wap/core/emit/*.wap | grep -vF 'table[BOXED_VALUE]' | filed emit-boxes
 }
 get_reads_places() {
 	grep -nE '^[[:space:]]+Get\(.*(DEFINED_AT|call_code)' wap/core/emit/*.wap | filed get-reads-places
