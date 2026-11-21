@@ -130,7 +130,7 @@ wap/
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
     host.wap                  the host machinery the file and command-line words use, hidden from programs
-    c.wap                     a C function's texts: passed as NUL-terminated copies, given back from C's pointer
+    c.wap                     a C function's texts passed as NUL-terminated copies and given back; its out-pointers
 
   sugar/                      the rules of the surface spellings wap's own source uses, one file per topic
     calls.wap                 x.f(y), x.f → calls and Get
@@ -155,6 +155,7 @@ wap/
       compiler.wap            wap.wasm found beside the executable, its machine code kept beside it by its hash
       console.wap             `wap` alone: each line a module, linked to the earlier lines' kept instances
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
+      host_words.wap          a program's C imports answered by the C functions of their names; C calling back into it
       programs.wap            a program's machine code kept beside wap.wasm, program-<hash>.cwasm by its sources
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
     packed.wap                a Node as compact bytes and back, pack and unpack: each text and repeated subtree once
