@@ -54,6 +54,7 @@ never two joined by an underscore.
 wap/
   compiler.wap                the entry: the stages in order (core/pipeline.wap), the command line, nothing else
                               warp wap/compiler.wap <program> <module.wasm>
+  nodes.wap                   wap's Node, the one notation of data and code, and the words over it (types.wap includes it)
 
   kernel/                     the kernel layer: the emitter's whole input language
     forms.wap                 the kernel forms, each a named pattern of Node
@@ -128,7 +129,6 @@ wap/
     rules.wap                 the kernel forms' patterns and the sugar/ files, used in load order
     prelude.wap               the built-ins (print …), each a function whose body may be a Prim
     operators.wap             the operator table: precedence groups and their relations, operators, aliases
-    nodes.wap                 warp's Node, case for case as core/node.warp declares it, and the words over it
     lists.wap                 list words over function values: map, filter, contains …
     maps.wap                  map words: a key's value, set, has, remove; text keys found by their hash
     texts.wap                 text words over a text's UTF-8 bytes
@@ -194,7 +194,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 |---|---|---|
 | lead: the queue, the contracts | warp-lead | compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap; the test/wap/ scripts no other row names |
 | self-build: wap compiled by wap, file by file | warp-wap-operators | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp; edits any file to write its types and `use` lines |
-| front: read, operators, rules, lowering | warp-wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/ |
+| front: read, operators, rules, lowering | warp-wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, nodes.wap |
 | types: declare, bind, type | warp-wap-binding | core/analyze/, core/paths.wap |
 | back: emitter, runtime | warp-wap-emitter | core/emit/, extensions/wasm/; test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
 | native: the wap command, programs built to executables | warp-host-fixer | extensions/native/; test/wap/test_native.sh |
@@ -252,7 +252,7 @@ The 20 largest top-level statements:
 | file and name | nodes |
 |---|---|
 | wap/core/analyze/scope.wap bound | 717 |
-| wap/types/nodes.wap text | 625 |
+| wap/nodes.wap text | 625 |
 | wap/core/analyze/calls.wap call_typed | 584 |
 | wap/core/analyze/calls.wap function_typed | 560 |
 | wap/core/rules/lowering.wap lowered_form | 534 |

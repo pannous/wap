@@ -10,7 +10,7 @@
 #   repeated-code    no line or list written twice in a file (scripts/repeated-code.sh)
 #   same-shape       no function body or { } block of SHAPE_FLOOR tokens or more with the shape of another, names,
 #                    numbers and texts erased (guardrail_shapes.awk): two such are one function or one table
-#   boxed-any        `any` written as a type in wap's own source, outside types/ (whose `any` is the language's
+#   boxed-any        `any` written as a type in wap's own source, outside the types module (whose `any` is the language's
 #                    dynamic type, the Node enum's Data among them): each spot a debt, the list empty before milestone 2
 #                    (notes/decisions.md wap-boxed-any-debt); a place typing infers as any is ratchet_census.sh's
 #   emit-boxes       only typing decides what is boxed (types.wap writes `prim box`): no struct.new of a box in core/emit
@@ -80,8 +80,13 @@ repeated_code() {
 same_shape() {
 	LC_ALL=C awk -v least=$SHAPE_FLOOR -f test/wap/guardrail_shapes.awk $wap_files
 }
+# the types module's files: its folder's, and those its types.wap includes from elsewhere (wap/nodes.wap)
+types_files() {
+	find wap/types -name "*.wap"
+	sed -n 's#^include "\(.*\)"$#wap/types/\1#p' wap/types/types.wap | sed -E 's#[^/]+/\.\./##'
+}
 boxed_any() {
-	grep -nE "$ANY_TYPE" $(printf '%s\n' $wap_files | grep -v '^wap/types/') | filed boxed-any | awk -F'\t' -v any="$ANY_TYPE" '{ code = $4; gsub(/"[^"]*"|#.*/, "", code) } code ~ any'
+	grep -nE "$ANY_TYPE" $(printf '%s\n' $wap_files | grep -vxF -f <(types_files)) | filed boxed-any | awk -F'\t' -v any="$ANY_TYPE" '{ code = $4; gsub(/"[^"]*"|#.*/, "", code) } code ~ any'
 }
 emit_boxes() {
 	grep -nE 'STRUCT_NEW.*\bbox|\bbox.*STRUCT_NEW' wap/core/emit/*.wap | grep -v 'name == BOXED_VALUE' | filed emit-boxes

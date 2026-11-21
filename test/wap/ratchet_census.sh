@@ -13,7 +13,7 @@ FILES_TYPED_WHOLE=62
 FUNCTIONS_UNTYPED=0
 # wap's size, the nodes its reader makes of its source (scripts/wap-size.warp), may not rise above the ceiling: only a
 # real simplification lowers it
-SIZE_NODES=101111
+SIZE_NODES=100703
 
 source "$(dirname "$0")/compile.sh"
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
@@ -33,7 +33,7 @@ counted=$(echo "$total" | sed -n 's/.*files typed whole, \([0-9]*\) of \([0-9]*\
 untyped=$([ -n "$counted" ] && echo $(($counted)))
 # the places typed any in the compiler's own files: the types module's are the language's dynamic words for programs,
 # `show(x: any)`, a Node's `Data(value: any)`
-compiler_anys=$(awk '/^== /{ file = $2 } /^any\t/ && file !~ /^wap\/types\// { print file ": " substr($0, 5) }' "$report")
+compiler_anys=$(awk '/^== /{ file = $2 } /as every program.s library/ { library[file] = 1 } /^any\t/ && !(file in library) { print file ": " substr($0, 5) }' "$report")
 at_most() { [ -n "$1" ] && [ "$1" -le "$2" ] && echo yes || echo "${1:-no total line} > $2"; }
 at_least() { [ -n "$1" ] && [ "$1" -ge "$2" ] && echo yes || echo "${1:-no total line} < $2"; }
 
