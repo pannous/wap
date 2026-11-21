@@ -9,9 +9,12 @@ warp-host-fixer; this file is the inventory.
 - C functions (host_words.wap, branch native-c-functions): each C import is the C function of its name, from the
   process or the library its module names (lib/native/libraries.h); an i32 is a pointer into the module's memory, an
   i64 as it is, an f64 a double. test/wap/test_c.sh.
+- Texts in a native program (build.sh): the compiler's `native` option lays a text out as the address of its count and
+  bytes in the memory, and the build reads extensions/native/text_bytes.wap in the place of types/text_bytes.wap.
+  Its memory is never freed: fine for the driver and short programs, not for a long-running native one. Lists, maps,
+  `any` and raise stay GC values a native program cannot use yet.
 
 ## Not yet
-- Texts in a native program itself (the driver's own code): wasm2c takes no GC type (next slice, warp-wap-operators).
 - A C function calling back into the program (lib/callbacks.warp c_callback): SDL, sqlite, audio.
 - C structs by value (lib/native/foreign.c native_call_struct); f32 parameters.
 - The host words of warp's lib/host/native_host (3400 lines), needed once lib's window, sound, gpu and webview
