@@ -24,4 +24,6 @@ check "write_bytes writes a file's bytes, read gives them back" "$(ran bytes_fil
 print read(\"$stage/out.bin\")")" "hi"
 check "wall_clock_ms is the wall clock's milliseconds since 1970" "$(ran clock 'start = wall_clock_ms()
 print text(start > 1700000000000 and wall_clock_ms() - start < 60000)')" "yes"
+mkdir -p "$stage/listed" && printf 'a' >"$stage/listed/one.txt" && printf 'b' >"$stage/listed/two.wap"
+check "list_files names a folder's files" "$(ran listed "print text(list_files(\"$stage/listed\").sorted)")" "[one.txt, two.wap]"
 exit $((failures > 0))
