@@ -72,6 +72,13 @@ else
 "b"
 y = "c"
 print x + y')" "bc"
+check "a word inside a rule's phrase is the program's own outside that phrase" "$(ran own_out 'rule tagged out $x => 1
+f(xs: list<int>): list<int> := {
+	out: list<int> = []
+	for x in xs { out.add(x) }
+	out
+}
+print(text(f([1, 2])))')" "[1, 2]"
 format_check 'if c
 	print "a"' 'if c {print "a"}'
 format_check 'r = 2..' 'r = 2 ..'
