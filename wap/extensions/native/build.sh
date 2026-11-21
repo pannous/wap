@@ -23,7 +23,7 @@ library="$(cd -P "$here/../../../lib" && pwd -P)"
 wasm2c=$(command -v wasm2c) || { echo "no wasm2c on the PATH (brew install wabt)" >&2; exit 1; }
 wabt="$(cd -P "$(dirname "$(readlink -f "$wasm2c")")/.." && pwd -P)"
 building="$executable.build"
-mkdir -p "$building"
+mkdir -p "$building" && building="$(cd -P "$building" && pwd -P)"
 # the compiler beside what it reads (scripts/lib/wap-beside.sh), a text's layout the native one
 source "$here/../../../scripts/lib/wap-beside.sh"
 mkdir -p "$building/compiler"
