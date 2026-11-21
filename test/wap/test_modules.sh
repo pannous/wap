@@ -51,6 +51,11 @@ print text(match n { List(items, bracket, separator) => #items; _ => 0 })')" "3"
 check "a pattern builds its shape, a rest hole taking a list" "$(ran pattern_rest 'pattern Run = (Run $first: Node $rest...: Node)
 n = Run(Text("a"), [Text("b"), Text("c")])
 print text(match n { List(items, bracket, separator) => #items; _ => 0 })')" "4"
+check "a pattern held in a map is a Node wherever one is wanted" "$(ran pattern_in_map 'pattern Pair = (Pair $a: Node $b: Node)
+shown(n: Node) as text := text(n)
+held: map<text, Pair> = {}
+held["p"] = Pair(Text("x"), Text("y"))
+for each in held.values { print shown(each) }')" "(Pair \"x\" \"y\")"
 check "a pattern's rest hole read as its part" "$(ran pattern_rest_part 'pattern Run = (Run $first: Node $rest...: Node)
 count_rest(r: Run) as int := #r.rest
 print text(count_rest(Run(Text("a"), [Text("b"), Text("c")])))')" "2"
