@@ -13,4 +13,8 @@ check "an any holding a class of another's shape shows its own class" "$(ran sam
 shown(x: any): text := show(x)
 class Box { n: int }
 print(shown(Box(3)))')" "Box{n: 3}"
+# a program whose first record holds a list of itself: the record's type and its list are one recursion group
+check "a first record holding a list of itself" "$(ran first_tree 'class Tree { n: int; kids: list<Tree> }
+t = Tree(1, [Tree(2, [])])
+#t.kids')" "1"
 exit $((failures > 0))
