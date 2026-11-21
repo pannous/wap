@@ -60,16 +60,18 @@ FRAME_BINDINGS = [DefinitionKind.Local, DefinitionKind.Parameter, DefinitionKind
 #   dropped). An int is the one value the host shows as warp does (main's i64 result); a float would show the host's
 #   digits (0.1 as 0.10000000000000001), a char or yes/no as a number. Paid off when values show through the runtime's
 #   show words, boxed into a $Node.
-emitted(program: Block, file: text) as WasmModule := {
+emitted(program: Block, file: text, exports: list<text> = []) as WasmModule := {
 	m = WasmModule()
 	p = Program(m, file)
 	for name in host_calls(program) { p.host[name] = imported(m, WASI, name, HOST_FUNCTIONS[name]#1, HOST_FUNCTIONS[name]#2) }
-	for call in foreign_calls(program) { foreign_imported(call, p) }
 	p.records = added_records(Records(), match program { Block(statements) => statements })
+	for call in foreign_calls(program) { foreign_imported(call, p) }
+	foreign_values_imported(match program { Block(statements) => statements }, p)
 	f = Frame()
 	body = code(program, p, f)
 	exported(m, "main", FUNCTION_KIND, function_of(m, [], Code([], if #m.tags == 0 then dropped(body) else uncaught_ended(dropped(body), p)), f))
-	functions_exported(match program { Block(statements) => statements }, p)
+	functions_exported(match program { Block(statements) => statements }, exports, p)
+	values_exported(program, exports, p)
 	exported(m, "memory", MEMORY_KIND, 0)
 	m
 }
@@ -89,7 +91,7 @@ primitives_in(n: Node) as list<text> := match n {
 # globals emitted so far, each a Placed
 class Program {
 	m: WasmModule
-	# the program's own file, whose functions are exported (functions_exported), so never kept in place
+	# the program's own file, whose functions are emitted, so never kept in place
 	source: text = ""
 	# the host functions imported: name → index
 	host: map<text, int> = {}
@@ -129,7 +131,7 @@ class Placed {
 code(form: Node, p: Program, f: Frame) as Code := match form {
 	Block(statements) => block_code(statements, p, f)
 	Define(name, parameters, body) => if p.in_place.has(function_key(form)) then Code() else { function_bodied(form, p); Code() }
-	Set(place, value) => assigned_code(form, place, value, p, f)
+	Set(place, value) => if is_foreign_value(form) then Code() else assigned_code(form, place, value, p, f)
 	Call(called, arguments) => call_code(form, called, arguments, p, f)
 	Try(body, handler) => try_code(form, body, handler, p, f)
 	If(condition, then_part, else_part) => if_code(form, code(condition, p, f), arm_code(form, then_part, p, f), arm_code(form, else_part, p, f), p)
@@ -175,7 +177,7 @@ if_code(form: Node, condition: Code, then_part: Code, else_part: Code, p: Progra
 try_code(form: Node, body: Node, handler: Node, p: Program, f: Frame) as Code := match handler {
 	Fn(parameters, handling) => {
 		tried = choice_fitted(form, labelled(f, [OTHER_LABEL, OTHER_LABEL, OTHER_LABEL], () => code(body, p, f)), body, p)
-		error = slotted(f, items_of(parameters)#1, known_layout(symbol(NODE_TYPE), p.m, p.records))
+		error = slotted(f, items_of(parameters)#1, known_layout(NODE_SYMBOL, p.m, p.records))
 		instead = arm_code(form, handling, p, f)
 		type = typed_layout(form, p)
 		caught = BLOCK + text_layout(p.m) + try_table(block_type(type), raised_tag(p), 0, kept(tried, type)) + instruction(BRANCH, [1]) + END

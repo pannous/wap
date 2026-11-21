@@ -5,7 +5,7 @@
 # its own (a template cannot add to a list of the program's). Run it with bash test/wap/test_rules.sh
 source "$(dirname "$0")/compile.sh"
 
-# repetition (notes/rules.md): `($k => $v)...` takes each arm, `print($v)...` writes one print per arm
+# repetition (wiki/rule.md): `($k => $v)...` takes each arm, `print($v)...` writes one print per arm
 check "a repeated part matched and written once per match" "$(ran repeat 'rule show { ($k => $v)... } => { print($v)... }
 show { 1 => "a"; 2 => "b" }')" "a
 b"

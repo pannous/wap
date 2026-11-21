@@ -1,17 +1,66 @@
 # A compiled module used as source (wiki/wasm-representation.md "Export names"): `use "m.wasm"` reads m's export
 # section, where each function's name is its header line, `add(a: int, b: int = 1) → int`, and declares each as a
-# function of m, a foreign primitive the host links by m's path (core/emit/host.wap foreign_imported).
+# function of m, a foreign primitive the host links by m's path (core/emit/host.wap foreign_imported). What wasm erases
+# travels in m's wap section as wap source, read before the exports' declarations.
+use "../../kernel/forms.wap"
+use "../../core/parse/cascade.wap"
+use "../../core/analyze/calls.wap"
+use "../../core/analyze/declarations.wap"
+use "../../core/emit/opcodes.wap"
+use "../../core/emit/wasm.wap"
+use "../../core/stage.wap"
+use "../../core/paths.wap"
+use "../../core/parse/reader.wap"
 
-# the export section's id, a function's kind of export, the bytes before the first section (magic and version)
-EXPORT_SECTION = 7
-FUNCTION_EXPORT = 0
+# the bytes before the first section (magic and version)
 PREAMBLE_BYTES = 8
 # what a header line writes before its result type, and the high bit of a LEB128 byte, set on all but the last
 RESULT_ARROW = " → "
 MORE_BYTES = 128
 
-# the source a compiled module stands for: a definition of each function it exports under its header line
-wasm_source(path: text) as text := export_names(read(path)).filter(name => name.contains("(")).map(header => foreign_definition(path, header)).join("\n")
+# the source a compiled module stands for: its wap section, then a definition of each function and value it exports
+# under its header line
+wasm_source(path: text) as text := {
+	bytes = read(path)
+	([custom_text(bytes, WAP_SECTION)] + exports_of(bytes).map(item => if item.kind == GLOBAL_KIND then foreign_value(path, item.header) else foreign_definition(path, item.header))).join("\n")
+}
+# `x: int = prim foreign("m.wasm", "x: int")`: m's global, the one x every module using m shares
+foreign_value(path: text, header: text) as text := "${header} = prim foreign(\"${path}\", \"${header}\")"
+
+# The functions a module compiles once and exports, those its files write with every parameter typed and a body of
+# their own, not a primitive, each the only statement of its phrase, and its values, each a global the modules using it
+# share; the rest of its code travels as wap source, every statement of a phrase (a class, its constructor, its show)
+# together
+compiled_once(module: Module, records: Records) as list<Signature> := {
+	typed = module.signatures.filter(signature => is_function(signature) and all_typed(signature, records) and compiled_body(defining_statement(module.code, signature)!))
+	ids = typed.map(signature => definer_id(signature.definer))
+	kept = top_level_statements(module.code).filter(statement => not defined_by(statement, ids)).map(statement => line_place(statement_place(statement)))
+	typed.filter(signature => not kept.contains(line_place(defining_statement(module.code, signature)!))) + module.signatures.filter(is_value)
+}
+compiled_body(statement: Node) as bool := match statement { Call(called, arguments) => not arguments#2 is Prim; _ => no }
+defined_by(statement: Node, ids: list<text>) as bool := declaration_of(statement) != ø and ids.contains(definer_id(declaration_name(declaration_of(statement)!)))
+# the wap section's source: the module's files as written, each top-level statement but the definitions compiled
+# once, which their export names declare, and the includes, whose files follow in their place
+header_source(file: text, module: Module, exported: list<Signature>) as text := {
+	cut = exported.map(signature => line_place(defining_statement(module.code, signature)!))
+	written_files(file).map(written => kept_lines(written, cut)).join("")
+}
+line_place(statement: Node) as text := "${file_of(statement)}:${line_of(statement)}"
+# a file and the files it includes, in their order
+written_files(file: text) as list<text> := [file] + files_named(notation(read(file), file), INCLUDE_WORD).flat_map(included => written_files(beside(file, included)))
+# a file's text without the lines of the statements cut and of its includes, each statement up to the next one
+kept_lines(file: text, cut: list<text>) as text := {
+	lines = read(file).split("\n")
+	statements = top_level_statements(notation(read(file), file)).filter(statement => line_of(statement) != ø)
+	starts = statements.map(statement => line_of(statement)!) + [#lines + 1]
+	kept = ""
+	for at in 0 to #statements - 1 {
+		if not cut.contains(line_place(statements[at])) and phrase_text(statements[at], INCLUDE_WORD) == ø { kept += lines[starts[at] - 1 .. starts[at + 1] - 1].join("\n") + "\n" }
+	}
+	kept
+}
+# where a top-level statement is written: its own place, a class's that of its name
+statement_place(statement: Node) as Node := if line_of(statement) == ø and declaration_of(statement) != ø then declaration_name(declaration_of(statement)!) else statement
 
 # `add(a: int, b: int = 1) as int := prim foreign("m.wasm", "add(a: int, b: int = 1) → int", a, b)`
 foreign_definition(path: text, header: text) as text := {
@@ -23,24 +72,38 @@ foreign_definition(path: text, header: text) as text := {
 	"${head}${result} := prim foreign(\"${path}\", \"${header}\", ${names.join(", ")})"
 }
 
-# the names of the functions a module's bytes export, read from its export section
-class WasmReader { bytes: text; at: int = PREAMBLE_BYTES }
-export_names(bytes: text) as list<text> := {
+# the text of a module's custom section of that name, "" when it has none
+custom_text(bytes: text, name: text) as text := {
 	r = WasmReader(bytes)
 	while r.at < byte_count(bytes) {
 		id = next_byte(r)
 		size = unsigned_read(r)
-		if id == EXPORT_SECTION { return (0 upto unsigned_read(r)).flat_map(each => function_export(r)) }
+		end = r.at + size
+		if id == CUSTOM_SECTION and name_read(r) == name { return bytes_between(bytes, r.at, end) }
+		r.at = end
+	}
+	""
+}
+# the functions and values a module's bytes export, read from its export section: each one's header line and its kind
+class WasmReader { bytes: text; at: int = PREAMBLE_BYTES }
+class ModuleExport { header: text; kind: int }
+exports_of(bytes: text) as list<ModuleExport> := {
+	r = WasmReader(bytes)
+	while r.at < byte_count(bytes) {
+		id = next_byte(r)
+		size = unsigned_read(r)
+		if id == EXPORT_SECTION { return (0 upto unsigned_read(r)).flat_map(each => item_export(r)) }
 		r.at += size
 	}
 	[]
 }
-# one export: its name, its kind and its index; the name when it is a function's
-function_export(r: WasmReader) as list<text> := {
+# one export: its name, its kind and its index; kept when its name is a function's header line (main's is none) or a
+# value's
+item_export(r: WasmReader) as list<ModuleExport> := {
 	name = name_read(r)
 	kind = next_byte(r)
 	unsigned_read(r)
-	if kind == FUNCTION_EXPORT then [name] else []
+	if kind == FUNCTION_KIND and name.contains("(") or kind == GLOBAL_KIND then [ModuleExport(name, kind)] else []
 }
 next_byte(r: WasmReader) as int := {
 	r.at += 1

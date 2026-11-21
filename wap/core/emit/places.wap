@@ -29,7 +29,7 @@ place_of(subject: Node, key: Node, p: Program, f: Frame) as Place := {
 	map = type_of(subject)
 	record = record_named(p.records, type_of(subject))
 	if record != ø {
-		at = [struct_of(record, p.m, p.records), index_where(fields_of(record), field => text(declared_name(field)) == text(key)) - 1]
+		at = [struct_of(record, p.m, p.records), index_where(fields_of(record), field => text(declared_name(field)) == text(key))]
 		return Place(code(subject, p, f).instructions, instruction(STRUCT_GET, at), instruction(STRUCT_SET, at))
 	}
 	Place(item_reached(subject, key, p, f), typed_helper_called(LIST_ITEM, map, p), typed_helper_called(LIST_SET, map, p))
@@ -47,7 +47,7 @@ map_code(form: Node, entries: list<Node>, p: Program, f: Frame) as Code := {
 # An instance, `Point{x: 1, y: 2}`: its fields' values in the order its record writes them, a new struct
 instance_code(form: Node, record: Node, items: list<Node>, p: Program, f: Frame) as Code := {
 	values = fields_of(record).map(field => items.filter(item => text(declared_name(item)) == text(declared_name(field)))#1)
-	Code(layout(form, p), (1 to #values).flat_map(at => field_filled(fields_of(record)#at, given_value(values#at), p, f)) + instruction(STRUCT_NEW, [struct_of(record, p.m, p.records)]))
+	Code(layout(form, p), i32_const(class_tag(record)) + (1 to #values).flat_map(at => field_filled(fields_of(record)#at, given_value(values#at), p, f)) + instruction(STRUCT_NEW, [struct_of(record, p.m, p.records)]))
 }
 # the instructions of a value given to a field, made to fit the field's type
 field_filled(field: Node, value: Node, p: Program, f: Frame) as list<int> := {
@@ -71,13 +71,19 @@ set_code(form: Node, place: Node, given: Node, p: Program, f: Frame) as Code := 
 	value = fitted(value, held.type, given, p)
 	if not valued(value.type) { refused(form, "this gives no value to set") }
 	if held.type != value.type { refused(form, "this name held another kind of value before") }
+	# (a global defined by a constant starts with it, so a module using this one reads it before anything runs)
+	start = constant(given)
+	if not held.local and fact_of(place, DEFINER) != ø and start != ø and start!.type == held.type { initial_given(p.m, held.index, start!.instructions) }
 	Code(value.type, value.instructions + kept(held))
 }
 
 # a name's value: a parameter, local, capture or global, or a function's name as a value (an empty struct)
 name_code(name: Node, p: Program, f: Frame) as Code := {
 	if is_case(name) { return case_value_code(name, name, [], p, f) }
-	if names_function(name) { return function_value_code(name, p, f) }
+	if names_function(name) or fact_of(name, FUNCTION_VALUE) != ø { return function_value_code(name, p, f) }
+	variable_code(name, p, f)
+}
+variable_code(name: Node, p: Program, f: Frame) as Code := {
 	# a global a function reads before the statement that sets it, the function emitted where its value is taken: the
 	# global made here, its statement setting it later
 	held = variable_of(name, p, f) ?? (if is_bound(name, DefinitionKind.Global) then added_variable(name, layout(name, p), p, f) else refused(name, "this name is read before any value is given to it"))

@@ -31,7 +31,7 @@ shape_narrows(type: Node) as Node := narrowed_type(type) ?? refused(type, "a sha
 # so LexemeKind's Key leaves `Key` Node's); a record's own name, or any other type, is as written
 shaped(type: Node, s: TypingState) as Node := {
 	if not type is symbol or record_named(s.records, type) != ø or fact_of(type, NARROWS) != ø { return type }
-	if form_named(type, s) != ø { return with_fact(type, NARROWS, symbol(NODE_TYPE)) }
+	if form_named(type, s) != ø { return with_fact(type, NARROWS, NODE_SYMBOL) }
 	holders = s.records.items.filter(record => cases_of(record).any(case => text(case_name(case)) == text(type) and case_fields(case) is not empty))
 	if #holders == 1 then with_fact(type, NARROWS, record_type(holders#1)) else type
 }
@@ -62,7 +62,7 @@ form_named(type: Node, s: TypingState) as Signature? := {
 # the shape a declared pattern takes values apart by, its holes `$name`
 form_taken(form: Signature, s: TypingState) as Node := fact_of(declared_name(written_name(define_of(form, s))), PATTERN_TAKEN) ?? refused(define_of(form, s), "a pattern's builder carries its shape")
 # the types of a declared pattern's holes, in order, their shapes known: its builder's parameters' types
-hole_types(form: Signature, s: TypingState) as list := form.parameters.map(type => shaped(type ?? symbol(NODE_TYPE), s))
+hole_types(form: Signature, s: TypingState) as list := form.parameters.map(type => shaped(type ?? NODE_SYMBOL, s))
 # The patterns an arm's pattern has at the holes of a form's shape, in order; ø when it is not of that shape
 form_parts(taken: Node, pattern: Node) as list<Node>? := {
 	if taken is symbol and text(taken).starts_with(HOLE_MARK) { return [pattern] }
@@ -81,6 +81,26 @@ zipped_parts(shapes: list<Node>, patterns: list<Node>) as list<Node>? := {
 	parts: list<Node> = []
 	for at in 1 to #shapes { parts = parts + (form_parts(shapes#at, patterns#at) ?? return ø) }
 	parts
+}
+
+# A part of a declared pattern's value by its hole's name, `r.a` of `r: Pair`: the match its shape writes, `match r
+# { Pair(a, _) => a }`, that hole a variable of its own; ø where the type is no declared pattern or has no such hole
+pattern_part(n: Node, typed: Node, key: Node, s: TypingState) as Node? := {
+	type = value_type(typed) ?? return ø
+	form = form_named(type, s) ?? return ø
+	taken = form_taken(form, s)
+	if not (form_parts(taken, taken) ?? []).contains(symbol(HOLE_MARK + text(key))) { return ø }
+	# the variable's id is the read's place: typing counts no definers
+	definer = with_fact(placed_like(symbol(text(key)), n), DEFINER, Text("${file_of(n)}@${line_of(n)}:${column_of(n)}"))
+	part = with_fact(with_binding(definer, DefinitionKind.Local), DEFINED_AT, definer)
+	pattern = with_fact(bound_shape(with_part(taken, HOLE_MARK + text(key), part), shape_narrows(type), s), SHAPE_OF, type)
+	placed_like(Case(typed, [Arm(pattern, part)]), n)
+}
+# a shape with one hole written as the variable that takes it
+with_part(taken: Node, hole: text, part: Node) as Node := if taken is symbol and text(taken) == hole then part else match taken {
+	Call(called, arguments) => Call(called, arguments.map(argument => with_part(argument, hole, part)))
+	List(items, bracket, separator) => List(items.map(item => with_part(item, hole, part)), bracket, separator)
+	_ => taken
 }
 
 # A shape as a pattern fitting each of its values, the cases it names bound to their enums: a case's name with `_` for
