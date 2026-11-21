@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The road to self-build as a ratchet (notes/wap.md "Road to self-build"): scripts/wap-census.warp over all of wap's
+# The road to self-build as a ratchet (notes/backbone.md "Milestones"): scripts/wap-census.warp over all of wap's
 # source counts the files wap types whole, which may not drop below the floor here, and the functions it does not type
 # alone, which may not rise above the ceiling: deleting a function never trips it, a function losing its typing does
 # (warp-simplifier, 2026-11-19). Move both by hand when the census's total line shows better. The compiler's own source stays fully typed (dynamic

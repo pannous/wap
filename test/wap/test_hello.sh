@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wap, the new compiler, compiles a program to a wasm module that runs (notes/wap.md, notes/backbone.md milestone 1).
+# wap, the new compiler, compiles a program to a wasm module that runs (notes/backbone.md milestone 1).
 # Run it with bash test/wap/test_hello.sh; the warp under test is WARP (default the warp on PATH)
 source "$(dirname "$0")/compile.sh"
 

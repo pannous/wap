@@ -195,7 +195,7 @@ checked) and a line here when its language changed. The lead reviews it against 
 1. **Hello:** `print "Hello"` through the new stages, with the emitter accepting only the kernel. Reached
    2026-11-17 (b5a5029b3d).
 2. **The new compiler builds itself.**
-   Done when all of these hold, each measured by a script, never by eye (user 2026-11-18, notes/wap_review.md):
+   Done when all of these hold, each measured by a script, never by eye (user 2026-11-18):
    1. the gauge, `warp scripts/wap-census.warp`, says every function of every wap file typed and emitted
       ("typed n of n functions" on each line, the total likewise); test/wap/test_census.sh holds that count and
       only lets it rise;
