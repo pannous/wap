@@ -36,10 +36,10 @@ folder_built() {
 }
 # the compiler under test: the module a test script is given as its first arguments, --compiler <module>
 # (test/wap/run.sh --stage passes one wap built of itself), else wap1, this tree's source compiled by the seed, built
-# once for each state of wap/ and shared by every script
+# once for each state of wap/ and lib/ and shared by every script
 if [ "$1" = --compiler ]; then compiler="$2"; shift 2
 else
-	sources=$(cd "$tree" && { cat "$seed"; find wap -name '*.wap' | sort | xargs cat; } | shasum | cut -c1-16)
+	sources=$(cd "$tree" && { cat "$seed"; find wap "$WAP_LIBRARY" \( -name '*.wap' -o -name '*.warp' \) | sort | xargs cat; } | shasum | cut -c1-16)
 	compiler=$(compiler_built "$data/wap1-$sources" 1) || { echo "wap1: $compiler" >&2; exit 1; }
 fi
 # each test script its own folder in the tree's data/ (never the system's temporary folder)
