@@ -10,6 +10,7 @@ use "run.wap"
 VALUE_BYTES := 32
 VALUE_OFFSET := 8
 KIND_I32 := 0
+KIND_F32 := 2
 KIND_F64 := 3
 # a C function takes up to REGISTERS integers and REGISTERS floats in their registers (main.c native_call)
 REGISTERS := 8
@@ -79,11 +80,12 @@ host_word_answered(word: int, caller: int, given: int, count: int, results: int,
 	while i < count {
 		value = given + i * VALUE_BYTES
 		number = long_at(value + VALUE_OFFSET)
-		if host_byte(value) == KIND_F64 {
-			set_long_at(word + FLOATS_SLOT + 8 * float_count, number)
+		# (a float goes in a float register's low 32 bits, where C reads its float; a double fills the register)
+		if host_byte(value) == KIND_F64 or host_byte(value) == KIND_F32 {
+			set_long_at(word + FLOATS_SLOT + 8 * float_count, if host_byte(value) == KIND_F32 then four_bytes(value + VALUE_OFFSET) else number)
 			float_count = float_count + 1
 		} else {
-			set_long_at(word + INTEGERS_SLOT + 8 * integer_count, if host_byte(value) == KIND_I32 then c_pointer(memory, host_address(value + VALUE_OFFSET)) else number)
+			set_long_at(word + INTEGERS_SLOT + 8 * integer_count, if host_byte(value) == KIND_I32 then c_pointer(memory, four_bytes(value + VALUE_OFFSET)) else number)
 			integer_count = integer_count + 1
 		}
 		i = i + 1
@@ -92,7 +94,7 @@ host_word_answered(word: int, caller: int, given: int, count: int, results: int,
 	global calling
 	outer: int = calling
 	global calling = caller
-	returned = native_call(long_at(word + FUNCTION_SLOT), word + INTEGERS_SLOT, word + FLOATS_SLOT, if kind == KIND_F64 then 1 else 0)
+	returned = native_call(long_at(word + FUNCTION_SLOT), word + INTEGERS_SLOT, word + FLOATS_SLOT, if kind == KIND_F64 or kind == KIND_F32 then 1 else 0)
 	global calling = outer
 	if results_count > 0 {
 		set_long_at(results, kind)
@@ -104,8 +106,8 @@ caller_memory(caller: int, extern_at: int): int := {
 	wasmtime_caller_export_get(caller, memory_name(), MEMORY_NAME_BYTES, extern_at)
 	wasmtime_memory_data(wasmtime_caller_context(caller), extern_at + VALUE_OFFSET)
 }
-# an i32 of the host's memory as the address it is: its 4 bytes alone, past them a wasmtime value holds anything
-host_address(host: int): int := {
+# the 4 bytes at the host's address as an unsigned int: an i32 or an f32 of a wasmtime value, past which it holds anything
+four_bytes(host: int): int := {
 	memcpy(pointer_at(LONG_AT), host, 4)
 	address(word32_at(LONG_AT))
 }
