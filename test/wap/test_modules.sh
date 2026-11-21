@@ -121,26 +121,26 @@ say(text(twice(21)))')" "loaded
 # one overload by that name
 called_export() {
 	printf '%s\n' "$2" >"$stage/$1.wap"
-	$warp "$compiler" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && wasmtime run -W gc=y,function-references=y,exceptions=y --invoke "$3" "$stage/$1.wasm" "${@:4}" 2>/dev/null
+	$wap "$compiler" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && wasmtime run -W gc=y,function-references=y,exceptions=y --invoke "$3" "$stage/$1.wasm" "${@:4}" 2>/dev/null
 }
 check "a host calls an exported overload by its header line" "$(called_export overloads 'add(a: int, b: int = 1) as int := a + b
 add(a: text, b: text) as text := a + b' 'add(a: int, b: int = 1) → int' 2 3)" "5"
-check "a program uses a compiled module as it uses its source" "$(printf '%s\n' 'add(a: int, b: int = 1) as int := a + b' 'twice(t: text) as text := t + t' >"$stage/compiled.wap" && $warp "$compiler" "$stage/compiled.wap" "$stage/compiled.wasm" 2>&1 && ran uses_compiled "use \"$stage/compiled.wasm\"
+check "a program uses a compiled module as it uses its source" "$(printf '%s\n' 'add(a: int, b: int = 1) as int := a + b' 'twice(t: text) as text := t + t' >"$stage/compiled.wap" && $wap "$compiler" "$stage/compiled.wap" "$stage/compiled.wasm" 2>&1 && ran uses_compiled "use \"$stage/compiled.wasm\"
 print text(add(2, 3) + add(4))
 print twice(\"ab\")")" "10
 abab"
-check "a compiled module that exports no function declares nothing" "$(printf '%s\n' 'x = 1' >"$stage/no_functions.wap" && $warp "$compiler" "$stage/no_functions.wap" "$stage/no_functions.wasm" 2>&1 && ran uses_no_functions "use \"$stage/no_functions.wasm\"
+check "a compiled module that exports no function declares nothing" "$(printf '%s\n' 'x = 1' >"$stage/no_functions.wap" && $wap "$compiler" "$stage/no_functions.wap" "$stage/no_functions.wasm" 2>&1 && ran uses_no_functions "use \"$stage/no_functions.wasm\"
 print(\"ok\")")" "ok"
 # a module compiled once carries what wasm erases as source in its wap section (wiki/wasm-representation.md): a class,
 # a generic function and a value travel along, the functions compiled once are called through its exports
-check "a compiled module's classes, generic functions and values work in the program using it" "$(printf '%s\n' 'class P { n: int, name: text }' 'names(ps: list<P>) as text := ps.map(p => p.name).join(",")' 'made(n: int) as P := P(n, "p" + text(n))' 'second(xs: list<T>) as T := xs#2' 'LIMIT = 7' >"$stage/carried.wap" && $warp "$compiler" "$stage/carried.wap" "$stage/carried.wasm" 2>&1 && ran uses_carried "use \"$stage/carried.wasm\"
+check "a compiled module's classes, generic functions and values work in the program using it" "$(printf '%s\n' 'class P { n: int, name: text }' 'names(ps: list<P>) as text := ps.map(p => p.name).join(",")' 'made(n: int) as P := P(n, "p" + text(n))' 'second(xs: list<T>) as T := xs#2' 'LIMIT = 7' >"$stage/carried.wap" && $wap "$compiler" "$stage/carried.wap" "$stage/carried.wasm" 2>&1 && ran uses_carried "use \"$stage/carried.wasm\"
 print names([made(1), P(2, \"q\")])
 print second([\"a\", \"b\"])
 print text(LIMIT)")" "p1,q
 b
 7"
 # a value assigned twice is one global, exported once
-check "a value a compiled module assigns twice is one value in the program using it" "$(printf '%s\n' 'LIMIT = 7' 'LIMIT = 8' >"$stage/twice.wap" && $warp "$compiler" "$stage/twice.wap" "$stage/twice.wasm" 2>&1 && ran uses_twice "use \"$stage/twice.wasm\"
+check "a value a compiled module assigns twice is one value in the program using it" "$(printf '%s\n' 'LIMIT = 7' 'LIMIT = 8' >"$stage/twice.wap" && $wap "$compiler" "$stage/twice.wap" "$stage/twice.wasm" 2>&1 && ran uses_twice "use \"$stage/twice.wasm\"
 print text(LIMIT)")" "8"
 # the program changes a used module's variable, which the module's own functions then read
 check "a program changes a used module's variable" "$(ran reassign_used 'use "greet.wap"
@@ -151,11 +151,11 @@ hi!"
 check "a host calls a word's one function by its plain word" "$(called_export plain 'twice(x: int) as int := x * 2
 add(a: int, b: int) as int := a + b
 add(a: text, b: text) as text := a + b' twice 21)" "42"
-check "a program uses a compiled module whose one function is exported by its plain word too" "$(printf '%s\n' 'twice(x: int) as int := x * 2' >"$stage/plain_twice.wap" && $warp "$compiler" "$stage/plain_twice.wap" "$stage/plain_twice.wasm" 2>&1 && ran uses_plain_twice "use \"$stage/plain_twice.wasm\"
+check "a program uses a compiled module whose one function is exported by its plain word too" "$(printf '%s\n' 'twice(x: int) as int := x * 2' >"$stage/plain_twice.wap" && $wap "$compiler" "$stage/plain_twice.wap" "$stage/plain_twice.wasm" 2>&1 && ran uses_plain_twice "use \"$stage/plain_twice.wasm\"
 print(text(twice(21)))")" "42"
 # a recursive record's recursion group holds only the types that refer to it, so a list or text the module shares
 # with the program is the program's own type
-check "a program calls a list and a text function of a module declaring a recursive record" "$(printf '%s\n' 'class Tree { kids: list<Tree>; name: text }' 'total(xs: list<int>) as int := xs.sum()' 'shout(t: text) as text := t + "!"' 'size(t: Tree) as int := 1 + t.kids.map(size).sum()' >"$stage/recursive_module.wap" && $warp "$compiler" "$stage/recursive_module.wap" "$stage/recursive_module.wasm" 2>&1 && ran uses_recursive_module "use \"$stage/recursive_module.wasm\"
+check "a program calls a list and a text function of a module declaring a recursive record" "$(printf '%s\n' 'class Tree { kids: list<Tree>; name: text }' 'total(xs: list<int>) as int := xs.sum()' 'shout(t: text) as text := t + "!"' 'size(t: Tree) as int := 1 + t.kids.map(size).sum()' >"$stage/recursive_module.wap" && $wap "$compiler" "$stage/recursive_module.wap" "$stage/recursive_module.wasm" 2>&1 && ran uses_recursive_module "use \"$stage/recursive_module.wasm\"
 print(text(total([1, 2, 3])))
 print(shout(\"hi\"))
 print(text(size(Tree([Tree([], \"b\")], \"a\"))))")" "6
@@ -163,7 +163,7 @@ hi!
 2"
 # wiki/use.md "folder, package and project scope": use folder brings in every source file beside the using one
 mkdir -p "$stage/shapes" && printf '%s\n' 'area(side: int) as int := side * side' >"$stage/shapes/square.wap"
-check "use folder brings in a word of a file beside it" "$(printf '%s\n' 'use folder' 'print(text(area(3)))' >"$stage/shapes/main.wap" && $warp "$compiler" "$stage/shapes/main.wap" "$stage/shapes/main.wasm" 2>&1 && $warp "$stage/shapes/main.wasm" 2>&1)" "9"
+check "use folder brings in a word of a file beside it" "$(printf '%s\n' 'use folder' 'print(text(area(3)))' >"$stage/shapes/main.wap" && $wap "$compiler" "$stage/shapes/main.wap" "$stage/shapes/main.wasm" 2>&1 && $wap "$stage/shapes/main.wasm" 2>&1)" "9"
 # wiki/use.md "Library folders": use name brings in the module of that name, here the one beside the program
 check "use name brings in the module of that name beside the program" "$(ran use_name 'use speak
 say("by name")')" "loaded
@@ -183,5 +183,5 @@ check "a global given again by files that use each other holds its later value" 
 use "cycle_f.wap"
 print(early + joined("x"))')" "ax+"
 # the library compiles once into a module of its own (notes/compile_inputs.md), the types module beside the compiler
-check "the types module compiles as a program of its own" "$($warp "$compiler" "$(dirname "$compiler")/types/types.wap" "$stage/types.wasm" 2>&1 && [ -s "$stage/types.wasm" ] && echo compiled)" "compiled"
+check "the types module compiles as a program of its own" "$($wap "$compiler" "$(dirname "$compiler")/types/types.wap" "$stage/types.wasm" 2>&1 && [ -s "$stage/types.wasm" ] && echo compiled)" "compiled"
 exit $((failures > 0))
