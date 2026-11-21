@@ -63,10 +63,10 @@ check "a module in a folder uses one beside its folder, loaded once" "$(ran use_
 use "speak.wap"
 shout()')" "loaded
 HEY"
-# a name means local > parameter > program > used module > preload; two used modules defining one name clash
+# a name means local > parameter > program > used module > types; two used modules defining one name clash
 printf '%s\n' 'twice(n: int) as int := n * 2' 'show(n: int) as text := "a " + text(n)' >"$stage/a.wap"
 printf '%s\n' 'twice(n: int) as int := n + n' >"$stage/b.wap"
-check "a used module's word hides the preload's of the same parameters" "$(ran module_over_preload 'use "a.wap"
+check "a used module's word hides the types module's of the same parameters" "$(ran module_over_types 'use "a.wap"
 print(show(3))')" "a 3"
 check "a.twice is the used module a's word, beside the program's own twice" "$(ran module_named 'use "a.wap"
 twice(n: int) as int := n * 10
@@ -123,4 +123,9 @@ print twice(\"ab\")")" "10
 abab"
 check "a compiled module that exports no function declares nothing" "$(printf '%s\n' 'x = 1' >"$stage/no_functions.wap" && $warp "$compiler" "$stage/no_functions.wap" "$stage/no_functions.wasm" 2>&1 && ran uses_no_functions "use \"$stage/no_functions.wasm\"
 print(\"ok\")")" "ok"
+# the program changes a used module's variable, which the module's own functions then read
+check "a program changes a used module's variable" "$(ran reassign_used 'use "greet.wap"
+greeting = greeting + "!"
+welcome()')" "loaded
+hi!"
 exit $((failures > 0))

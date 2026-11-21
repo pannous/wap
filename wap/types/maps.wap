@@ -1,0 +1,100 @@
+# The types module's map words (AGENTS.md "Layers"): a map<K, V> holds its keys and its values as two lists, an entry
+# the same place in both, in the order the keys were set; a map of text keys past a few also holds slots, a table of
+# their places by their hash, so a key is found without searching them all (core/emit/values.wap map_parts).
+
+# a map of more text keys than this finds them by their hash, a smaller one searches them in order
+INDEXED_FROM := 8
+
+# a map's keys and its values as it holds them, an entry the same place in both, not copied; and its slots, of a map
+# of more than INDEXED_FROM text keys: a table of each key's place (from 1, 0 an empty slot) from the slot of its hash on
+held_keys(m: map<K, V>): list<K> := prim map_keys_held(m)
+held_values(m: map<K, V>): list<V> := prim map_values_held(m)
+held_slots(m: map<K, V>): list<int> := prim map_slots_held(m)
+# the place of a key among a map's keys, counting from 1; 0 when the map lacks it. The keys are searched in order
+key_place(m: map<K, V>, key: K): int := listed_place(held_keys(m), key)
+listed_place(keys: list<K>, key: K): int := {
+	for at in 1 to #keys { if keys#at == key { return at } }
+	0
+}
+# a text key's place, through the slots where the map has them: from the slot of its hash on, up to an empty one
+key_place(m: map<text, V>, key: text): int := {
+	slots = held_slots(m)
+	if slots is empty { return listed_place(held_keys(m), key) }
+	keys = held_keys(m)
+	at = hashed(key, #slots)
+	place = slots[at]
+	while place != 0 {
+		if keys#place == key { return place }
+		at = (at + 1) % #slots
+		place = slots[at]
+	}
+	0
+}
+# a text's hash, a slot of a table of that size
+hashed(t: text, size: int): int := {
+	hash = 0
+	for at in 0 upto byte_count(t) { hash = (hash * 31 + byte_at(t, at)) % size }
+	hash
+}
+# the slots a map of this many text keys holds: none for a few, else a power of two at least twice the count, so that
+# the slots follow from the keys alone
+slots_wanted(count: int): int := {
+	if count <= INDEXED_FROM { return 0 }
+	size = 2 * INDEXED_FROM
+	while size < 2 * count { size = size * 2 }
+	size
+}
+# a map's slots kept in step with its keys once one was added or removed: the last key placed where the table keeps
+# its size after an add, else every key placed anew; a map of other keys has none
+reslotted(m: map<K, V>, added: bool) := ø
+reslotted(m: map<text, V>, added: bool) := {
+	keys = held_keys(m)
+	slots = held_slots(m)
+	size = slots_wanted(#keys)
+	if added and size > 0 and size == #slots { key_slotted(slots, keys, #keys) } else {
+		while #slots > size { slots.remove_at(#slots - 1) }
+		for at in 0 upto #slots { slots[at] = 0 }
+		while #slots < size { slots.add(0) }
+		if size > 0 { for place in 1 to #keys { key_slotted(slots, keys, place) } }
+	}
+}
+# a key's place written in the first empty slot from its hash on
+key_slotted(slots: list<int>, keys: list<text>, place: int) := {
+	at = hashed(keys#place, #slots)
+	while slots[at] != 0 { at = (at + 1) % #slots }
+	slots[at] = place
+}
+# a map's count of entries: `#{"a": 1, "b": 2}` is 2
+#(m: map<K, V>): int := #held_keys(m)
+# a map's value by its key: `m["a"]`, `m.a`; a key the map lacks raises
+#(m: map<K, V>, key: K): V := {
+	at = key_place(m, key)
+	if at == 0 { raise "this map has no such key" }
+	held_values(m)#at
+}
+# a key given its value, `set k of: m to: v`, as `m#k = v` and `m["a"] = 1` write it: the value of a key the map holds
+# changed, the key and the value added at the end otherwise
+set(key: K, of: map<K, V>, to: V) := {
+	at = key_place(of, key)
+	values = held_values(of)
+	if at == 0 {
+		held_keys(of).add(key)
+		values.add(to)
+		reslotted(of, yes)
+	} else { values[at - 1] = to }
+}
+# a map's keys, a new list in the order they were set: `{a: 1, b: 2}.keys()` is ["a", "b"]
+keys(m: map<K, V>): list<K> := copy(held_keys(m))
+# a map's values, a new list in the order their keys were set: `{a: 1, b: 2}.values()` is [1, 2]
+values(m: map<K, V>): list<V> := copy(held_values(m))
+# whether a map holds a key
+has(m: map<K, V>, key: K): bool := key_place(m, key) > 0
+# a key taken out of a map with its value, the others kept in their order; a missing key leaves the map as it was
+remove(m: map<K, V>, key: K) := {
+	at = key_place(m, key)
+	if at > 0 {
+		held_keys(m).remove_at(at - 1)
+		held_values(m).remove_at(at - 1)
+		reslotted(m, no)
+	}
+}

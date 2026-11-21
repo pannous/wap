@@ -3,18 +3,20 @@
 source "$(dirname "${BASH_SOURCE[0]}")/../native/checks.sh"
 tree="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 source_compiler="$tree/wap/compiler.wap"
+source "$tree/scripts/lib/wap-beside.sh"
 # the folder builds and runs go in, by its real path: a module's WASI follows no link to an absolute path (data/ is often
 # one, to a scratch volume)
 data="$(mkdir -p "$tree/data/wap-tests" && cd -P "$tree/data/wap-tests" && pwd -P)"
-# wap's seed, wap built by itself, beside the warp binary with its preload and kernel (scripts/refresh-seed.sh --wap)
+# wap's seed, wap built by itself, beside the warp binary with its types module and kernel (scripts/refresh-seed.sh
+# --wap)
 seed="$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm"
 [ -f "$seed" ] || { echo "no wap seed at $seed: scripts/refresh-seed.sh --wap installs it" >&2; exit 2; }
 # wap's compiler built by itself <n> times into <folder>, a folder holding it already kept; prints the module, or the
-# failed step's error. A module reads its preload beside itself (the host reads no link out of a folder): wap0.wasm is
-# the source compiled by the seed beside the seed's preload, so a rule form the tree's preload is the first to write is
-# known; wap1.wasm the source compiled by wap0 beside a copy of the tree's preload, each next one by the one before.
-# The folder is built whole beside it and then put in its place, so scripts sharing it never read half a module or a
-# preload being copied
+# failed step's error. A module reads its types module beside itself (the host reads no link out of a folder): wap0.wasm
+# is the source compiled by the seed beside the seed's types module, so a rule form the tree's types module is the first
+# to write is known; wap1.wasm the source compiled by wap0 beside a copy of the tree's types module, each next one by
+# the one before. The folder is built whole beside it and then put in its place, so scripts sharing it never read half a
+# module or a types being copied
 compiler_built() {
 	local folder=$1 last=$2
 	[ -f "$folder/wap$last.wasm" ] || folder_built "$folder" "$last" || return 1
@@ -22,7 +24,7 @@ compiler_built() {
 }
 folder_built() {
 	local building=$1.$$ built=$1.$$/wap0.wasm n
-	mkdir -p "$building" && cp -R "$tree/wap/preload" "$tree/wap/kernel" "$building/" || return 1
+	mkdir -p "$building" && (cd "$tree/wap" && cp -R "${WAP_BESIDE[@]}" "$building/") || return 1
 	$warp "$seed" "$source_compiler" "$built" 2>&1 || return 1
 	for ((n = 1; n <= $2; n++)); do
 		$warp "$built" "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1

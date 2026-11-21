@@ -14,10 +14,14 @@
 # body emitted where its definition stands; a global a body reads before its statement sets it takes its type from
 # typing too.
 #
-# The emitter knows no library word: the preload's functions the program calls (wap/preload/prelude.wap) come before
+# The emitter knows no library word: the types module's functions the program calls (wap/types/prelude.wap) come before
 # the program's statements, emitted like its own functions, and a built-in's body is a Prim
 # (core/emit/primitives.wap). Functions and calls are core/emit/functions.wap's, matching patterns.wap's, and where
 # values live places.wap's.
+
+# DEBT: The emitter learns a value's type by emitting it, though the typing stage gives each one: an `if` still joins
+#   its arms' types and a primitive takes its operands' emitted layouts (bends "meaning is typed"). Paid off when the
+#   emitter reads each form's `type` fact.
 
 use "functions.wap"
 use "lists.wap"
@@ -52,6 +56,10 @@ FRAME_BINDINGS = [DefinitionKind.Local, DefinitionKind.Parameter, DefinitionKind
 # The module of a program: its statements become the body of `main`, which the host runs. The typing stage made the
 # program print its value, `print(show(it))`, so main gives nothing back. The functions the program's file defines at
 # the top level are exported (core/emit/functions.wap).
+# DEBT: A program's value is shown only when it is an int (bends "refuse, never guess" mildly: any other value is
+#   dropped). An int is the one value the host shows as warp does (main's i64 result); a float would show the host's
+#   digits (0.1 as 0.10000000000000001), a char or yes/no as a number. Paid off when values show through the runtime's
+#   show words, boxed into a $Node.
 emitted(program: Block, file: text) as WasmModule := {
 	m = WasmModule()
 	p = Program(m, file)
@@ -220,13 +228,15 @@ return_code(form: Node, value: Node, p: Program, f: Frame) as Code := {
 # DONE: the checked cast (wap-any-cast); the rest stands.
 # DONE: the boxing, typing's `prim box` (wap-box-kernel).
 # A value given where a type is wanted, made to fit it: any reference taken as itself where `any` is wanted, an `any`
-# cast to the wanted reference type (checked_cast); any other value as it is, for its taker to check. A plain value
-# arrives boxed already, by typing's `prim box`. `form` is the value's code, the place a failed cast names.
+# cast to the wanted reference type (checked_cast); a reference where another is wanted as it is, for wasm to check as
+# its subtype; any other value refused, never written as invalid wasm. A plain value arrives boxed already, by typing's
+# `prim box`. `form` is the value's code, the place a failed cast names.
 fitted(given: Code, wanted: list<int>, form: Node, p: Program) as Code := {
 	if given.type == wanted { return given }
 	if wanted == ANYREF and is_reference(given.type) { return Code(wanted, given.instructions) }
 	if given.type == ANYREF and is_reference(wanted) { return Code(wanted, given.instructions + cast_called(wanted, "one", form, p)) }
-	given
+	if given.type == NEVER or is_reference(given.type) and is_reference(wanted) { return given }
+	refused(form, "this value's type does not fit where it is given")
 }
 # The helper casting an `any` to a type: the value when it holds one of that type, a plain value taken out of its box,
 # a reference type taking ø too; else a raise naming the type and the place that wanted it. `form` is the code

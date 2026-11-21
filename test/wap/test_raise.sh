@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wap's raise (wap/preload/prelude.wap; wiki/keyword.md raise): the program stops, its message on the standard error;
+# wap's raise (wap/types/prelude.wap; wiki/keyword.md raise): the program stops, its message on the standard error;
 # raise fits where any value is wanted, since it never gives one. Run it with bash test/wap/test_raise.sh
 source "$(dirname "$0")/compile.sh"
 
@@ -20,4 +20,6 @@ still running"
 check "a hint is a got-it line on the standard error, the program going on" "$(ran hinted 'hint "write a + b"
 print "out"' 2>/dev/null)" "hint: write a + b
 out"
+# throw, fail and panic are other names of raise (wiki/keyword.md)
+check "throw is another name of raise" "$(ran thrown 'throw "bad"' 2>&1)" "bad"
 exit $((failures > 0))
