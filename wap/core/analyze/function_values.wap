@@ -14,6 +14,8 @@ use "../../kernel/forms.wap"
 use "fits.wap"
 use "dispatch.wap"
 use "declarations.wap"
+use "../rules/typed.wap"
+use "../rules/stages.wap"
 
 # the names of a function value's own function and of its first parameter, the value itself
 LAMBDA_NAME = "λ"
@@ -54,6 +56,8 @@ captured_by(definition: Node, types: list) as list<Binding> := {
 # A call of a function value, `f(x)` where f holds `y => y + 1` or a function's name: a call of the value's function,
 # a function value's own one taking the value as its first argument
 value_call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
+	offered = word_call_offered(n, called, arguments, s, f, expected)
+	if offered != ø { return offered }
 	typed_called = typed_form(called, s, f, ø)
 	type = value_type(typed_called)
 	through = function_parts(type)
@@ -64,6 +68,17 @@ value_call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: Type
 	name = declared_name(written_name(define_of(definition, s)))
 	given = if is_lambda_key(key, s) then [called] + arguments else arguments
 	call_typed(n, with_fact(with_binding(name, DefinitionKind.Function), DEFINED_AT, name), given, s, f, expected)
+}
+# a call of a word nothing defines on a value, `twice 3` read `3.twice()` (core/analyze/scope.wap field_called): its
+# value and arguments typed once, offered to the typed rules first (`rule twice $x: int => $x + $x`), else the field's
+word_call_offered(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame, expected: Node?) as Node? := match called {
+	Get(subject, key) => if not key is text or fact_of(subject, TYPED_HOLE) != ø or not definitions_named(text(key), s) is empty then ø else {
+		held = ([subject] + arguments).map(part => marked_typed(typed_form(part, s, f, ø)))
+		offered = refitted(Call(refitted(symbol(text(key)), called), held), n)
+		fired = kind_rewritten(offered, s, f, expected)
+		if fired != offered then fired else value_call_typed(n, refitted(Get(held#1, key), called), held.drop(1), s, f, expected)
+	}
+	_ => ø
 }
 # A call of a value of a function type, `helpers#1(x)` of a list<(int) -> int>: a call of whichever function it holds,
 # at run time, each argument of the type's parameter type, giving its result type
