@@ -22,16 +22,20 @@ tree=$(cd "${1:-$(git rev-parse --show-toplevel)}" && pwd) || exit 2
 warp=${WARP_BINARY:-warp}
 seed=$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm
 [ -f "$seed" ] || { echo "refresh-seed: no seed at $seed" >&2; exit 2; }
-mkdir -p "$tree/data" && scratch=$(mktemp -d "$tree/data/refresh-seed.XXXXXX") || exit 2
+# the scratch folder by its real path: a module's WASI follows no link, and data/ is often one (test/wap/compile.sh)
+mkdir -p "$tree/data" && scratch=$(cd -P "$(mktemp -d "$tree/data/refresh-seed.XXXXXX")" && pwd -P) || exit 2
 trap 'rm -rf "$scratch"' EXIT
 source "$(dirname "$0")/lib/wap-beside.sh"
 # every stage after A reads the tree's types module and kernel beside itself
 wap_beside_copied "$tree" "$scratch" || exit 2
 
-# stage <compiler> <output>: the compiler compiling wap's source; its cost in user + system CPU seconds
+echo 'print "Hello"' >"$scratch/hello.wap"
+# stage <compiler> <output>: the compiler compiling wap's source; its cost in user + system CPU seconds, timed warm: a
+# first hello lets warp compile a new module's machine code before the clock starts, else a new stage pays for it
 stage() {
 	local start=$SECONDS cost
-	cost=$( { TIMEFORMAT="%U %S"; time "$warp" --no-window "$1" "$tree/wap/compiler.wap" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%d", $1 + $2 }')
+	"$warp" --no-window "$1" "$scratch/hello.wap" "$scratch/warm.wasm" >/dev/null 2>&1
+	cost=$( { TIMEFORMAT="%U %S"; time "$warp" --no-window "$1" "$tree/wap/compiler.wap" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
 	[ -f "$2" ] || { echo "refresh-seed: $(basename "$2" .wasm) FAILED: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
 	stage_cost=$cost
 	echo "refresh-seed: $(basename "$2" .wasm) $(wc -c <"$2" | tr -d ' ') B in $((SECONDS - start)) s, $cost s CPU, sha256 $(shasum -a 256 "$2" | cut -c1-16)"
@@ -46,11 +50,10 @@ for name in $STAGES; do
 done
 chosen=$previous
 
-echo 'print "Hello"' >"$scratch/hello.wap"
 hello=$("$warp" --no-window "$chosen" "$scratch/hello.wap" "$scratch/hello.wasm" 2>&1 && "$warp" --no-window "$scratch/hello.wasm" 2>&1)
 echo "$hello" | grep -q Hello || { echo "refresh-seed: $(basename "$chosen" .wasm) runs no hello ($(echo "$hello" | tail -1 | cut -c1-200)); the seed stays" >&2; exit 1; }
 echo "refresh-seed: wap's source took $stage_cost s CPU with the new compiler, $old_cost s with the seed it replaces"
-[ $((stage_cost * 100)) -le $((old_cost * SLOWER_PERCENT)) ] || { echo "refresh-seed: the new compiler is over ${SLOWER_PERCENT}% of the seed's time; the seed stays" >&2; exit 1; }
+awk -v new="$stage_cost" -v old="$old_cost" -v most="$SLOWER_PERCENT" 'BEGIN { exit !(new * 100 <= old * most) }' || { echo "refresh-seed: the new compiler is over ${SLOWER_PERCENT}% of the seed's time; the seed stays" >&2; exit 1; }
 if [ -n "$check" ]; then
 	cmp -s "$chosen" "$seed" && echo "refresh-seed: the seed is that stage" || echo "refresh-seed: the seed differs from that stage (--check: kept)"
 	exit 0
