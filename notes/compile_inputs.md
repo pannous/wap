@@ -25,3 +25,13 @@ hard-coded.
 
 Measurements and the options considered: warp notes/gc_snapshot.md. Today's full warm state (424k nodes, library
 bodies included) is the layout this note replaces.
+
+## When a program adds cases to a library word
+
+A program may extend a library's overloads, for example `==(a: Side, b: Grouping)`. The precompiled dispatcher
+does not know that case. The general mechanism (user 2026-11-21) adds cases to dispatch at compile time or at run
+time. Signatures are enough for the compile-time way: the compiler writes the program's own dispatcher for that word
+from all its cases (the library's from their export names, the program's own). The dispatcher calls the precompiled
+bodies and the program's new ones. Bodies stay compiled once; only the small dispatcher is per program. A word no
+program extends keeps the library's dispatcher. Open: whether some cases need run-time dispatch (values whose type is
+known only at run time), and how much of today's semi-typed code exists only for this.
