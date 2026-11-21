@@ -1,5 +1,5 @@
 #!/bin/bash
-# Refresh wap's seed: wap-seed/wap.wasm beside the warp binary, the compiler wap's tests and census start from
+# Refresh wap's seed: wap-seed/wap/wap.wasm beside the warp binary, the compiler wap's tests and census start from
 # (test/wap/compile.sh), with the types module and kernel it reads beside it. Stage A is the seed compiling
 # wap/compiler.wap beside the seed's own types module, so a rule form the tree's types module is the first to write is
 # known; B is A compiling it beside the tree's types module, C is B compiling it again. The last stage built is the new
@@ -20,12 +20,12 @@ check=
 [ "${1-}" = --check ] && { check=1; shift; }
 tree=$(cd "${1:-$(git rev-parse --show-toplevel)}" && pwd) || exit 2
 warp=${WARP_BINARY:-warp}
-seed=$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm
+source "$(dirname "$0")/lib/wap-beside.sh"
+seed=$(dirname "$(command -v "$warp")")/wap-seed/$WAP_FOLDER/wap.wasm
 [ -f "$seed" ] || { echo "refresh-seed: no seed at $seed" >&2; exit 2; }
 # the scratch folder by its real path: a module's WASI follows no link, and data/ is often one (test/wap/compile.sh)
 mkdir -p "$tree/data" && scratch=$(cd -P "$(mktemp -d "$tree/data/refresh-seed.XXXXXX")" && pwd -P) || exit 2
 trap 'rm -rf "$scratch"' EXIT
-source "$(dirname "$0")/lib/wap-beside.sh"
 # every stage after A reads the tree's types module and kernel beside itself
 wap_beside_copied "$tree" "$scratch" || exit 2
 
@@ -43,10 +43,11 @@ stage() {
 previous=$seed
 old_cost=
 for name in $STAGES; do
-	stage "$previous" "$scratch/$name.wasm"
+	built=$scratch/$WAP_FOLDER/$name.wasm
+	stage "$previous" "$built"
 	[ -n "$old_cost" ] || old_cost=$stage_cost
-	if [ "$previous" != "$seed" ] && cmp -s "$previous" "$scratch/$name.wasm"; then echo "refresh-seed: $name is the same bytes as the stage before: a fixpoint"; fi
-	previous=$scratch/$name.wasm
+	if [ "$previous" != "$seed" ] && cmp -s "$previous" "$built"; then echo "refresh-seed: $name is the same bytes as the stage before: a fixpoint"; fi
+	previous=$built
 done
 chosen=$previous
 
@@ -60,18 +61,18 @@ if [ -n "$check" ]; then
 fi
 
 # the seed and what it reads beside it, installed and published
-cp "$chosen" "$seed" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && echo "refresh-seed: replaced $seed"
+cp "$chosen" "$seed" && wap_beside_mirrored "$tree" "$(dirname "$(dirname "$seed")")" && echo "refresh-seed: replaced $seed"
 # (the old compiler's machine code goes with it: the native wap writes the new one's at its first run, below)
 rm -f "$(dirname "$seed")"/wap-*.cwasm
 # the native wap beside the warp binary, the command that runs the seed (wap/extensions/native/driver.wap), built by it
-native=$(dirname "$(dirname "$seed")")
+native=$(dirname "$(dirname "$(dirname "$seed")")")
 WARP=$warp "$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" \
 	-L"$native/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib && echo "refresh-seed: installed $native/wap" ||
 	echo "refresh-seed: the native wap was not built; $native/wap stays" >&2
 # its first run, so the first one anyone makes finds the compiler's machine code written
 "$native/wap" '1+1' >/dev/null || echo "refresh-seed: the installed $native/wap fails to run 1+1" >&2
 beside=$scratch/wap-seed-beside.tar.gz
-tar -czf "$beside" -C "$tree/wap" "${WAP_BESIDE[@]}" -C "$tree" "$WAP_LIBRARY" || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
+tar -czf "$beside" -C "$tree" "${WAP_BESIDE[@]/#/$WAP_FOLDER/}" "$WAP_LIBRARY" || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
 release=wap-seed-$(date +%Y-%m-%d)-$(shasum -a 256 "$seed" | cut -c1-8)
 source_commit=$(git -C "$tree" rev-parse HEAD)
 gh release create "$release" "$seed" "$beside" --repo "$REPOSITORY" --prerelease --title "$release" --target "$source_commit" \
