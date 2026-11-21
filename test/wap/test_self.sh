@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # The self-build, file by file (notes/backbone.md milestone 2, point 2): wap compiles one of its own
-# files, the leaves of the use graph first, and the module it makes loads and runs. A file joins once wap compiles it
-# as written and its functions give under wap what they give under warp. Source: warp-lead's self-build plan,
+# files, each alone, and the module it makes loads and runs. Source: warp-lead's self-build plan,
 # 2026-11-18. Run it with bash test/wap/test_self.sh; the warp under test is WARP (default the warp on PATH)
 source "$(dirname "$0")/compile.sh"
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
@@ -14,75 +13,11 @@ loaded() {
 	$warp "$compiler" "$root/$1" "$module" 2>&1 && $warp "$module" >/dev/null 2>&1 && echo loads
 }
 
-# the files wap compiles alone and loads, in the order each became loadable
-files=(
-	wap/core/emit/opcodes.wap
-	wap/kernel/forms.wap
-	wap/core/emit/wasm.wap
-	wap/core/stage.wap
-	wap/core/errors.wap
-	wap/core/parse/lexemes.wap
-	wap/core/analyze/definers.wap
-	wap/core/bindings.wap
-	wap/core/paths.wap
-	wap/core/type_notation.wap
-	wap/types/operators.wap
-	wap/core/emit/emitter.wap
-	wap/core/emit/equality.wap
-	wap/core/emit/function_values.wap
-	wap/core/emit/functions.wap
-	wap/core/emit/host.wap
-	wap/core/emit/lists.wap
-	wap/core/emit/patterns.wap
-	wap/core/emit/places.wap
-	wap/core/emit/primitives.wap
-	wap/core/emit/values.wap
-	wap/core/parse/atoms.wap
-	wap/core/parse/cascade.wap
-	wap/core/parse/layout.wap
-	wap/core/parse/reader.wap
-	wap/core/analyze/names.wap
-	wap/types/lists.wap
-	wap/types/numbers.wap
-	wap/types/rules.wap
-	wap/sugar/calls.wap
-	wap/sugar/conditions.wap
-	wap/sugar/data.wap
-	wap/sugar/definitions.wap
-	wap/sugar/literals.wap
-	wap/sugar/loops.wap
-	wap/sugar/matching.wap
-	wap/sugar/ranges.wap
-	wap/sugar/records.wap
-	wap/sugar/types.wap
-	wap/core/format.wap
-	wap/core/language.wap
-	wap/core/parse/operator_table.wap
-	wap/core/parse/operators.wap
-	wap/core/parse/tokens.wap
-	wap/core/rules/lines.wap
-	wap/core/rules/lowering.wap
-	wap/core/rules/matcher.wap
-	wap/core/rules/patterns.wap
-	wap/core/rules/stages.wap
-	wap/core/rules/templates.wap
-	wap/core/rules/typed.wap
-	wap/core/analyze/calls.wap
-	wap/core/analyze/conditions.wap
-	wap/core/analyze/data.wap
-	wap/core/analyze/declarations.wap
-	wap/core/analyze/dispatch.wap
-	wap/core/analyze/fits.wap
-	wap/core/analyze/function_values.wap
-	wap/core/analyze/letters.wap
-	wap/core/analyze/matching.wap
-	wap/core/analyze/modules.wap
-	wap/core/analyze/scope.wap
-	wap/core/analyze/shapes.wap
-	wap/core/analyze/types.wap
-	wap/core/analyze/variables.wap
-	wap/core/pipeline.wap
-)
+# every file of wap's own, but the compiler (stage 2 below compiles it whole), the files every program meets beside it
+# already (compiled as a program, their words would be defined twice) and the native extension's programs, which run
+# only built to machine code (wap/extensions/native)
+NOT_ALONE=(wap/compiler.wap wap/nodes.wap wap/types/types.wap wap/types/prelude.wap wap/types/texts.wap wap/types/c.wap)
+files=($(cd "$root" && git ls-files 'wap/*.wap' | grep -v -x -F "${NOT_ALONE[@]/#/-e}" | grep -v '^wap/extensions/native/'))
 for file in "${files[@]}"; do
 	check "wap compiles $file and the result loads" "$(loaded "$file")" "loads"
 done

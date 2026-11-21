@@ -182,4 +182,6 @@ printf '%s\n' 'use "cycle_e.wap"' 'labelled(t: text) as text := if #t > 100 then
 check "a global given again by files that use each other holds its later value" "$(ran cycle_again 'use "cycle_e.wap"
 use "cycle_f.wap"
 print(early + joined("x"))')" "ax+"
+# the library compiles once into a module of its own (notes/compile_inputs.md), the types module beside the compiler
+check "the types module compiles as a program of its own" "$($warp "$compiler" "$(dirname "$compiler")/types/types.wap" "$stage/types.wasm" 2>&1 && [ -s "$stage/types.wasm" ] && echo compiled)" "compiled"
 exit $((failures > 0))
