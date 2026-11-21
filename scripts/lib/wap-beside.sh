@@ -1,7 +1,9 @@
 # scripts/lib/wap-beside.sh: what a compiled wap compiler reads beside itself, from wap/: the types module, the Node it
 # includes, the kernel, the extensions' rule files; and from the tree's root the standard library, where `use name` finds a module (sourced by
 # test/wap/compile.sh and scripts/refresh-seed.sh, which copy and publish them)
-WAP_BESIDE=(types sugar nodes.wap kernel extensions)
+# everything in wap/ but the compiler's own source, which the compiled compiler holds: a new folder there goes along
+WAP_COMPILED=(core compiler.wap)
+WAP_BESIDE=($(cd "$(dirname "${BASH_SOURCE[0]}")/../../wap" && ls | grep -vxF "${WAP_COMPILED[@]/#/-e}"))
 WAP_LIBRARY=lib
 # wap_beside_copied <tree> <folder>: all of it copied from the tree into the folder
 wap_beside_copied() {
