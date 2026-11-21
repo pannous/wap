@@ -125,6 +125,7 @@ wap/
     prelude.wap               the built-ins (print …), each a function whose body may be a Prim
     operators.wap             the operator table: precedence groups and their relations, operators, aliases
     list_items.wap            how a list holds its items, the one list file a build may swap (native/list_items.wap)
+    text_bytes.wap            how a text holds its bytes, the one text file a build may swap (native/text_bytes.wap)
     lists.wap                 list words over function values: map, filter, contains …
     maps.wap                  map words: a key's value, set, has, remove; text keys found by their hash
     texts.wap                 text words over a text's UTF-8 bytes
