@@ -17,4 +17,11 @@ check "a C function of libm takes and gives a double" "$(ran libm_line "fabs(x: 
 print(text(fabs(-2.5)))")" "2.5"
 check "a C function of the library its module names, loaded by that name" "$(ran zlib_line "crc32(crc: i64, bytes: text, count: i64): i64 from 'z'
 print(text(crc32(0, \"hello\", 5)))")" "907060870"
+check "a C function takes and gives C's float" "$(ran float_line "sqrtf(x: f32): f32 from 'm'
+print(text(sqrtf(2.25)))")" "1.5"
+# div gives its div_t {quot, rem} by value, in one register: quot in the low half
+check "a C struct given back by value, packed in its register" "$(ran struct_line "div(numerator: i32, denominator: i32): i64 from 'c'
+print(text(div(7, 2)))")" "4294967299"
+check "a C truth value given back as a bool" "$(ran bool_line "isatty(file: i32): bool from 'c'
+print(text(isatty(-1)))")" "no"
 exit $((failures > 0))
