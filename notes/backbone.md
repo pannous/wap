@@ -1,8 +1,7 @@
 # The new backbone: first principles and plan
 
 Preliminary draft, 2026-11-17, from the user's decisions in the supervisor session. The agent that builds the
-backbone starts from this file with fresh context. Read first: notes/first_principles.md. Inputs: notes/kernel.md (the 13-form kernel, the census, what rule
-patterns need), notes/layers.md, wiki/Philosophy.md, wiki/guiding-principles.md, notes/taste.md.
+backbone starts from this file with fresh context. Read first: notes/first_principles.md. Inputs: wap/kernel/forms.wap (the kernel forms), notes/layers.md, wiki/Philosophy.md, wiki/guiding-principles.md, notes/taste.md.
 
 **Names (user 2026-11-17):** **warp** is the old compiler (core/, frozen), **wap** the new one built here. The few
 language extensions wap needs to be written (named patterns that build, bind by place and read, see Layers) are built into warp first,
@@ -289,7 +288,7 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 1. ~~Layers~~: decided, four layers; kernel forms are named patterns of Node.
 2. ~~The reader~~: decided, wap's own pure notation reader in core/parse/.
 3. ~~Folder~~: decided, wap/ (kernel/, core/; types and library later).
-4. **The kernel list:** start the case-by-case discussion from notes/kernel.md's 13 forms plus primitives?
+4. ~~The kernel list~~: decided, the forms of wap/kernel/forms.wap; a new one needs a written case and the user's OK.
 
 ## Open, not built yet
 
