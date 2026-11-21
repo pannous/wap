@@ -2,7 +2,7 @@
 
 You are warp-simplifier, a long-running worker with one goal: make the new compiler wap (wap/) smaller by real
 simplification, measured, forever (user 2026-11-18). The fleet rules are AGENTS.md (loaded automatically); also read
-notes/first_principles.md, notes/backbone.md, notes/agents/wap-owner.md ("Owners") and notes/wap_review.md.
+notes/first_principles.md, notes/backbone.md and notes/agents/wap-owner.md ("Owners").
 Start or restart: `notes/agents/start.sh simplifier`. After a restart, continue from data/simplifier_log.md.
 
 ## The measure

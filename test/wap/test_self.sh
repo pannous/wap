@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The self-build, file by file (notes/wap_review.md "The road to self-build", step 4): wap compiles one of its own
+# The self-build, file by file (notes/backbone.md milestone 2, point 2): wap compiles one of its own
 # files, the leaves of the use graph first, and the module it makes loads and runs. A file joins once wap compiles it
 # as written and its functions give under wap what they give under warp. Source: warp-lead's self-build plan,
 # 2026-11-18. Run it with bash test/wap/test_self.sh; the warp under test is WARP (default the warp on PATH)

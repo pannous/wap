@@ -175,7 +175,7 @@ A rule file is in types/sugar/ exactly when wap's own source uses its spelling; 
 ## Owners
 
 Each wap file has one expert owner, whose duties are above (user 2026-11-18); ownership changes
-only through warp-lead, in this table. Owners go by stage (user 2026-11-18, notes/wap_review.md "The workers").
+only through warp-lead, in this table. Owners go by stage (user 2026-11-18).
 Anyone may edit any wap file on a branch; the owner of the file's stage reviews the change before the handoff, and owns the stage's contract: what its output
 language is (notes/backbone.md "Stage languages"). Breadth stops until milestone 2: wap gets only what its own
 source uses, and every landing names the functions of wap it turned green (scripts/wap-census.warp). Tests
