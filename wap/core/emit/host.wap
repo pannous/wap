@@ -8,6 +8,7 @@ use "wasm.wap"
 use "opcodes.wap"
 use "../errors.wap"
 use "../stage.wap"
+use "../bindings.wap"
 use "../type_notation.wap"
 use "primitives.wap"
 use "places.wap"
@@ -42,11 +43,11 @@ HOST_FUNCTIONS = {
 	"args_sizes_get": [[I32, I32], [I32]], "args_get": [[I32, I32], [I32]],
 	"path_open": [[I32, I32, I32, I32, I32, I64, I64, I32, I32], [I32]], "clock_time_get": [[I32, I64, I32], [I32]]
 }
-# A function of another module the program declares, `getenv(name: int): int from "c"` (wap/extensions/native):
+# A function of another module, wasm's import, `strlen(s: int32): int := prim foreign("c", "strlen", s)`:
 # Prim(foreign, [module, name, arguments…]), its module and name texts the emitter reads, never code; its types those
 # of its arguments and value. Imported before any function of the module's own, as the host functions are
 FOREIGN = "foreign"
-foreign_calls(n: Node) as list<Node> := match n {
+foreign_calls(n: Node) as list<Node> := if is_foreign_value(n) then [] else match n {
 	Prim(operation, arguments) => (if text(operation) == FOREIGN then [n] else []) + arguments.flat_map(foreign_calls)
 	_ => direct_parts(n).flat_map(foreign_calls)
 }
@@ -57,8 +58,13 @@ foreign_imported(call: Node, p: Program) := {
 	if not p.host.has(foreign_key(call)) { p.host[foreign_key(call)] = imported(p.m, written_text(call, 1), written_text(call, 2), foreign_arguments(call).map(argument => layout(argument, p)), if typed_layout(call, p) is empty then [] else [typed_layout(call, p)]) }
 }
 foreign_code(call: Node, p: Program, f: Frame) as Code := Code(typed_layout(call, p), foreign_arguments(call).flat_map(argument => code(argument, p, f).instructions) + instruction(CALL, [p.host[foreign_key(call)]]))
+# A value of another module, `x: int = prim foreign("m.wasm", "x: int")`, is its global, imported mutable before the
+# module's own and shared: a global a foreign primitive gives is that module's
+is_foreign_value(statement: Node) as bool := match statement { Set(place, value) => is_bound(declared_name(place), DefinitionKind.Global) and (match value { Prim(operation, given) => text(operation) == FOREIGN; _ => no }); _ => no }
+foreign_values_imported(statements: list<Node>, p: Program) := for set in statements.filter(is_foreign_value) { value_imported(set, p) }
+value_imported(set: Set, p: Program) := match set { Set(place, value) => { p.globals += [Placed(defining_key(declared_name(place)), imported_global(p.m, written_text(value, 1), written_text(value, 2), layout(declared_name(place), p)), layout(declared_name(place), p))] } }
 foreign_key(call: Node) as text := written_text(call, 1) + "." + written_text(call, 2)
-# data_address("Hello"): the address of the text's bytes in the memory, a C string, its text written in place
+# data_address("Hello"): the address of the text's bytes in the module's data, its text written in place
 DATA_TEXT = "data_address"
 data_code(form: Node, p: Program) as Code := {
 	address = data_placed(p.m, written_text(form, 1).bytes)
