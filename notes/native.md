@@ -14,8 +14,13 @@ warp-host-fixer; this file is the inventory.
   Its memory is never freed: fine for the driver and short programs, not for a long-running native one. When the
   memory cannot grow further (wasm's 4 GiB, or the host's limit), memory.grow fails (core/emit/host.wap memory_grown
   drops its -1) and the first store past the end traps, "Out-of-bounds access in linear memory": the run stops loudly,
-  nothing is overwritten; the message does not yet say the texts ran out of memory. Lists, maps,
-  `any` and raise stay GC values a native program cannot use yet.
+  nothing is overwritten; the message does not yet say the texts ran out of memory.
+- Lists in a native program likewise: a list is the address of its header in the memory, [count][room][items block],
+  the items 8 bytes each (core/emit/primitives.wap item.load/item.store by the item's layout); the build reads
+  extensions/native/list_items.wap in the place of types/list_items.wap, and typing writes a list literal as calls of
+  its `reserved` and `extended` under the same switch, values_in_memory. A list grows in place, its block copied to one
+  twice as large, every name holding it seeing the item; the old block is never freed, like a text. Slices, maps, `any`
+  and raise stay GC values a native program cannot use yet.
 
 ## Not yet
 - A C function calling back into the program (lib/callbacks.warp c_callback): SDL, sqlite, audio.
