@@ -35,11 +35,13 @@ class Packer {
 	done: list<int>
 	completed: int
 	at: int
+	written: (text) -> text
 }
 
-# a node as packed bytes: `pack(n)`
-pack(n: Node) as text := {
-	p = Packer{subtree: [], size: [], ids: {}, bytes: [], texts: {}, done: [], completed: 0, at: 0}
+# a node as packed bytes: `pack(n)`; each Text's value written as `written` gives it (a path made relative, say)
+pack(n: Node) as text := pack(n, value => value)
+pack(n: Node, written: (text) -> text) as text := {
+	p = Packer{subtree: [], size: [], ids: {}, bytes: [], texts: {}, done: [], completed: 0, at: 0, written: written}
 	identified(p, n)
 	p.done = (0 ..< #p.ids).map(id => NOT_DONE)
 	node_packed(p, n)
@@ -73,7 +75,7 @@ node_packed(p: Packer, n: Node) := {
 		Meta(node, data) => ø
 		Number(value) => bytes_added(p, signed(if value is int then value else float_bits(value)))
 		Char(value) => number_packed(p, ord(value))
-		Text(value) => text_packed(p, value)
+		Text(value) => text_packed(p, p.written(value))
 		Symbol(name) => text_packed(p, name)
 		Key(left, op, right) => text_packed(p, op as text)
 		List(items, bracket, separator) => { number_packed(p, items.length); text_packed(p, text(bracket)); text_packed(p, text(separator)) }
@@ -137,10 +139,11 @@ leaf_text(n: Node) as text := match n {
 # ── unpacking ──
 
 # the bytes read so far, the texts and completed nodes met
-class Unpacker { blob: text; at: int; texts: list<text>; done: list<Node> }
+class Unpacker { blob: text; at: int; texts: list<text>; done: list<Node>; restored: (text) -> text }
 
-# packed bytes as their node: `unpack(pack(n)) == n`
-unpack(blob: text) as Node := node_unpacked(Unpacker{blob: blob, at: 0, texts: [], done: []})
+# packed bytes as their node: `unpack(pack(n)) == n`; each Text's value as `restored` gives it back
+unpack(blob: text) as Node := unpack(blob, value => value)
+unpack(blob: text, restored: (text) -> text) as Node := node_unpacked(Unpacker{blob: blob, at: 0, texts: [], done: [], restored: restored})
 
 node_unpacked(u: Unpacker) as Node := {
 	tag = byte_read(u)
@@ -157,7 +160,7 @@ node_of(u: Unpacker, tag: int) as Node := {
 	if tag == INT_TAG { return Number(number_unpacked(u, yes)) }
 	if tag == FLOAT_TAG { return Number(bits_float(number_unpacked(u, yes))) }
 	if tag == CHAR_TAG { return Char(char(number_unpacked(u, no))) }
-	if tag == TEXT_TAG { return Text(text_unpacked(u)) }
+	if tag == TEXT_TAG { return Text(u.restored(text_unpacked(u))) }
 	if tag == SYMBOL_TAG { return Symbol(text_unpacked(u)) }
 	if tag == ERROR_TAG { return Error(node_unpacked(u)) }
 	if tag == KEY_TAG { op = text_unpacked(u) as Op; left = node_unpacked(u); return Key(left, op, node_unpacked(u)) }
