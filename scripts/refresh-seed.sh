@@ -61,8 +61,9 @@ fi
 
 # the seed and what it reads beside it, installed and published
 cp "$chosen" "$seed" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && echo "refresh-seed: replaced $seed"
-# (the old compiler's machine code goes with it: the native wap writes the new one's at its first run, below)
-rm -f "$(dirname "$seed")"/wap-*.cwasm
+# (the old compiler's machine code goes with it, and every program's it compiled: the native wap writes the new
+# compiler's at its first run, below)
+rm -f "$(dirname "$seed")"/*.cwasm
 # the native wap beside the warp binary, the command that runs the seed (wap/extensions/native/driver.wap), built by it
 native=$(dirname "$(dirname "$seed")")
 WARP=$warp "$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" \
