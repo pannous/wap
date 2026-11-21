@@ -57,14 +57,16 @@ if [ -n "$check" ]; then
 fi
 
 # the seed and what it reads beside it, installed and published
-cp "$chosen" "$seed" && wap_beside_copied "$tree" "$(dirname "$seed")" && echo "refresh-seed: replaced $seed"
-# (the old compiler's machine code goes with it: the native wap writes the new one's at its first run)
+cp "$chosen" "$seed" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && echo "refresh-seed: replaced $seed"
+# (the old compiler's machine code goes with it: the native wap writes the new one's at its first run, below)
 rm -f "$(dirname "$seed")"/wap-*.cwasm
 # the native wap beside the warp binary, the command that runs the seed (wap/extensions/native/driver.wap), built by it
 native=$(dirname "$(dirname "$seed")")
 WARP=$warp "$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" \
 	-L"$native/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib && echo "refresh-seed: installed $native/wap" ||
 	echo "refresh-seed: the native wap was not built; $native/wap stays" >&2
+# its first run, so the first one anyone makes finds the compiler's machine code written
+"$native/wap" '1+1' >/dev/null || echo "refresh-seed: the installed $native/wap fails to run 1+1" >&2
 beside=$scratch/wap-seed-beside.tar.gz
 tar -czf "$beside" -C "$tree/wap" "${WAP_BESIDE[@]}" -C "$tree" "$WAP_LIBRARY" || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
 release=wap-seed-$(date +%Y-%m-%d)-$(shasum -a 256 "$seed" | cut -c1-8)
