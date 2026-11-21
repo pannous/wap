@@ -9,7 +9,8 @@
 set -euo pipefail
 WARP=${WARP:-warp}
 C_COMPILER=cc
-C_FLAGS="-O2"
+# -rdynamic: the executable's own C functions (main.c native_call, wap_host_callback) are found by name as libc's are
+C_FLAGS="-O2 -rdynamic"
 MODULE_NAME=program
 WASM2C_RUNTIME=share/wabt/wasm2c
 WABT_HEADERS=include

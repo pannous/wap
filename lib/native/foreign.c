@@ -203,18 +203,7 @@ struct bytes_result* field_bytes(const uint8_t* address, int64_t offset, int64_t
 	return result;
 }
 void set_field_bytes(uint8_t* address, int64_t offset, const uint8_t* data, int64_t size) { memcpy(address + offset, data, (size_t)size); }
-// a C function called with up to 8 integers and pointers and up to 8 floats in their registers (the ARM64 and x86-64
-// conventions keep the two apart, `ldexp(double, int)` takes d0 and x0): it reads only the ones its parameters name.
-// Its result is the integer register, or the bits of the float register
-typedef uint64_t (*integer_function)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, double, double, double, double, double, double, double, double);
-typedef double (*float_function)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, double, double, double, double, double, double, double, double);
-uint64_t native_call(void* function, uint64_t* i, double* f, int32_t float_result) {
-	if (!float_result) return ((integer_function)function)(i[0], i[1], i[2], i[3], i[4], i[5], i[6], i[7], f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
-	double result = ((float_function)function)(i[0], i[1], i[2], i[3], i[4], i[5], i[6], i[7], f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
-	uint64_t bits;
-	memcpy(&bits, &result, sizeof bits);
-	return bits;
-}
+#include "native_call.h"
 // One trailing aggregate, after `count` integer arguments (0 to 6) and no floats. `bytes` is `size` bytes, 17 to 128.
 // The carrier is 128 bytes and 16-aligned, which is the same MEMORY class as any aggregate over 16 bytes: on x86-64
 // SysV the C compiler puts it on the stack, and the callee reads its own prefix; on AAPCS64 the compiler passes a

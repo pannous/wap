@@ -1,0 +1,98 @@
+# The host words a module the native wap runs imports (run.wap imports_linked): each C function it imports, as
+# wap/extensions/c/functions.wap describes them, is answered by the C function of its name, found in the process (a missing one stops the run as the module is linked), with
+# the module's values as C takes them by their wasm types: an i32 an address of the caller's memory, given as a pointer
+# to it (0 as NULL), an i64 an int or a pointer as it is, an f64 a double. wasmtime calls main.c's wap_host_callback
+# with the import's record, which calls the driver's export host_word, answered here.
+use "c.wap"
+
+# a wasmtime value: its kind, then its number, in VALUE_BYTES (wasmtime_val_t)
+VALUE_BYTES := 32
+VALUE_OFFSET := 8
+KIND_I32 := 0
+KIND_F64 := 3
+# a C function takes up to REGISTERS integers and REGISTERS floats in their registers (main.c native_call)
+REGISTERS := 8
+# an import's record, the data wasmtime calls it with: the C function, its result's kind (NO_RESULT for none), a
+# scratch extern, and the REGISTERS integer and REGISTERS float arguments of a call
+FUNCTION_SLOT := 0
+RESULT_SLOT := 8
+EXTERN_SLOT := 16
+INTEGERS_SLOT := 40
+FLOATS_SLOT := INTEGERS_SLOT + 8 * REGISTERS
+RECORD_BYTES := FLOATS_SLOT + 8 * REGISTERS
+NO_RESULT := -1
+# the C names this file finds and the import modules that are no C library: WASI's and the host words'
+wasi_module(): int32 := prim data_address("wasi_snapshot_preview1")
+host_module(): int32 := prim data_address("host")
+callback_name(): int32 := prim data_address("wap_host_callback")
+memory_name(): int32 := prim data_address("memory")
+MEMORY_NAME_BYTES := 6
+
+# the C function of that name in the process (main.c's); a missing one stops the run naming it
+c_function(name: int): int := prim foreign("c", "c_function", name)
+native_call(function: int, integers: int, floats: int, float_result: int): int := prim foreign("c", "native_call", function, integers, floats, float_result)
+wasm_importtype_type(import: int): int := prim foreign("c", "wasm_importtype_type", import)
+wasm_externtype_as_functype_const(type: int): int := prim foreign("c", "wasm_externtype_as_functype_const", type)
+wasm_functype_results(type: int): int := prim foreign("c", "wasm_functype_results", type)
+wasm_valtype_kind(type: int): int := prim foreign("c", "wasm_valtype_kind", type)
+wasmtime_linker_define_func(linker: int, module: int, module_size: int, name: int, name_size: int, type: int, callback: int, data: int, finalizer: int): int := prim foreign("c", "wasmtime_linker_define_func", linker, module, module_size, name, name_size, type, callback, data, finalizer)
+wasmtime_caller_context(caller: int): int := prim foreign("c", "wasmtime_caller_context", caller)
+wasmtime_caller_export_get(caller: int, name: int32, size: int, item_at: int): int := prim foreign("c", "wasmtime_caller_export_get", caller, name, size, item_at)
+wasmtime_memory_data(context: int, memory_at: int): int := prim foreign("c", "wasmtime_memory_data", context, memory_at)
+
+# whether an import of the module named at NAME_AT (a C string of the program's memory) is a C function's
+is_c_import(module: int32): bool := strcmp(module, wasi_module()) != 0 and strcmp(module, host_module()) != 0
+# the import, `from` and `name` its host name vectors (size, data), defined in the linker as the C function of its name
+c_function_defined(linker: int, import: int, from: int, name: int): int := {
+	type = wasm_externtype_as_functype_const(wasm_importtype_type(import))
+	record = host_block(RECORD_BYTES)
+	c_name = strndup(long_at(name + 8), long_at(name))
+	set_long_at(record + FUNCTION_SLOT, c_function(c_name))
+	set_long_at(record + RESULT_SLOT, result_kind(type))
+	wasmtime_linker_define_func(linker, long_at(from + 8), long_at(from), long_at(name + 8), long_at(name), type, c_function(host_of(callback_name())), record, 0)
+}
+# the kind of a function type's one result, NO_RESULT for none
+result_kind(type: int): int := {
+	results = wasm_functype_results(type)
+	if long_at(results) == 0 then NO_RESULT else wasm_valtype_kind(long_at(long_at(results + 8))) % 256
+}
+
+# the call of an import's C function (its record `word`) with the `count` values at the host's `given`, its result
+# written to the host's `results`: driver.wap's export host_word, which main.c's wap_host_callback calls
+host_word_answered(word: int, caller: int, given: int, count: int, results: int, results_count: int) := {
+	memory = caller_memory(caller, word + EXTERN_SLOT)
+	integer_count = 0
+	float_count = 0
+	i = 0
+	while i < count {
+		value = given + i * VALUE_BYTES
+		number = long_at(value + VALUE_OFFSET)
+		if host_byte(value) == KIND_F64 {
+			set_long_at(word + FLOATS_SLOT + 8 * float_count, number)
+			float_count = float_count + 1
+		} else {
+			set_long_at(word + INTEGERS_SLOT + 8 * integer_count, if host_byte(value) == KIND_I32 then c_pointer(memory, host_address(value + VALUE_OFFSET)) else number)
+			integer_count = integer_count + 1
+		}
+		i = i + 1
+	}
+	kind = long_at(word + RESULT_SLOT)
+	returned = native_call(long_at(word + FUNCTION_SLOT), word + INTEGERS_SLOT, word + FLOATS_SLOT, if kind == KIND_F64 then 1 else 0)
+	if results_count > 0 {
+		set_long_at(results, kind)
+		set_long_at(results + VALUE_OFFSET, returned)
+	}
+}
+# the caller's memory, where its i32 addresses point; `extern_at` a host block for its export
+caller_memory(caller: int, extern_at: int): int := {
+	wasmtime_caller_export_get(caller, memory_name(), MEMORY_NAME_BYTES, extern_at)
+	wasmtime_memory_data(wasmtime_caller_context(caller), extern_at + VALUE_OFFSET)
+}
+# an i32 of the host's memory as the address it is: its 4 bytes alone, past them a wasmtime value holds anything
+host_address(host: int): int := {
+	memcpy(pointer_at(LONG_AT), host, 4)
+	address(word32_at(LONG_AT))
+}
+word32_at(at: int): int32 := prim i32.load(at)
+# an address of the memory as C's pointer, the address 0 as NULL
+c_pointer(memory: int, address: int): int := if address == 0 then 0 else memory + address
