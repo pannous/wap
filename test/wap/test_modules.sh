@@ -51,6 +51,11 @@ print text(match n { List(items, bracket, separator) => #items; _ => 0 })')" "3"
 check "a pattern builds its shape, a rest hole taking a list" "$(ran pattern_rest 'pattern Run = (Run $first: Node $rest...: Node)
 n = Run(Text("a"), [Text("b"), Text("c")])
 print text(match n { List(items, bracket, separator) => #items; _ => 0 })')" "4"
+check "a pattern held in a map is a Node wherever one is wanted" "$(ran pattern_in_map 'pattern Pair = (Pair $a: Node $b: Node)
+shown(n: Node) as text := text(n)
+held: map<text, Pair> = {}
+held["p"] = Pair(Text("x"), Text("y"))
+for each in held.values { print shown(each) }')" "(Pair \"x\" \"y\")"
 check "a pattern's rest hole read as its part" "$(ran pattern_rest_part 'pattern Run = (Run $first: Node $rest...: Node)
 count_rest(r: Run) as int := #r.rest
 print text(count_rest(Run(Text("a"), [Text("b"), Text("c")])))')" "2"
@@ -148,6 +153,14 @@ add(a: int, b: int) as int := a + b
 add(a: text, b: text) as text := a + b' twice 21)" "42"
 check "a program uses a compiled module whose one function is exported by its plain word too" "$(printf '%s\n' 'twice(x: int) as int := x * 2' >"$stage/plain_twice.wap" && $warp "$compiler" "$stage/plain_twice.wap" "$stage/plain_twice.wasm" 2>&1 && ran uses_plain_twice "use \"$stage/plain_twice.wasm\"
 print(text(twice(21)))")" "42"
+# a recursive record's recursion group holds only the types that refer to it, so a list or text the module shares
+# with the program is the program's own type
+check "a program calls a list and a text function of a module declaring a recursive record" "$(printf '%s\n' 'class Tree { kids: list<Tree>; name: text }' 'total(xs: list<int>) as int := xs.sum()' 'shout(t: text) as text := t + "!"' 'size(t: Tree) as int := 1 + t.kids.map(size).sum()' >"$stage/recursive_module.wap" && $warp "$compiler" "$stage/recursive_module.wap" "$stage/recursive_module.wasm" 2>&1 && ran uses_recursive_module "use \"$stage/recursive_module.wasm\"
+print(text(total([1, 2, 3])))
+print(shout(\"hi\"))
+print(text(size(Tree([Tree([], \"b\")], \"a\"))))")" "6
+hi!
+2"
 # wiki/use.md "folder, package and project scope": use folder brings in every source file beside the using one
 mkdir -p "$stage/shapes" && printf '%s\n' 'area(side: int) as int := side * side' >"$stage/shapes/square.wap"
 check "use folder brings in a word of a file beside it" "$(printf '%s\n' 'use folder' 'print(text(area(3)))' >"$stage/shapes/main.wap" && $warp "$compiler" "$stage/shapes/main.wap" "$stage/shapes/main.wasm" 2>&1 && $warp "$stage/shapes/main.wasm" 2>&1)" "9"
@@ -157,4 +170,10 @@ say("by name")')" "loaded
 by name"
 check "use name brings in a standard module from the library beside the compiler" "$(ran use_library 'use ordering
 print(text(natural_compare("a2", "a10") < 0))')" "yes"
+# files that use each other: a function typed before its file's statements still reads its constant's type
+printf '%s\n' 'use "cycle_b.wap"' 'CUT = [" ", "…"].join("")' 'quoted(t: text) as text := t + CUT' >"$stage/cycle_a.wap"
+printf '%s\n' 'use "cycle_a.wap"' 'checked(t: text) as text := if #t > 100 then quoted(t) else t' 'early = checked("b")' >"$stage/cycle_b.wap"
+check "a function of a file that uses another reads its own computed constant, whichever file runs first" "$(ran cycle_constant 'use "cycle_a.wap"
+use "cycle_b.wap"
+print(early + quoted("x"))')" "bx …"
 exit $((failures > 0))
