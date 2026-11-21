@@ -27,4 +27,5 @@ check "wall_clock_ms is the wall clock's milliseconds since 1970" "$(ran clock '
 print text(start > 1700000000000 and wall_clock_ms() - start < 60000)')" "yes"
 mkdir -p "$stage/listed" && printf 'a' >"$stage/listed/one.txt" && printf 'b' >"$stage/listed/two.wap"
 check "list_files names a folder's files" "$(ran listed "print text(list_files(\"$stage/listed\").sorted)")" "[one.txt, two.wap]"
+check "exists tests a path, a leading ~ is the home folder, started_env a variable" "$(ran home_paths 'print text(exists("~/listed/one.txt")) + " " + text(exists("~/nowhere")) + " " + text(exists("")) + " " + read("~/listed/one.txt") + " " + (started_env("WAP_UNSET_CHECK") ?? "unset")' >/dev/null; HOME="$stage" $warp "$stage/home_paths.wasm")" "yes no no a unset"
 exit $((failures > 0))
