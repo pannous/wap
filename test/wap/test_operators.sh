@@ -55,6 +55,7 @@ format_check 'y = x!' 'y = x!'
 format_check 'z = !x' 'z = not x'
 # a word leading a rule's phrase after an infix takes the rest of the phrase, as at a phrase's start; other words stay operands
 format_check 'x = f(a) ?? return ø' 'x = f(a) ?? (return ø)'
+format_check 'x = f(a) ?? return text 0' 'x = f(a) ?? (return text 0)'
 format_check 'n = if s < 0 then 0 - s else s' 'n = if s < 0 then 0 - s else s'
 format_check 'z = a ?? if c {1} else {2}' 'z = a ?? (if c {1} else {2})'
 check "a match after an assignment keeps its arms" "$(ran assigned_match 'x = 2
