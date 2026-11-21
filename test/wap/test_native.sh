@@ -69,4 +69,9 @@ check "the console keeps a value for the lines after it" "$(printf '%s\n' 'x = 2
 \"abab\""
 # the compiler's machine code, written beside wap.wasm by the first run, read by the next ones
 check "the native wap keeps the compiler's machine code beside it" "$(ls "$stage/bin/wap-seed/" | grep -c '^wap-[0-9a-f]*\.cwasm$')" "1"
+# a program run again unchanged runs from its machine code kept beside the compiler, never compiled; a change to a file
+# it uses compiles it again
+check "a program runs again from its kept machine code, compiled anew when a file it uses changes" "$(cd "$stage" && printf '%s\n' 'word() as text := "hi"' >used.wap && printf '%s\n' 'use "used.wap"' 'print word()' >using.wap && "$native_wap" using.wap && "$native_wap" using.wap && printf '%s\n' 'word() as text := "ho"' >used.wap && "$native_wap" using.wap 2>&1)" "hi
+hi
+ho"
 exit $((failures > 0))

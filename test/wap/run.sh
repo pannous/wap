@@ -3,13 +3,15 @@
 # script test/wap/test_*.sh; a test is a path or an area, `run.sh nodes`): first wap's compiler compiled and run once,
 # or its error, the first signal a worker waits for; then the tests run detached, niced, as many at once as the
 # machine's job slots allow (scripts/job-slot.sh, shared by every worktree), each one's output in
-# data/wap-tests/<test file>.txt and one summary line in data/wap-tests/summary.txt, read later. --wait runs them in the
-# foreground and prints the summary. The warp under test is WARP (default the warp on PATH). The self-build ratchet,
+# data/wap-tests/<test file>.txt and one summary line in data/wap-tests/summary.txt, read later; a run of all tests
+# writes its line to data/wap-tests/full-summary.txt too, which a run of some leaves alone (vitals reads it). --wait
+# runs them in the foreground and prints the summary. The warp under test is WARP (default the warp on PATH). The self-build ratchet,
 # ratchet_census.sh (about 4 min), is no default script: run it by name, test/wap/run.sh --wait
 # test/wap/ratchet_census.sh, after each wap landing
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 results="$here/../../data/wap-tests"
 SUMMARY="$results/summary.txt"
+FULL_SUMMARY="$results/full-summary.txt"
 cores=$(getconf _NPROCESSORS_ONLN)
 job_slot="$here/../../scripts/job-slot.sh"
 
@@ -30,14 +32,15 @@ one_run() {
 		*) bash "$1" ${2:+--compiler "$2"} ;;
 	esac
 }
-# every test run in a job slot, niced (all_run <module or ""> <tests>), then the summary written; a test waiting for its
-# slot says so in its output
+# every test run in a job slot, niced (all_run <module or ""> <all: yes or no> <tests>), then the summary written; a
+# test waiting for its slot says so in its output
 all_run() {
-	local module=$1
-	shift
+	local module=$1 all=$2
+	shift 2
 	started=$(date +%s)
 	printf '%s\n' "$@" | xargs -P "$cores" -I{} "$job_slot" bash "${BASH_SOURCE[0]}" one_run {} "$module"
 	summed "$@" | tee "$SUMMARY"
+	[ "$all" = no ] || cp "$SUMMARY" "$FULL_SUMMARY"
 	# the run's exit status: 0 only when no check failed
 	grep -q ' 0 ✗' "$SUMMARY"
 }
@@ -66,7 +69,7 @@ for test in "$@"; do
 			[ ${#tests[@]} -gt "$found" ] || { echo "no test of $test" >&2; exit 2; } ;;
 	esac
 done
-[ $# -gt 0 ] && set -- "${tests[@]}" || set -- "$programs"/test_*.wap "$here"/test_*.sh
+if [ $# -gt 0 ]; then all=no; set -- "${tests[@]}"; else all=yes; set -- "$programs"/test_*.wap "$here"/test_*.sh; fi
 for test in "$@"; do [ -f "$test" ] || { echo "no test $test" >&2; exit 2; }; done
 mkdir -p "$results" && rm -f $(outputs "$@") "$SUMMARY"
 source "$here/compile.sh"
@@ -80,4 +83,4 @@ fi
 # the first signal: wap's compiler compiles and runs, reading an empty program
 said=$(ran empty '') || { echo "wap compiler: $said"; exit 1; }
 echo "wap compiler OK; the checks of $# tests run$( [ $wait = yes ] || echo " in the background: summary in $SUMMARY")"
-if [ $wait = yes ]; then all_run "$module" "$@"; else nohup bash "${BASH_SOURCE[0]}" all_run "$module" "$@" >/dev/null 2>&1 & fi
+if [ $wait = yes ]; then all_run "$module" "$all" "$@"; else nohup bash "${BASH_SOURCE[0]}" all_run "$module" "$all" "$@" >/dev/null 2>&1 & fi
