@@ -124,6 +124,7 @@ wap/
     rules.wap                 the kernel forms' patterns and the ../sugar/ files, used in load order
     prelude.wap               the built-ins (print …), each a function whose body may be a Prim
     operators.wap             the operator table: precedence groups and their relations, operators, aliases
+    list_items.wap            how a list holds its items, the one list file a build may swap (native/list_items.wap)
     lists.wap                 list words over function values: map, filter, contains …
     maps.wap                  map words: a key's value, set, has, remove; text keys found by their hash
     texts.wap                 text words over a text's UTF-8 bytes
@@ -155,8 +156,10 @@ wap/
       compiler.wap            wap.wasm found beside the executable, its machine code kept beside it by its hash
       console.wap             `wap` alone: each line a module, linked to the earlier lines' kept instances
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
+      list_items.wap          a list in the memory, read in the place of types/list_items.wap by a native build
       programs.wap            a program's machine code kept beside wap.wasm, program-<hash>.cwasm by its sources
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
+      text_bytes.wap          a text in the memory, read in the place of types/text_bytes.wap by a native build
     packed.wap                a Node as compact bytes and back, pack and unpack: each text and repeated subtree once
     wasm/                     a compiled wap module used as its source
       modules.wap             use "m.wasm": its functions declared from their export names, the rest (rules, enums,
