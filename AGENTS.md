@@ -17,7 +17,7 @@ https://github.com/pannous/wap
   appears in the types module only where the source does not use it; a change that needs more lands after a seed refresh.
 - Throwaway programs in the session scratchpad or data/<topic>/, never the repo; every kept test in test/wap/.
 
-## Layers (notes/wap.md "Layers", notes/backbone.md)
+## Layers (notes/agents/wap-owner.md "The tree", notes/backbone.md)
 - **wap/kernel/**: the kernel forms (forms.wap) and the primitives, the emitter's whole input.
 - **wap/core/**: the machinery only, one folder per stage: parse/, rules/, analyze/, emit/, and the walker
   (stage.wap), the pipeline and the errors. core knows no library word by name (user 2026-11-20).
@@ -155,7 +155,7 @@ this file and your role file beat the handover.
   worktree); commit your own paths by name (`git commit -- <paths>`), then `git fetch --no-write-fetch-head origin main
   && git rebase --rebase-merges origin/main` (never `git pull`, never a stash). Do not push that onto main; hand the
   commit or patch to the integrator (Handoff, below). Never leave unpushed commits on main.
-- Every wap file has one owner, its expert (notes/wap.md Owners, notes/agents/wap-owner.md): every change to it passes
+- Every wap file has one owner, its expert (notes/agents/wap-owner.md "Owners"): every change to it passes
   that owner's review; outside wap/core and wap/kernel a change of about 10 lines lands at once and is reviewed
   afterwards.
 - Anything in wap/: a worktree, from /Users/me/dev/angles/wap
