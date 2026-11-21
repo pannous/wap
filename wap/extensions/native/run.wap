@@ -51,6 +51,9 @@ main_name(): int32 := prim data_address("main")
 MAIN_NAME_BYTES := 4
 no_module(): int32 := prim data_address("wap: no module at that path\n")
 newline(): int32 := prim data_address("\n")
+no_module_at(): int32 := prim data_address("wap: no module at ")
+nor_at(): int32 := prim data_address(" nor at ")
+EXISTS := 0
 
 # the run ended with this status, its temporary files gone (a path not made yet is an empty one, unlinking nothing)
 ended(status: int) := {
@@ -131,11 +134,11 @@ linker_made(): int := {
 	checked(wasmtime_linker_define_wasi(linker))
 	linker
 }
-# the module of the file, compiled by the engine; 0 where there is none, said
-module_compiled(path: int32): int := {
+# the module of the file at the host's path, compiled by the engine; 0 where there is none, said
+module_compiled(path: int): int := {
 	set_word(STATUS_AT, FAILED)
 	size_at = host_block(8)
-	bytes = file_read(host_of(path), size_at)
+	bytes = file_read(path, size_at)
 	if bytes == 0 then said_none(no_module()) else module_of(bytes, long_at(size_at))
 }
 # the module of these bytes of the host's memory; 0 where they are none, said
@@ -143,10 +146,10 @@ module_of(bytes: int, size: int): int := {
 	module_at = host_block(8)
 	if failed(wasmtime_module_new(engine, bytes, size, module_at), host_block(8)) then 0 else long_at(module_at)
 }
-# the module instantiated in the context, what it imports by a .wasm path linked first, then its main run: the
-# instance, 0 where a step failed
-instance_ran(linker: int, context: int, module: int): int := {
-	if not imports_linked(linker, context, module) { return 0 }
+# the module of the file at the host's path `importer` instantiated in the context, what it imports by a .wasm name
+# linked first, then its main run: the instance, 0 where a step failed
+instance_ran(linker: int, context: int, module: int, importer: int): int := {
+	if not imports_linked(linker, context, module, importer) { return 0 }
 	instance = host_block(INSTANCE_BYTES)
 	trap_at = host_block(8)
 	if failed(wasmtime_linker_instantiate(linker, context, module, instance, trap_at), trap_at) { return 0 }
@@ -154,9 +157,9 @@ instance_ran(linker: int, context: int, module: int): int := {
 	wasmtime_instance_export_get(context, instance, main_name(), MAIN_NAME_BYTES, item)
 	if failed(wasmtime_func_call(context, item + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, trap_at), trap_at) then 0 else instance
 }
-# each module the module imports by a .wasm path (`use "m.wasm"`, extensions/wasm/modules.wap) that the linker holds
-# no instance of yet: that file's module run, its instance kept in the linker under its path; whether each was
-imports_linked(linker: int, context: int, module: int): bool := {
+# each module the module imports by a .wasm name (`use "m.wasm"`, extensions/wasm/modules.wap) that the linker holds
+# no instance of yet: that file's module run, its instance kept in the linker under its name; whether each was
+imports_linked(linker: int, context: int, module: int, importer: int): bool := {
 	imports = host_block(VECTOR_BYTES)
 	wasmtime_module_imports(module, imports)
 	linked = yes
@@ -168,17 +171,18 @@ imports_linked(linker: int, context: int, module: int): bool := {
 		memcpy(pointer_at(NAME_AT), long_at(from + 8), long_at(from))
 		set_word(NAME_AT + long_at(from), 0)
 		held = wasmtime_linker_get(linker, context, from, name, host_block(EXTERN_BYTES)) % BOOL_BYTE != 0
-		if ends_in(pointer_at(NAME_AT), module_suffix()) and not held { linked = instance_defined(linker, context, pointer_at(NAME_AT)) and linked }
+		if ends_in(pointer_at(NAME_AT), module_suffix()) and not held { linked = instance_defined(linker, context, pointer_at(NAME_AT), importer) and linked }
 		i = i + 1
 	}
 	linked
 }
-# the module of the file at `path` run in the context and kept in the linker under its path, when it defines something
+# the module the importer names run in the context and kept in the linker under that name, when it defines something
 # (what another module imports from it; a console line that only did something is run and gone): whether it was
-instance_defined(linker: int, context: int, path: int32): bool := {
-	name = strdup(path)
-	module = module_compiled(path)
-	instance = if module == 0 then 0 else instance_ran(linker, context, module)
+instance_defined(linker: int, context: int, written: int32, importer: int): bool := {
+	name = strdup(written)
+	path = module_path(name, importer)
+	module = if path == 0 then 0 else module_compiled(path)
+	instance = if module == 0 then 0 else instance_ran(linker, context, module, path)
 	instance != 0 and exports_more(module) and not failed(wasmtime_linker_define_instance(linker, context, name, strlen(name), instance), host_block(8))
 }
 # whether the module exports more than every program does, its main and its memory
@@ -188,8 +192,33 @@ exports_more(module: int): bool := {
 	wasmtime_module_exports(module, exports)
 	long_at(exports) > BASE_EXPORTS
 }
-# the module run with the host argument list given, in a store of its own; whether it ran
-module_ran(module: int, count: int, arguments: int): bool := module != 0 and instance_ran(linker_made(), context_made(count, arguments), module) != 0
+# where the module a name names is, as a dynamic linker looks: a bare name (no slash) beside the importing module at
+# the host's path, else beside the compiler; any other name is its path; 0 where neither place has it, said
+module_path(name: int, importer: int): int := {
+	if index(name, SLASH) != 0 { return name }
+	near = beside(importer, name, strlen(name))
+	if access(near, EXISTS) == 0 { return near }
+	far = beside(host_of(pointer_at(COMPILER_AT)), name, strlen(name))
+	if access(far, EXISTS) == 0 then far else missing_said(near, far)
+}
+missing_said(near: int, far: int): int := {
+	said(no_module_at())
+	written(STANDARD_ERROR, near)
+	said(nor_at())
+	written(STANDARD_ERROR, far)
+	said_none(newline())
+}
+# the host's path of the name, `count` bytes at the host's `name`: as it is when it starts at the root, else in the
+# folder of the file at the host's path
+beside(path: int, name: int, count: int): int := {
+	joined = host_block(PATH_BYTES)
+	if host_byte(name) != SLASH { strlcat(joined, strndup(path, rindex(path, SLASH) + 1 - path), PATH_BYTES) }
+	strlcat(joined, strndup(name, count), PATH_BYTES)
+	joined
+}
+# the module of the file at the host's path `importer` run with the host argument list given, in a store of its own;
+# whether it ran
+module_ran(module: int, count: int, arguments: int, importer: int): bool := module != 0 and instance_ran(linker_made(), context_made(count, arguments), module, importer) != 0
 # a new path in the temporary folder at `at`, by the template
 temporary_path(at: int, template: int32) := {
 	set_word(at, 0)
