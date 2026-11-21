@@ -45,6 +45,8 @@ termination, the stage-1 walk). Interface agreed with the lead 2026-11-17.
 - **Modules:** a used module's rules apply to the program that uses it (`use` and `rule` build the language the
   program is written in): the `use` lines are read before shaping, each module is declared after the ones it uses.
 - **Hygiene:** a name a template binds by itself (`t = $a`) is made fresh per use (`t·3`, fact `fresh`).
+  A word a template spells itself (fact `derived`) means the function of its name past a program's variable of that
+  name (analyze/names.wap rule_word_meant): `x == ø` stays missing(x) beside a variable `missing`.
 - **Termination at load:** the heads a template writes must not lead back to the rule's own head, unless each rule
   on that cycle writes less code than it matches and uses no hole twice.
 - **Lowering** passes a declared form a rule built (`(If …)`) with its parts lowered.
