@@ -74,4 +74,14 @@ check "the native wap keeps the compiler's machine code beside it" "$(ls "$stage
 check "a program runs again from its kept machine code, compiled anew when a file it uses changes" "$(cd "$stage" && printf '%s\n' 'word() as text := "hi"' >used.wap && printf '%s\n' 'use "used.wap"' 'print word()' >using.wap && "$native_wap" using.wap && "$native_wap" using.wap && printf '%s\n' 'word() as text := "ho"' >used.wap && "$native_wap" using.wap 2>&1)" "hi
 hi
 ho"
+# texts in a native program, held in its memory (extensions/native/text_bytes.wap): literals, + and interpolation,
+# equality, print, and a text passed to C
+check "a native program's texts" "$(native_ran texts 'strlen(s: text): i64 from '"'"'c'"'"'
+name = "wap"
+greeting = "hello " + name
+print greeting
+print "${greeting} has ${strlen(greeting)} bytes"
+print(if name == "wap" then "same" else "other")')" "hello wap
+hello wap has 9 bytes
+same"
 exit $((failures > 0))
