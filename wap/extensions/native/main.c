@@ -12,6 +12,7 @@
 static void* c_function(const char* name) { return native_function("c", name); }
 #include "glue.c"
 #include "native/native_call.h"
+#include "native/callbacks.h"
 
 // the host words of a module the program runs through wasmtime (the native wap's host_words.wap): wasmtime calls this
 // with an import's record, and the program's exported host_word answers it (glue.awk defines PROGRAM_HOST_WORD for a program exporting one)

@@ -4,6 +4,7 @@
 # to it (0 as NULL), an i64 an int or a pointer as it is, an f64 a double. wasmtime calls main.c's wap_host_callback
 # with the import's record, which calls the driver's export host_word, answered here.
 use "c.wap"
+use "run.wap"
 
 # a wasmtime value: its kind, then its number, in VALUE_BYTES (wasmtime_val_t)
 VALUE_BYTES := 32
@@ -28,6 +29,14 @@ callback_name(): int32 := prim data_address("wap_host_callback")
 c_library(): int32 := prim data_address("c")
 memory_name(): int32 := prim data_address("memory")
 MEMORY_NAME_BYTES := 6
+fired_name(): int32 := prim data_address("c_callback_fired")
+FIRED_NAME_BYTES := 16
+no_callback(): int32 := prim data_address("wap: C called a function back, but the module calling C exports no c_callback_fired\n")
+# a callback's values: its slot and the six integers C gave; its result
+CALLBACK_VALUES := 7
+KIND_I64 := 1
+# the caller of the C call in progress, whose module a callback calls back; 0 outside one
+calling: int = 0
 
 # the C function of that name in the process, else in the library of that name (lib/native/libraries.h); a missing one
 # stops the run naming it
@@ -41,6 +50,7 @@ wasmtime_linker_define_func(linker: int, module: int, module_size: int, name: in
 wasmtime_caller_context(caller: int): int := prim foreign("c", "wasmtime_caller_context", caller)
 wasmtime_caller_export_get(caller: int, name: int32, size: int, item_at: int): int := prim foreign("c", "wasmtime_caller_export_get", caller, name, size, item_at)
 wasmtime_memory_data(context: int, memory_at: int): int := prim foreign("c", "wasmtime_memory_data", context, memory_at)
+free(block: int) := prim foreign("c", "free", block)
 
 # whether an import of the module named at NAME_AT (a C string of the program's memory) is a C function's
 is_c_import(module: int32): bool := strcmp(module, wasi_module()) != 0 and strcmp(module, host_module()) != 0
@@ -79,7 +89,11 @@ host_word_answered(word: int, caller: int, given: int, count: int, results: int,
 		i = i + 1
 	}
 	kind = long_at(word + RESULT_SLOT)
+	global calling
+	outer: int = calling
+	global calling = caller
 	returned = native_call(long_at(word + FUNCTION_SLOT), word + INTEGERS_SLOT, word + FLOATS_SLOT, if kind == KIND_F64 then 1 else 0)
+	global calling = outer
 	if results_count > 0 {
 		set_long_at(results, kind)
 		set_long_at(results + VALUE_OFFSET, returned)
@@ -98,3 +112,37 @@ host_address(host: int): int := {
 word32_at(at: int): int32 := prim i32.load(at)
 # an address of the memory as C's pointer, the address 0 as NULL
 c_pointer(memory: int, address: int): int := if address == 0 then 0 else memory + address
+# C calling back the function a program handed it (lib/callbacks.warp c_callback; lib/native/callbacks.h, whose
+# trampoline of the slot calls the driver's export c_callback_answered): the export c_callback_fired(slot, a, b, c, d,
+# e, f) of the module whose C call is in progress, its int result C's
+callback_answered(slot: int, a: int, b: int, c: int, d: int, e: int, f: int): int := {
+	global calling
+	caller: int = calling
+	function = host_block(EXTERN_BYTES)
+	if caller == 0 or wasmtime_caller_export_get(caller, fired_name(), FIRED_NAME_BYTES, function) % BOOL_BYTE == 0 {
+		said(no_callback())
+		exit(FAILED)
+	}
+	values = host_block(VALUE_BYTES * CALLBACK_VALUES)
+	result = host_block(VALUE_BYTES)
+	trap_at = host_block(8)
+	integer_set(values, 0, slot)
+	integer_set(values, 1, a)
+	integer_set(values, 2, b)
+	integer_set(values, 3, c)
+	integer_set(values, 4, d)
+	integer_set(values, 5, e)
+	integer_set(values, 6, f)
+	if failed(wasmtime_func_call(wasmtime_caller_context(caller), function + VALUE_OFFSET, values, CALLBACK_VALUES, result, 1, trap_at), trap_at) { exit(FAILED) }
+	answer = long_at(result + VALUE_OFFSET)
+	free(function)
+	free(values)
+	free(result)
+	free(trap_at)
+	answer
+}
+# the wasmtime value at `at` among those from `values` an i64 of n
+integer_set(values: int, at: int, n: int) := {
+	set_long_at(values + VALUE_BYTES * at, KIND_I64)
+	set_long_at(values + VALUE_BYTES * at + VALUE_OFFSET, n)
+}

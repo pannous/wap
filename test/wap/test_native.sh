@@ -74,4 +74,28 @@ check "the native wap keeps the compiler's machine code beside it" "$(ls "$stage
 check "a program runs again from its kept machine code, compiled anew when a file it uses changes" "$(cd "$stage" && printf '%s\n' 'word() as text := "hi"' >used.wap && printf '%s\n' 'use "used.wap"' 'print word()' >using.wap && "$native_wap" using.wap && "$native_wap" using.wap && printf '%s\n' 'word() as text := "ho"' >used.wap && "$native_wap" using.wap 2>&1)" "hi
 hi
 ho"
+# C calling back a function of the program run (lib/native/callbacks.h, extensions/native/host_words.wap): qsort
+# compares by the program's c_callback_fired
+cat >"$stage/sorted.wap" <<'PROGRAM'
+qsort(base: int32, count: int, size: int, compare: int) := prim foreign("c", "qsort", base, count, size, compare)
+memcpy(destination: int32, source: int, count: int): int := prim foreign("c", "memcpy", destination, source, count)
+c_callback_pointer(slot: int): int := prim foreign("c", "c_callback_pointer", slot)
+address(at: int): int32 := prim i32.wrap_i64(at)
+set_word(at: int, w: int) := prim i32.store(at, w)
+word(at: int): int := prim i32.load(at)
+ARRAY_AT := 2048
+SCRATCH_AT := 3072
+# C's compare of the two ints it points at
+c_callback_fired(slot: int, a: int, b: int, c: int, d: int, e: int, f: int): int := {
+	memcpy(address(SCRATCH_AT), a, 4)
+	memcpy(address(SCRATCH_AT + 4), b, 4)
+	word(SCRATCH_AT) - word(SCRATCH_AT + 4)
+}
+set_word(ARRAY_AT, 3)
+set_word(ARRAY_AT + 4, 1)
+set_word(ARRAY_AT + 8, 2)
+qsort(address(ARRAY_AT), 3, 4, c_callback_pointer(0))
+print "${word(ARRAY_AT)} ${word(ARRAY_AT + 4)} ${word(ARRAY_AT + 8)}"
+PROGRAM
+check "C calls back a function of the program the native wap runs" "$(cd "$stage" && "$native_wap" sorted.wap 2>&1)" "1 2 3"
 exit $((failures > 0))
