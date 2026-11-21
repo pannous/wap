@@ -9,13 +9,13 @@ WAP_LIBRARY=lib
 wap_beside_copied() {
 	(cd "$1/wap" && cp -R "${WAP_BESIDE[@]}" "$2/") && cp -R "$1/$WAP_LIBRARY" "$2/"
 }
-# wap_beside_mirrored <tree> <folder>: the folder holds exactly that beside its compiler, wap.wasm and its machine code
-# wap-*.cwasm: copied, whatever the tree no longer has removed, one line naming it
+# wap_beside_mirrored <tree> <folder>: the folder holds exactly that beside its compiler, wap.wasm and the machine code
+# *.cwasm (refresh-seed's to remove): copied, whatever the tree no longer has removed, one line naming it
 wap_beside_mirrored() {
 	local kept=" wap.wasm ${WAP_BESIDE[*]} $WAP_LIBRARY " entry removed="" synced
 	for entry in "$2"/*; do
 		case "$kept" in *" ${entry##*/} "*) continue ;; esac
-		case "${entry##*/}" in wap-*.cwasm) continue ;; esac
+		case "${entry##*/}" in *.cwasm) continue ;; esac
 		rm -rf "$entry" && removed="$removed ${entry##*/}"
 	done
 	synced=$(cd "$1/wap" && rsync -a --delete -i "${WAP_BESIDE[@]}" "$2/" && cd .. && rsync -a --delete -i "$WAP_LIBRARY" "$2/") || return 1
