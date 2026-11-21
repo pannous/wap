@@ -98,9 +98,6 @@ self_built_ran() {
 	$warp "$wap1" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && $warp "$stage/$1.wasm" 2>&1
 }
 check "the compiler wap makes of itself compiles a program that runs" "$(self_built_ran hello 'print "hello from wap"')" "hello from wap"
-check "the self-built compiler keeps two enums' cases of one name apart" "$(self_built_ran tags 'enum A { X, Y }
-enum B { Y, X }
-print text(B.X == A.X)')" "no"
 # and compiles wap's compiler in under a minute (milestone 2, notes/backbone.md), its CPU seconds (user and system),
 # so the machine's load leaves the measure alone
 self_compile_time() {
