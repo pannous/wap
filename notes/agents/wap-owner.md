@@ -131,7 +131,8 @@ wap/
       records.wap             class, enum → Record
       types.wap               list of int, x as text → bracketed types and conversions
 
-  extensions/                 rule files no compiler needs, one per topic, loaded like modules: no hook table
+  extensions/                 what no compiler needs: rule files loaded like modules, and code compiler.wap hands in
+                              through a Language field (readers: a file ending → its reader)
                               (units 3km, durations 2 weeks, inline html … as the forms arrive)
     native/                   a wap program built to a native executable (build.sh: wasm2c, cc, glue.awk, main.c)
       c.wap                   libc's and wasmtime's C functions, foreign primitives of the module c
@@ -140,7 +141,8 @@ wap/
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
     wasm/                     a compiled wap module used as its source
-      modules.wap             use "m.wasm": each function m exports declared from its header-line name
+      modules.wap             use "m.wasm": its functions declared from their export names, the rest (rules, enums,
+                              classes, generic bodies) read from its wap section as source (Language.readers[".wasm"])
 
 lib/                          the library, warp's own, shared and used as it is
 test/wap/                     wap's outcome tests: a program compiled by wap, run, its output checked
@@ -152,9 +154,11 @@ What each file may know:
 - **core/rules/** knows patterns and templates, no particular form: every form it handles comes from a rule file.
 - **core/analyze/** reads, never rewrites.
 - **core/emit/** reads only the kernel; `wasm.wap` reads not even that.
-- **types/sugar/** and **extensions/** hold rules only; a rule that needs code calls a function in lib/.
+- **core/** uses no file of extensions/ (guardrail core-no-extension); it walks Language's fields, compiler.wap fills them.
+- **types/sugar/** holds rules only; a rule that needs code calls a function in lib/.
 
-Which of the two a rule file belongs in is measured, not argued: wap compiles itself with extensions/ switched off.
+Which of the two a rule file belongs in is measured, not argued: wap compiles itself with extensions/ switched off:
+no extension rule file loaded and Language.readers empty.
 A rule file is in types/sugar/ exactly when wap's own source uses its spelling; when that changes, the file moves.
 
 ## Owners
