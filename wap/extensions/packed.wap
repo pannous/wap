@@ -1,0 +1,198 @@
+# Packed notation: a Node as compact bytes and back, so a compiler loads its rule tables and signatures without
+# reading their source again (wap#42, notes/compile_inputs.md). A node is its tag byte, then its parts in order, a
+# subtree written once: every later copy of it is a back reference to the node completed at that place. Numbers are
+# LEB128, a float its bits as one; each text (a Text's value, a Symbol's name, a case's spelling) is written once and
+# referred to by its place after that. Data holds a runtime value no bytes can say: packing one is refused.
+use "../core/emit/wasm.wap"
+
+EMPTY_TAG = 0
+TRUE_TAG = 1
+FALSE_TAG = 2
+INT_TAG = 3
+FLOAT_TAG = 4
+CHAR_TAG = 5
+TEXT_TAG = 6
+SYMBOL_TAG = 7
+ERROR_TAG = 8
+KEY_TAG = 9
+LIST_TAG = 10
+META_TAG = 11
+TYPE_TAG = 12
+COPY_TAG = 13
+# a subtree not written yet
+NOT_DONE = -1
+
+# ── packing ──
+
+# what packing knows of the tree beforehand, its nodes in written order: the subtree each one is (equal subtrees one
+# id) and how many nodes it holds; then what is written: the bytes, each text's place, each subtree's place among the completed ones
+class Packer {
+	subtree: list<int>
+	size: list<int>
+	ids: map<text, int>
+	bytes: list<int>
+	texts: map<text, int>
+	done: list<int>
+	completed: int
+	at: int
+}
+
+# a node as packed bytes: `pack(n)`
+pack(n: Node) as text := {
+	p = Packer{subtree: [], size: [], ids: {}, bytes: [], texts: {}, done: [], completed: 0, at: 0}
+	identified(p, n)
+	p.done = (0 ..< #p.ids).map(id => NOT_DONE)
+	node_packed(p, n)
+	bytes_text(p.bytes)
+}
+
+# a node's subtree id, its children's first: equal subtrees, the same id
+identified(p: Packer, n: Node) as int := {
+	slot = p.subtree.length
+	p.subtree.add(0)
+	p.size.add(0)
+	key = "${tag_of(n)}(${parts_of(n).map(part => identified(p, part)).join(",")}|${leaf_text(n)})"
+	if not p.ids.has(key) { p.ids[key] = #p.ids }
+	p.subtree[slot] = p.ids[key]
+	p.size[slot] = p.subtree.length - slot
+	p.ids[key]
+}
+
+# a node written: its tag and parts, or a reference to the copy completed before
+node_packed(p: Packer, n: Node) := {
+	id = p.subtree[p.at]
+	if p.done[id] != NOT_DONE {
+		p.bytes.add(COPY_TAG)
+		number_packed(p, p.done[id])
+		p.at += p.size[p.at]
+		return
+	}
+	p.at += 1
+	p.bytes.add(tag_of(n))
+	match n {
+		Meta(node, data) => ø
+		Number(value) => bytes_added(p, signed(if value is int then value else float_bits(value)))
+		Char(value) => number_packed(p, ord(value))
+		Text(value) => text_packed(p, value)
+		Symbol(name) => text_packed(p, name)
+		Key(left, op, right) => text_packed(p, op as text)
+		List(items, bracket, separator) => { number_packed(p, items.length); text_packed(p, text(bracket)); text_packed(p, text(separator)) }
+		_ => ø
+	}
+	for part in parts_of(n) { node_packed(p, part) }
+	p.done[id] = p.completed
+	p.completed += 1
+}
+
+number_packed(p: Packer, n: int) := bytes_added(p, unsigned(n))
+bytes_added(p: Packer, more: list<int>) := { for b in more { p.bytes.add(b) } }
+
+# a text by its place, a new one by its length and bytes after the place it takes
+text_packed(p: Packer, t: text) := {
+	if p.texts.has(t) { return number_packed(p, p.texts[t]) }
+	p.texts[t] = #p.texts
+	number_packed(p, p.texts[t])
+	number_packed(p, byte_count(t))
+	bytes_added(p, bytes(t))
+}
+
+tag_of(n: Node) as int := match n {
+	Meta(node, data) => META_TAG
+	Empty => EMPTY_TAG
+	True => TRUE_TAG
+	False => FALSE_TAG
+	Number(value) => if value is int then INT_TAG else FLOAT_TAG
+	Char(value) => CHAR_TAG
+	Text(value) => TEXT_TAG
+	Symbol(name) => SYMBOL_TAG
+	Error(node) => ERROR_TAG
+	Key(left, op, right) => KEY_TAG
+	List(items, bracket, separator) => LIST_TAG
+	Type(name, body) => TYPE_TAG
+	Data(value) => raise "packed: a Data node holds a runtime value, which bytes cannot say"
+}
+
+# the nodes a node holds, in written order (a pattern sees through Meta, so Meta comes first in each match here)
+parts_of(n: Node) as list<Node> := match n {
+	Meta(node, data) => [node, data]
+	Error(node) => [node]
+	Key(left, op, right) => [left, right]
+	List(items, bracket, separator) => items
+	Type(name, body) => [name, body]
+	_ => []
+}
+
+# what tells a node apart beside its tag and parts
+leaf_text(n: Node) as text := match n {
+	Meta(node, data) => ""
+	Number(value) => number_text(value)
+	Char(value) => text(value)
+	Text(value) => value
+	Symbol(name) => name
+	Key(left, op, right) => op as text
+	List(items, bracket, separator) => "${bracket} ${separator}"
+	_ => ""
+}
+
+# ── unpacking ──
+
+# the bytes read so far, the texts and completed nodes met
+class Unpacker { blob: text; at: int; texts: list<text>; done: list<Node> }
+
+# packed bytes as their node: `unpack(pack(n)) == n`
+unpack(blob: text) as Node := node_unpacked(Unpacker{blob: blob, at: 0, texts: [], done: []})
+
+node_unpacked(u: Unpacker) as Node := {
+	tag = byte_read(u)
+	if tag == COPY_TAG { return u.done[number_unpacked(u, no)] }
+	n = node_of(u, tag)
+	u.done.add(n)
+	n
+}
+
+node_of(u: Unpacker, tag: int) as Node := {
+	if tag == EMPTY_TAG { return Empty }
+	if tag == TRUE_TAG { return True }
+	if tag == FALSE_TAG { return False }
+	if tag == INT_TAG { return Number(number_unpacked(u, yes)) }
+	if tag == FLOAT_TAG { return Number(bits_float(number_unpacked(u, yes))) }
+	if tag == CHAR_TAG { return Char(char(number_unpacked(u, no))) }
+	if tag == TEXT_TAG { return Text(text_unpacked(u)) }
+	if tag == SYMBOL_TAG { return Symbol(text_unpacked(u)) }
+	if tag == ERROR_TAG { return Error(node_unpacked(u)) }
+	if tag == KEY_TAG { op = text_unpacked(u) as Op; left = node_unpacked(u); return Key(left, op, node_unpacked(u)) }
+	if tag == LIST_TAG {
+		count = number_unpacked(u, no)
+		bracket = text_unpacked(u) as Bracket
+		separator = text_unpacked(u) as Separator
+		return List((0 ..< count).map(i => node_unpacked(u)), bracket, separator)
+	}
+	if tag == META_TAG { node = node_unpacked(u); return Meta(node, node_unpacked(u)) }
+	if tag == TYPE_TAG { name = node_unpacked(u); return Type(name, node_unpacked(u)) }
+	raise "packed: no node has the tag ${tag} at byte ${u.at - 1}"
+}
+
+byte_read(u: Unpacker) as int := {
+	if u.at >= byte_count(u.blob) { raise "packed: the bytes end inside a node" }
+	u.at += 1
+	byte_at(u.blob, u.at - 1)
+}
+
+# a LEB128 number; a signed one's last byte has its sign in bit 0x40
+number_unpacked(u: Unpacker, signed: bool) as int := {
+	n = 0
+	scale = 1
+	b = byte_read(u)
+	while b >= 0x80 { n += (b - 0x80) * scale; scale *= 0x80; b = byte_read(u) }
+	if signed and b >= 0x40 then n + (b - 0x80) * scale else n + b * scale
+}
+
+text_unpacked(u: Unpacker) as text := {
+	place = number_unpacked(u, no)
+	if place < u.texts.length { return u.texts[place] }
+	length = number_unpacked(u, no)
+	t = bytes_between(u.blob, u.at, u.at + length)
+	u.at += length
+	u.texts.add(t)
+	t
+}
