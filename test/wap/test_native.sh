@@ -84,4 +84,18 @@ print "${greeting} has ${strlen(greeting)} bytes"
 print(if name == "wap" then "same" else "other")')" "hello wap
 hello wap has 9 bytes
 same"
+# lists in a native program, held in its memory (extensions/native/list_items.wap): literals, #, items, add, a loop,
+# lists of texts and of ints passed between functions
+check "a native program's lists" "$(native_ran lists 'total(xs: list<int>) as int := {
+	sum = 0
+	for x in xs { sum = sum + x }
+	sum
+}
+names = ["ada", "bo"]
+names.add("cy")
+numbers = [3, 4]
+for at in 1 to 10 { numbers.add(at) }
+print "${#names} names, the last ${names#3}"
+print "${#numbers} numbers, total ${total(numbers)}, the third ${numbers#3}"')" "3 names, the last cy
+12 numbers, total 62, the third 1"
 exit $((failures > 0))

@@ -29,7 +29,7 @@ source "$here/../../../scripts/lib/wap-beside.sh"
 mkdir -p "$building/compiler"
 (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$building/compiler/") && cp "$compiler" "$building/compiler/wap.wasm"
 # (a library the compiler compiled once, types/types.wasm, is the GC one: a native build's library is read anew)
-cp "$here/text_bytes.wap" "$building/compiler/types/text_bytes.wap" && rm -f "$building/compiler/types/types.wasm"
+cp "$here/text_bytes.wap" "$building/compiler/types/text_bytes.wap" && cp "$here/list_items.wap" "$building/compiler/types/list_items.wap" && rm -f "$building/compiler/types/types.wasm"
 "$WARP" --no-window "$building/compiler/wap.wasm" native "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
 awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"
