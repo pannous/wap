@@ -71,7 +71,7 @@ class Deferred { definition: Signature; types: list<Node>; at: Node }
 class TypingState {
 	definitions: list<Signature> = []
 	# each definition as it is now, by its record's key: shaped, bound, lifted (define_of)
-	defines: map<text, Node> = {}
+	defines: map<text, Define> = {}
 	# the definitions' places by name, for definitions_named, and by the key of the place each is written at, for
 	# definition_keyed (core/analyze/calls.wap)
 	definition_names: NameIndex = NameIndex()
@@ -174,7 +174,7 @@ typed_among(program: Block, library: list, rules: KindRules, library_scope: Scop
 	s.kind_rules = rules
 	s.library_scope = library_scope
 	s.ids = definers_of(program)
-	defines = library.filter(statement => statement is Define)
+	defines = defines_in(library)
 	# the records declare wrote, then those of the definitions lowering wrote beside them
 	s.definitions = signatures.filter(signature => is_function(signature))
 	definitions_held(defines, s)
@@ -226,7 +226,7 @@ form_typed(n: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := ma
 	Return(value) => return_typed(n, value, s, f)
 	Break() => jumping(n)
 	Continue() => jumping(n)
-	Record(name, fields, variants) => s.records.items.find(record => place_key(record_declared(record)) == place_key(name)) ?? n
+	Record(name, fields, variants) => s.records.items.find(record => place_key(record_declared(record)) == place_key(name)) ?? refused(n, "typing holds no record declared here: the pipeline lost it")
 	Key(head, Op.None, List(items, Bracket.Curly, separator)) => instance_typed(n, head, items, separator, s, f)
 	Get(subject, key) => part_got(n, typed_form(subject, s, f, ø), key, s, f, expected)
 	List(items, Bracket.Square, separator) => list_typed(n, items, separator, s, f, expected)
@@ -251,7 +251,7 @@ with_type_of(n: Node, type: Node?) as Node := if type == ø then n else with_fac
 # whole program is typed (instances_placed); one whose parameters all have their types is typed even when nothing
 # calls it, unless it is TYPED_WHEN_CALLED.
 block_typed(n: Node, written: list, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
-	definitions_held(written.filter(statement => statement is Define), s)
+	definitions_held(defines_in(written), s)
 	records_added(written, s)
 	# each definition as the typing stage keeps it, its written types' shapes known once all are: a pattern's builder
 	# may come after a definition naming its type
@@ -290,7 +290,7 @@ typed_alone(statements: list, s: TypingState) := for statement in statements {
 held_function(definition: Node, s: TypingState) as Signature := definition_keyed(function_key_of(definition), s) ?? function_of(definition)
 # a definition's Define as it is now, found by its record's key; a record whose Define typing never saw is the
 # pipeline's bug, never skipped
-define_of(definition: Signature, s: TypingState) as Node := if s.defines.has(definition.key) then s.defines[definition.key] else refused(Text(definition.key), "typing holds no definition for this record: the pipeline lost it")
+define_of(definition: Signature, s: TypingState) as Define := if s.defines.has(definition.key) then s.defines[definition.key] else refused(Text(definition.key), "typing holds no definition for this record: the pipeline lost it")
 # the records among statements added to those typing knows, their fields' written types shaped once all are known, as
 # a definition's are: a field of a pattern's type holds a Node
 records_added(statements: list, s: TypingState) := {
@@ -301,16 +301,18 @@ record_shaped(record: Node, s: TypingState) as Node := match record {
 	Record(name, fields, variants) => refitted(Record(name, with_items(fields, items_of(fields).map(field => shaped_key(field, s))), variants), record)
 	_ => record
 }
+# the definitions among statements
+defines_in(statements: list) as list<Define> := statements.flat_map(statement => if statement is Define then [statement] else [])
 # Defines typing now holds, each by its record's key unless it holds one already: the record declare wrote, else one
 # made of it; a block typed again, a typed rule's code around it, adds only what typing does not hold yet
-definitions_held(defines: list, s: TypingState) := for define in defines {
+definitions_held(defines: list<Define>, s: TypingState) := for define in defines {
 	key = function_key_of(define)
 	if not s.defines.has(key) { s.defines[key] = define }
 	# a record not reached yet, so the library's definitions are bound only once typing reaches them
 	if items_named(s.definition_keys, s.definitions, key, definition => definition.key) is empty { s.definitions += [function_of(define)] }
 }
 # a function the typing stage writes itself, held with the written ones
-function_added(definition: Node, s: TypingState) as Signature := {
+function_added(definition: Define, s: TypingState) as Signature := {
 	definitions_held([definition], s)
 	definition_keyed(function_key_of(definition), s)!
 }
