@@ -15,6 +15,8 @@
 #                    (notes/decisions.md wap-boxed-any-debt); a place typing infers as any is ratchet_census.sh's
 #   emit-boxes       only typing decides what is boxed (types.wap writes `prim box`): no struct.new of a box in core/emit
 #                    outside that primitive; never allowlisted
+#   get-reads-places a call has one kernel spelling: typing writes `f(x)` for a dot read naming a function, so the
+#                    emitter's Get arm reads a place and calls nothing; never allowlisted
 #   one-owner        every wap file and test/wap script falls under exactly one row of notes/agents/wap-owner.md "Owners": a path or
 #                    folder in its files column (wap/'s own paths written without it), or a row's "<folder> … no other
 #                    row names"; a clause in words, a role row's "any file", owns nothing
@@ -26,9 +28,9 @@
 # Today's exceptions are in guardrails_allowed.txt, `<rule> <key> <count>`, key a function for one-fit and a file for
 # the others. The list only shrinks: a count above it fails naming file:line and the rule, a count below it fails
 # until the line is lowered or dropped. Run it with bash test/wap/test_guardrails.sh; it compiles nothing
-RULES="one-fit emit-infers-type dynamic-prim one-ranking long-file repeated-code same-shape boxed-any emit-boxes one-owner in-tree core-no-extension kernel-emitted"
+RULES="one-fit emit-infers-type dynamic-prim one-ranking long-file repeated-code same-shape boxed-any emit-boxes get-reads-places one-owner in-tree core-no-extension kernel-emitted"
 # the rules no allowlist line excuses: a spot of theirs is a failure at once
-UNLISTED="emit-boxes in-tree core-no-extension kernel-emitted"
+UNLISTED="emit-boxes get-reads-places in-tree core-no-extension kernel-emitted"
 OWNERS=notes/agents/wap-owner.md
 KERNEL=wap/kernel/forms.wap
 EMITTER=wap/core/emit/emitter.wap
@@ -95,6 +97,9 @@ boxed_any() {
 }
 emit_boxes() {
 	grep -nE 'STRUCT_NEW.*\bbox|\bbox.*STRUCT_NEW' wap/core/emit/*.wap | grep -v 'name == BOXED_VALUE' | filed emit-boxes
+}
+get_reads_places() {
+	grep -nE '^[[:space:]]+Get\(.*(DEFINED_AT|call_code)' wap/core/emit/*.wap | filed get-reads-places
 }
 # the owner rows' files, `<row> <path>` a line, a folder ending in /, and `<row> * <folder>` for a catch-all
 owned_paths() {
