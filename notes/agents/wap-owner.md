@@ -130,6 +130,7 @@ wap/
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
     host.wap                  the host machinery the file and command-line words use, hidden from programs
+    c.wap                     a C function's texts: passed as NUL-terminated copies, given back from C's pointer
 
   sugar/                      the rules of the surface spellings wap's own source uses, one file per topic
     calls.wap                 x.f(y), x.f → calls and Get
@@ -146,6 +147,9 @@ wap/
   extensions/                 what no compiler needs: rule files loaded like modules, and code compiler.wap hands in
                               through a Language field (readers: a file ending → its reader)
                               (units 3km, durations 2 weeks, inline html … as the forms arrive)
+    c/                        C functions as lib writes them, `strlen(s: text): i64 from 'c'`, run by the native warp
+      foreign.wap             the rules that lower a foreign line to a function calling the library's import
+      functions.wap           the warp.c_functions section that describes each C import for the native warp
     native/                   a wap program built to a native executable (build.sh: wasm2c, cc, glue.awk, main.c)
       c.wap                   libc's and wasmtime's C functions, foreign primitives of the module c
       compiler.wap            wap.wasm found beside the executable, its machine code kept beside it by its hash
@@ -196,7 +200,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 | self-build: wap compiled by wap, file by file | warp-wap-operators | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp; edits any file to write its types and `use` lines |
 | front: read, operators, rules, lowering | warp-wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap |
 | types: declare, bind, type | warp-wap-binding | core/analyze/, core/paths.wap |
-| back: emitter, runtime | warp-wap-emitter | core/emit/, extensions/wasm/; test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
+| back: emitter, runtime | warp-wap-emitter | core/emit/, extensions/wasm/, extensions/c/; test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
 | native: the wap command, programs built to executables | warp-host-fixer | extensions/native/; test/wap/test_native.sh |
 | simplification: wap smaller by its Node count (Meta excluded) | warp-simplifier | any file, by review of its stage owner |
 
