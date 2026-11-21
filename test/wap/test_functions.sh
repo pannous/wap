@@ -49,4 +49,15 @@ operator ⇔(a: bool, b: bool) := a == b
 infix operator times := left * right
 prefix operator ⁻ := it * -1
 print(text(3 divides 12) + " " + text((1 > 0) ⇔ (2 > 0)) + " " + text(3 times 4) + " " + text(⁻5))')" "yes yes 12 -5"
+# a library function written as one wasm instruction, as lib's bits.warp writes them
+check "functions written as wasm's bit instructions" "$(ran bits 'ones(n: int): int := prim i64.popcnt(n)
+leading(n: int): int := prim i64.clz(n)
+trailing(n: int): int := prim i64.ctz(n)
+both(a: int, b: int): int := prim i64.and(a, b)
+either(a: int, b: int): int := prim i64.or(a, b)
+differ(a: int, b: int): int := prim i64.xor(a, b)
+shifted(a: int, b: int): int := prim i64.shr_u(a, b)
+left(a: int, b: int): int := prim i64.rotl(a, b)
+right(a: int, b: int): int := prim i64.rotr(a, b)
+print([ones(255), leading(1), trailing(8), both(12, 10), either(12, 10), differ(12, 10), shifted(-1, 60), left(1, 65), right(1, 1)].map(n => text(n)).join(" "))')" "8 63 3 8 14 6 15 2 -9223372036854775808"
 exit $((failures > 0))
