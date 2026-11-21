@@ -37,6 +37,9 @@ format_check $'infix operator divides(d, n) := n % d == 0\n3 divides (2 * 6)' $'
 format_check 'suffix operator ³ := it * it * it' 'suffix operator ³ := it * it * it'
 # a precedence declaration places its operator and is no code: `%` below `+` reads 1 + 7 % 4 as (1 + 7) % 4
 check "a placed operator binds by its place" "$(ran placed $'operator % has precedence below +\nprint(text(1 + 7 % 4))')" "0"
+# a suffix operator is the function of its operand `it` (wiki/keyword.md, wiki/operator.md)
+check "a suffix operator doubles" "$(ran doubled $'suffix operator ‼ := it*2\nprint(text(3‼))')" "6"
+check "a suffix operator cubes" "$(ran cubed $'suffix operator ³ := it * it * it\nprint(text(2³))')" "8"
 # an operator with no operand after it is a name
 format_check 'total := fold +' 'total := fold +'
 # a function's result type prints after `as`, the canonical word (wiki/function.md); a typed name keeps its `:`
