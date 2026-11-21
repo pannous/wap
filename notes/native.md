@@ -12,12 +12,18 @@ warp-host-fixer; this file is the inventory.
 - C calling back a function of the program (lib/native/callbacks.h trampolines, host_words.wap callback_answered):
   the export c_callback_fired(slot, a, b, c, d, e, f) of the module whose C call is in progress, during that call;
   its int result C's. test/wap/test_native.sh (qsort).
+- Texts in a native program (build.sh): the compiler's `native` option lays a text out as the address of its count and
+  bytes in the memory, and the build reads extensions/native/text_bytes.wap in the place of types/text_bytes.wap.
+  Its memory is never freed: fine for the driver and short programs, not for a long-running native one. When the
+  memory cannot grow further (wasm's 4 GiB, or the host's limit), memory.grow fails (core/emit/host.wap memory_grown
+  drops its -1) and the first store past the end traps, "Out-of-bounds access in linear memory": the run stops loudly,
+  nothing is overwritten; the message does not yet say the texts ran out of memory. Lists, maps,
+  `any` and raise stay GC values a native program cannot use yet.
 
 ## Not yet
-- Texts in a native program itself (the driver's own code): wasm2c takes no GC type (next slice, warp-wap-operators).
 - A lib module's function as the callback C calls: lib/callbacks.warp's `export c_callback_fired` is no wap form, and a
   used module's functions are not exported (SDL, sqlite, audio need it).
-- C structs by value (lib/native/foreign.c native_call_struct); f32 parameters.
+- C structs by value larger than a register, and all-float ones (HFA: raylib's Vector2); out-pointers are answered (native-imports).
 - The host words of warp's lib/host/native_host (3400 lines), needed once lib's window, sound, gpu and webview
   modules are wap: window (host_window_layer, host_pixels_shown, host_shader_painted, host_shader_shown,
   host_text_coverage, host_value, host_value_set), sound and MIDI (host_sound_played, host_sound_file_decoded,

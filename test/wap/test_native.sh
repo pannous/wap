@@ -100,4 +100,14 @@ qsort(address(ARRAY_AT), 3, 4, c_callback_pointer(0))
 print "${word(ARRAY_AT)} ${word(ARRAY_AT + 4)} ${word(ARRAY_AT + 8)}"
 PROGRAM
 check "C calls back a function of the program the native wap runs" "$(cd "$stage" && "$native_wap" sorted.wap 2>&1)" "1 2 3"
+# texts in a native program, held in its memory (extensions/native/text_bytes.wap): literals, + and interpolation,
+# equality, print, and a text passed to C
+check "a native program's texts" "$(native_ran texts 'strlen(s: text): i64 from '"'"'c'"'"'
+name = "wap"
+greeting = "hello " + name
+print greeting
+print "${greeting} has ${strlen(greeting)} bytes"
+print(if name == "wap" then "same" else "other")')" "hello wap
+hello wap has 9 bytes
+same"
 exit $((failures > 0))
