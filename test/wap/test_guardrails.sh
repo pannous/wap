@@ -26,10 +26,12 @@
 #                    (Arm in Case): the file holds the emitter's input and nothing else; never allowlisted
 #   in-tree          every wap file has its line in notes/agents/wap-owner.md's tree, the block of "## The tree": a file `<name>.wap`
 #                    two spaces deeper than its folder's line `<folder>/`; never allowlisted
+#   copied-growth    a list or text is grown in place or built once, never copied whole for each part: no `xs += [x]`,
+#                    `xs = xs + [x]` or `t = t + "…"` (xs.add(x); types/texts.wap concatenated)
 # Today's exceptions are in guardrails_allowed.txt, `<rule> <key> <count>`, key a function for one-fit and a file for
 # the others. The list only shrinks: a count above it fails naming file:line and the rule, a count below it fails
 # until the line is lowered or dropped. Run it with bash test/wap/test_guardrails.sh; it compiles nothing
-RULES="one-fit emit-infers-type dynamic-prim one-ranking long-file repeated-code same-shape boxed-any emit-boxes get-reads-places one-owner in-tree core-no-extension kernel-emitted"
+RULES="one-fit emit-infers-type dynamic-prim one-ranking long-file repeated-code same-shape boxed-any emit-boxes get-reads-places one-owner in-tree core-no-extension kernel-emitted copied-growth"
 # the rules no allowlist line excuses: a spot of theirs is a failure at once
 UNLISTED="emit-boxes get-reads-places in-tree core-no-extension kernel-emitted"
 OWNERS=notes/agents/wap-owner.md
@@ -143,6 +145,9 @@ kernel_emitted() {
 		grep -qE "^[[:space:]]+$name\(" $EMITTER || grep '^pattern ' $KERNEL | grep -v "^pattern $name " | grep -qw "$name" ||
 			printf 'kernel-emitted\t%s\t%s:%s\tno arm in %s\n' "$name" $KERNEL "$line" $EMITTER
 	done
+}
+copied_growth() {
+	perl -ne 'print "$ARGV:$.:$_" if /\b([a-z_.]+) \+= \[|\b([a-z_.]+) = \2 \+ \[|\b([a-z_]+) = \3 \+ .*("|\btext\(|\bshow\()/; close ARGV if eof' $wap_files | filed copied-growth
 }
 in_tree() {
 	printf '%s\n' $wap_files | grep -vxF -f <(tree_paths) | awk '{ printf "in-tree\t%s\t%s:1\tno line in the tree of notes/agents/wap-owner.md\n", $0, $0 }'
