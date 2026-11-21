@@ -24,7 +24,7 @@ compiler_built() {
 }
 folder_built() {
 	local building=$1.$$ built=$1.$$/wap0.wasm n
-	mkdir -p "$building" && (cd "$tree/wap" && cp -R "${WAP_BESIDE[@]}" "$building/") || return 1
+	mkdir -p "$building" && wap_beside_copied "$tree" "$building" || return 1
 	$warp "$seed" "$source_compiler" "$built" 2>&1 || return 1
 	for ((n = 1; n <= $2; n++)); do
 		$warp "$built" "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
@@ -36,10 +36,10 @@ folder_built() {
 }
 # the compiler under test: the module a test script is given as its first arguments, --compiler <module>
 # (test/wap/run.sh --stage passes one wap built of itself), else wap1, this tree's source compiled by the seed, built
-# once for each state of wap/ and shared by every script
+# once for each state of wap/ and lib/ and shared by every script
 if [ "$1" = --compiler ]; then compiler="$2"; shift 2
 else
-	sources=$(cd "$tree" && { cat "$seed"; find wap -name '*.wap' | sort | xargs cat; } | shasum | cut -c1-16)
+	sources=$(cd "$tree" && { cat "$seed"; find wap "$WAP_LIBRARY" \( -name '*.wap' -o -name '*.warp' \) | sort | xargs cat; } | shasum | cut -c1-16)
 	compiler=$(compiler_built "$data/wap1-$sources" 1) || { echo "wap1: $compiler" >&2; exit 1; }
 fi
 # each test script its own folder in the tree's data/ (never the system's temporary folder)
