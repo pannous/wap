@@ -170,4 +170,7 @@ say("by name")')" "loaded
 by name"
 check "use name brings in a standard module from the library beside the compiler" "$(ran use_library 'use ordering
 print(text(natural_compare("a2", "a10") < 0))')" "yes"
+# a folder right in the library holds modules too, lib/native's C bindings among them; import is use
+check "import name brings in a module from a folder of the library" "$(ran use_library_folder 'import z
+print(text(compressBound(100)))')" "113"
 exit $((failures > 0))
