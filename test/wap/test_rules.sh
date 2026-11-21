@@ -25,4 +25,8 @@ klass Q { x: int; g := "q" }
 print g()')" "fields
 fields
 q"
+# a comprehension (wiki/keyword.md for … if)
+check "a comprehension lists a value for each item its condition keeps" "$(ran comprehension 'print(text([x * 2 for x in 1..4 if x > 1]))
+print(text([#w for w in ["a", "bb"]]))')" "[4, 6]
+[1, 2]"
 exit $((failures > 0))
