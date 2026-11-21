@@ -29,6 +29,10 @@ https://github.com/pannous/wap
   <!-- DONE (card move-sugar, b330a36) move types/sugar to sugar/  -->
 - wap/core and wap/kernel are semi-frozen: every change there goes to warp-interviewer first. A new feature goes
   into wap/extensions/ (first case: the native binary).
+- A library feature starts as idiomatic wap (functions, classes, enums, block parameters, operator overloads). A
+  compiler change it asks for (core, kernel or extensions/) goes to warp-interviewer with: the idiomatic attempt and
+  where it fails, the general mechanism, two uses outside that library, the core line count; without them it is
+  refused. A library file that needs odd syntax is rewritten in plain wap, never the compiler widened for it.
 
 ## How it compiles (notes/backbone.md "Stage languages")
 read = parse → shape rules (stage 1) → declare → declaration rules (stage 2) → lower → bind → type, with the kind rules
