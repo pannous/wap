@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wap's shape rules (notes/first_principles.md "Holes"; notes/kernel.md: `unless c { b }` is a rule writing If): a
+# wap's shape rules (notes/first_principles.md "Holes"; wap/kernel/forms.wap: `unless c { b }` is a rule writing If): a
 # spelling written as other code by a rule, from types/sugar or from the program itself, compiled and run.
 # The rest is test/test_rules.wap; these rules' templates write the prints themselves, and a template's own names are
 # its own (a template cannot add to a list of the program's). Run it with bash test/wap/test_rules.sh
