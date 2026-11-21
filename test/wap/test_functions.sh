@@ -43,4 +43,10 @@ bump() := {
 }
 bump()
 print(text(n))')" "2"
+# a program's operators (wiki/operator.md): with parameters, without them (left and right; it), `operator` alone infix
+check "a program's operator is the function of its name" "$(ran program_operators 'infix operator divides(d: int, n: int) := n % d == 0
+operator ⇔(a: bool, b: bool) := a == b
+infix operator times := left * right
+prefix operator ⁻ := it * -1
+print(text(3 divides 12) + " " + text((1 > 0) ⇔ (2 > 0)) + " " + text(3 times 4) + " " + text(⁻5))')" "yes yes 12 -5"
 exit $((failures > 0))

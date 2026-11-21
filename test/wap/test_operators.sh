@@ -33,6 +33,13 @@ format_check '1 + (2 * 3)' '1 + 2 * 3'
 format_check $'infix operator ⊕(a, b) := a * b\n1 ⊕ (2 * 3)\n(1 ⊕ 2) * 3' $'infix operator ⊕(a, b) := a * b\n1 ⊕ 2 * 3\n(1 ⊕ 2) * 3'
 format_check $'infix operator ⊗ := left * right\noperator ⊗ has precedence above *\n2 * (3 ⊗ 4)' $'infix operator ⊗ := left * right\noperator ⊗ has precedence above *\n2 * 3 ⊗ 4'
 format_check $'infix operator divides(d, n) := n % d == 0\n3 divides (2 * 6)' $'infix operator divides(d, n) := n % d == 0\n3 divides 2 * 6'
+# the declared spelling is a name in its declaration, not the table's operator: ³ declares, never applies to `operator`
+format_check 'suffix operator ³ := it * it * it' 'suffix operator ³ := it * it * it'
+# a precedence declaration places its operator and is no code: `%` below `+` reads 1 + 7 % 4 as (1 + 7) % 4
+check "a placed operator binds by its place" "$(ran placed $'operator % has precedence below +\nprint(text(1 + 7 % 4))')" "0"
+# a suffix operator is the function of its operand `it` (wiki/keyword.md, wiki/operator.md)
+check "a suffix operator doubles" "$(ran doubled $'suffix operator ‼ := it*2\nprint(text(3‼))')" "6"
+check "a suffix operator cubes" "$(ran cubed $'suffix operator ³ := it * it * it\nprint(text(2³))')" "8"
 # an operator with no operand after it is a name
 format_check 'total := fold +' 'total := fold +'
 # a function's result type prints after `as`, the canonical word (wiki/function.md); a typed name keeps its `:`
