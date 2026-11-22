@@ -21,22 +21,29 @@ read(path: text): text := {
 	fd_seek(file, 0, FROM_END, MOVED_AT)
 	size = memory_word(MOVED_AT)
 	fd_seek(file, 0, FROM_START, MOVED_AT)
-	memory_holding(size)
-	got = bytes_read(file, size)
+	at = scratch(size)
+	got = bytes_read(file, at, size)
 	fd_close(file)
-	memory_text(BYTES_AT, got)
+	memory_text(at, got)
 }
 # the names in the folder at a path, as the host lists them, its own `.` and `..` left out; read again from the entry a
 # read cut off
+# whether a file or folder is at the path; "" names none (python's os.path.exists)
+exists(path: text): bool := {
+	if path == "" { return no }
+	file = opened_at(path, 0, 0) ?? return no
+	fd_close(file)
+	yes
+}
 list_files(folder: text): list<text> := {
 	listed = opened(folder, FOLDER_FLAG, READ_ENTRIES, "cannot list ")
 	names = []
 	cookie = 0
-	memory_holding(ENTRIES_READ)
+	entries = scratch(ENTRIES_READ)
 	while yes {
-		fd_readdir(listed, BYTES_AT, ENTRIES_READ, cookie, MOVED_AT)
-		end = BYTES_AT + memory_word(MOVED_AT)
-		at = BYTES_AT
+		fd_readdir(listed, entries, ENTRIES_READ, cookie, MOVED_AT)
+		end = entries + memory_word(MOVED_AT)
+		at = entries
 		while at + ENTRY_HEADER <= end {
 			length = memory_word(at + NAME_LENGTH_AT)
 			if at + ENTRY_HEADER + length > end { break }
@@ -45,7 +52,7 @@ list_files(folder: text): list<text> := {
 			cookie = memory_word(at)
 			at += ENTRY_HEADER + length
 		}
-		if end < BYTES_AT + ENTRIES_READ {
+		if end < entries + ENTRIES_READ {
 			fd_close(listed)
 			return names
 		}
@@ -53,13 +60,28 @@ list_files(folder: text): list<text> := {
 	names
 }
 # the command line: the program's file as it was named, then its arguments. WASI's args_sizes_get puts the count at 0
-# and the bytes' size at 4, args_get each one's address from BYTES_AT and their zero-ended bytes after them
+# and the bytes' size at 4, args_get each one's address into scratch and their zero-ended bytes after them
 arguments(): list<text> := {
 	args_sizes_get(0, 4)
 	count = memory_word(0)
-	memory_holding(4 * count + memory_word(4))
-	args_get(BYTES_AT, BYTES_AT + 4 * count)
-	(0 upto count).map(at => zero_ended(memory_word(BYTES_AT + 4 * at)))
+	addresses = scratch(4 * count + memory_word(4))
+	args_get(addresses, addresses + 4 * count)
+	(0 upto count).map(at => zero_ended(memory_word(addresses + 4 * at)))
+}
+# the run's environment, each `NAME=value` entry zero-ended, as WASI's environ_get writes them after their addresses
+wasi_environment(): text := {
+	environ_sizes_get(0, 4)
+	addresses = 4 * memory_word(0)
+	size = memory_word(4)
+	at = scratch(addresses + size)
+	environ_get(at, at + addresses)
+	memory_text(at + addresses, size)
+}
+# an environment variable as the run started with it, ø when unset: `started_env("HOME")`
+started_env(name: text): text? := {
+	entry = name + "="
+	for line in wasi_environment().split(text_made(1)) { if line.starts_with(entry) { return line[#entry ..] } }
+	ø
 }
 # milliseconds since 1970 by the wall clock: WASI's clock_time_get puts the nanoseconds at 0, as two words
 wall_clock_ms(): int := {
@@ -87,8 +109,6 @@ write_bytes(path: text, bytes: list<int>) := {
 # the program stopped with a message on the standard error, then a line end; it never finishes
 raise(message: text): never := prim raise_text(message)
 
-# how many items a list holds, a list of any items: a bare `list` fits every list<T>
-#(xs: list): int := prim list_count(xs)
 
 # arithmetic and comparisons of ints and of floats, each one wasm instruction; a call picks the overload its
 # arguments' types fit
@@ -135,7 +155,6 @@ rem(a: int, b: int): int := truncated_remainder(a, b)
 >=(a: float, b: float): bool := prim f64.ge(a, b)
 
 # texts: equal when their bytes are, joined by +
-==(a: text, b: text): bool := prim text_equal(a, b)
 !=(a: text, b: text): bool := not(a == b)
 # any two values of one type are equal by that type's equality: cases by tag and fields, instances field by field,
 # lists item by item (core/emit/equality.wap); the overloads above are the plain values' own
@@ -143,7 +162,6 @@ rem(a: int, b: int): int := truncated_remainder(a, b)
 !=(a: T, b: T): bool := not(a == b)
 # a case's name, `Bracket.Round` is "Round"
 text(e: enum): text := prim case_name(e)
-+(a: text, b: text): text := prim text_joined(a, b)
 
 # the int a text of decimal digits writes, a leading - its sign: `int("-42")` is -42; any other text raises
 int(t: text): int := {
@@ -220,6 +238,13 @@ abs(x: float): float := if x < 0.0 then -x else x
 floor(x: float): float := prim f64.floor(x)
 ceil(x: float): float := prim f64.ceil(x)
 sqrt(x: float): float := prim f64.sqrt(x)
+# `√x`, the square root: a float's as sqrt gives it; an int's when it is a whole number, `√16` 4, else refused, as wap
+# has no exact roots yet (warp keeps `√2` exact) and gives no float in their place
+√(x: float): float := sqrt(x)
+√(n: int): int := {
+	root = round(sqrt(float(n)))
+	if root * root == n then root else raise("√${n} is no whole number, and wap has no exact roots yet: write √${n}.0 for the float")
+}
 trunc(x: float): int := prim i64.trunc_f64_s(x)
 # x's nearest whole number, a half away from zero: `round(2.5)` is 3, `round(-2.5)` is -3
 round(x: float): int := if x < 0 then 0 - trunc(0.5 - x) else trunc(x + 0.5)

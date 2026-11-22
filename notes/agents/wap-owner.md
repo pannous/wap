@@ -124,13 +124,18 @@ wap/
     rules.wap                 the kernel forms' patterns and the ../sugar/ files, used in load order
     prelude.wap               the built-ins (print …), each a function whose body may be a Prim
     operators.wap             the operator table: precedence groups and their relations, operators, aliases
+    list_items.wap            how a list holds its items, the one list file a build may swap (memory_lists.wap)
+    text_bytes.wap            how a text holds its bytes, the one text file a build may swap (memory_texts.wap)
     lists.wap                 list words over function values: map, filter, contains …
     maps.wap                  map words: a key's value, set, has, remove; text keys found by their hash
     texts.wap                 text words over a text's UTF-8 bytes
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
     host.wap                  the host machinery the file and command-line words use, hidden from programs
-    c.wap                     a C function's texts: passed as NUL-terminated copies, given back from C's pointer
+    text_bytes.wap            a text's bytes: count, a byte, a slice, made from bytes, joined, compared
+    memory_texts.wap          a native build's texts in the module's memory, read by its build in the place of text_bytes.wap
+    memory_lists.wap          a native build's lists in the module's memory, read by its build in the place of list_items.wap
+    c.wap                     a C function's texts passed as NUL-terminated copies and given back; its out-pointers
 
   sugar/                      the rules of the surface spellings wap's own source uses, one file per topic
     calls.wap                 x.f(y), x.f → calls and Get
@@ -152,9 +157,11 @@ wap/
       functions.wap           the warp.c_functions section that describes each C import for the native warp
     native/                   a wap program built to a native executable (build.sh: wasm2c, cc, glue.awk, main.c)
       c.wap                   libc's and wasmtime's C functions, foreign primitives of the module c
-      compiler.wap            wap.wasm found beside the executable, its machine code kept beside it by its hash
+      compiler.wap            wap.wasm compiling a source; a module's machine code kept beside it by its hash
       console.wap             `wap` alone: each line a module, linked to the earlier lines' kept instances
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
+      host_words.wap          a program's C imports answered by the C functions of their names; C calling back into it
+      linking.wap             where a used module is found: beside its importer, its compiler's folder, wap.wasm's
       programs.wap            a program's machine code kept beside wap.wasm, program-<hash>.cwasm by its sources
       linking.wap             where a module imported by a bare name is: beside the importer, in the compiler folder
                               its wap.compiler section names, else in the installed wap-seed

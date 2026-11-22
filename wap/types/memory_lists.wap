@@ -1,0 +1,56 @@
+# How a list holds its items in a native build (build.sh), which takes this file for types/list_items.wap, as wasm2c
+# takes no GC type: a list is the address of its header in the module's memory, [count u32][room u32][items u32], the
+# items 8 bytes each in a block of their own (core/emit/primitives.wap item.load), so a list grows in place, its block
+# copied to a larger one, and every name holding it sees the item added. The memory comes from text_bytes.wap's
+# memory_taken.
+# DEBT: a list's memory is never freed, nor its old block when it grows: fine for the native wap's driver and short
+#   programs, not for a long-running one
+# (copied over list_items.wap in a native build, so beside the text_bytes.wap it uses, memory_texts.wap there)
+use "text_bytes.wap"
+
+HEADER_BYTES := 12
+ITEM_BYTES := 8
+ROOM_FIRST := 4
+
+# a list as the address it is, and back: a list<int> a literal retypes as the list it makes (core/analyze/data.wap
+# memory_list), as every list is one address here
+list_address(xs: list): int := prim i64.extend_i32_u(xs)
+list_at(at: int): list<int> := prim i32.wrap_i64(at)
+# how many items a list holds, how many its block has room for, where its block starts
+#(xs: list): int := memory_word(list_address(xs))
+room(xs: list): int := memory_word(list_address(xs) + 4)
+items_at(xs: list): int := memory_word(list_address(xs) + 8)
+# a list's item at a place, counting from 1, `xs#2`, and given a value, `xs#2 = 5`
+#(xs: list<T>, at: int): T := prim item.load(items_at(xs) + (at - 1) * ITEM_BYTES)
+set(at: int, of: list<T>, to: T) := prim item.store(items_at(of) + (at - 1) * ITEM_BYTES, to)
+# an empty list with room for `count` items: what a list literal starts from (core/analyze/data.wap memory_list)
+reserved(count: int): list<int> := {
+	at = memory_taken(HEADER_BYTES)
+	set_memory_word(at + 4, count)
+	set_memory_word(at + 8, memory_taken(count * ITEM_BYTES))
+	list_at(at)
+}
+# an item put at the end of a list, its block moved to one twice as large when it is full
+add(xs: list<T>, item: T) := {
+	count = #xs
+	if count == room(xs) {
+		larger = if count == 0 then ROOM_FIRST else count * 2
+		block = memory_taken(larger * ITEM_BYTES)
+		for at in 0 upto count * ITEM_BYTES { set_memory_byte(block + at, memory_byte(items_at(xs) + at)) }
+		set_memory_word(list_address(xs) + 4, larger)
+		set_memory_word(list_address(xs) + 8, block)
+	}
+	set_memory_word(list_address(xs), count + 1)
+	set(count + 1, xs, item)
+}
+# a list with an item added: each item of a list literal in turn
+extended(xs: list<T>, item: T): list<T> := {
+	add(xs, item)
+	xs
+}
+# the last item taken off a list
+pop(xs: list<T>): T := {
+	count = #xs
+	set_memory_word(list_address(xs), count - 1)
+	xs#count
+}

@@ -3,7 +3,10 @@
 # the emitter's helpers that grow it, place a text in it and write a text from it (core/emit/host.wap), and each WASI
 # call by its own name (core/emit/primitives.wap).
 
-# the memory: an iovec [address, length] at 0, the count a call moved or the file it opened at 8, bytes from 16
+use "text_bytes.wap"
+
+# the memory: an iovec [address, length] at 0, the count a call moved or the file it opened at 8, a path's bytes from
+# 16; a read's in scratch(count)
 IOVEC_AT := 0
 MOVED_AT := 8
 BYTES_AT := 16
@@ -35,18 +38,23 @@ WORD_RANGE := 4294967296
 
 memory_byte(at: int): int := prim i32.load8_u(at)
 memory_word(at: int): int := prim i32.load(at)
-# a text of `count` zero bytes, and one of them set: how a text is made from bytes
-text_made(count: int): text := prim array.new_default(count)
-set_text_byte(t: text, at: int, b: int) := prim array.set(t, at, b)
+set_memory_byte(at: int, b: int) := prim i32.store8(at, b)
 set_memory_word(at: int, word: int) := prim i32.store(at, word)
 # the memory grown to hold `count` bytes from BYTES_AT; a text's bytes placed there; a text written to a file, a line
 # end after it when `line` says so
 memory_holding(count: int) := prim memory_held(count)
-place(t: text) := prim text_placed(t)
-write(t: text, file: int, line: bool) := prim text_written(t, file, line)
+# where `count` bytes of scratch go: from BYTES_AT, the memory grown to hold them; new memory where texts are in the
+# memory, whose data (the literal texts) starts past 65536, which a long scratch from BYTES_AT would overwrite
+scratch(count: int): int := {
+	if texts_in_memory() { return text_address(text_made(count)) }
+	memory_holding(count)
+	BYTES_AT
+}
 
 args_sizes_get(count_at: int, size_at: int): int := prim args_sizes_get(count_at, size_at)
 args_get(addresses_at: int, bytes_at: int): int := prim args_get(addresses_at, bytes_at)
+environ_sizes_get(count_at: int, size_at: int): int := prim environ_sizes_get(count_at, size_at)
+environ_get(addresses_at: int, bytes_at: int): int := prim environ_get(addresses_at, bytes_at)
 path_open(folder: int, lookup: int, path_at: int, length: int, flags: int, rights: int, inherited: int, file_flags: int, opened_at: int): int := prim path_open(folder, lookup, path_at, length, flags, rights, inherited, file_flags, opened_at)
 fd_seek(file: int, offset: int, whence: int, position_at: int): int := prim fd_seek(file, offset, whence, position_at)
 fd_read(file: int, iovecs_at: int, count: int, moved_at: int): int := prim fd_read(file, iovecs_at, count, moved_at)
@@ -66,19 +74,26 @@ zero_ended(at: int): text := {
 	while memory_byte(end) != 0 { end += 1 }
 	memory_text(at, end - at)
 }
-# the file at a path opened with these flags and rights, relative to the current folder or from the root (/…); a path
-# it cannot open raises the refusal and the path
-opened(path: text, flags: int, rights: int, refusal: text): int := {
+# the file at a path opened with these flags and rights, relative to the current folder or from the root (/…); ø for a
+# path it cannot open
+opened_at(written: text, flags: int, rights: int): int? := {
+	path = home_expanded(written)
 	rooted = if byte_count(path) > 0 and byte_at(path, 0) == SLASH then 1 else 0
 	place(bytes_between(path, rooted, byte_count(path)))
-	if path_open(CURRENT_FOLDER + rooted, FOLLOW_LINKS, BYTES_AT, byte_count(path) - rooted, flags, rights, 0, 0, MOVED_AT) != 0 { raise refusal + path }
+	if path_open(CURRENT_FOLDER + rooted, FOLLOW_LINKS, BYTES_AT, byte_count(path) - rooted, flags, rights, 0, 0, MOVED_AT) != 0 { return ø }
 	memory_word(MOVED_AT)
 }
-# a file's bytes read into the memory from BYTES_AT until `total` are or a read gives none; the count read
-bytes_read(file: int, total: int): int := {
+# `~/notes.txt`: a path's leading ~ is the home folder ($HOME), expanded where the path is used (wiki/script.md), so a
+# quoted "~/x" works too; a run without one is told so, never handed "ø/…"
+home_expanded(path: text): text := if path == "~" or path.starts_with("~/") then home_folder() + path[1 ..] else path
+home_folder(): text := started_env("HOME") ?? raise("~ is the home folder, and this run has none ($HOME is unset)")
+# the file opened, a path it cannot open raising the refusal and the path
+opened(path: text, flags: int, rights: int, refusal: text): int := opened_at(path, flags, rights) ?? raise(refusal + path)
+# a file's bytes read into the memory from `at` until `total` are or a read gives none; the count read
+bytes_read(file: int, at: int, total: int): int := {
 	done = 0
 	while done < total {
-		set_memory_word(IOVEC_AT, BYTES_AT + done)
+		set_memory_word(IOVEC_AT, at + done)
 		set_memory_word(IOVEC_AT + 4, total - done)
 		fd_read(file, IOVEC_AT, 1, MOVED_AT)
 		if memory_word(MOVED_AT) == 0 { return done }
