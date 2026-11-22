@@ -34,6 +34,10 @@ folder_built() {
 	mkdir -p "$building" && wap_beside_copied "$tree" "$building" || return 1
 	[ -f "$warm_state" ] || : >"$warm_state"
 	$wap "$seed" "$source_compiler" "$built" 2>&1 || return 1
+	# the library compiled once beside the compiler, which programs then read (extensions/wasm/library.wap), by wap0,
+	# which is this tree's source as each next one is, from the sources (wap0 embeds whatever warm state the tree had):
+	# before the warm states, so each holds the library a compile reads
+	$wap "$built" --sources "$building/types/types.wap" "$building/types.wasm" 2>&1 || return 1
 	for ((n = 1; n <= $2; n++)); do
 		warm_written "$built" || return 1
 		$wap "$built" --sources "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
