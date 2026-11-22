@@ -157,13 +157,13 @@ wap/
       functions.wap           the warp.c_functions section that describes each C import for the native warp
     native/                   a wap program built to a native executable (build.sh: wasm2c, cc, glue.awk, main.c)
       c.wap                   libc's and wasmtime's C functions, foreign primitives of the module c
-      compiler.wap            wap.wasm found beside the executable, its machine code kept beside it by its hash
+      compiler.wap            wap.wasm compiling a source; a module's machine code kept beside it by its hash
       console.wap             `wap` alone: each line a module, linked to the earlier lines' kept instances
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
       host_words.wap          a program's C imports answered by the C functions of their names; C calling back into it
+      linking.wap             where a used module is found: beside its importer, its compiler's folder, wap.wasm's
       programs.wap            a program's machine code kept beside wap.wasm, program-<hash>.cwasm by its sources
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
-      text_bytes.wap          a text in the memory, read in the place of types/text_bytes.wap by a native build
     packed.wap                a Node as compact bytes and back, pack and unpack: each text and repeated subtree once
     warm.wap                  the compiler's warm state: the files it reads before a program, operated, packed
     wasm/                     a compiled wap module used as its source

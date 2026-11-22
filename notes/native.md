@@ -51,3 +51,12 @@ warp-host-fixer; this file is the inventory.
 - wap's tests: C functions of 'c' and 'm' only.
 - lib/'s C libraries by imports: wgpu_native 66, raylib 32, python 31, sqlite3 26, rs_regex 10, objc 8, mpg123 8, m 8,
   uniscript_c 6, rs_sha2 6, freetype 6, z 5, rs_strsim 2, rs_crc32fast 1, kernel32 1.
+
+## The native wap's driver (wap/extensions/native)
+- folder_part (run.wap) walks a path's bytes back to its last slash by hand: one line once native texts have a
+  last_index_of.
+- Workarounds of native gaps, each to go when its gap closes: the driver reads its arguments by its own loop (prelude's
+  arguments() maps and writes from BYTES_AT), joins lists by add (list + is wrong natively), reads files by fopen
+  (read() takes an optional), and declares fopen's result i64 (a `handle` result raises, which emits GC helpers).
+- Waiting for native optionals (read() reachable natively): a test_native line reading a file over 64K, the proof of
+  host.wap's scratch(count); and read() then returning its scratch text cut to the bytes read, not a second copy.
