@@ -47,5 +47,4 @@ rule lasts [$a $b] => print("$b")
 firsts [1 2]
 lasts [3, 4]')" "1
 4"
-||||||| 1ccac64
 exit $((failures > 0))
