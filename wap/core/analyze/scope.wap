@@ -73,7 +73,8 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	Item(subject, key) => refitted(Item(bound(subject, scope, depth), bound(key, scope, depth)), n)
 	List(items, Bracket.Square, separator) => refitted(List(all_bound(items, scope, depth), Bracket.Square, separator), n)
 	Key(name, Op.Colon, type) => refitted(Key(bound(name, scope, depth), Op.Colon, type_bound(type, scope)), n)
-	Key(head, Op.None, List(items, Bracket.Curly, separator)) => refitted(Key(type_bound(head, scope), Op.None, List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator)), n)
+	# a function's name glued to a map calls it with the map, `style{a: 1}` style({a: 1}) (wiki/significant-whitespace.md)
+	Key(head, Op.None, List(items, Bracket.Curly, separator)) => if names_function_in(head, scope) then bound(refitted(Call(head, [refitted(List(items, Bracket.Curly, separator), n)]), n), scope, depth) else refitted(Key(type_bound(head, scope), Op.None, List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator)), n)
 	List(items, Bracket.Curly, separator) => refitted(List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator), n)
 	Record(name, fields, variants) => n
 	Number(value) => n
@@ -85,6 +86,11 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	_ => refused(n, "the binding analysis reads only kernel forms; the lowering should have removed this")
 }
 # A written type with each record name in it bound to the Record its scope sees, `Box` of `b: Box` or `list<Box>?`
+# whether a name in scope names functions and no class, whose constructor is a function too
+names_function_in(name: Node, scope: Scope) as bool := {
+	meant = definitions_meant(text(name), scope)
+	meant is not empty and is_function(meant#1) and not named_in(scope, text(name)).any(definition => definition.kind == DefinitionKind.Record)
+}
 type_bound(type: Node, scope: Scope) as Node := match type {
 	Symbol(name) => {
 		for definition in named_in(scope, name) { if definition.kind == DefinitionKind.Record { return with_fact(type, DECLARED_BY, record_declared(definition.definer)) } }
@@ -257,7 +263,7 @@ resolved_taking(name: Node, given: int?, scope: Scope, depth: int) as Node := {
 	}
 	innermost = if meant#1.kind == DefinitionKind.Case then unambiguous_case(name, meant#1, given, scope) else meant#1
 	# a name a rule read as a function binds to a function, never to a variable of that name in its way
-	if fact_of(name, READ_WITH) != ø and not innermost.kind in [DefinitionKind.Function, DefinitionKind.Library] { refused(name, "a rule reads ${name} as the function ${fact_of(name, READ_WITH)}, but a variable of that name hides it: rename the variable") }
+	if fact_of(name, READ_WITH) != ø and not is_function(innermost) { refused(name, "a rule reads ${name} as the function ${fact_of(name, READ_WITH)}, but a variable of that name hides it: rename the variable") }
 	kind = if innermost.depth == depth or innermost.depth <= PROGRAM_DEPTH or innermost.kind == DefinitionKind.Global then innermost.kind else DefinitionKind.Capture
 	bound = with_binding(name, kind)
 	if #meant == 1 then with_fact(bound, DEFINED_AT, innermost.definer) else with_fact(without_attribute(bound, DEFINED_AT), CANDIDATES, data_list(depths_of(meant).map(depth => data_list(meant.filter(definition => definition.depth == depth).map(definition => definition.definer)))))

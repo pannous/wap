@@ -24,8 +24,9 @@ warm_written() {
 	$wap "$1" --sources warm "$warm_state.$$" 2>&1 && mv "$warm_state.$$" "$warm_state"
 }
 compiler_built() {
-	local folder=$1 last=$2
-	[ -f "$folder/wap$last.wasm" ] || folder_built "$folder" "$last" || return 1
+	local folder=$1 last=$2 said
+	# (what the build says is printed only when it fails: a notice of a build that went on is no part of the path)
+	[ -f "$folder/wap$last.wasm" ] || said=$(folder_built "$folder" "$last") || { echo "$said"; return 1; }
 	echo "$folder/wap$last.wasm"
 }
 folder_built() {
@@ -33,6 +34,10 @@ folder_built() {
 	mkdir -p "$building" && wap_beside_copied "$tree" "$building" || return 1
 	[ -f "$warm_state" ] || : >"$warm_state"
 	$wap "$seed" "$source_compiler" "$built" 2>&1 || return 1
+	# the library compiled once beside the compiler, which programs then read (extensions/wasm/library.wap), by wap0,
+	# which is this tree's source as each next one is, from the sources (wap0 embeds whatever warm state the tree had):
+	# before the warm states, so each holds the library a compile reads
+	$wap "$built" --sources "$building/types/types.wap" "$building/types.wasm" 2>&1 || return 1
 	for ((n = 1; n <= $2; n++)); do
 		warm_written "$built" || return 1
 		$wap "$built" --sources "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1

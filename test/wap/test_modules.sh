@@ -161,6 +161,12 @@ print(shout(\"hi\"))
 print(text(size(Tree([Tree([], \"b\")], \"a\"))))")" "6
 hi!
 2"
+# a used module raises by the library's tag, so the program's main catches it though it calls nothing of the library
+check "a raise in a used compiled module is caught by the program" "$(printf '%s\n' 'positive(x: int) as int := if x > 0 then x else raise "not positive"' >"$stage/raising.wap" && $wap "$compiler" "$stage/raising.wap" "$stage/raising.wasm" 2>&1 && ran uses_raising "use \"$stage/raising.wasm\"
+print(text(positive(-1)))" 2>&1)" "not positive"
+# a used compiled module's top level runs once before the program, so a value it computes is set when the program reads it
+check "a value a used compiled module computes at its top level is set for the program" "$(printf '%s\n' 'answer = [40, 2].sum()' >"$stage/answering.wap" && $wap "$compiler" "$stage/answering.wap" "$stage/answering.wasm" 2>&1 && ran uses_answering "use \"$stage/answering.wasm\"
+print(text(answer))" 2>&1)" "42"
 # wiki/use.md "folder, package and project scope": use folder brings in every source file beside the using one
 mkdir -p "$stage/shapes" && printf '%s\n' 'area(side: int) as int := side * side' >"$stage/shapes/square.wap"
 check "use folder brings in a word of a file beside it" "$(printf '%s\n' 'use folder' 'print(text(area(3)))' >"$stage/shapes/main.wap" && $wap "$compiler" "$stage/shapes/main.wap" "$stage/shapes/main.wasm" 2>&1 && $wap "$stage/shapes/main.wasm" 2>&1)" "9"
@@ -173,4 +179,25 @@ print(text(natural_compare("a2", "a10") < 0))')" "yes"
 # a folder right in the library holds modules too, lib/native's C bindings among them; import is use
 check "import name brings in a module from a folder of the library" "$(ran use_library_folder 'import z
 print(text(compressBound(100)))')" "113"
+# ini: keys before any section stay at the top level beside the sections (lib/ini.warp, card lib-ini-toml)
+check "ini keeps the keys before any section" "$(ran use_ini 'use ini
+print to_ini(parse_ini("top = 1
+[db]
+host = x"))')" "top = 1
+
+[db]
+host = x"
+# list: the standard list words beyond the types module's, typed (lib/list.warp, notes/lib_coverage.md)
+check "the list module's words take typed lists" "$(ran use_list 'use list
+print text(chunk([1, 2, 3, 4, 5], 2))
+print text(median([3, 1, 2, 4]))
+print text(combinations([1, 2, 3], 2))')" "[[1, 2], [3, 4], [5]]
+2.5
+[[1, 2], [1, 3], [2, 3]]"
+# path's glob classes and machine_math's powers of two (lib/path.warp, lib/machine_math.warp, notes/lib_coverage.md)
+check "path globs a class of letters, machine_math raises two" "$(ran use_path_math 'use path
+use machine_math
+print text(path_matches("b.txt", "[a-c].txt"))
+print text(round(two_to(10.0)))')" "yes
+1024"
 exit $((failures > 0))

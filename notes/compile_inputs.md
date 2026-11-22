@@ -35,3 +35,13 @@ from all its cases (the library's from their export names, the program's own). T
 bodies and the program's new ones. Bodies stay compiled once; only the small dispatcher is per program. A word no
 program extends keeps the library's dispatcher. Open: whether some cases need run-time dispatch (values whose type is
 known only at run time), and how much of today's semi-typed code exists only for this.
+
+## Where it stands (2026-11-21)
+
+Step 2: the library compiles once into types/types.wasm beside its source (extensions/wasm/library.wap), stamped
+with its source files and their hash; a program reads its export names plus the source it keeps. Functions that load
+or store linear memory, and the values and functions around them, stay source: a program's C call reads the
+program's memory. A stale module is said on stderr and the source is read: a stopgap. The goal is that the installed
+compiler never reads library source outside debug mode, so next a stale types.wasm gets rebuilt, not read around.
+Generic words: one body per overload plus one general fallback for run-time dispatch (user), after the non-generic
+words.
