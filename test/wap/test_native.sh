@@ -55,6 +55,10 @@ check "a program file stays after its run" "$(cd "$stage" && "$native_wap" hello
 # stays for the lines after it and an effect happens once
 check "the console keeps a definition and runs each line once" "$(printf '%s\n' 'f(x: int) as int := x * 2' 'print "once"' 'f(21)' | "$native_wap" 2>&1)" "once
 42"
+# a line that only prints defines nothing, though its module exports the exception tag: no later line runs it again
+check "the console runs a line that only prints once, after a value" "$(printf '%s\n' 'x = 5' 'print "a"' 'x + 1' | "$native_wap" 2>&1)" "5
+a
+6"
 # a program using a compiled module (use "m.wasm", extensions/wasm/modules.wap): the native wap links its instance
 check "a native wap run links a module the program uses" "$(printf '%s\n' 'add(a: int, b: int) as int := a + b' >"$stage/adding.wap" && $wap "$compiler" "$stage/adding.wap" "$stage/adding.wasm" 2>&1 && "$native_wap" "use \"$stage/adding.wasm\"
 add(40, 2)" 2>&1)" "42"
