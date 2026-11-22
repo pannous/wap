@@ -16,7 +16,7 @@ slots=$(job_slots)
 for tree in "${INTEGRATION_TREES[@]}"; do [[ " $PWD/ $*/" == *" $tree/"* ]] && { slots=$((slots + 1)); break; }; done
 waited=
 while :; do
-	slot_tried "$warp_store/job-slots" "$slots" nice -n 19 "$@"
+	slot_tried "$slot_store/job-slots" "$slots" nice -n 19 "$@"
 	status=$?
 	[ $slot_held = no ] || exit $status
 	[ -n "$waited" ] || { echo "job-slot.sh: all $(job_slots) job slots taken, waiting" >&2; waited=1; }
