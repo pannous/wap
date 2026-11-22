@@ -1,6 +1,6 @@
-# wap.wasm for the native wap (driver.wap): found beside the executable, its machine code kept beside it for the next
-# runs (wap-<hash>.cwasm, by its bytes' hash; another wasmtime's refused, said, and written anew), compiling a source to
-# a module (run.wap runs both).
+# wap.wasm for the native wap (driver.wap): found beside the executable, compiling a source to a module (run.wap runs
+# both); a module's machine code, the compiler's too, kept beside it for the next runs (<stem>-<hash>.cwasm, by its
+# bytes' hash; another wasmtime's refused, said, and written anew).
 use "c.wap"
 use "run.wap"
 
@@ -9,7 +9,7 @@ compiler_beside(): int32 := prim data_address("/wap-seed/wap.wasm")
 own_path_link(): int32 := prim data_address("/proc/self/exe")
 # the compiler compiled to machine code, beside it: wap-<hash>.cwasm; a part written before it takes that name
 cached_suffix(): int32 := prim data_address(".cwasm")
-compiler_cache(): int32 := prim data_address("wap-")
+hash_mark(): int32 := prim data_address("-")
 part_template(): int32 := prim data_address(".XXXXXX")
 stale(): int32 := prim data_address("wap: this machine code is not this wasmtime's, so it is compiled again: ")
 digit_table(): int32 := prim data_address("0123456789abcdef")
@@ -35,23 +35,30 @@ compiler_hash(): int := {
 	bytes = file_read(host_of(pointer_at(COMPILER_AT)), size_at)
 	if bytes == 0 then 0 else hash_of(0, bytes, long_at(size_at))
 }
-# wap.wasm's module of this hash: its machine code read from beside it, where this wasmtime wrote it for these bytes,
-# else compiled and its machine code written there for the next run
-compiler_loaded(hash: int): int := {
-	cached = cached_module(CACHE_AT, compiler_cache(), hash)
+# the module of the .wasm file at `path`, its machine code kept beside it, <stem>-<hash>.cwasm by the hash of its bytes
+# (wap.wasm's: wap-<hash>.cwasm): read from there where this wasmtime wrote it, else compiled and written there for the
+# next run; its path made at `at`; 0 where there is no module, said
+module_loaded(path: int32, at: int): int := {
+	size_at = host_block(8)
+	bytes = file_read(host_of(path), size_at)
+	if bytes == 0 { return said_none(no_module()) }
+	strcpy(pointer_at(at), path)
+	set_word(at + strlen(host_of(pointer_at(at))) - strlen(host_of(module_suffix())), 0)
+	hash_named(at, hash_of(0, bytes, long_at(size_at)))
+	cached = deserialized(at)
 	if cached != 0 { return cached }
-	module = module_compiled(host_of(pointer_at(COMPILER_AT)))
-	if module != 0 then cache_written(module, CACHE_AT) else 0
+	module = module_of(bytes, long_at(size_at))
+	if module != 0 then cache_written(module, at) else 0
 	module
 }
-# the module whose machine code beside wap.wasm the hash names, its path made at `at`: <prefix><hash>.cwasm in its
-# folder; 0 where there is none, or where this wasmtime refuses it (another's), said
-cached_module(at: int, prefix: int32, hash: int): int := {
-	strcpy(pointer_at(at), pointer_at(COMPILER_AT))
-	set_word(at + strrchr(pointer_at(at), SLASH) + 1 - host_of(pointer_at(at)), 0)
-	strcat(pointer_at(at), host_of(prefix))
+# the path at `at` ended by -<hash>.cwasm
+hash_named(at: int, hash: int) := {
+	strcat(pointer_at(at), host_of(hash_mark()))
 	strcat(pointer_at(at), host_of(digits_of(hash, HEXADECIMAL)))
 	strcat(pointer_at(at), host_of(cached_suffix()))
+}
+# the module of the machine code at `at`; 0 where there is none, or where this wasmtime refuses it (another's), said
+deserialized(at: int): int := {
 	if realpath(pointer_at(at), 0) == 0 { return 0 }
 	module_at = host_block(8)
 	if wasmtime_module_deserialize_file(engine, pointer_at(at), module_at) == 0 then long_at(module_at) else stale_said(at)
@@ -108,13 +115,17 @@ digits_of(n: int, base: int): int32 := {
 	}
 	pointer_at(DIGITS_AT)
 }
-# this executable's path (Linux's link, else macOS's dyld) with its file name replaced by the compiler's, at COMPILER_AT
+# this executable's path (Linux's link, else macOS's dyld), its links followed (a link to it finds the wap-seed/ beside
+# the file itself, and WASI reads no path through a link to a place outside), with its file name replaced by the
+# compiler's, at COMPILER_AT
 compiler_found() := {
 	length = readlink(own_path_link(), pointer_at(COMPILER_AT), PATH_BYTES - 1)
 	if length > 0 then set_word(COMPILER_AT + length, 0) else {
 		set_word(SIZE_AT, PATH_BYTES)
 		_NSGetExecutablePath(pointer_at(COMPILER_AT), pointer_at(SIZE_AT))
 	}
+	resolved = realpath(pointer_at(COMPILER_AT), 0)
+	if resolved != 0 { memcpy(pointer_at(COMPILER_AT), resolved, strlen(resolved) + 1) }
 	slash = strrchr(pointer_at(COMPILER_AT), SLASH) - host_of(pointer_at(COMPILER_AT))
 	strcpy(pointer_at(COMPILER_AT + slash), compiler_beside())
 }

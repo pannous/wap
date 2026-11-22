@@ -1,15 +1,15 @@
 # the helper of wap's shell tests (source it): ran <name> <program> is what the program printed, compiled by wap, the
-# new compiler, and run, or the compiler's error. The warp under test is WARP (default the warp on PATH)
+# new compiler, and run, or the compiler's error. Its modules run on the native wap on PATH (wap/extensions/native)
 source "$(dirname "${BASH_SOURCE[0]}")/../native/checks.sh"
+wap=$(command -v wap) || { echo "no native wap on PATH: scripts/refresh-seed.sh installs it" >&2; exit 2; }
 tree="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 source_compiler="$tree/wap/compiler.wap"
 source "$tree/scripts/lib/wap-beside.sh"
 # the folder builds and runs go in, by its real path: a module's WASI follows no link to an absolute path (data/ is often
 # one, to a scratch volume)
 data="$(mkdir -p "$tree/data/wap-tests" && cd -P "$tree/data/wap-tests" && pwd -P)"
-# wap's seed, wap built by itself, beside the warp binary with its types module and kernel (scripts/refresh-seed.sh
-# --wap)
-seed="$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm"
+# wap's seed, wap built by itself, beside the native wap with its types module and kernel (scripts/refresh-seed.sh)
+seed="$(dirname "$(readlink -f "$wap")")/wap-seed/wap.wasm"
 [ -f "$seed" ] || { echo "no wap seed at $seed: scripts/refresh-seed.sh --wap installs it" >&2; exit 2; }
 # wap's compiler built by itself <n> times into <folder>, a folder holding it already kept; prints the module, or the
 # failed step's error. A module reads its types module beside itself (the host reads no link out of a folder): wap0.wasm
@@ -17,6 +17,12 @@ seed="$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm"
 # to write is known; wap1.wasm the source compiled by wap0 beside a copy of the tree's types module, each next one by
 # the one before. The folder is built whole beside it and then put in its place, so scripts sharing it never read half a
 # module or a types being copied
+# the warm state a compiler embeds (wap/compiler.wap WARM_STATE): written from the sources by the compiler before it,
+# beside each build's own copy first, so a script sharing the tree never embeds half of one
+warm_state="$tree/$WAP_WARM"
+warm_written() {
+	$wap "$1" --sources warm "$warm_state.$$" 2>&1 && mv "$warm_state.$$" "$warm_state"
+}
 compiler_built() {
 	local folder=$1 last=$2
 	[ -f "$folder/wap$last.wasm" ] || folder_built "$folder" "$last" || return 1
@@ -25,9 +31,11 @@ compiler_built() {
 folder_built() {
 	local building=$1.$$ built=$1.$$/wap0.wasm n
 	mkdir -p "$building" && wap_beside_copied "$tree" "$building" || return 1
-	$warp "$seed" "$source_compiler" "$built" 2>&1 || return 1
+	[ -f "$warm_state" ] || : >"$warm_state"
+	$wap "$seed" "$source_compiler" "$built" 2>&1 || return 1
 	for ((n = 1; n <= $2; n++)); do
-		$warp "$built" "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
+		warm_written "$built" || return 1
+		$wap "$built" --sources "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
 		built="$building/wap$n.wasm"
 	done
 	# another script may have put the same folder in place meanwhile: the first one stays
@@ -42,6 +50,23 @@ else
 	sources=$(cd "$tree" && { cat "$seed"; find wap "$WAP_LIBRARY" \( -name '*.wap' -o -name '*.warp' \) | sort | xargs cat; } | shasum | cut -c1-16)
 	compiler=$(compiler_built "$data/wap1-$sources" 1) || { echo "wap1: $compiler" >&2; exit 1; }
 fi
+# native_wap_built <folder>: the tree's native wap (wap/extensions/native/driver.wap) built into the folder, bin/wap with
+# the compiler under test beside it as its seed and wasmtime's library; prints its path or the build's error
+native_wap_built() {
+	mkdir -p "$1/wap-seed" "$1/lib" && (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$1/wap-seed/") && cp "$compiler" "$1/wap-seed/wap.wasm" \
+		&& cp "$(cd -P "$(dirname "$wap")/lib" && pwd -P)"/libwarp_wasmtime.* "$1/lib/" \
+		&& "$tree/wap/extensions/native/build.sh" "$compiler" "$tree/wap/extensions/native/driver.wap" "$1/wap" -L"$1/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib >"$1/build.log" 2>&1 \
+		|| { echo "the tree's native wap did not build: $(tail -3 "$1/build.log")" >&2; return 1; }
+	echo "$1/wap"
+}
+# the modules of a test run on this tree's native wap, built once for each compiler beside it, so a program's C imports
+# and the driver's other host words are this tree's; with no wasm2c the installed wap runs them, said once
+tree_wap_built() {
+	local folder="$(dirname "$compiler")/bin"
+	[ -x "$folder/wap" ] || { native_wap_built "$folder.$$" >/dev/null || return 1; [ -x "$folder/wap" ] && rm -rf "$folder.$$" || mv "$folder.$$" "$folder"; }
+	echo "$folder/wap"
+}
+if command -v wasm2c >/dev/null; then wap=$(tree_wap_built) || exit 1; else echo "no wasm2c: the installed wap runs the modules, not this tree's" >&2; fi
 # each test script its own folder in the tree's data/ (never the system's temporary folder)
 stage="$data/$$"
 mkdir -p "$stage" || exit 1
@@ -49,5 +74,5 @@ trap 'rm -rf "$stage"' EXIT
 
 ran() {
 	printf '%s\n' "$2" >"$stage/$1.wap"
-	$warp "$compiler" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && $warp "$stage/$1.wasm" 2>&1
+	$wap "$compiler" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && $wap "$stage/$1.wasm" 2>&1
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wap's reader (wap/core/parse/reader.wap; wiki/syntax.md): text read as notation, data and code alike, and printed
 # back by `wap format` in canonical warp. The cases are wasp's reader tests and the reader's decisions.
-# Run it with bash test/wap/test_reader.sh; the warp under test is WARP (default the warp on PATH)
+# Run it with bash test/wap/test_reader.sh; its modules run on the native wap on PATH
 source "$(dirname "$0")/format_checks.sh"
 
 # atoms: numbers as their value, texts in double quotes, words as written
@@ -77,4 +77,14 @@ check "a comma at a line's end continues the row, a line without one starts a ne
 ys = [1, 2
 3, 4]
 print text(#xs) + " " + text(#ys)')" "4 2"
+# an operator word where no operator can stand is a name: a parameter `to` ending a phrase, or glued to a member
+check "a word operator as a parameter's name" "$(ran operator_names 'same_side(from: text, to: text) as bool := from.starts_with("/") == to.starts_with("/")
+differ(from: text, to: text) as bool := from != to
+joined(from: text, to: text) as text := "from " + from + " to " + to + "."
+print text(same_side("/a", "b")) + " " + text(differ("a", "b")) + " " + joined("a", "b")')" "no yes from a to b."
+# a class's fields on one `;` row, its methods on the lines after (wiki/class.md)
+check "a row of fields, then a method" "$(ran field_row 'class Cursor { s: text; at: int
+	done() as bool := at >= 3
+}
+print text(Cursor("x", 4).done())')" "yes"
 exit $((failures > 0))

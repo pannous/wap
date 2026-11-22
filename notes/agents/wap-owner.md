@@ -124,15 +124,18 @@ wap/
     rules.wap                 the kernel forms' patterns and the ../sugar/ files, used in load order
     prelude.wap               the built-ins (print …), each a function whose body may be a Prim
     operators.wap             the operator table: precedence groups and their relations, operators, aliases
-    list_items.wap            how a list holds its items, the one list file a build may swap (native/list_items.wap)
-    text_bytes.wap            how a text holds its bytes, the one text file a build may swap (native/text_bytes.wap)
+    list_items.wap            how a list holds its items, the one list file a build may swap (memory_lists.wap)
+    text_bytes.wap            how a text holds its bytes, the one text file a build may swap (memory_texts.wap)
     lists.wap                 list words over function values: map, filter, contains …
     maps.wap                  map words: a key's value, set, has, remove; text keys found by their hash
     texts.wap                 text words over a text's UTF-8 bytes
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
     host.wap                  the host machinery the file and command-line words use, hidden from programs
-    c.wap                     a C function's texts: passed as NUL-terminated copies, given back from C's pointer
+    text_bytes.wap            a text's bytes: count, a byte, a slice, made from bytes, joined, compared
+    memory_texts.wap          a native build's texts in the module's memory, read by its build in the place of text_bytes.wap
+    memory_lists.wap          a native build's lists in the module's memory, read by its build in the place of list_items.wap
+    c.wap                     a C function's texts passed as NUL-terminated copies and given back; its out-pointers
 
   sugar/                      the rules of the surface spellings wap's own source uses, one file per topic
     calls.wap                 x.f(y), x.f → calls and Get
@@ -157,11 +160,12 @@ wap/
       compiler.wap            wap.wasm found beside the executable, its machine code kept beside it by its hash
       console.wap             `wap` alone: each line a module, linked to the earlier lines' kept instances
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
-      list_items.wap          a list in the memory, read in the place of types/list_items.wap by a native build
+      host_words.wap          a program's C imports answered by the C functions of their names; C calling back into it
       programs.wap            a program's machine code kept beside wap.wasm, program-<hash>.cwasm by its sources
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
       text_bytes.wap          a text in the memory, read in the place of types/text_bytes.wap by a native build
     packed.wap                a Node as compact bytes and back, pack and unpack: each text and repeated subtree once
+    warm.wap                  the compiler's warm state: the files it reads before a program, operated, packed
     wasm/                     a compiled wap module used as its source
       modules.wap             use "m.wasm": its functions declared from their export names, the rest (rules, enums,
                               classes, generic bodies) read from its wap section as source (Language.readers[".wasm"])
@@ -204,7 +208,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 |---|---|---|
 | lead: the queue, the contracts | warp-lead | compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap, kernel/surface.wap; the test/wap/ scripts no other row names |
 | self-build: wap compiled by wap, file by file | warp-wap-operators | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp; edits any file to write its types and `use` lines |
-| front: read, operators, rules, lowering | warp-wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap, extensions/packed.wap |
+| front: read, operators, rules, lowering | warp-wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap, extensions/packed.wap, extensions/warm.wap |
 | types: declare, bind, type | warp-wap-binding | core/analyze/, core/paths.wap |
 | back: emitter, runtime | warp-wap-emitter | core/emit/, extensions/wasm/, extensions/c/; test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
 | native: the wap command, programs built to executables | warp-host-fixer | extensions/native/; test/wap/test_native.sh |

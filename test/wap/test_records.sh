@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wap's records (wap/kernel/forms.wap Record; wiki/class.md): a class a used module declares, its constructor and fields
 # there for the program (the rest is test/test_records.wap; a second module file needs a script).
-# Run it with bash test/wap/test_records.sh; the warp under test is WARP (default the warp on PATH)
+# Run it with bash test/wap/test_records.sh; its modules run on the native wap on PATH
 source "$(dirname "$0")/compile.sh"
 
 printf '%s\n' 'class Point { x: int; y: int }' >"$stage/points.wap"
@@ -17,4 +17,9 @@ print(shown(Box(3)))')" "Box{n: 3}"
 check "a first record holding a list of itself" "$(ran first_tree 'class Tree { n: int; kids: list<Tree> }
 t = Tree(1, [Tree(2, [])])
 #t.kids')" "1"
+# a field given only its default has the default's type (wiki/class.md; OK warp-interviewer 2026-11-21 field-default-type)
+check "a field given only its default" "$(ran field_default 'class Counter { at = 0 }
+c = Counter()
+c.at += 2
+c.at + 1')" "3"
 exit $((failures > 0))

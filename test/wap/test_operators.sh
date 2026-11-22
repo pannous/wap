@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wap's operator stage (notes/backbone.md "Operators", wiki/precedence.md): a program printed back by `format` in
 # canonical warp, every operator read by the table of wap/types/operators.wap.
-# Run it with bash test/wap/test_operators.sh; the warp under test is WARP (default the warp on PATH)
+# Run it with bash test/wap/test_operators.sh; its modules run on the native wap on PATH
 source "$(dirname "$0")/format_checks.sh"
 
 format_check '1+2 * 3' '1 + 2 * 3'
@@ -20,6 +20,22 @@ format_check 'print if c then 1 else 2' 'print (if c then 1 else 2)'
 format_check 'not a and b' 'not a and b'
 # the minus rule: spacing decides prefix or infix, and format spells the reading out
 format_check '[a -1]' '[a, -1]'
+# a word after a number literal measures it, looser than a power, tighter than arithmetic and a call's arguments; two
+# literals stay two items (wiki/unit.md, decision measure-group)
+format_check '[1 2]' '[1 2]'
+format_check '[1 -2]' '[1, -2]'
+check "a word after a number literal measures it" "$(ran measure 'class U { name: text }
+class Q { amount: int, unit: text }
+*(n: int, u: U) as Q := Q(n, u.name)
+*(q: Q, n: int) as Q := Q(q.amount * n, q.unit)
+>(a: Q, b: Q) as bool := a.amount > b.amount
+^(u: U, n: int) as U := U(u.name + text(n))
+shown(q: Q) as text := text(q.amount) + q.unit
+rule $e: int $u: U => $e * $u
+m = U("m")
+x = 2000 m
+s = shown 5 m
+print(shown(2 m^2) + " " + shown(3 m * 2) + " " + text(x > 1500 m) + " " + s)')" "2m2 6m yes 5m"
 format_check '[a - 1]' '[a - 1]'
 format_check 'a-b' 'a - b'
 format_check 'print -x' 'print (-x)'
@@ -55,6 +71,7 @@ format_check 'y = x!' 'y = x!'
 format_check 'z = !x' 'z = not x'
 # a word leading a rule's phrase after an infix takes the rest of the phrase, as at a phrase's start; other words stay operands
 format_check 'x = f(a) ?? return ø' 'x = f(a) ?? (return ø)'
+format_check 'x = f(a) ?? return text 0' 'x = f(a) ?? (return text 0)'
 format_check 'n = if s < 0 then 0 - s else s' 'n = if s < 0 then 0 - s else s'
 format_check 'z = a ?? if c {1} else {2}' 'z = a ?? (if c {1} else {2})'
 check "a match after an assignment keeps its arms" "$(ran assigned_match 'x = 2
@@ -65,6 +82,21 @@ z = f(0) ?? if 2 > 1 {7} else {8}
 print text(z)')" "7"
 format_check 'x = if c then 1
 	else 2' 'x = if c then 1 else 2'
+check "a line ending in then or else takes the next line, and only that one" "$(ran trailing_then 'chosen(n: int) as text := {
+	if n > 2 then
+	"a"
+	else
+	"b"
+}
+y = "c"
+print chosen(1) + y')" "bc"
+check "a word inside a rule's phrase is the program's own outside that phrase" "$(ran own_out 'rule tagged out $x => 1
+f(xs: list<int>): list<int> := {
+	out: list<int> = []
+	for x in xs { out.add(x) }
+	out
+}
+print(text(f([1, 2])))')" "[1, 2]"
 format_check 'if c
 	print "a"' 'if c {print "a"}'
 format_check 'r = 2..' 'r = 2 ..'

@@ -22,7 +22,8 @@ class Code {
 # the layouts of the types a word names that need no type of the module: `number` and `any` hold any value, a
 # plain one boxed (fitted)
 # (an int32 is wasm's own i32, the int a foreign function's signature writes: an address in the module's memory too)
-WORD_LAYOUTS = {"int": I64, "float": F64, "bool": I32, "char": I32, "int32": I32, "number": ANYREF, "any": ANYREF}
+# (a float32 is wasm's f32, the float a foreign function's signature writes for C's float)
+WORD_LAYOUTS = {"int": I64, "float": F64, "float32": F32, "bool": I32, "char": I32, "int32": I32, "number": ANYREF, "any": ANYREF}
 # a case's tag, the first field of an enum's struct: its place among the cases, from 0
 TAG_FIELD = field_type(I32, IMMUTABLE)
 # a class tag's hash: its base and the largest i32 prime, so every tag is a positive i32
@@ -60,7 +61,7 @@ layout_of(type_name: Node, m: WasmModule, records: Records) as list<int>? := if 
 		type = fact_of(type_name, NARROWS) ?? type_name
 		name = text(type)
 		record = record_named(records, type)
-		if WORD_LAYOUTS.has(name) then WORD_LAYOUTS[name] else if name == "text" then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == ENUM_WORD then nullable(enum_base(m)) else if record == ø then ø else nullable(struct_of(record, m, records))
+		if WORD_LAYOUTS.has(name) then WORD_LAYOUTS[name] else if name == "text" then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == MAP_TYPE then nullable(map_base(m)) else if name == ENUM_WORD then nullable(enum_base(m)) else if record == ø then ø else nullable(struct_of(record, m, records))
 	}
 	_ => {
 		index = list_index(type_name, m, records) ?? function_value_index(type_name, m, records) ?? signature_value_index(type_name, m, records) ?? map_index(type_name, m, records)
@@ -69,8 +70,9 @@ layout_of(type_name: Node, m: WasmModule, records: Records) as list<int>? := if 
 }
 
 # The GC type of a map, `map<text, int>`: a struct of three lists, its keys and its values of one count and its slots (lists.wap); ø
-# for a type that is no map
-map_index(type: Node, m: WasmModule, records: Records) as int? := if key_type(type) == ø then ø else added_type(m, struct_type(map_parts(type).map(part => field_type(nullable(items_list(part, m, records) ?? refused(part, "the emitter has no value layout for this type yet")), MUTABLE))))
+# for a type that is no map. Every map's type extends the map base, so `x is map` tests any map at once
+map_index(type: Node, m: WasmModule, records: Records) as int? := if key_type(type) == ø then ø else added_type(m, open_type([map_base(m)], struct_type(map_parts(type).map(part => field_type(nullable(items_list(part, m, records) ?? refused(part, "the emitter has no value layout for this type yet")), MUTABLE)))))
+map_base(m: WasmModule) as int := added_type(m, open_type([], struct_type([])))
 # a map type's parts, each held as a list: its keys (field 0), its values (field 1) and its slots (field 2), the places
 # of its text keys by their hash (types/prelude.wap key_place)
 map_parts(type: Node) as list<Node> := [key_type(type), held_type(type)].map(part => part ?? refused(type, "a map type names its key and value types, `map<text, int>`")) + [symbol(SLOT_TYPE)]
@@ -186,5 +188,5 @@ text_literal(t: text, m: WasmModule) as Code := {
 	Code(nullable(type), i32_const(0) + i32_const(#t.bytes) + instruction(ARRAY_NEW_DATA, [type, added_text(m, t.bytes)]))
 }
 # a text in the module's data, its address: its byte count (4 bytes), its bytes and a zero, as
-# extensions/native/text_bytes.wap reads one
+# types/memory_texts.wap reads one
 memory_text(t: text, m: WasmModule) as Code := Code(I32, i32_const(data_placed(m, little_endian(#t.bytes, 4) + t.bytes)))
