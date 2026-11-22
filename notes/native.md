@@ -34,6 +34,9 @@ warp-host-fixer; this file is the inventory.
   the run's life (host_run_ended, host_waited, host_export, host_owns).
 
 ## Parked
+- The emitter's text helpers moved to types/ (text-helpers-out, 2026-11-22): native texts stays at +9 core lines. The helpers
+  leave once the emitter's own callers (record and any comparisons, the any cast's raise, main's uncaught catch) are
+  types words placed by typing; noted on card wap-prims-mnemonics.
 - `import cbrt from "m"`, `import (getenv, strlen) from "c"` (warp's form; parked 2026-11-21 by warp-interviewer, samples
   write `use m`, `use c`). If wanted: declarations.wap phrase_part reads `use <names> from <library>` as `use <library>`
   (about 3 lines) and refuses a named function the module does not declare, naming the module to declare it in (about
