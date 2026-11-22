@@ -5,8 +5,8 @@
 source "$(dirname "$0")/../native/checks.sh"
 guarded="$(dirname "$0")/../../scripts/guarded.sh"
 
-# what a guarded run says on stderr, if it was killed, and its status
-guarded_run() { "$guarded" "$@" 2>&1 >/dev/null | grep -o 'past the cap of [0-9]* [GBs]*\|runaway-input'; echo "status ${PIPESTATUS[0]}"; }
+# what a guarded run says on stderr, if it was killed (the cap, a process past the time cap), and its status
+guarded_run() { "$guarded" "$@" 2>&1 >/dev/null | grep -o 'past the cap of [0-9]* [GBs]*\(: .*\)*\|runaway-input'; echo "status ${PIPESTATUS[0]}"; }
 
 check "a guarded command's output and status are its own" "$("$guarded" bash -c 'echo said; exit 3'; echo "status $?")" "said
 status 3"
@@ -16,8 +16,9 @@ check "a command past the memory cap is killed and its input named" \
 runaway-input
 status 137"
 check "a command past the time cap is killed, its children too" \
-	"$(guarded_run --seconds 1 bash -c 'sleep 30 & sleep 30  # runaway-input')" \
-	"past the cap of 1 s
-runaway-input
+	"$(guarded_run --seconds 1 bash -c 'sleep 30 & sleep 30')" \
+	"past the cap of 1 s: sleep 30
 status 137"
+check "a script of short runs may take longer than the time cap" "$("$guarded" --seconds 2 bash -c 'for run in 1 2 3 4; do sleep 1; done; echo done'; echo "status $?")" "done
+status 0"
 exit $((failures > 0))
