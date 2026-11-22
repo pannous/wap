@@ -35,19 +35,23 @@ blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** 
 | found running modules | any program | `text(m)` of a map<text, int> traps (out of bounds) |
 | | lib/list.warp | an operator a used module declares, `[1] ∪ [2]`, is not lowered in the program |
 | | list.warp (fixed around) | an if-expression as a call's argument (above) |
+| | callbacks.warp | reading an item of a `list<function?>` / `list<function>`: the types module's list_item "gives no value" |
+| | unicode.warp:149 | no `upper(text)` in the types module |
+| 5: cli i18n map toml yaml | map.warp deep_merge … | no cast from an any back to a container, `a as map<text, any>` (refused in binding) |
 
 ## Lib: the module's own fault
 
 | Modules blocked | Where | Root cause | State |
 |---|---|---|---|
 | 10: crypto encoding html list template text url uuid version xml | list.warp | parameters typed `any` where a list is meant: count(any) is a float, so `0 to count(xs) - n` is no range | fixed (batch 1): list passes; the other nine now stop at text.warp:17 (compiler, below) |
-| 2: fast_math machine_math | machine_math.warp:30 | `rest % 2` with a float rest: floor gives a float | open |
-| 6: cli i18n map PHP toml yaml | each module | state kept in maps of any, `st["at"] - 1`, `keys(a)` on an any | open |
-| 1: callbacks | callbacks.warp:14 | `+=` on a global without `global`: reads as a new local | open |
-| 1: functions | functions.warp:36 | assigning a closure's outer local without `let`/`global` | open |
-| 1: unit_names | unit_names.warp:101 | a function giving values of two types | open |
-| 1: unicode | unicode.warp:42 | a table filled as a map but read with `#` | open |
-| 1: path | path.warp:100 | `ord` of a one-letter text, not a char | open |
-| 1: fractions | fractions.warp:26 | `is rational` names no type | open |
-| 1: time | time.warp:24 | clock_time_get without `use` of the host module | open |
-| 1: regex | lib/regex.warp, lib/crates/regex.warp | two modules named regex | open |
+| 2: fast_math machine_math | machine_math.warp:30, :53 | `% 2` of a whole float | fixed (batch 2): both pass |
+| 1: PHP | PHP.warp:3 | words typed `any` | fixed (batch 3): typed, passes |
+| 5: cli i18n map toml yaml | each module | trees of mixed maps and lists read back out of an any, `st["kinds"][k]`, `keys(messages)`: needs the cast below | compiler |
+| 1: callbacks | callbacks.warp:14, :62 | untyped global lists grown by `+=` | fixed (batch 2): typed, grown by .add; now stops at a compiler cause (below) |
+| 1: functions | functions.warp:36 | throttle's closure reassigns a name it captured, `last = [at, f(x)]` | compiler: a closure can't assign a captured local |
+| 1: unit_names | unit_names.warp:101 | units as mixed `[amount, dimension]` lists of exact fractions (10^-3) | open: wants a class and exact numbers |
+| 1: unicode | unicode.warp:42, :61, :93 | untyped tables and lists (int keys read as text) | fixed (batch 2): typed; now stops at a compiler cause (below) |
+| 1: path | path.warp:100 | `ord` of a one-letter text: `s#j` of a text is a text | fixed (batch 2): compares the letters; passes |
+| 1: fractions | fractions.warp:26 | `is rational`: wap has no exact rational type | compiler (moved there) |
+| 1: time | time.warp:24 | clock_time_get lives in wap/types/host.wap, which a library module can't `use` by name | compiler/layout |
+| 1: regex | lib/regex.warp, lib/crates/regex.warp | the crate spec in lib/crates/ is found as a second module regex | layout: the module search should skip crates/, or the spec be renamed |
