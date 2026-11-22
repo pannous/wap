@@ -159,6 +159,7 @@ wap/
     native/                   a wap program built to a native executable (build.sh: wasm2c, cc, glue.awk, main.c)
       c.wap                   libc's and wasmtime's C functions, foreign primitives of the module c
       compiler.wap            wap.wasm compiling a source; a module's machine code kept beside it by its hash
+      commands.wap            the native wap's commands and options, one table: dispatch and `wap help`
       console.wap             `wap` alone: each line a module, linked to the earlier lines' kept instances
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
       editing.wap             the console's line edited on a terminal: arrows, word moves, deletes, history
