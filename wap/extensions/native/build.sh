@@ -32,7 +32,7 @@ mkdir -p "$building/compiler"
 (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$building/compiler/") && cp "$compiler" "$building/compiler/wap.wasm"
 # (the library the compiler compiled once, types/types.wasm, and its warm state are the GC ones: a native build reads
 # its library anew, --sources)
-cp "$building/compiler/types/memory_texts.wap" "$building/compiler/types/text_bytes.wap" && rm -f "$building/compiler/types/types.wasm"
+cp "$building/compiler/types/memory_texts.wap" "$building/compiler/types/text_bytes.wap" && cp "$building/compiler/types/memory_lists.wap" "$building/compiler/types/list_items.wap" && rm -f "$building/compiler/types/types.wasm"
 wap_ran "$building/compiler/wap.wasm" --sources native "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
 awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"
