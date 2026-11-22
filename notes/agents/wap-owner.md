@@ -80,6 +80,7 @@ wap/
       matcher.wap             running a compiled Matcher against code, its holes bound; and specificity
       templates.wap           building a rule's output: splicing, fresh names, free words resolved in the rule's module
       stages.wap              shape rules (stage 1): rules indexed by head, run over operated code
+      heads.wap               the rules' heads: the word a rule's pattern is indexed by
       termination.wap         the rules checked to end: no chain of them rewrites forever
       lines.wap               a program's lines as the rules read them: a line led by a rule word
       declared.wap            declaration rules (stage 2): holes that ask the declarations, after declare
