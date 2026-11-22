@@ -22,8 +22,12 @@ warp-host-fixer; this file is the inventory.
   the items 8 bytes each (core/emit/primitives.wap item.load/item.store by the item's layout); the build reads
   types/memory_lists.wap in the place of types/list_items.wap, and typing writes a list literal as calls of
   its `reserved` and `extended` under the same switch, values_in_memory. A list grows in place, its block copied to one
-  twice as large, every name holding it seeing the item; the old block is never freed, like a text. Slices, maps, `any`
-  and raise stay GC values a native program cannot use yet.
+  twice as large, every name holding it seeing the item; the old block is never freed, like a text. Maps, `any` and
+  enums whose cases have fields stay GC values a native program cannot use yet.
+- Enums of cases without fields in a native program: a case is its tag, an i32, compared by i32.eq (core/emit/values.wap
+  enum_layout, tagged), as a class's instance is its address.
+- An uncaught raise in a native program: its text and a line end on stderr, then exit status 1, no exception thrown
+  (core/emit/host.wap memory_raised). try/catch stays GC-only.
 
 ## Not yet
 - A lib module's function as the callback C calls: lib/callbacks.warp's `export c_callback_fired` is no wap form, and a
