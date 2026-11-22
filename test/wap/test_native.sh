@@ -38,6 +38,14 @@ exit(k)' >/dev/null; echo $?)" "3"
 native_wap=$(native_wap_built "$stage/bin")
 printf '%s\n' 'print "Hello"' >"$stage/hello.wap"
 check "wap hello.wap prints Hello" "$(cd "$stage" && "$native_wap" hello.wap 2>&1)" "Hello"
+# the native wap's commands and options, one table (wap/extensions/native/commands.wap; card wap-help)
+check "wap help lists the commands and the options" "$("$native_wap" help | grep -c -e '^  wap run ' -e '^  wap repl ' -e '^  wap test ' -e '^  wap version ' -e '^  --memory-gb ' -e '^  --seconds ')" "6"
+check "wap --help and wap -h are wap help" "$([ "$("$native_wap" --help)" = "$("$native_wap" help)" ] && [ "$("$native_wap" -h)" = "$("$native_wap" help)" ] && echo same)" "same"
+check "wap version names the compiler it runs" "$("$native_wap" version | grep -c '^wap, the native command · its compiler /.*wap.wasm$')" "1"
+check "wap run runs a program" "$(cd "$stage" && "$native_wap" run hello.wap 2>&1)" "Hello"
+check "wap repl is the console" "$(printf '%s\n' '20 + 22' | "$native_wap" repl 2>&1)" "42"
+check "an unknown option is refused with the options, never run as code" "$("$native_wap" --nope 2>&1 | head -1; "$native_wap" --nope >/dev/null 2>&1; echo $?)" "wap: no option --nope; the options, before the command or file:
+2"
 printf '%s\n' 'x = 40000000000' 'x + 2' >"$stage/value.wap"
 check "a native wap run shows the program's value" "$(cd "$stage" && "$native_wap" value.wap 2>&1)" "40000000002"
 # a program named by an absolute path through a link, which WASI alone would not follow
