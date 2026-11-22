@@ -130,6 +130,18 @@ for at in 1 to 10 { numbers.add(at) }
 print "${#names} names, the last ${names#3}"
 print "${#numbers} numbers, total ${total(numbers)}, the third ${numbers#3}"')" "3 names, the last cy
 12 numbers, total 62, the third 1"
+check "a native program's lists joined and copied" "$(native_ran joined 'xs = ["a"] + ["b", "c"]
+ys = copy(xs)
+ys.add("d")
+print xs.join("+") + " " + ys.join("+")')" "a+b+c a+b+c+d"
+# records in a native program, held in its memory (types/memory_lists.wap): a class's instance, its fields read and
+# written, a Range's slices
+check "a native program's records" "$(native_ran records 'class Point { x: int; label: text }
+p = Point{x: 3, label: "a"}
+p.x = p.x + 4
+print "${p.label} ${p.x}"')" "a 7"
+check "a native program's slices" "$(native_ran slices 'xs = ["a", "b", "c"]
+print xs[.. 2].join("+") + " " + xs.drop(1).join("+")')" "a+b b+c"
 # a module's `export` is exported by the program that uses it too, under its plain name: C calls back the module's
 # c_callback_fired though the program defines none
 cat >"$stage/comparing.wap" <<'MODULE'
