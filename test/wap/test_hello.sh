@@ -9,7 +9,7 @@ print "b"')" "a
 b"
 # a form refused by a later stage still names the line the program wrote it on
 check "a refusal names the user's line" "$(ran later 'print "a"
-print 3' | grep -o 'line [0-9]*:[0-9]*')" "line 2:1"
+x: int = "b"' | grep -o 'line [0-9]*:[0-9]*')" "line 2:1"
 # a program's value is shown, as warp shows it (notes/self_hosting.md "Value layout": an int is an i64)
 check "a program's int value is shown" "$(ran int '40000000000')" "40000000000"
 check "a negative int" "$(ran negative '-3')" "-3"
