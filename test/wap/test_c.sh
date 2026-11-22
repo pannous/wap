@@ -38,4 +38,7 @@ child = posix_spawnp(\"echo\", 0, 0, [\"echo\", \"spawned\", \"by C\"], [])
 waitpid(child, 0, 0)")" "spawned by C"
 check "a list of bytes crosses as a pointer to their copy, NULs and all, its count the length after it" "$(ran bytes_line "crc32(start: i64, data: bytes, size: length): i64 from 'z'
 print(text(crc32(0, [97, 0, 98])))")" "367556721"
+# a function of the program reads a value of the library before any C call gave it one (warp-interviewer 2026-11-22)
+check "a function reads the library's value of the C calls' out-pointers" "$(ran library_value 'f() := c_outs
+print(text(f()))')" "0"
 exit $((failures > 0))

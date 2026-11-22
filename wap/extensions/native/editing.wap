@@ -19,44 +19,20 @@ HISTORY_FILE := "/.wap_history"
 APPENDING := "a"
 EMPTY_LINE_INTERRUPTED := "\n(Ctrl+C again or Ctrl+D to exit)\n"
 LINE_INTERRUPTED := "^C\n"
-# the keys, as a terminal sends them
-KEY_LINE_START := 1
-KEY_INTERRUPT := 3
-KEY_END_OF_INPUT := 4
-KEY_LINE_END := 5
-KEY_BACKSPACE := 8
-KEY_RETURN := 13
-KEY_ESCAPE := 27
-KEY_SPACE := 32
-KEY_DELETE := 127
-# after ESC: Alt with a letter, ESC b, d, f; a control sequence, ESC [ or ESC O, its numbers split by ;, then its final
-KEY_ALT_B := 98
-KEY_ALT_D := 100
-KEY_ALT_F := 102
-KEY_BRACKET := 91
-KEY_APPLICATION := 79
-SEMICOLON := 59
+# the keys that end the line, drop it, end the input; a typed character's first byte is at least a space
+RETURN := "\r"
+INTERRUPT := "\x03"
+END_OF_INPUT := "\x04"
+SPACE := 32
+# a control sequence's numbers and their separator, the bytes 0 to ; between ESC [ or ESC O and its final byte
 DIGIT_ZERO := 48
-DIGIT_NINE := 57
-FINAL_UP := 65
-FINAL_DOWN := 66
-FINAL_RIGHT := 67
-FINAL_LEFT := 68
-FINAL_END := 70
-FINAL_HOME := 72
-FINAL_NUMBERED := 126
-# ESC [ <number> ~: Home 1 or 7, Delete 3, End 4 or 8; ;3 the Alt modifier
-NUMBERED_HOME := 1
-NUMBERED_DELETE := 3
-NUMBERED_END := 4
-NUMBERED_HOME_VT := 7
-NUMBERED_END_VT := 8
-MODIFIER_ALT := 3
+SEMICOLON := 59
 # a UTF-8 byte that continues a character is 10xxxxxx
 CONTINUATION_UNIT := 64
 CONTINUATION := 2
 
-# the edits a key asks for
+# the edits a key asks for: a move of the cursor, a deletion from it to where that move would reach, a step through
+# the history
 enum Edit { Typed, Left, Right, Up, Down, Start, End, WordLeft, WordRight, Back, Delete, WordBefore, WordAfter }
 
 # the line edited on the terminal after the prompt, and its newline, as console.wap line_read gives a line; "" at the input's end.
@@ -69,157 +45,138 @@ edited_line(prompt: text, history: list<text>): text := {
 	at = 0
 	back = 0
 	interrupted = no
-	ended = no
-	editing = yes
-	while editing {
-		c = key()
-		if c < 0 or (c == KEY_END_OF_INPUT and byte_count(line) == 0) or (c == KEY_INTERRUPT and interrupted) {
-			ended = yes
-			editing = no
-		} else if c == KEY_RETURN or c == NEWLINE {
-			editing = no
-		} else if c == KEY_INTERRUPT {
-			written(STANDARD_OUTPUT, if byte_count(line) == 0 then EMPTY_LINE_INTERRUPTED else LINE_INTERRUPTED)
-			interrupted = byte_count(line) == 0
+	known = keys()
+	typed = key()
+	while typed != RETURN and typed != "\n" and typed != "" and not (typed == END_OF_INPUT and line == "") and not (typed == INTERRUPT and interrupted) {
+		edit = edit_of(typed, known)
+		interrupted = typed == INTERRUPT and line == ""
+		if typed == INTERRUPT {
+			written(STANDARD_OUTPUT, if interrupted then EMPTY_LINE_INTERRUPTED else LINE_INTERRUPTED)
 			line = ""
 			at = 0
 			back = 0
-			redrawn(prompt, line, at)
-		} else {
-			interrupted = no
-			edit = edit_of(c)
-			if edit == Left and at > 0 { at = character_before(line, at) }
-			if edit == Right and at < byte_count(line) { at = character_after(line, at) }
-			if (edit == Up and back < #history) or (edit == Down and back > 0) {
-				back = if edit == Up then back + 1 else back - 1
-				line = if back == 0 then "" else history#(#history + 1 - back)
-				at = byte_count(line)
-			}
-			if edit == Start { at = 0 }
-			if edit == End { at = byte_count(line) }
-			if edit == WordLeft { at = word_before(line, at) }
-			if edit == WordRight { at = word_after(line, at) }
-			if edit == Delete and at < byte_count(line) { line = cut(line, at, character_after(line, at)) }
-			if edit == WordAfter { line = cut(line, at, word_after(line, at)) }
-			if (edit == Back and at > 0) or edit == WordBefore {
-				start = if edit == Back then character_before(line, at) else word_before(line, at)
-				line = cut(line, start, at)
-				at = start
-			}
-			if edit == Typed and c >= KEY_SPACE {
-				line = bytes_between(line, 0, at) + byte_text(c) + after(line, at)
-				at = at + 1
-			}
-			redrawn(prompt, line, at)
 		}
+		if (edit == Up and back < #history) or (edit == Down and back > 0) {
+			back = if edit == Up then back + 1 else back - 1
+			line = if back == 0 then "" else history#(#history + 1 - back)
+			at = byte_count(line)
+		}
+		if edit == Typed and byte_at(typed, 0) >= SPACE {
+			line = spliced(line, at, at, typed)
+			at = at + byte_count(typed)
+		}
+		reached = reached_by(line, at, edit)
+		if edit == Back or edit == Delete or edit == WordBefore or edit == WordAfter {
+			line = spliced(line, min(at, reached), max(at, reached), "")
+			reached = min(at, reached)
+		}
+		at = reached
+		redrawn(prompt, line, at)
+		typed = key()
 	}
 	system(LINES_MODE)
 	written(STANDARD_OUTPUT, "\n")
-	if ended { return "" }
-	if byte_count(line) > 0 { history_added(history, line) }
+	if typed != RETURN and typed != "\n" { return "" }
+	if line != "" { history_added(history, line) }
 	line + "\n"
 }
+# the next key the terminal gives, its bytes: one, or ESC and the key after it (ESC ESC and one more, iTerm's Alt with
+# an arrow), a control sequence ESC [ or ESC O with its numbers up to its final byte; "" at the input's end
+key(): text := {
+	c = byte()
+	typed = if c < 0 then "" else byte_text(c)
+	while typed == "\e" or typed == "\e\e" { typed = typed + byte_text(byte()) }
+	# (ESC O, the terminal's application mode, sends what ESC [ does)
+	if typed == "\eO" { typed = "\e[" }
+	if typed == "\e[" or typed == "\e\e[" {
+		c = byte()
+		while c >= DIGIT_ZERO and c <= SEMICOLON {
+			typed = typed + byte_text(c)
+			c = byte()
+		}
+		typed = typed + byte_text(c)
+	}
+	typed
+}
 # the next byte the terminal gives, -1 at its end
-key(): int := {
+byte(): int := {
 	cell = text_made(1)
 	if bytes_read(STANDARD_INPUT, c_text(cell), 1) <= 0 then -1 else byte_at(cell, 0)
 }
-# the edit a key asks for, Typed for a character
-edit_of(c: int): Edit := {
-	if c == KEY_ESCAPE { return escaped_edit() }
-	if c == KEY_DELETE or c == KEY_BACKSPACE { return Back }
-	if c == KEY_LINE_START { return Start }
-	if c == KEY_LINE_END { return End }
+# a key as a terminal sends it and the edit it asks for
+class Key { sequence: text, edit: Edit }
+# the keys as macOS Terminal, iTerm and xterm send them: the arrows and Home/End as ESC [ sequences, ESC [ <number> ~
+# for Home 1 or 7, Delete 3, End 4 or 8; Alt as ESC before a key or as the ;3 modifier
+keys(): list<Key> := [
+	Key("\e[D", Left),
+	Key("\e[C", Right),
+	Key("\e[A", Up),
+	Key("\e[B", Down),
+	Key("\x01", Start),
+	Key("\e[H", Start),
+	Key("\e[1~", Start),
+	Key("\e[7~", Start),
+	Key("\x05", End),
+	Key("\e[F", End),
+	Key("\e[4~", End),
+	Key("\e[8~", End),
+	Key("\eb", WordLeft),
+	Key("\e[1;3D", WordLeft),
+	Key("\e\e[D", WordLeft),
+	Key("\ef", WordRight),
+	Key("\e[1;3C", WordRight),
+	Key("\e\e[C", WordRight),
+	Key("\x7f", Back),
+	Key("\x08", Back),
+	Key("\e[3~", Delete),
+	Key("\e\x7f", WordBefore),
+	Key("\e\x08", WordBefore),
+	Key("\ed", WordAfter),
+	Key("\e[3;3~", WordAfter)
+]
+# the edit a key asks for among the keys, Typed for a character
+edit_of(typed: text, known: list<Key>): Edit := {
+	for k in known { if k.sequence == typed { return k.edit } }
 	Typed
 }
-# the edit of the sequence after ESC, as macOS Terminal, iTerm and xterm send them: ESC [ <number>;<modifier> <final>
-# or ESC O <final>, or Alt with a key, ESC <key>; ESC ESC [D is iTerm's Option+←, the arrow with Alt
-escaped_edit(): Edit := {
-	c = key()
-	if c == KEY_DELETE or c == KEY_BACKSPACE { return WordBefore }
-	if c == KEY_ALT_D { return WordAfter }
-	if c == KEY_ALT_B { return WordLeft }
-	if c == KEY_ALT_F { return WordRight }
-	if c == KEY_ESCAPE { return with_alt(escaped_edit()) }
-	if c != KEY_BRACKET and c != KEY_APPLICATION { return Typed }
-	number = 0
-	given = 0
-	c = key()
-	while c == SEMICOLON or (c >= DIGIT_ZERO and c <= DIGIT_NINE) {
-		if c == SEMICOLON {
-			number = given
-			given = 0
-		} else { given = given * 10 + c - DIGIT_ZERO }
-		c = key()
-	}
-	modifier = if number == 0 then 0 else given
-	if number == 0 { number = given }
-	edit = final_edit(c, number)
-	if modifier == MODIFIER_ALT then with_alt(edit) else edit
-}
-# the edit a control sequence's final byte and number name
-final_edit(final: int, number: int): Edit := {
-	if final == FINAL_LEFT { return Left }
-	if final == FINAL_RIGHT { return Right }
-	if final == FINAL_UP { return Up }
-	if final == FINAL_DOWN { return Down }
-	if final == FINAL_HOME or (final == FINAL_NUMBERED and (number == NUMBERED_HOME or number == NUMBERED_HOME_VT)) { return Start }
-	if final == FINAL_END or (final == FINAL_NUMBERED and (number == NUMBERED_END or number == NUMBERED_END_VT)) { return End }
-	if final == FINAL_NUMBERED and number == NUMBERED_DELETE { return Delete }
-	Typed
-}
-# an edit with Alt: an arrow moves a word, Delete deletes one
-with_alt(edit: Edit): Edit := {
-	if edit == Left { return WordLeft }
-	if edit == Right { return WordRight }
-	if edit == Delete { return WordAfter }
-	edit
+# where an edit takes the cursor; a deletion's the place its move reaches
+reached_by(line: text, at: int, edit: Edit): int := {
+	if edit == Start { return 0 }
+	if edit == End { return byte_count(line) }
+	step = if edit == Left or edit == Back or edit == WordLeft or edit == WordBefore then -1 else 1
+	if edit == Left or edit == Right or edit == Back or edit == Delete { return character_edge(line, at, step) }
+	if edit == WordLeft or edit == WordRight or edit == WordBefore or edit == WordAfter { return word_edge(line, at, step) }
+	at
 }
 
 # --- the line's text ---
-byte_text(b: int): text := {
-	t = text_made(1)
-	set_text_byte(t, 0, b)
-	t
+# the line with its bytes from start until stop replaced by a text
+spliced(line: text, start: int, stop: int, put: text): text := bytes_between(line, 0, start) + put + bytes_between(line, stop, byte_count(line))
+# whether a step from at stays in the line; the byte it passes over
+stays(line: text, at: int, step: int): bool := if step < 0 then at > 0 else at < byte_count(line)
+passed(line: text, at: int, step: int): int := byte_at(line, if step < 0 then at - 1 else at)
+# where a step from at ends past a word: past the blanks first, then the word's bytes
+word_edge(line: text, from: int, step: int): int := {
+	at = from
+	while stays(line, at, step) and passed(line, at, step) == SPACE { at = at + step }
+	while stays(line, at, step) and passed(line, at, step) != SPACE { at = at + step }
+	at
 }
-# the line from byte at on; without its bytes from start until stop
-after(line: text, at: int): text := bytes_between(line, at, byte_count(line))
-cut(line: text, start: int, stop: int): text := bytes_between(line, 0, start) + after(line, stop)
-blank(line: text, at: int): bool := byte_at(line, at) == KEY_SPACE
-# where the word before the cursor starts, past the blanks right before it; where the one after it ends
-word_before(line: text, at: int): int := {
-	start = at
-	while start > 0 and blank(line, start - 1) { start = start - 1 }
-	while start > 0 and not blank(line, start - 1) { start = start - 1 }
-	start
-}
-word_after(line: text, at: int): int := {
-	stop = at
-	while stop < byte_count(line) and blank(line, stop) { stop = stop + 1 }
-	while stop < byte_count(line) and not blank(line, stop) { stop = stop + 1 }
-	stop
+# where a step from at ends past one character, its continuing bytes with it
+character_edge(line: text, from: int, step: int): int := {
+	at = if stays(line, from, step) then from + step else from
+	while at > 0 and at < byte_count(line) and continues(line, at) { at = at + step }
+	at
 }
 continues(line: text, at: int): bool := byte_at(line, at) ÷ CONTINUATION_UNIT == CONTINUATION
-character_before(line: text, at: int): int := {
-	start = at - 1
-	while start > 0 and continues(line, start) { start = start - 1 }
-	start
-}
-character_after(line: text, at: int): int := {
-	stop = at + 1
-	while stop < byte_count(line) and continues(line, stop) { stop = stop + 1 }
-	stop
-}
 # the prompt and the line written anew, the rest of the terminal's line cleared, the cursor moved back over the
 # characters after it
 redrawn(prompt: text, line: text, at: int) := {
 	characters_after = 0
 	for i in at upto byte_count(line) { if not continues(line, i) { characters_after = characters_after + 1 } }
-	back = if characters_after > 0 then control("${characters_after}D") else ""
-	written(STANDARD_OUTPUT, "\r" + prompt + line + control("K") + back)
+	back = if characters_after > 0 then "\e[${characters_after}D" else ""
+	written(STANDARD_OUTPUT, "\r" + prompt + line + "\e[K" + back)
 }
-# a terminal control sequence: ESC [ and the rest
-control(rest: text): text := byte_text(KEY_ESCAPE) + "[" + rest
 
 # --- the history: the lines typed before, one a line of HISTORY_FILE ---
 history_path(): text := getenv("HOME") + HISTORY_FILE
@@ -230,14 +187,9 @@ history_read(): list<text> := {
 	size_at = host_block(8)
 	block = file_read(history_path(), size_at)
 	all = if block == 0 then "" else c_copied(block, long_at(size_at))
-	lines: list<text> = []
-	start = 0
-	for at in 0 upto byte_count(all) {
-		if byte_at(all, at) == NEWLINE {
-			lines.add(bytes_between(all, start, at))
-			start = at + 1
-		}
-	}
+	# (each line ends in a newline: the part after the last one is no line)
+	lines = all.split("\n")
+	lines.remove_at(#lines - 1)
 	lines
 }
 # a line added to the history and appended to its file

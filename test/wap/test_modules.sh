@@ -200,4 +200,8 @@ use machine_math
 print text(path_matches("b.txt", "[a-c].txt"))
 print text(round(two_to(10.0)))')" "yes
 1024"
+# a library word given an any reaches its definition for the type the any holds (decision any-values, warp-reviewer)
+check "a library word takes an any holding its type" "$(ran use_any 'use ini
+a: any = parse_ini("top = 1")
+print to_ini(a)')" "top = 1"
 exit $((failures > 0))
