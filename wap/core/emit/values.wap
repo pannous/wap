@@ -22,7 +22,8 @@ class Code {
 # the layouts of the types a word names that need no type of the module: `number` and `any` hold any value, a
 # plain one boxed (fitted)
 # (an int32 is wasm's own i32, the int a foreign function's signature writes: an address in the module's memory too)
-WORD_LAYOUTS = {"int": I64, "float": F64, "bool": I32, "char": I32, "int32": I32, "number": ANYREF, "any": ANYREF}
+# (a float32 is wasm's f32, the float a foreign function's signature writes for C's float)
+WORD_LAYOUTS = {"int": I64, "float": F64, "float32": F32, "bool": I32, "char": I32, "int32": I32, "number": ANYREF, "any": ANYREF}
 # a case's tag, the first field of an enum's struct: its place among the cases, from 0
 TAG_FIELD = field_type(I32, IMMUTABLE)
 # a class tag's hash: its base and the largest i32 prime, so every tag is a positive i32
@@ -33,8 +34,9 @@ ENUM_WORD = "enum"
 
 # the GC type of a text: its UTF-8 bytes
 text_type(m: WasmModule) as int := added_type(m, array_type(field_type(I8, MUTABLE)))
-# the wasm type of a text's value: a reference to its bytes, null where it is missing
-text_layout(m: WasmModule) as list<int> := nullable(text_type(m))
+# the wasm type of a text's value: a reference to its bytes, null where it is missing; or the address of its bytes in
+# the memory
+text_layout(m: WasmModule) as list<int> := if m.text_in_memory then I32 else nullable(text_type(m))
 
 # the code of a literal, or ø for a node that is none
 literal(n: Node, m: WasmModule) as Code? := match n {
@@ -179,8 +181,12 @@ case_struct_of(record: Record, case: Node, m: WasmModule, records: Records) as i
 
 # a text's bytes kept in a passive segment, copied into a new array where the program meets it
 # a text literal as a constant expression, its bytes given one by one, ø for any other node
-fixed_text(n: Node, m: WasmModule) as Code? := match n { Text(t) => Code(text_layout(m), t.bytes.flat_map(b => i32_const(b)) + instruction(ARRAY_NEW_FIXED, [text_type(m), #t.bytes])); _ => ø }
+fixed_text(n: Node, m: WasmModule) as Code? := match n { Text(t) => if m.text_in_memory then memory_text(t, m) else Code(text_layout(m), t.bytes.flat_map(b => i32_const(b)) + instruction(ARRAY_NEW_FIXED, [text_type(m), #t.bytes])); _ => ø }
 text_literal(t: text, m: WasmModule) as Code := {
+	if m.text_in_memory { return memory_text(t, m) }
 	type = text_type(m)
 	Code(nullable(type), i32_const(0) + i32_const(#t.bytes) + instruction(ARRAY_NEW_DATA, [type, added_text(m, t.bytes)]))
 }
+# a text in the module's data, its address: its byte count (4 bytes), its bytes and a zero, as
+# types/memory_texts.wap reads one
+memory_text(t: text, m: WasmModule) as Code := Code(I32, i32_const(data_placed(m, little_endian(#t.bytes, 4) + t.bytes)))
