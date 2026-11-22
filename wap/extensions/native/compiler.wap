@@ -3,129 +3,77 @@
 # bytes' hash; another wasmtime's refused, said, and written anew).
 use "c.wap"
 use "run.wap"
+use "linking.wap"
 
-# the texts named here, each a C string in the program's memory
-compiler_beside(): int32 := prim data_address("/wap-seed/wap.wasm")
-own_path_link(): int32 := prim data_address("/proc/self/exe")
 # the compiler compiled to machine code, beside it: wap-<hash>.cwasm; a part written before it takes that name
-cached_suffix(): int32 := prim data_address(".cwasm")
-hash_mark(): int32 := prim data_address("-")
-part_template(): int32 := prim data_address(".XXXXXX")
-stale(): int32 := prim data_address("wap: this machine code is not this wasmtime's, so it is compiled again: ")
-digit_table(): int32 := prim data_address("0123456789abcdef")
+CACHED_SUFFIX := ".cwasm"
+PART_SUFFIX := ".XXXXXX"
+DIGIT_TABLE := "0123456789abcdef"
 HEXADECIMAL := 16
 # a hash of bytes: a polynomial over their 32-bit words below HASH_RANGE, read a chunk at a time
 HASH_BASE := 31
 HASH_RANGE := 72057594037927931
 CHUNK_BYTES := 4096
 # the source compiled to the module by the compiler's module: whether it was, the compiler's refusal said
-COMPILE_COUNT := 3
-compiled(compiler: int, source: int32, module: int32): bool := {
-	arguments = host_block(8 * COMPILE_COUNT)
-	set_long_at(arguments, host_of(pointer_at(COMPILER_AT)))
-	# (its links followed: WASI follows none out of a folder it opened, and data/ often is one)
-	set_long_at(arguments + 8, program_path(source))
-	set_long_at(arguments + 16, host_of(module))
-	module_ran(compiler, COMPILE_COUNT, arguments, host_of(pointer_at(COMPILER_AT)))
-}
+compiled(compiler: int, source: text, module: text): bool := module_ran(compiler, [compiler_path, program_path(source), module], compiler_path)
 
 # wap.wasm's hash, which its machine code and every program's are named by
 compiler_hash(): int := {
 	size_at = host_block(8)
-	bytes = file_read(host_of(pointer_at(COMPILER_AT)), size_at)
+	bytes = file_read(compiler_path, size_at)
 	if bytes == 0 then 0 else hash_of(0, bytes, long_at(size_at))
 }
 # the module of the .wasm file at `path`, its machine code kept beside it, <stem>-<hash>.cwasm by the hash of its bytes
 # (wap.wasm's: wap-<hash>.cwasm): read from there where this wasmtime wrote it, else compiled and written there for the
-# next run; its path made at `at`; 0 where there is no module, said
-module_loaded(path: int32, at: int): int := {
+# next run; 0 where there is no module, said
+module_loaded(path: text): int := {
 	size_at = host_block(8)
-	bytes = file_read(host_of(path), size_at)
-	if bytes == 0 { return said_none(no_module()) }
-	strcpy(pointer_at(at), path)
-	set_word(at + strlen(host_of(pointer_at(at))) - strlen(host_of(module_suffix())), 0)
-	hash_named(at, hash_of(0, bytes, long_at(size_at)))
-	cached = deserialized(at)
+	bytes = file_read(path, size_at)
+	if bytes == 0 { return said_none("wap: no module at ${path}") }
+	cache = cache_named(bytes_between(path, 0, byte_count(path) - byte_count(MODULE_SUFFIX)), hash_of(0, bytes, long_at(size_at)))
+	cached = deserialized(cache)
 	if cached != 0 { return cached }
 	module = module_of(bytes, long_at(size_at))
-	if module != 0 then cache_written(module, at) else 0
+	if module != 0 then cache_written(module, cache) else 0
 	module
 }
-# the path at `at` ended by -<hash>.cwasm
-hash_named(at: int, hash: int) := {
-	strcat(pointer_at(at), host_of(hash_mark()))
-	strcat(pointer_at(at), host_of(digits_of(hash, HEXADECIMAL)))
-	strcat(pointer_at(at), host_of(cached_suffix()))
-}
-# the module of the machine code at `at`; 0 where there is none, or where this wasmtime refuses it (another's), said
-deserialized(at: int): int := {
-	if realpath(pointer_at(at), 0) == 0 { return 0 }
+# the stem's machine code path, ended by -<hash>.cwasm
+cache_named(stem: text, hash: int): text := "${stem}-${digits_of(hash, HEXADECIMAL)}${CACHED_SUFFIX}"
+# the module of the machine code at the path; 0 where there is none, or where this wasmtime refuses it (another's), said
+deserialized(path: text): int := {
+	if access(path, EXISTS) != 0 { return 0 }
 	module_at = host_block(8)
-	if wasmtime_module_deserialize_file(engine, pointer_at(at), module_at) == 0 then long_at(module_at) else stale_said(at)
+	if wasmtime_module_deserialize_file(engine, path, module_at) == 0 then long_at(module_at) else said_none("wap: this machine code is not this wasmtime's, so it is compiled again: ${path}")
 }
-stale_said(at: int): int := {
-	said(stale())
-	said(pointer_at(at))
-	said_none(newline())
-}
-# the module's machine code written to the path at `at`, through a part of its own, so a run reading it never reads half
-# of it
-cache_written(module: int, at: int): int := {
+# the module's machine code written to the path, through a part of its own, so a run reading it never reads half of it
+cache_written(module: int, path: text): int := {
 	code = host_block(VECTOR_BYTES)
 	if wasmtime_module_serialize(module, code) != 0 { return 0 }
-	strcpy(pointer_at(PART_AT), pointer_at(at))
-	strcat(pointer_at(PART_AT), host_of(part_template()))
-	part = mkstemps(pointer_at(PART_AT), 0)
-	write(part, long_at(code + 8), long_at(code))
-	close(part)
-	rename(pointer_at(PART_AT), pointer_at(at))
+	# (mkstemps replaces the part's X's in its own bytes)
+	part = path + PART_SUFFIX
+	file = mkstemps(part, 0)
+	write(file, long_at(code + 8), long_at(code))
+	close(file)
+	rename(part, path)
 }
 # a hash gone on over these bytes of the host's memory: a polynomial over their 32-bit words below HASH_RANGE
 hash_of(start: int, bytes: int, size: int): int := {
+	# (a word past the chunk: the last word's bytes past the file are none)
+	chunk = text_address(text_made(CHUNK_BYTES + 4))
 	hash = start
 	at = 0
 	while at < size {
 		count = if size - at < CHUNK_BYTES then size - at else CHUNK_BYTES
-		memcpy(pointer_at(NAME_AT), bytes + at, count)
-		# (the last word's bytes past the file are none)
-		set_word(NAME_AT + count, 0)
+		memcpy(pointer_at(chunk), bytes + at, count)
+		set_word(chunk + count, 0)
 		i = 0
 		while i < count {
-			hash = (hash * HASH_BASE + word_at(NAME_AT + i)) % HASH_RANGE
+			hash = (hash * HASH_BASE + word_at(chunk + i)) % HASH_RANGE
 			i = i + 4
 		}
 		at = at + count
 	}
 	hash
 }
-# the digits of a count in the base (up to 16), a C string at DIGITS_AT
-digits_of(n: int, base: int): int32 := {
-	count = 1
-	rest = n ÷ base
-	while rest > 0 {
-		count = count + 1
-		rest = rest ÷ base
-	}
-	set_word(DIGITS_AT + count, 0)
-	rest = n
-	while count > 0 {
-		count = count - 1
-		memmove(pointer_at(DIGITS_AT + count), pointer_at(address(digit_table()) + rest % base), 1)
-		rest = rest ÷ base
-	}
-	pointer_at(DIGITS_AT)
-}
-# this executable's path (Linux's link, else macOS's dyld), its links followed (a link to it finds the wap-seed/ beside
-# the file itself, and WASI reads no path through a link to a place outside), with its file name replaced by the
-# compiler's, at COMPILER_AT
-compiler_found() := {
-	length = readlink(own_path_link(), pointer_at(COMPILER_AT), PATH_BYTES - 1)
-	if length > 0 then set_word(COMPILER_AT + length, 0) else {
-		set_word(SIZE_AT, PATH_BYTES)
-		_NSGetExecutablePath(pointer_at(COMPILER_AT), pointer_at(SIZE_AT))
-	}
-	resolved = realpath(pointer_at(COMPILER_AT), 0)
-	if resolved != 0 { memcpy(pointer_at(COMPILER_AT), resolved, strlen(resolved) + 1) }
-	slash = strrchr(pointer_at(COMPILER_AT), SLASH) - host_of(pointer_at(COMPILER_AT))
-	strcpy(pointer_at(COMPILER_AT + slash), compiler_beside())
-}
+# the digits of a count in the base (up to 16)
+digits_of(n: int, base: int): text := (if n < base then "" else digits_of(n ÷ base, base)) + bytes_between(DIGIT_TABLE, n % base, n % base + 1)

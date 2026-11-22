@@ -23,4 +23,20 @@ void* wap_host_callback(void* word, void* caller, const void* given, size_t coun
 }
 #endif
 
+// the native wap's clock (run.wap engine_made): a thread ticking the engine's epoch once a second, so a store's epoch
+// deadline counts seconds; a thread wap cannot start, as the program's code runs on one only. wasmtime is found by name,
+// so a program that links no wasmtime builds as before
+#include <pthread.h>
+#include <unistd.h>
+static void* epoch_ticking(void* engine) {
+	void (*epoch_incremented)(void*) = (void (*)(void*))native_function("c", "wasmtime_engine_increment_epoch");
+	for (;;) { sleep(1); epoch_incremented(engine); }
+	return NULL;
+}
+void epoch_ticker_started(int64_t engine) {
+	pthread_t ticker;
+	pthread_create(&ticker, NULL, epoch_ticking, (void*)(intptr_t)engine);
+	pthread_detach(ticker);
+}
+
 void run_main(w2c_program* program) { w2c_program_main(program); }
