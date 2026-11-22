@@ -115,4 +115,6 @@ check "an operator overloaded for an int and a text, the built-in kept for two i
 not a number: x"
 check "an operator overloaded for a class" "$(ran class_plus $'class P { x: int }\n+(a: P, b: P): P := P{x: a.x + b.x}\nprint(text((P{x: 1} + P{x: 2}).x))')" "3"
 check "a declared operator with its result type" "$(ran typed_operator $'infix operator ⇔(a: bool, b: bool): bool := a == b\nprint(text((1 > 0) ⇔ (2 > 0)))')" "yes"
+# a glyph nobody declared is a name like any other (wiki/operator.md): a function of that name, called glued to its arguments
+check "a free glyph names a function" "$(ran glyph_function $'⊕(a: int, b: int): int := a * 10 + b\nprint(text(⊕(4, 2)))')" "42"
 exit $((failures > 0))
