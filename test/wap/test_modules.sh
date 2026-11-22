@@ -164,6 +164,9 @@ hi!
 # a used module raises by the library's tag, so the program's main catches it though it calls nothing of the library
 check "a raise in a used compiled module is caught by the program" "$(printf '%s\n' 'positive(x: int) as int := if x > 0 then x else raise "not positive"' >"$stage/raising.wap" && $warp "$compiler" "$stage/raising.wap" "$stage/raising.wasm" 2>&1 && ran uses_raising "use \"$stage/raising.wasm\"
 print(text(positive(-1)))" 2>&1)" "not positive"
+# a used compiled module's top level runs once before the program, so a value it computes is set when the program reads it
+check "a value a used compiled module computes at its top level is set for the program" "$(printf '%s\n' 'answer = [40, 2].sum()' >"$stage/answering.wap" && $warp "$compiler" "$stage/answering.wap" "$stage/answering.wasm" 2>&1 && ran uses_answering "use \"$stage/answering.wasm\"
+print(text(answer))" 2>&1)" "42"
 # wiki/use.md "folder, package and project scope": use folder brings in every source file beside the using one
 mkdir -p "$stage/shapes" && printf '%s\n' 'area(side: int) as int := side * side' >"$stage/shapes/square.wap"
 check "use folder brings in a word of a file beside it" "$(printf '%s\n' 'use folder' 'print(text(area(3)))' >"$stage/shapes/main.wap" && $warp "$compiler" "$stage/shapes/main.wap" "$stage/shapes/main.wasm" 2>&1 && $warp "$stage/shapes/main.wasm" 2>&1)" "9"
