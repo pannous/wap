@@ -33,10 +33,17 @@ wap_beside_copied "$tree" "$scratch" || exit 2
 echo 'print "Hello"' >"$scratch/hello.wap"
 # stage <compiler> <output>: the compiler compiling wap's source; its cost in user + system CPU seconds, timed warm: a
 # first hello lets the host compile a new module's machine code before the clock starts, else a new stage pays for it
+# A stage built from the tree reads the tree's sources (its own warm state is the stage's before) and first writes the
+# warm state the compiler it builds embeds
 stage() {
-	local start=$SECONDS cost
+	local start=$SECONDS cost sources=()
+	[ -f "$tree/$WAP_WARM" ] || : >"$tree/$WAP_WARM"
+	if [ "$1" != "$seed" ]; then
+		sources=(--sources)
+		wap_ran "$1" --sources warm "$tree/$WAP_WARM" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: no warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
+	fi
 	wap_ran "$1" "$scratch/hello.wap" "$scratch/warm.wasm" >/dev/null 2>&1
-	cost=$( { TIMEFORMAT="%U %S"; time wap_ran "$1" "$tree/wap/compiler.wap" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
+	cost=$( { TIMEFORMAT="%U %S"; time wap_ran "$1" ${sources[@]+"${sources[@]}"} "$tree/wap/compiler.wap" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
 	[ -f "$2" ] || { echo "refresh-seed: $(basename "$2" .wasm) FAILED: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
 	stage_cost=$cost
 	echo "refresh-seed: $(basename "$2" .wasm) $(wc -c <"$2" | tr -d ' ') B in $((SECONDS - start)) s, $cost s CPU, sha256 $(shasum -a 256 "$2" | cut -c1-16)"
