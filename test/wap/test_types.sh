@@ -21,7 +21,7 @@ print(h(yes) ?? "x")')" "yes"
 check "a name given another type holds any, with a warning" "$(ran retyped 'x = 1
 print "${x + 1}"
 x = "ab"
-print x' | sed 's/.*: this name/this name/')" "this name held int and now text, so it holds any from here on: write \`let\` for a name that keeps its type: (Set x \"ab\")
+print x' | sed 's/.*: this name/this name/')" "this name held int and now text, so it holds any from here on: write \`let\` for a name that keeps its type
 2
 ab"
 check "an int given a float holds the float, said nothing" "$(ran widened 'y = 2

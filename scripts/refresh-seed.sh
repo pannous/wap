@@ -67,8 +67,26 @@ if [ -n "$check" ]; then
 	exit 0
 fi
 
+# the build stamp appended to a compiler, the custom section wap.build of lines: the tree's commit, when it was built
+# (`wap version` shows it, wap/extensions/native/commands.wap; as warp's stamp, core/native/warp.warp stamped)
+stamped() {
+	python3 - "$1" "$2" "$(date '+%Y-%m-%d %H:%M')" <<'PY'
+import sys
+path, commit, built = sys.argv[1:]
+name = b"wap.build"
+payload = bytes([len(name)]) + name + f"{commit}\n{built}".encode()
+size, leb = len(payload), bytearray()
+while True:
+    byte, size = size & 127, size >> 7
+    leb.append(byte | (128 if size else 0))
+    if not size:
+        break
+open(path, "ab").write(b"\0" + bytes(leb) + payload)
+PY
+}
+source_commit=$(git -C "$tree" rev-parse HEAD)
 # the seed and what it reads beside it, installed and published
-cp "$chosen" "$seed" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && echo "refresh-seed: replaced $seed"
+cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && echo "refresh-seed: replaced $seed"
 # (the old compiler's machine code goes with it, and every program's it compiled: the native wap writes the new
 # compiler's at its first run, below)
 rm -f "$(dirname "$seed")"/*.cwasm
@@ -82,7 +100,6 @@ native=$(dirname "$(dirname "$seed")")
 beside=$scratch/wap-seed-beside.tar.gz
 tar -czf "$beside" -C "$tree/wap" "${WAP_BESIDE[@]}" -C "$tree" "$WAP_LIBRARY" || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
 release=wap-seed-$(date +%Y-%m-%d)-$(shasum -a 256 "$seed" | cut -c1-8)
-source_commit=$(git -C "$tree" rev-parse HEAD)
 gh release create "$release" "$seed" "$beside" --repo "$REPOSITORY" --prerelease --title "$release" --target "$source_commit" \
 	--notes "wap's seed compiler: wap/compiler.wap of ${source_commit:0:10}, compiled by the stages A B C." &&
 	echo "refresh-seed: published $release"

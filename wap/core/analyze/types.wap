@@ -190,11 +190,12 @@ typed_among(program: Block, library: list, rules: KindRules, library_scope: Scop
 	s.definitions = signatures.filter(signature => is_function(signature))
 	definitions_held(defines, s)
 	records_added(library, s)
+	values = library_values(library).map(value => typed_form(value, s, TypeFrame(), ø))
 	typed = try typed_form(program, s, TypeFrame(), ø) catch e { if #s.retyped == #retyped then refused_all(s, [e.message]) else Block([]) }
 	if #s.retyped > #retyped { return typed_among(program, library, rules, library_scope, signatures, s.retyped, s.retypings) }
 	if s.refusals { refused_all(s, []) }
 	for retyping in s.retypings { hint(retyping) }
-	statements = statements_in(typed)
+	statements = values + statements_in(typed)
 	if s.unknowns > 0 { all_settled(s) }
 	dispatches_completed(s)
 	s.functions = distinct_instances(s.functions, s)
@@ -203,6 +204,9 @@ typed_among(program: Block, library: list, rules: KindRules, library_scope: Scop
 	whole = refitted(Block(s.records.items + functions_typed_from(written, s) + placed), typed)
 	if s.unknowns > 0 then settled_everywhere(whole, s) else whole
 }
+# the values a compiled library takes from its module, each `c_outs: int = prim foreign(…)`: typed before the program
+# and its first statements, so the program imports each as it imports a used module's, and they hold before it reads one
+library_values(library: list) as list := library.filter(statement => match statement { Set(place, value) => value is Prim and declared_type(place) != ø; _ => no })
 # every function wap refuses, then what else stopped the program, said together
 refused_all(s: TypingState, more: list) := raise (s.refusals.map(each => each.message) + more).join("\n")
 # whether a typed form gives a value: not none, not a jump that never comes back
@@ -374,7 +378,9 @@ receiver_field(name: Node) as Node := {
 }
 name_set_typed(n: Node, place: Node, value: Node, s: TypingState, f: TypeFrame) as Node := {
 	name = declared_name(place)
+	# a name written `any` holds the type of what it is given (a later other type retypes it)
 	declared = substituted(declared_type(place), f.letters)
+	if declared != ø and shaped(declared, s) == ANY_SYMBOL { declared = ø }
 	key = place_key(defined_at(name))
 	if declared != ø or is_kind_word(fact_of(n, ASSIGNS), DefinitionKind.Local) { s.fixed.add(key) }
 	wanted = if declared != ø then shaped(declared, s) else type_keyed(key, s.retyped) ?? variable_type(name, s, f)
@@ -400,7 +406,7 @@ retyped(n: Node, key: text, held: Node, given: Node, refusal: text, s: TypingSta
 	if key in s.fixed or type_keyed(key, s.retyped) != ø { raise refusal }
 	both = joined_type(held, given, s) ?? ANY_SYMBOL
 	s.retyped.add(Binding(key, both))
-	if both == ANY_SYMBOL { s.retypings.add(warning_of(n, "this name held ${type_text(held)} and now ${type_text(given)}, so it holds any from here on: write `let` for a name that keeps its type")) }
+	if both == ANY_SYMBOL { s.retypings.add(place_of(n) + "this name held ${type_text(held)} and now ${type_text(given)}, so it holds any from here on: write `let` for a name that keeps its type") }
 	both
 }
 # a list's item or a record's field given a value of its type; the Set itself gives none
