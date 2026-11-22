@@ -29,9 +29,11 @@ use "core/rules/stages.wap"
 use "core/format.wap"
 use "core/emit/wasm.wap"
 use "core/emit/emitter.wap"
+use "core/emit/functions.wap"
 use "core/language.wap"
 use "extensions/wasm/modules.wap"
 use "extensions/c/functions.wap"
+use "extensions/wasm/library.wap"
 use "core/stage.wap"
 use "core/analyze/types.wap"
 use "extensions/warm.wap"
@@ -40,6 +42,7 @@ use "extensions/warm.wap"
 # already, so it reads no source; `--sources` reads them instead, as a compiler built without one does (empty)
 WARM_STATE := embedded("warm.packed")
 SOURCES_OPTION = "--sources"
+WARM_COMMAND = "warm"
 from_sources = #args > 0 and args#1 == SOURCES_OPTION
 given = if from_sources then args[1 ..] else args
 warm = not from_sources and WARM_STATE != ""
@@ -52,22 +55,27 @@ if warm { warm_brought(language, program.folder, WARM_STATE) }
 rules_loaded(language, operated_file(language, in_folder(program.folder, C_FUNCTION_RULES)))
 rules_files_loaded(language, program.folder)
 if warm { rules_checked(language) }
-types = types_declared(language, program.folder)
+if #given < 2 { raise "usage: warp wap/compiler.wap [--sources] <program> <module.wasm>, format <program>, warm <state file>, or native <program> <module.wasm>" }
+# the library a compile reads: from sources, as the compilers bootstrap and a native build compile (whose texts are not
+# the GC ones the module compiled once holds), its source; else, a warm state too, recording what a compile reads, the
+# module compiled once where its stamp fits (extensions/wasm/library.wap)
+library = if from_sources and given#1 != WARM_COMMAND then TYPES_FILE else library_file(program.folder, given#1)
+types = types_declared(language, program.folder, library)
 # a module: its functions compiled once each and exported, the rest of its code as wap source in its wap section
 compiled(file: text, values_in_memory: bool = no) as list := {
 	modules = declared_modules(language, file)
 	typed = typed_modules(language, modules, types)
 	own = modules.last
-	exported = compiled_once(own, added_records(Records(), statements_in(typed)))
-	m = emitted(typed, file, (exported + library_exports(modules)).map(signature => definer_id(signature.definer)), values_in_memory)
+	travelling = travelling_of(program.folder, file, own, typed)
+	exported = compiled_once(own, added_records(Records(), statements_in(typed)), travelling)
+	m = emitted(library_code(program.folder, file, typed, travelling), file, (exported + library_exports(modules)).map(signature => export_key(signature.definer)), values_in_memory, raise_module(program.folder, library), is_library(program.folder, file))
 	m.header = header_source(file, own, exported)
-	c_described(m, module_bytes(m))
+	library_stamped(program.folder, file, c_described(m, module_bytes(m)))
 }
 
 # (the native `wap` compiles as the native warp does: the program's folder, its lib/ and runtime follow, unread here)
 # `native <program> <module.wasm>`: for a native build (wap/extensions/native/build.sh), each text in the memory
-if #given < 2 { raise "usage: warp wap/compiler.wap [--sources] <program> <module.wasm>, format <program>, warm <state file>, or native <program> <module.wasm>" }
 if given#1 == "format" { code = read_notation(language, given#2); words_known(language, code); print formatted(language, groupings_written(language, operated_program(language, code))) }
-else if given#1 == "warm" { write_bytes(given#2, bytes(warm_state(language, program.folder))) }
+else if given#1 == WARM_COMMAND { write_bytes(given#2, bytes(warm_state(language, program.folder))) }
 else if given#1 == "native" { language.values_in_memory = yes; write_bytes(given#3, compiled(given#2, yes)) }
 else { write_bytes(given#2, compiled(given#1)) }
