@@ -17,6 +17,9 @@ SIZE_NODES=116768
 
 source "$(dirname "$0")/compile.sh"
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
+# a merge not yet committed lists each conflicted file once per side, which counts it three times: refuse
+unmerged=$(cd "$root" && git ls-files --unmerged 'wap/*.wap' | cut -f2 | sort -u)
+[ -z "$unmerged" ] || { echo "✗ census: commit the merge first, these files are unmerged: $unmerged"; exit 1; }
 
 # one census of every file, in one process: the files share their modules and their typing (scripts/wap-census.warp),
 # compiled by the compiler under test (--compiler <module>, or wap's source run by the old compiler), and run from the
