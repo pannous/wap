@@ -179,4 +179,12 @@ print(text(natural_compare("a2", "a10") < 0))')" "yes"
 # a folder right in the library holds modules too, lib/native's C bindings among them; import is use
 check "import name brings in a module from a folder of the library" "$(ran use_library_folder 'import z
 print(text(compressBound(100)))')" "113"
+# ini: keys before any section stay at the top level beside the sections (lib/ini.warp, card lib-ini-toml)
+check "ini keeps the keys before any section" "$(ran use_ini 'use ini
+print to_ini(parse_ini("top = 1
+[db]
+host = x"))')" "top = 1
+
+[db]
+host = x"
 exit $((failures > 0))
