@@ -35,10 +35,7 @@ while n < 5 {
 }
 exit(k)' >/dev/null; echo $?)" "3"
 # the native wap (driver.wap, built by wap): `wap <program>` compiles with the wap.wasm beside it and runs the module
-native_wap="$stage/bin/wap"
-mkdir -p "$stage/bin/wap-seed" && (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$stage/bin/wap-seed/") && cp "$compiler" "$stage/bin/wap-seed/wap.wasm"
-wasmtime_library="$(cd -P "$(dirname "$wap")/lib" && pwd -P)"
-WARP=$wap "$tree/wap/extensions/native/build.sh" "$compiler" "$tree/wap/extensions/native/driver.wap" "$native_wap" -L"$wasmtime_library" -lwarp_wasmtime -Wl,-rpath,"$wasmtime_library" >/dev/null 2>&1
+native_wap=$(native_wap_built "$stage/bin")
 printf '%s\n' 'print "Hello"' >"$stage/hello.wap"
 check "wap hello.wap prints Hello" "$(cd "$stage" && "$native_wap" hello.wap 2>&1)" "Hello"
 printf '%s\n' 'x = 40000000000' 'x + 2' >"$stage/value.wap"
@@ -102,7 +99,7 @@ qsort(address(ARRAY_AT), 3, 4, c_callback_pointer(0))
 print "${word(ARRAY_AT)} ${word(ARRAY_AT + 4)} ${word(ARRAY_AT + 8)}"
 PROGRAM
 check "C calls back a function of the program the native wap runs" "$(cd "$stage" && "$native_wap" sorted.wap 2>&1)" "1 2 3"
-# texts in a native program, held in its memory (extensions/native/text_bytes.wap): literals, + and interpolation,
+# texts in a native program, held in its memory (types/memory_texts.wap): literals, + and interpolation,
 # equality, print, and a text passed to C
 check "a native program's texts" "$(native_ran texts 'strlen(s: text): i64 from '"'"'c'"'"'
 name = "wap"

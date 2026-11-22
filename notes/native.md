@@ -13,7 +13,7 @@ warp-host-fixer; this file is the inventory.
   the export c_callback_fired(slot, a, b, c, d, e, f) of the module whose C call is in progress, during that call;
   its int result C's. test/wap/test_native.sh (qsort).
 - Texts in a native program (build.sh): the compiler's `native` option lays a text out as the address of its count and
-  bytes in the memory, and the build reads extensions/native/text_bytes.wap in the place of types/text_bytes.wap.
+  bytes in the memory, and the build reads types/memory_texts.wap in the place of types/text_bytes.wap.
   Its memory is never freed: fine for the driver and short programs, not for a long-running native one. When the
   memory cannot grow further (wasm's 4 GiB, or the host's limit), memory.grow fails (core/emit/host.wap memory_grown
   drops its -1) and the first store past the end traps, "Out-of-bounds access in linear memory": the run stops loudly,

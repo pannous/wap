@@ -2,7 +2,7 @@
 # A wap program built to a native executable: compiled by wap to a module, which wasm2c writes as C, which cc
 # builds with wasm2c's runtime, lib/native/wasi.c and the C glue of its imports (main.c, glue.awk beside this
 # script). The program uses no GC value: no list or raise; a text is in the module's memory, as the compiler writes one
-# that reads text_bytes.wap (beside this script) in the place of types/text_bytes.wap.
+# that reads types/memory_texts.wap in the place of types/text_bytes.wap.
 #   wap/extensions/native/build.sh <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]
 # the arguments after the executable are the C compiler's, the libraries the program's C functions are in:
 # `-Llib -lwarp_wasmtime -Wl,-rpath,@executable_path/lib` for the native wap (driver.wap)
@@ -32,7 +32,7 @@ mkdir -p "$building/compiler"
 (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$building/compiler/") && cp "$compiler" "$building/compiler/wap.wasm"
 # (the library the compiler compiled once, types/types.wasm, and its warm state are the GC ones: a native build reads
 # its library anew, --sources)
-cp "$here/text_bytes.wap" "$building/compiler/types/text_bytes.wap" && rm -f "$building/compiler/types/types.wasm"
+cp "$building/compiler/types/memory_texts.wap" "$building/compiler/types/text_bytes.wap" && rm -f "$building/compiler/types/types.wasm"
 wap_ran "$building/compiler/wap.wasm" --sources native "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
 awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"
