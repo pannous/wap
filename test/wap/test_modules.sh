@@ -200,4 +200,9 @@ use machine_math
 print text(path_matches("b.txt", "[a-c].txt"))
 print text(round(two_to(10.0)))')" "yes
 1024"
+# a used module's function nothing calls is left out, as the library's are, so what it alone needs (here a C library
+# that is not there) never stops the program
+printf '%s\n' 'missing() as int := prim foreign("nosuchlibrary", "nosuchword")' 'greeting() as text := "hi"' >"$stage/unused.wap"
+check "a used module's function nothing calls is left out" "$(ran use_unused 'use "unused.wap"
+print greeting()')" "hi"
 exit $((failures > 0))
