@@ -160,4 +160,47 @@ check "C calls back the export of a module the program uses" "$(cd "$stage" && "
 # its time cap stops and names the cap and the program
 printf 'n = 0\nwhile yes { n = n + 1 }\n' >"$stage/spinning.wap"
 check "a run past its time cap stops, naming the cap and the program" "$(cd "$stage" && "$native_wap" --seconds 1 spinning.wap 2>&1 | grep -o 'wap: spinning.wap ran past the time cap of 1 s')" "wap: spinning.wap ran past the time cap of 1 s"
+# the console on a terminal edits its line (wap/extensions/native/editing.wap): each line typed with the keys' escape
+# sequences as macOS Terminal, iTerm and xterm send them, on a pseudo terminal, HOME the stage so the history is the
+# session's; what the console shows for each line, one a line
+console_typed() {
+	HOME="$stage" python3 - "$native_wap" "$@" <<'EOF'
+import os, pty, re, select, sys, time
+PROMPT, WAIT_SECONDS = "› ".encode(), 60
+child, terminal = pty.fork()
+if child == 0:
+    os.execv(sys.argv[1], [sys.argv[1]])
+output = b""
+def read_until(count: int) -> None:
+    global output
+    end = time.time() + WAIT_SECONDS
+    while output.count(PROMPT) < count and time.time() < end:
+        if select.select([terminal], [], [], 0.2)[0]:
+            output += os.read(terminal, 4096)
+read_until(1)
+for typed in sys.argv[2:]:
+    start = len(output)
+    os.write(terminal, os.fsencode(typed) + b"\r")
+    read_until(output.count(PROMPT) + 1)
+    shown = re.sub(rb"\x1b\[[0-9;]*[A-Za-z]", b"", output[start:]).decode(errors="replace")
+    print(" ".join(part.split("\r")[-1].strip() for part in shown.split("\n") if part.split("\r")[-1].strip() and not part.split("\r")[-1].startswith("›")))
+os.write(terminal, b"\x04")
+os.waitpid(child, 0)
+EOF
+}
+LEFT=$'\e[D' RIGHT=$'\e[C' UP=$'\e[A' HOME_KEY=$'\e[H' END_KEY=$'\e[F' DELETE=$'\e[3~' BACKSPACE=$'\x7f' CTRL_A=$'\x01' CTRL_E=$'\x05'
+ALT_LEFT=$'\e[1;3D' ALT_DELETE=$'\e[3;3~' ALT_BACKSPACE=$'\e\x7f'
+check "the console edits its line: arrows, Home/End, Ctrl+A/E, deletes, word moves, the lines before" "$(console_typed \
+	"50+1" "+1${HOME_KEY}41${END_KEY}*1" "+1${CTRL_A}44${CTRL_E}*1" "4196${LEFT}${LEFT}${LEFT}${DELETE}" "4${LEFT}3${RIGHT}0" \
+	"foo bar 47${HOME_KEY}${ALT_DELETE}${ALT_DELETE}" "49 foo bar${ALT_BACKSPACE}${ALT_BACKSPACE}" "2 * 2${ALT_LEFT}${ALT_LEFT}${ALT_LEFT}1" \
+	"print \"aé\"${LEFT}${LEFT}${BACKSPACE}" "${UP}${UP}" 2>&1)" "51
+42
+45
+496
+340
+47
+49
+24
+é
+24"
 exit $((failures > 0))
