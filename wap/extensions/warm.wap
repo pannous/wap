@@ -1,5 +1,5 @@
 # The compiler's warm state (wap#42, decision wap-packed-library): every file it reads before a program, its rules and
-# its types module, operated once and packed (extensions/packed.wap), so a compiled compiler brings them in from its
+# its types module, operated once, and the library lowered once, packed (extensions/packed.wap), so a compiled compiler brings them in from its
 # own bytes and reads no source; a source is read only where no warm state was baked. Every path in it, a file's and
 # each place's, is kept inside the wap folder, so a state written in one folder holds in any other.
 use "packed.wap"
@@ -12,16 +12,20 @@ use "../core/rules/patterns.wap"
 # what stands for the wap folder in a written path
 WAP_FOLDER_MARK = "<wap>/"
 
-# the files the language read so far, packed: [path: [code, [word, …]], …]
-warm_state(language: Language, wap_folder: text) as text := pack(List(language.operated.keys.map(file => Key(Text(file), Op.Colon, List([language.operated[file].code, List(language.operated[file].words.map(word => Text(word)), Bracket.Square, Separator.Comma)], Bracket.Square, Separator.Comma))), Bracket.Square, Separator.Comma), path => marked(wap_folder, path))
+# the files the language read and lowered so far, packed: [[path: [code, [word, …]], …], [path: lowered code, …]]
+warm_state(language: Language, wap_folder: text) as text := pack(data_list([files_listed(language.operated.keys, file => data_list([language.operated[file].code, data_list(language.operated[file].words.map(word => Text(word)))])), files_listed(language.lowered.keys, file => language.lowered[file])]), path => marked(wap_folder, path))
+files_listed(files: list<text>, kept: (text) -> Node) as Node := data_list(files.map(file => Key(Text(file), Op.Colon, kept(file))))
 
-# a packed warm state brought in: each file's code operated already, found by its path in this wap folder; an empty one
-# brings nothing, so the files are read
+# a packed warm state brought in: each file's code operated already and each library file's lowered, found by its path
+# in this wap folder; an empty one brings nothing, so the files are read
 warm_brought(language: Language, wap_folder: text, state: text) := {
 	if state == "" { return }
 	match unpack(state, path => unmarked(wap_folder, path)) {
-		List(files, bracket, separator) => for file in files { match file { Key(Text(path), op, List(kept, square, comma)) => language.operated[path] = Operated(kept#1, items_of(kept#2).map(word => text(word))); _ => raise "warm state: no file entry: ${text(file)}" } }
-		_ => raise "warm state: no list of files"
+		List(parts, bracket, separator) => {
+			for file in items_of(parts#1) { match file { Key(Text(path), op, List(kept, square, comma)) => language.operated[path] = Operated(kept#1, items_of(kept#2).map(word => text(word))); _ => raise "warm state: no file entry: ${text(file)}" } }
+			for file in items_of(parts#2) { match file { Key(Text(path), op, code) => language.lowered[path] = code; _ => raise "warm state: no lowered file entry: ${text(file)}" } }
+		}
+		_ => raise "warm state: no lists of operated and lowered files"
 	}
 }
 
