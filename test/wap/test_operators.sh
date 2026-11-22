@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wap's operator stage (notes/backbone.md "Operators", wiki/precedence.md): a program printed back by `format` in
 # canonical warp, every operator read by the table of wap/types/operators.wap.
-# Run it with bash test/wap/test_operators.sh; the warp under test is WARP (default the warp on PATH)
+# Run it with bash test/wap/test_operators.sh; its modules run on the native wap on PATH
 source "$(dirname "$0")/format_checks.sh"
 
 format_check '1+2 * 3' '1 + 2 * 3'
