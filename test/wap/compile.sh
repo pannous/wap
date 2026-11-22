@@ -74,8 +74,6 @@ if command -v wasm2c >/dev/null; then wap=$(tree_wap_built) || exit 1; else echo
 # each test script its own folder in the tree's data/ (never the system's temporary folder)
 stage="$data/$$"
 mkdir -p "$stage" || exit 1
-# the programs compiled here import the library by its bare name, which the host finds beside them
-cp "$(dirname "$compiler")/types.wasm" "$stage/" 2>/dev/null
 trap 'rm -rf "$stage"' EXIT
 
 ran() {
