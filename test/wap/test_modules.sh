@@ -162,7 +162,7 @@ print(text(size(Tree([Tree([], \"b\")], \"a\"))))")" "6
 hi!
 2"
 # a used module raises by the library's tag, so the program's main catches it though it calls nothing of the library
-check "a raise in a used compiled module is caught by the program" "$(printf '%s\n' 'positive(x: int) as int := if x > 0 then x else raise "not positive"' >"$stage/raising.wap" && $warp "$compiler" "$stage/raising.wap" "$stage/raising.wasm" 2>&1 && ran uses_raising "use \"$stage/raising.wasm\"
+check "a raise in a used compiled module is caught by the program" "$(printf '%s\n' 'positive(x: int) as int := if x > 0 then x else raise "not positive"' >"$stage/raising.wap" && $wap "$compiler" "$stage/raising.wap" "$stage/raising.wasm" 2>&1 && ran uses_raising "use \"$stage/raising.wasm\"
 print(text(positive(-1)))" 2>&1)" "not positive"
 # wiki/use.md "folder, package and project scope": use folder brings in every source file beside the using one
 mkdir -p "$stage/shapes" && printf '%s\n' 'area(side: int) as int := side * side' >"$stage/shapes/square.wap"

@@ -39,7 +39,7 @@ folder_built() {
 		built="$building/wap$n.wasm"
 	done
 	# the library compiled once beside the compiler, which programs then read (extensions/wasm/library.wap)
-	$warp "$built" "$building/types/types.wap" "$building/types.wasm" 2>&1 || return 1
+	$wap "$built" "$building/types/types.wap" "$building/types.wasm" 2>&1 || return 1
 	# another script may have put the same folder in place meanwhile: the first one stays
 	[ -f "$1/wap$2.wasm" ] && { rm -rf "$building"; return; }
 	rm -rf "$1" && mv "$building" "$1"
