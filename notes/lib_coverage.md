@@ -37,6 +37,8 @@ blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** 
 | | list.warp (fixed around) | an if-expression as a call's argument (above) |
 | | callbacks.warp | reading an item of a `list<function?>` / `list<function>`: the types module's list_item "gives no value" |
 | | unicode.warp:149 | no `upper(text)` in the types module |
+| | unicode.warp:18 … | an empty map takes text keys, so int-keyed tables write their types: `m = {}; m[3] = 4` is refused (lists take their element type from first use already); card empty-map, one token in core/analyze/data.wap:140 |
+| | test/test_dynamic.wap:30 | `letter: any = "z"; letter is text` gives no (red on main) |
 | 5: cli i18n map toml yaml | map.warp deep_merge … | no cast from an any back to a container, `a as map<text, any>` (refused in binding) |
 
 ## Lib: the module's own fault
