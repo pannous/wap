@@ -187,4 +187,11 @@ host = x"))')" "top = 1
 
 [db]
 host = x"
+# list: the standard list words beyond the types module's, typed (lib/list.warp, notes/lib_coverage.md)
+check "the list module's words take typed lists" "$(ran use_list 'use list
+print text(chunk([1, 2, 3, 4, 5], 2))
+print text(median([3, 1, 2, 4]))
+print text(combinations([1, 2, 3], 2))')" "[[1, 2], [3, 4], [5]]
+2.5
+[[1, 2], [1, 3], [2, 3]]"
 exit $((failures > 0))
