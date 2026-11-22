@@ -109,4 +109,30 @@ print "${greeting} has ${strlen(greeting)} bytes"
 print(if name == "wap" then "same" else "other")')" "hello wap
 hello wap has 9 bytes
 same"
+# a module's `export` is exported by the program that uses it too, under its plain name: C calls back the module's
+# c_callback_fired though the program defines none
+cat >"$stage/comparing.wap" <<'MODULE'
+memcpy(destination: int32, source: int, count: int): int := prim foreign("c", "memcpy", destination, source, count)
+word(at: int): int := prim i32.load(at)
+SCRATCH_AT := 3072
+export c_callback_fired(slot: int, a: int, b: int, c: int, d: int, e: int, f: int): int := {
+	memcpy(prim i32.wrap_i64(SCRATCH_AT), a, 4)
+	memcpy(prim i32.wrap_i64(SCRATCH_AT + 4), b, 4)
+	word(SCRATCH_AT) - word(SCRATCH_AT + 4)
+}
+MODULE
+cat >"$stage/sorting.wap" <<'PROGRAM'
+use "comparing.wap"
+qsort(base: int32, count: int, size: int, compare: int) := prim foreign("c", "qsort", base, count, size, compare)
+c_callback_pointer(slot: int): int := prim foreign("c", "c_callback_pointer", slot)
+set_word(at: int, w: int) := prim i32.store(at, w)
+item(at: int): int := prim i32.load(at)
+ARRAY_AT := 2048
+set_word(ARRAY_AT, 2)
+set_word(ARRAY_AT + 4, 3)
+set_word(ARRAY_AT + 8, 1)
+qsort(prim i32.wrap_i64(ARRAY_AT), 3, 4, c_callback_pointer(0))
+print "${item(ARRAY_AT)} ${item(ARRAY_AT + 4)} ${item(ARRAY_AT + 8)}"
+PROGRAM
+check "C calls back the export of a module the program uses" "$(cd "$stage" && "$native_wap" sorting.wap 2>&1)" "1 2 3"
 exit $((failures > 0))
