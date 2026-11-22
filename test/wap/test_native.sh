@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # a wap program of no GC value builds to a native executable, which prints what the program prints
-# (wap/extensions/native/build.sh, card wap-command-options). Run it with bash test/wap/test_native.sh; the warp under
-# test is WARP (default the warp on PATH). Needs wasm2c and a C compiler
+# (wap/extensions/native/build.sh, card wap-command-options). Run it with bash test/wap/test_native.sh; its
+# modules run on the native wap on PATH. Needs wasm2c and a C compiler
 source "$(dirname "$0")/compile.sh"
 command -v wasm2c >/dev/null || { echo "⊘ no wasm2c: skipped"; exit 0; }
 native_ran() {
 	printf '%s\n' "$2" >"$stage/$1.wap"
-	WARP=$warp "$tree/wap/extensions/native/build.sh" "$compiler" "$stage/$1.wap" "$stage/$1" 2>&1 && "$stage/$1" 2>&1
+	"$tree/wap/extensions/native/build.sh" "$compiler" "$stage/$1.wap" "$stage/$1" 2>&1 && "$stage/$1" 2>&1
 }
 check "a native hello" "$(native_ran hello 'greeting(): int := prim data_address("Hello\n")
 set_word(at: int, word: int) := prim i32.store(at, word)
@@ -37,8 +37,8 @@ exit(k)' >/dev/null; echo $?)" "3"
 # the native wap (driver.wap, built by wap): `wap <program>` compiles with the wap.wasm beside it and runs the module
 native_wap="$stage/bin/wap"
 mkdir -p "$stage/bin/wap-seed" && (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$stage/bin/wap-seed/") && cp "$compiler" "$stage/bin/wap-seed/wap.wasm"
-wasmtime_library="$(cd -P "$(dirname "$(command -v "$warp")")/lib" && pwd -P)"
-WARP=$warp "$tree/wap/extensions/native/build.sh" "$compiler" "$tree/wap/extensions/native/driver.wap" "$native_wap" -L"$wasmtime_library" -lwarp_wasmtime -Wl,-rpath,"$wasmtime_library" >/dev/null 2>&1
+wasmtime_library="$(cd -P "$(dirname "$wap")/lib" && pwd -P)"
+WARP=$wap "$tree/wap/extensions/native/build.sh" "$compiler" "$tree/wap/extensions/native/driver.wap" "$native_wap" -L"$wasmtime_library" -lwarp_wasmtime -Wl,-rpath,"$wasmtime_library" >/dev/null 2>&1
 printf '%s\n' 'print "Hello"' >"$stage/hello.wap"
 check "wap hello.wap prints Hello" "$(cd "$stage" && "$native_wap" hello.wap 2>&1)" "Hello"
 printf '%s\n' 'x = 40000000000' 'x + 2' >"$stage/value.wap"
@@ -59,7 +59,7 @@ check "a program file stays after its run" "$(cd "$stage" && "$native_wap" hello
 check "the console keeps a definition and runs each line once" "$(printf '%s\n' 'f(x: int) as int := x * 2' 'print "once"' 'f(21)' | "$native_wap" 2>&1)" "once
 42"
 # a program using a compiled module (use "m.wasm", extensions/wasm/modules.wap): the native wap links its instance
-check "a native wap run links a module the program uses" "$(printf '%s\n' 'add(a: int, b: int) as int := a + b' >"$stage/adding.wap" && $warp "$compiler" "$stage/adding.wap" "$stage/adding.wasm" 2>&1 && "$native_wap" "use \"$stage/adding.wasm\"
+check "a native wap run links a module the program uses" "$(printf '%s\n' 'add(a: int, b: int) as int := a + b' >"$stage/adding.wap" && $wap "$compiler" "$stage/adding.wap" "$stage/adding.wasm" 2>&1 && "$native_wap" "use \"$stage/adding.wasm\"
 add(40, 2)" 2>&1)" "42"
 # a console value is the line's exported global, one x every later line reads and its functions use
 check "the console keeps a value for the lines after it" "$(printf '%s\n' 'x = 2' 'x + 1' 'f(a: int) as int := a * x' 'f(21)' 't = "ab"' 't + t' | "$native_wap" 2>&1)" "2
@@ -78,4 +78,11 @@ ho"
 check "wap runs a compiled module with its arguments" "$(printf '%s\n' 'print args#2' >"$stage/arguments.wap" && "$native_wap" "$compiler" "$stage/arguments.wap" "$stage/arguments.wasm" && "$native_wap" "$stage/arguments.wasm" first second 2>&1)" "second"
 # a module rebuilt without a word a program it runs imports: the run names that word and the module
 check "a run names the word its module no longer exports" "$(cd "$stage" && printf '%s\n' 'one() as int := 1' 'two() as int := 2' >words.wap && "$native_wap" "$compiler" words.wap words.wasm && printf '%s\n' 'use "words.wasm"' 'print text(two())' >wording.wap && "$native_wap" "$compiler" wording.wap wording.wasm && printf '%s\n' 'one() as int := 1' >words.wap && "$native_wap" "$compiler" words.wap words.wasm && "$native_wap" wording.wasm 2>&1)" "wap: no two() → int in words.wasm"
+# a used module's finished() runs when the run ends, after the program's own output (host.wap: the sound heard out)
+check "a used module's finished runs at the run's end" "$(cd "$stage" && printf '%s\n' 'finished() := print "done"' 'word() as int := 1' >ending.wap && "$native_wap" "$compiler" ending.wap ending.wasm && printf '%s\n' 'use "ending.wasm"' 'print text(word())' >ended.wap && "$native_wap" ended.wap 2>&1)" "1
+done"
+# a link to the native wap (as a package manager installs one) finds the wap-seed/ beside the file itself
+check "a link to the native wap runs a program" "$(ln -sf "$native_wap" "$stage/linked-wap" && "$stage/linked-wap" 'print "linked"' 2>&1)" "linked"
+# a program's folder is its source's, wherever its module was written: wap's compiler run from source finds its types
+check "the native wap runs wap's compiler from its source" "$(cd "$stage" && printf '%s\n' 'print "Hello"' >hello_source.wap && "$native_wap" "$tree/wap/compiler.wap" hello_source.wap hello_source.wasm && "$native_wap" hello_source.wasm 2>&1)" "Hello"
 exit $((failures > 0))

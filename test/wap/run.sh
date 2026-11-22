@@ -5,7 +5,7 @@
 # machine's job slots allow (scripts/job-slot.sh, shared by every worktree), each one's output in
 # data/wap-tests/<test file>.txt and one summary line in data/wap-tests/summary.txt, read later; a run of all tests
 # writes its line to data/wap-tests/full-summary.txt too, which a run of some leaves alone (vitals reads it). --wait
-# runs them in the foreground and prints the summary. The warp under test is WARP (default the warp on PATH). The self-build ratchet,
+# runs them in the foreground and prints the summary. Its modules run on the native wap on PATH. The self-build ratchet,
 # ratchet_census.sh (about 4 min), is no default script: run it by name, test/wap/run.sh --wait
 # test/wap/ratchet_census.sh, after each wap landing
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -28,7 +28,7 @@ summed() {
 # compiled by it and run; a test script run with it
 one_run() {
 	case $1 in
-		*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $warp "$compiler" "$1" "$stage/test.wasm" 2>&1 && $warp "$stage/test.wasm" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
+		*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/test.wasm" 2>&1 && $wap "$stage/test.wasm" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
 		*) bash "$1" ${2:+--compiler "$2"} ;;
 	esac
 }

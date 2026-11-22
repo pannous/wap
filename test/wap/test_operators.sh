@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wap's operator stage (notes/backbone.md "Operators", wiki/precedence.md): a program printed back by `format` in
 # canonical warp, every operator read by the table of wap/types/operators.wap.
-# Run it with bash test/wap/test_operators.sh; the warp under test is WARP (default the warp on PATH)
+# Run it with bash test/wap/test_operators.sh; its modules run on the native wap on PATH
 source "$(dirname "$0")/format_checks.sh"
 
 format_check '1+2 * 3' '1 + 2 * 3'
@@ -20,6 +20,22 @@ format_check 'print if c then 1 else 2' 'print (if c then 1 else 2)'
 format_check 'not a and b' 'not a and b'
 # the minus rule: spacing decides prefix or infix, and format spells the reading out
 format_check '[a -1]' '[a, -1]'
+# a word after a number literal measures it, looser than a power, tighter than arithmetic and a call's arguments; two
+# literals stay two items (wiki/unit.md, decision measure-group)
+format_check '[1 2]' '[1 2]'
+format_check '[1 -2]' '[1, -2]'
+check "a word after a number literal measures it" "$(ran measure 'class U { name: text }
+class Q { amount: int, unit: text }
+*(n: int, u: U) as Q := Q(n, u.name)
+*(q: Q, n: int) as Q := Q(q.amount * n, q.unit)
+>(a: Q, b: Q) as bool := a.amount > b.amount
+^(u: U, n: int) as U := U(u.name + text(n))
+shown(q: Q) as text := text(q.amount) + q.unit
+rule $e: int $u: U => $e * $u
+m = U("m")
+x = 2000 m
+s = shown 5 m
+print(shown(2 m^2) + " " + shown(3 m * 2) + " " + text(x > 1500 m) + " " + s)')" "2m2 6m yes 5m"
 format_check '[a - 1]' '[a - 1]'
 format_check 'a-b' 'a - b'
 format_check 'print -x' 'print (-x)'

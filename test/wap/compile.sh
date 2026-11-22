@@ -1,15 +1,15 @@
 # the helper of wap's shell tests (source it): ran <name> <program> is what the program printed, compiled by wap, the
-# new compiler, and run, or the compiler's error. The warp under test is WARP (default the warp on PATH)
+# new compiler, and run, or the compiler's error. Its modules run on the native wap on PATH (wap/extensions/native)
 source "$(dirname "${BASH_SOURCE[0]}")/../native/checks.sh"
+wap=$(command -v wap) || { echo "no native wap on PATH: scripts/refresh-seed.sh installs it" >&2; exit 2; }
 tree="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 source_compiler="$tree/wap/compiler.wap"
 source "$tree/scripts/lib/wap-beside.sh"
 # the folder builds and runs go in, by its real path: a module's WASI follows no link to an absolute path (data/ is often
 # one, to a scratch volume)
 data="$(mkdir -p "$tree/data/wap-tests" && cd -P "$tree/data/wap-tests" && pwd -P)"
-# wap's seed, wap built by itself, beside the warp binary with its types module and kernel (scripts/refresh-seed.sh
-# --wap)
-seed="$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm"
+# wap's seed, wap built by itself, beside the native wap with its types module and kernel (scripts/refresh-seed.sh)
+seed="$(dirname "$(readlink -f "$wap")")/wap-seed/wap.wasm"
 [ -f "$seed" ] || { echo "no wap seed at $seed: scripts/refresh-seed.sh --wap installs it" >&2; exit 2; }
 # wap's compiler built by itself <n> times into <folder>, a folder holding it already kept; prints the module, or the
 # failed step's error. A module reads its types module beside itself (the host reads no link out of a folder): wap0.wasm
@@ -21,7 +21,7 @@ seed="$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm"
 # beside each build's own copy first, so a script sharing the tree never embeds half of one
 warm_state="$tree/$WAP_WARM"
 warm_written() {
-	$warp "$1" --sources warm "$warm_state.$$" 2>&1 && mv "$warm_state.$$" "$warm_state"
+	$wap "$1" --sources warm "$warm_state.$$" 2>&1 && mv "$warm_state.$$" "$warm_state"
 }
 compiler_built() {
 	local folder=$1 last=$2
@@ -32,14 +32,14 @@ folder_built() {
 	local building=$1.$$ built=$1.$$/wap0.wasm n
 	mkdir -p "$building" && wap_beside_copied "$tree" "$building" || return 1
 	[ -f "$warm_state" ] || : >"$warm_state"
-	$warp "$seed" "$source_compiler" "$built" 2>&1 || return 1
+	$wap "$seed" "$source_compiler" "$built" 2>&1 || return 1
 	for ((n = 1; n <= $2; n++)); do
 		warm_written "$built" || return 1
-		$warp "$built" --sources "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
+		$wap "$built" --sources "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
 		built="$building/wap$n.wasm"
 	done
 	# the library compiled once beside its source, which programs then read (extensions/wasm/library.wap)
-	$warp "$built" "$building/types/types.wap" "$building/types/types.wasm" 2>&1 || return 1
+	$wap "$built" "$building/types/types.wap" "$building/types/types.wasm" 2>&1 || return 1
 	# another script may have put the same folder in place meanwhile: the first one stays
 	[ -f "$1/wap$2.wasm" ] && { rm -rf "$building"; return; }
 	rm -rf "$1" && mv "$building" "$1"
@@ -59,5 +59,5 @@ trap 'rm -rf "$stage"' EXIT
 
 ran() {
 	printf '%s\n' "$2" >"$stage/$1.wap"
-	$warp "$compiler" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && $warp "$stage/$1.wasm" 2>&1
+	$wap "$compiler" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && $wap "$stage/$1.wasm" 2>&1
 }
