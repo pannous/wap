@@ -165,27 +165,39 @@ check "a run past its time cap stops, naming the cap and the program" "$(cd "$st
 # session's; what the console shows for each line, one a line
 console_typed() {
 	HOME="$stage" python3 - "$native_wap" "$@" <<'EOF'
-import os, pty, re, select, sys, time
-PROMPT, WAIT_SECONDS = "› ".encode(), 60
+import os, pty, re, select, signal, sys, time
+# a line's run is over when the prompt starts a new line (each key redraws it after a carriage return)
+PROMPT, NEXT_PROMPT, WAIT_SECONDS = "› ".encode(), "\n› ".encode(), 60
 child, terminal = pty.fork()
 if child == 0:
     os.execv(sys.argv[1], [sys.argv[1]])
 output = b""
-def read_until(count: int) -> None:
+def read_until(mark: bytes, count: int) -> None:
     global output
     end = time.time() + WAIT_SECONDS
-    while output.count(PROMPT) < count and time.time() < end:
+    while output.count(mark) < count and time.time() < end:
         if select.select([terminal], [], [], 0.2)[0]:
             output += os.read(terminal, 4096)
-read_until(1)
+read_until(PROMPT, 1)
 for typed in sys.argv[2:]:
     start = len(output)
     os.write(terminal, os.fsencode(typed) + b"\r")
-    read_until(output.count(PROMPT) + 1)
-    shown = re.sub(rb"\x1b\[[0-9;]*[A-Za-z]", b"", output[start:]).decode(errors="replace")
-    print(" ".join(part.split("\r")[-1].strip() for part in shown.split("\n") if part.split("\r")[-1].strip() and not part.split("\r")[-1].startswith("›")))
+    read_until(NEXT_PROMPT, output.count(NEXT_PROMPT) + 1)
+    lines = [part.rstrip("\r").split("\r")[-1].strip() for part in re.sub(rb"\x1b\[[0-9;]*[A-Za-z]", b"", output[start:]).decode(errors="replace").split("\n")]
+    print(" ".join(line for line in lines if line and not line.startswith("›")))
 os.write(terminal, b"\x04")
-os.waitpid(child, 0)
+end = time.time() + WAIT_SECONDS
+while os.waitpid(child, os.WNOHANG)[0] == 0:
+    if time.time() > end:
+        print("the console did not end on Ctrl+D")
+        os.kill(child, signal.SIGKILL)
+        break
+    # (read on: a terminal's process ends only once what it wrote is read)
+    if select.select([terminal], [], [], 0.2)[0]:
+        try:
+            os.read(terminal, 4096)
+        except OSError:
+            pass
 EOF
 }
 LEFT=$'\e[D' RIGHT=$'\e[C' UP=$'\e[A' HOME_KEY=$'\e[H' END_KEY=$'\e[F' DELETE=$'\e[3~' BACKSPACE=$'\x7f' CTRL_A=$'\x01' CTRL_E=$'\x05'
