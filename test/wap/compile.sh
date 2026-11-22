@@ -52,6 +52,23 @@ else
 	sources=$(cd "$tree" && { cat "$seed"; find wap "$WAP_LIBRARY" \( -name '*.wap' -o -name '*.warp' \) | sort | xargs cat; } | shasum | cut -c1-16)
 	compiler=$(compiler_built "$data/wap1-$sources" 1) || { echo "wap1: $compiler" >&2; exit 1; }
 fi
+# native_wap_built <folder>: the tree's native wap (wap/extensions/native/driver.wap) built into the folder, bin/wap with
+# the compiler under test beside it as its seed and wasmtime's library; prints its path or the build's error
+native_wap_built() {
+	mkdir -p "$1/wap-seed" "$1/lib" && (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$1/wap-seed/") && cp "$compiler" "$1/wap-seed/wap.wasm" \
+		&& cp "$(cd -P "$(dirname "$wap")/lib" && pwd -P)"/libwarp_wasmtime.* "$1/lib/" \
+		&& "$tree/wap/extensions/native/build.sh" "$compiler" "$tree/wap/extensions/native/driver.wap" "$1/wap" -L"$1/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib >"$1/build.log" 2>&1 \
+		|| { echo "the tree's native wap did not build: $(tail -3 "$1/build.log")" >&2; return 1; }
+	echo "$1/wap"
+}
+# the modules of a test run on this tree's native wap, built once for each compiler beside it, so a program's C imports
+# and the driver's other host words are this tree's; with no wasm2c the installed wap runs them, said once
+tree_wap_built() {
+	local folder="$(dirname "$compiler")/bin"
+	[ -x "$folder/wap" ] || { native_wap_built "$folder.$$" >/dev/null || return 1; [ -x "$folder/wap" ] && rm -rf "$folder.$$" || mv "$folder.$$" "$folder"; }
+	echo "$folder/wap"
+}
+if command -v wasm2c >/dev/null; then wap=$(tree_wap_built) || exit 1; else echo "no wasm2c: the installed wap runs the modules, not this tree's" >&2; fi
 # each test script its own folder in the tree's data/ (never the system's temporary folder)
 stage="$data/$$"
 mkdir -p "$stage" || exit 1
