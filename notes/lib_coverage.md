@@ -19,7 +19,7 @@ blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** 
 | 6: agent audio markup music sound tasks | tasks.warp:12, agent.warp:23, markup.warp:53 | a rule's `where $x = …` binding a template hole |
 | 4: channels signals storage timers | timers.warp:20 | a rule template `() => $body` with `where $day is symbol` |
 | 9: draw gpu_passes keys pga_draw router uniscript wagi web webview | C bindings | C types node, int, owned_text do not cross yet |
-| 3: diff semver symbolic | diff.warp:109 … | a comprehension over a text's characters, `[c for c in a]` |
+| 11: crypto diff encoding html semver symbolic template text url uuid version xml | text.warp:17, diff.warp:109 … | a comprehension over a text's characters, `[c for c in t]`, lowers to `map(text, f)`, which the types module does not define (a loop `for c in t` works); one `map(t: text, f: (char) -> U)` in wap/types/texts.wap would take it |
 | 3: os repl wasm | os.warp:16 | no host word std_io |
 | 2: display units | units.warp:276 | the `format Angle a as text := …` declaration |
 | 2: hyperreal reals | reals.warp:264 | no `denominator(number)` |
@@ -32,12 +32,15 @@ blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** 
 | | laws.warp:24 | no `op_of(Key)` |
 | | shown_frames.warp:6 | no host word window_open |
 | | c.warp | no C function field_u8 in the executable |
+| found running modules | any program | `text(m)` of a map<text, int> traps (out of bounds) |
+| | lib/list.warp | an operator a used module declares, `[1] ∪ [2]`, is not lowered in the program |
+| | list.warp (fixed around) | an if-expression as a call's argument (above) |
 
 ## Lib: the module's own fault
 
 | Modules blocked | Where | Root cause | State |
 |---|---|---|---|
-| 10: crypto encoding html list template text url uuid version xml | list.warp | parameters typed `any` where a list is meant: count(any) is a float, so `0 to count(xs) - n` is no range | open |
+| 10: crypto encoding html list template text url uuid version xml | list.warp | parameters typed `any` where a list is meant: count(any) is a float, so `0 to count(xs) - n` is no range | fixed (batch 1): list passes; the other nine now stop at text.warp:17 (compiler, below) |
 | 2: fast_math machine_math | machine_math.warp:30 | `rest % 2` with a float rest: floor gives a float | open |
 | 6: cli i18n map PHP toml yaml | each module | state kept in maps of any, `st["at"] - 1`, `keys(a)` on an any | open |
 | 1: callbacks | callbacks.warp:14 | `+=` on a global without `global`: reads as a new local | open |
