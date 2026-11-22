@@ -27,6 +27,10 @@ ab"
 check "an int given a float holds the float, said nothing" "$(ran widened 'y = 2
 y = 2.5
 print "${y * 2}"')" "5"
+# a name written any holds the type of its value, and any once given another, said nothing: any was asked for (user 11-22)
+check "a name written any given another type says nothing" "$(ran written_any 'x: any = 1
+x = "ab"
+print x')" "ab"
 # a map's value type that would hold itself settles as any, so untyped nested maps work (decision untyped-nested-maps)
 check "a map holding a map of its own type holds any" "$(ran nested_maps 'out = {}
 section = out
