@@ -25,4 +25,6 @@ check "literals of every kind run" "$(ran kinds "'a'
 # statements on one line, separated by `;`, run as the program's own lines do
 check "statements separated by ;" "$(ran semicolons 'x = 1; y = 2
 x + y')" "3"
+# print takes any value and prints its text (warp-supervisor's decision 2026-11-22: a library overload)
+check "print takes any value" "$(ran print_any 'print 1 + 2')" "3"
 exit $((failures > 0))
