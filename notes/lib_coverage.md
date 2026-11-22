@@ -37,6 +37,7 @@ blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** 
 | | list.warp (fixed around) | an if-expression as a call's argument (above) |
 | | callbacks.warp | reading an item of a `list<function?>` / `list<function>`: the types module's list_item "gives no value" |
 | | unicode.warp:149 | no `upper(text)` in the types module |
+| 5: cli i18n map toml yaml | map.warp deep_merge … | no cast from an any back to a container, `a as map<text, any>` (refused in binding) |
 
 ## Lib: the module's own fault
 
@@ -44,9 +45,10 @@ blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** 
 |---|---|---|---|
 | 10: crypto encoding html list template text url uuid version xml | list.warp | parameters typed `any` where a list is meant: count(any) is a float, so `0 to count(xs) - n` is no range | fixed (batch 1): list passes; the other nine now stop at text.warp:17 (compiler, below) |
 | 2: fast_math machine_math | machine_math.warp:30, :53 | `% 2` of a whole float | fixed (batch 2): both pass |
-| 6: cli i18n map PHP toml yaml | each module | state kept in maps of any, `st["at"] - 1`, `keys(a)` on an any | open |
+| 1: PHP | PHP.warp:3 | words typed `any` | fixed (batch 3): typed, passes |
+| 5: cli i18n map toml yaml | each module | trees of mixed maps and lists read back out of an any, `st["kinds"][k]`, `keys(messages)`: needs the cast below | compiler |
 | 1: callbacks | callbacks.warp:14, :62 | untyped global lists grown by `+=` | fixed (batch 2): typed, grown by .add; now stops at a compiler cause (below) |
-| 1: functions | functions.warp:36 | assigning a closure's outer local without `let`/`global` | open |
+| 1: functions | functions.warp:36 | throttle's closure reassigns a name it captured, `last = [at, f(x)]` | compiler: a closure can't assign a captured local |
 | 1: unit_names | unit_names.warp:101 | units as mixed `[amount, dimension]` lists of exact fractions (10^-3) | open: wants a class and exact numbers |
 | 1: unicode | unicode.warp:42, :61, :93 | untyped tables and lists (int keys read as text) | fixed (batch 2): typed; now stops at a compiler cause (below) |
 | 1: path | path.warp:100 | `ord` of a one-letter text: `s#j` of a text is a text | fixed (batch 2): compares the letters; passes |
