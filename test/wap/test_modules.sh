@@ -173,4 +173,8 @@ print(text(natural_compare("a2", "a10") < 0))')" "yes"
 # a folder right in the library holds modules too, lib/native's C bindings among them; import is use
 check "import name brings in a module from a folder of the library" "$(ran use_library_folder 'import z
 print(text(compressBound(100)))')" "113"
+# a library word given an any reaches its definition for the type the any holds (decision any-values, warp-reviewer)
+check "a library word takes an any holding its type" "$(ran use_any 'use ini
+a: any = parse_ini("top = 1")
+print to_ini(a)')" "top = 1"
 exit $((failures > 0))
