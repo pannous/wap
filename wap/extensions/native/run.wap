@@ -1,34 +1,22 @@
-# How the native wap runs wasm modules (wap/extensions/native, driver.wap): by wasmtime's C API, one engine for the
-# run, a store with WASI for each program's arguments, what a module imports by a .wasm path linked first; and the
-# program's memory, where the driver, the compiler's loading and the console keep their words.
+# How the native wap runs wasm modules (driver.wap): by wasmtime's C API, a store with WASI for each program's run,
+# a module's .wasm and C imports linked first; the memory where the driver, compiler loading and console keep words.
 use "c.wap"
+use "host_words.wap"
+use "linking.wap"
 
-# --- the program's memory: where the driver keeps its own words, below the data at 65536 (core/emit/opcodes.wap) ---
+# --- the program's memory: the out-cells C and WASI fill, below the data at 65536 (core/emit/opcodes.wap) ---
 STATUS_AT := 1032
 ARGUMENT_COUNT_AT := 1040
 ARGUMENT_BYTES_COUNT_AT := 1044
 SIZE_AT := 1048
-DIGITS_AT := 1056
 # the used modules' `finished()` functions the run's end calls: their context, their count, the host block of their
 # externs
-FINISHING_AT := 1536
-FINISHER_COUNT_AT := 1544
-FINISHERS_AT := 1552
+finishing: int = 0
+finisher_count: int = 0
 FINISHERS := 16
-ARGUMENTS_AT := 2048
-ARGUMENT_BYTES_AT := 4096
-LINE_AT := 16384
-LINE_BYTES := 8192
-NAME_AT := 24576
-SESSION_AT := 28672
-COMPILER_AT := 32768
-MODULE_AT := 40960
-SOURCE_AT := 45056
-COMMAND_AT := 49152
-CACHE_AT := 53248
-PART_AT := 57344
-PROGRAM_CACHE_AT := 61440
-PATH_BYTES := 4096
+# the temporary files a run makes, gone at its end: a program's module, code given in place of a program file
+module_file: text = ""
+source_file: text = ""
 # the host's records the C API fills, by their sizes in bytes: a byte vector (size, data), an instance, an extern
 VECTOR_BYTES := 16
 INSTANCE_BYTES := 16
@@ -38,46 +26,52 @@ EXTERN_VALUE_OFFSET := 8
 # wasmtime's limits for a run: the compiler's GC heap and its wasm stack (core/native/driver.warp's)
 GC_HEAP_BYTES := 134217728
 WASM_STACK_BYTES := 251658240
-# C's whence for fseek, a C bool's byte, the file descriptor of standard error, the slash
+# a run's caps, as scripts/guarded.sh's: a store's memory in GB, its seconds; `--memory-gb <n>` and `--seconds <n>`
+# before the program change them (driver.wap). One runaway wap took 90 GB of a 32 GB Mac, 2026-11-22
+memory_cap_gb: int = 12
+time_cap_seconds: int = 1800
+GB := 1073741824
+NO_CAP := -1
+# what wasmtime says when a store passes its time cap, its memory cap
+TIME_CAP_PASSED := "wasm trap: interrupt"
+MEMORY_CAP_PASSED := "out of memory"
+# the program or module the run was given, named when it passes a cap (driver.wap)
+run_input: text = ""
+# C's whence for fseek, a C bool's byte, the file descriptor of standard error, a path's mode that asks whether it is
+# there, the mode of a file the driver writes (rw-r--r--)
 FROM_START := 0
 FROM_END := 2
 BOOL_BYTE := 256
 STANDARD_ERROR := 2
-SLASH := 47
 FAILED := 1
-# the texts named here, each a C string in the program's memory
-wap_suffix(): int32 := prim data_address(".wap")
-module_suffix(): int32 := prim data_address(".wasm")
-temporary_folder(): int32 := prim data_address("TMPDIR")
-current_folder(): int32 := prim data_address(".")
-# the root, and the slash a path's folders are joined with
-root(): int32 := prim data_address("/")
-reading(): int32 := prim data_address("rb")
-main_name(): int32 := prim data_address("main")
-no_module(): int32 := prim data_address("wap: no module at that path\n")
-newline(): int32 := prim data_address("\n")
-no_module_at(): int32 := prim data_address("wap: no module at ")
-nor_at(): int32 := prim data_address(" nor at ")
-no_word(): int32 := prim data_address("wap: no ")
-in_module(): int32 := prim data_address(" in ")
-# every module exports its memory: a module whose memory the linker holds was started already
-memory_name(): int32 := prim data_address("memory")
-# what a used module exports to be called when the run ends (host.wap's: the queued sound heard out)
-finished_name(): int32 := prim data_address("finished()")
 EXISTS := 0
+FILE_MODE := 420
+MODULE_SUFFIX := ".wasm"
+# every module exports its memory: a module whose memory the linker holds was started already
+MEMORY_NAME := "memory"
+# what a used module exports to be called when the run ends (host.wap's: the queued sound heard out)
+FINISHED_NAME := "finished()"
 
 # the run ended with this status, its temporary files gone (a path not made yet is an empty one, unlinking nothing)
 ended(status: int) := {
+	global module_file
+	global source_file
 	each_finished()
-	unlink(pointer_at(MODULE_AT))
-	unlink(pointer_at(SOURCE_AT))
+	unlink(module_file)
+	unlink(source_file)
 	exit(status)
 }
-# a C string of the host's memory written to the file
-written(file: int, t: int) := write(file, t, strlen(t))
-said(t: int32) := written(STANDARD_ERROR, host_of(t))
-# (wasmtime's messages end in a C string's 0, which a reader of the output would take for binary data)
-said_vector(vector: int): bool := write(STANDARD_ERROR, long_at(vector + 8), strlen(long_at(vector + 8))) >= 0
+# a text written to the file
+written(file: int, t: text) := write(file, host_of(c_text(t)), byte_count(t))
+# (wasmtime's messages end in a C string's 0, which a reader of the output would take for binary data); a message of
+# a passed cap is followed by the cap, the input and the option that changes it
+said_vector(vector: int): bool := {
+	message = c_text_from(long_at(vector + 8))
+	eprint(message)
+	if message.contains(TIME_CAP_PASSED) { eprint("wap: ${run_input} ran past the time cap of ${time_cap_seconds} s (--seconds <n> before the program changes it)") }
+	if message.contains(MEMORY_CAP_PASSED) { eprint("wap: ${run_input} passed the memory cap of ${memory_cap_gb} GB (--memory-gb <n> before the program changes it)") }
+	yes
+}
 # whether a call failed: its error or trap said, the status at STATUS_AT; an exit() of status 0 is no failure, one of
 # another status a failure the program said itself
 failed(error: int, trap_at: int): bool := {
@@ -97,14 +91,14 @@ trap_said(trap: int): bool := {
 # the run ended where a step of wasmtime's setup failed
 checked(error: int) := if failed(error, host_block(8)) then ended(word_at(STATUS_AT))
 
-said_none(t: int32): int := {
-	said(t)
+said_none(message: text): int := {
+	eprint(message)
 	0
 }
-# the bytes of the file at the host's path in a block of the host's memory, its size written at the host's size_at; 0
-# where there is no file
-file_read(path: int, size_at: int): int := {
-	file = fopen(path, reading())
+# the bytes of the file at the path in a block of the host's memory, its size written at the host's size_at; 0 where
+# there is no file
+file_read(path: text, size_at: int): int := {
+	file = fopen(path, "rb")
 	if file == 0 { return 0 }
 	fseek(file, 0, FROM_END)
 	size = ftell(file)
@@ -125,20 +119,26 @@ engine_made(): int := {
 	wasmtime_config_wasm_exceptions_set(config, 1)
 	warp_config_gc_heap_initial_size_set(config, GC_HEAP_BYTES)
 	warp_config_wasm_stack_set(config, WASM_STACK_BYTES)
-	wasm_engine_new_with_config(config)
+	wasmtime_config_epoch_interruption_set(config, 1)
+	made = wasm_engine_new_with_config(config)
+	epoch_ticker_started(made)
+	made
 }
-# a store's context whose WASI gives the host argument list, the standard files, the environment, the current folder
-# and the root
-context_made(count: int, arguments: int): int := {
-	context = wasmtime_store_context(wasmtime_store_new(engine, 0, 0))
+# a store's context, within the run's caps, whose WASI gives the host argument list, the standard files, the
+# environment, the current folder and the root
+context_made(arguments: list<text>): int := {
+	store = wasmtime_store_new(engine, 0, 0)
+	wasmtime_store_limiter(store, memory_cap_gb * GB, NO_CAP, NO_CAP, NO_CAP, NO_CAP)
+	context = wasmtime_store_context(store)
+	wasmtime_context_set_epoch_deadline(context, time_cap_seconds)
 	wasi = wasi_config_new()
-	wasi_config_set_argv(wasi, count, arguments)
+	wasi_config_set_argv(wasi, #arguments, arguments)
 	wasi_config_inherit_stdin(wasi)
 	wasi_config_inherit_stdout(wasi)
 	wasi_config_inherit_stderr(wasi)
 	wasi_config_inherit_env(wasi)
-	wasi_config_preopen_dir(wasi, current_folder(), current_folder(), 1)
-	wasi_config_preopen_dir(wasi, root(), root(), 1)
+	wasi_config_preopen_dir(wasi, ".", ".", 1)
+	wasi_config_preopen_dir(wasi, "/", "/", 1)
 	checked(wasmtime_context_set_wasi(context, wasi))
 	context
 }
@@ -147,93 +147,89 @@ linker_made(): int := {
 	checked(wasmtime_linker_define_wasi(linker))
 	linker
 }
-# the module of the file at the host's path, compiled by the engine; 0 where there is none, said
-module_compiled(path: int): int := {
+# the module of the file at the path, compiled by the engine; 0 where there is none, said
+module_compiled(path: text): int := {
 	set_word(STATUS_AT, FAILED)
 	size_at = host_block(8)
 	bytes = file_read(path, size_at)
-	if bytes == 0 then said_none(no_module()) else module_of(bytes, long_at(size_at))
+	if bytes == 0 then said_none("wap: no module at ${path}") else module_of(bytes, long_at(size_at))
 }
 # the module of these bytes of the host's memory; 0 where they are none, said
 module_of(bytes: int, size: int): int := {
 	module_at = host_block(8)
 	if failed(wasmtime_module_new(engine, bytes, size, module_at), host_block(8)) then 0 else long_at(module_at)
 }
-# the module of the file at the host's path `importer` instantiated in the context, what it imports by a .wasm name
+# the module of the file at the path `importer` instantiated in the context, what it imports by a .wasm name
 # linked first, then its main run when `main` asks (a program's, a console line's; a module another uses only starts):
 # the instance, 0 where a step failed
-instance_ran(linker: int, context: int, module: int, importer: int, main: bool): int := {
+instance_ran(linker: int, context: int, module: int, importer: text, main: bool): int := {
 	if not imports_linked(linker, context, module, importer) { return 0 }
 	instance = host_block(INSTANCE_BYTES)
 	trap_at = host_block(8)
 	if failed(wasmtime_linker_instantiate(linker, context, module, instance, trap_at), trap_at) { return 0 }
-	if not main {
-		finisher_kept(context, instance)
-		return instance
-	}
+	if not main { return finisher_kept(context, instance) }
 	item = host_block(EXTERN_BYTES)
-	wasmtime_instance_export_get(context, instance, main_name(), strlen(host_of(main_name())), item)
+	wasmtime_instance_export_get(context, instance, "main", byte_count("main"), item)
 	if failed(wasmtime_func_call(context, item + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, trap_at), trap_at) then 0 else instance
 }
-# each module the module imports by a .wasm name (`use "m.wasm"`, extensions/wasm/modules.wap) that the linker holds
-# no instance of yet: that file's module run, its instance kept in the linker under its name; whether each was
-imports_linked(linker: int, context: int, module: int, importer: int): bool := {
+# each module the module imports by a .wasm name (`use "m.wasm"`) the linker holds no instance of yet run and kept in
+# it under its name, whether each was; each C function it imports defined as that C function (host_words.wap)
+imports_linked(linker: int, context: int, module: int, importer: text): bool := {
 	imports = host_block(VECTOR_BYTES)
 	wasmtime_module_imports(module, imports)
 	linked = yes
 	i = 0
 	while i < long_at(imports) {
-		import = long_at(long_at(imports + 8) + 8 * i)
-		from = wasm_importtype_module(import)
-		name = wasm_importtype_name(import)
-		memcpy(pointer_at(NAME_AT), long_at(from + 8), long_at(from))
-		set_word(NAME_AT + long_at(from), 0)
+		imported = long_at(long_at(imports + 8) + 8 * i)
+		from = wasm_importtype_module(imported)
+		name = wasm_importtype_name(imported)
+		module_name = vector_text(from)
 		held = wasmtime_linker_get(linker, context, from, name, host_block(EXTERN_BYTES)) % BOOL_BYTE != 0
-		if ends_in(pointer_at(NAME_AT), module_suffix()) and not held { linked = (if module_started(linker, context, from) then missing_word_said(name) else instance_defined(linker, context, pointer_at(NAME_AT), importer, no)) and linked }
+		if module_name.ends_with(MODULE_SUFFIX) and not held { linked = (if module_started(linker, context, from) then missing_word_said(name, module_name) else instance_defined(linker, context, module_name, importer, no)) and linked }
+		else if is_c_import(module_name) and not held { c_function_defined(linker, imported, from, name) }
 		i = i + 1
 	}
 	linked
 }
-# a used module's `finished()`, when it exports one, kept for the run's end
-finisher_kept(context: int, instance: int) := {
-	item = long_at(host_of(pointer_at(FINISHERS_AT))) + EXTERN_BYTES * word_at(FINISHER_COUNT_AT)
-	if word_at(FINISHER_COUNT_AT) < FINISHERS and wasmtime_instance_export_get(context, instance, finished_name(), strlen(host_of(finished_name())), item) % BOOL_BYTE != 0 {
-		set_long_at(host_of(pointer_at(FINISHING_AT)), context)
-		set_word(FINISHER_COUNT_AT, word_at(FINISHER_COUNT_AT) + 1)
+# the instance of a used module, its `finished()`, when it exports one, kept for the run's end
+finisher_kept(context: int, instance: int): int := {
+	global finisher_count
+	item = finishers + EXTERN_BYTES * finisher_count
+	if finisher_count < FINISHERS and wasmtime_instance_export_get(context, instance, FINISHED_NAME, byte_count(FINISHED_NAME), item) % BOOL_BYTE != 0 {
+		global finishing = context
+		global finisher_count = finisher_count + 1
 	}
+	instance
 }
 # each kept `finished()` called, in the order its module was used
 each_finished() := {
+	global finisher_count
+	global finishing
 	i = 0
-	while i < word_at(FINISHER_COUNT_AT) {
-		wasmtime_func_call(long_at(host_of(pointer_at(FINISHING_AT))), long_at(host_of(pointer_at(FINISHERS_AT))) + EXTERN_BYTES * i + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, host_block(8))
+	while i < finisher_count {
+		wasmtime_func_call(finishing, finishers + EXTERN_BYTES * i + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, host_block(8))
 		i = i + 1
 	}
 }
 # whether the linker holds the module of the name vector `from` already, by its memory
 module_started(linker: int, context: int, from: int): bool := {
 	memory = host_block(VECTOR_BYTES)
-	set_long_at(memory, strlen(host_of(memory_name())))
-	set_long_at(memory + 8, host_of(memory_name()))
+	set_long_at(memory, byte_count(MEMORY_NAME))
+	set_long_at(memory + 8, host_of(c_text(MEMORY_NAME)))
 	wasmtime_linker_get(linker, context, from, memory, host_block(EXTERN_BYTES)) % BOOL_BYTE != 0
 }
-# a word the program imports that its started module (its name at NAME_AT) does not export, said; no
-missing_word_said(word: int): bool := {
-	said(no_word())
-	write(STANDARD_ERROR, long_at(word + 8), long_at(word))
-	said(in_module())
-	written(STANDARD_ERROR, host_of(pointer_at(NAME_AT)))
-	said_none(newline()) != 0
-}
+# a word the program imports, a host name vector, that its started module does not export, said; no
+missing_word_said(word: int, module_name: text): bool := said_none("wap: no ${vector_text(word)} in ${module_name}") != 0
+# the text of a host name vector (size, data)
+vector_text(vector: int): text := c_copied(long_at(vector + 8), long_at(vector))
 # the module the importer names instantiated in the context (its main run when `main` asks) and kept in the linker
 # under that name, when it defines something (what another module imports from it; a console line that only did
 # something is run and gone): whether it was
-instance_defined(linker: int, context: int, written: int32, importer: int, main: bool): bool := {
-	name = strdup(written)
+instance_defined(linker: int, context: int, name: text, importer: text, main: bool): bool := {
 	path = module_path(name, importer)
-	module = if path == 0 then 0 else module_compiled(path)
+	module = if path == "" then 0 else module_compiled(path)
 	instance = if module == 0 then 0 else instance_ran(linker, context, module, path, main)
-	instance != 0 and exports_more(module) and not failed(wasmtime_linker_define_instance(linker, context, name, strlen(name), instance), host_block(8))
+	instance != 0 and exports_more(module) and not failed(wasmtime_linker_define_instance(linker, context, name, byte_count(name), instance), host_block(8))
 }
 # whether the module exports more than every program does, its main and its memory
 BASE_EXPORTS := 2
@@ -242,58 +238,26 @@ exports_more(module: int): bool := {
 	wasmtime_module_exports(module, exports)
 	long_at(exports) > BASE_EXPORTS
 }
-# where the module a name names is, as a dynamic linker looks: a bare name (no slash) beside the importing module at
-# the host's path, else beside the compiler; any other name is its path; 0 where neither place has it, said
-module_path(name: int, importer: int): int := {
-	if index(name, SLASH) != 0 { return name }
-	near = beside(importer, name, strlen(name))
-	if access(near, EXISTS) == 0 { return near }
-	far = beside(host_of(pointer_at(COMPILER_AT)), name, strlen(name))
-	if access(far, EXISTS) == 0 then far else missing_said(near, far)
+# the path of the name: as it is when it starts at the root, else in the folder of the file at the path (the current
+# folder when the path names none)
+beside(path: text, name: text): text := if name.starts_with("/") then name else folder_part(path) + name
+# a path up to its last slash, the slash kept; "" for a path naming no folder
+folder_part(path: text): text := {
+	end = byte_count(path)
+	while end > 0 and byte_at(path, end - 1) != SLASH_BYTE { end = end - 1 }
+	bytes_between(path, 0, end)
 }
-missing_said(near: int, far: int): int := {
-	said(no_module_at())
-	written(STANDARD_ERROR, near)
-	said(nor_at())
-	written(STANDARD_ERROR, far)
-	said_none(newline())
-}
-# the host's path of the name, `count` bytes at the host's `name`: as it is when it starts at the root, else in the
-# folder of the file at the host's path (the current folder when the path names none)
-beside(path: int, name: int, count: int): int := {
-	joined = host_block(PATH_BYTES)
-	folder_end = rindex(path, SLASH)
-	if host_byte(name) != SLASH and folder_end != 0 { strlcat(joined, strndup(path, folder_end + 1 - path), PATH_BYTES) }
-	strlcat(joined, strndup(name, count), PATH_BYTES)
-	joined
-}
-# the module of the file at the host's path `importer` run with the host argument list given, in a store of its own;
-# whether it ran
-module_ran(module: int, count: int, arguments: int, importer: int): bool := module != 0 and instance_ran(linker_made(), context_made(count, arguments), module, importer, yes) != 0
-# a new path in the temporary folder at `at`, by the template
-temporary_path(at: int, template: int32) := {
-	set_word(at, 0)
-	strcat(pointer_at(at), getenv(temporary_folder()))
-	strcat(pointer_at(at), host_of(template))
-}
-# whether the C string ends in the suffix
-ends_in(t: int32, suffix: int32): bool := strlen(host_of(t)) >= strlen(host_of(suffix)) and strcmp(pointer_at(address(t) + strlen(host_of(t)) - strlen(host_of(suffix))), suffix) == 0
+SLASH_BYTE := 47
+# the module of the file at the path `importer` run with these arguments, in a store of its own; whether it ran
+module_ran(module: int, arguments: list<text>, importer: text): bool := module != 0 and instance_ran(linker_made(), context_made(arguments), module, importer, yes) != 0
+# a new path in the temporary folder by the template
+temporary_path(template: text): text := getenv("TMPDIR") + template
 # a program's path as the compiler reads it, its links followed; as written where nothing is there, for the compiler
 # to say so
-program_path(written: int32): int := {
+program_path(written: text): text := {
 	resolved = realpath(written, 0)
-	if resolved == 0 then host_of(written) else resolved
-}
-# a host list of these addresses' C strings
-host_list(addresses: int, count: int): int := {
-	list = host_block(8 * count)
-	i = 0
-	while i < count {
-		set_long_at(list + 8 * i, host_of(pointer_at(word_at(addresses + 4 * i))))
-		i = i + 1
-	}
-	list
+	if resolved == "" then written else resolved
 }
 
 engine = engine_made()
-set_long_at(host_of(pointer_at(FINISHERS_AT)), host_block(FINISHERS * EXTERN_BYTES))
+finishers = host_block(FINISHERS * EXTERN_BYTES)

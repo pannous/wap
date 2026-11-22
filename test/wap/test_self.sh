@@ -14,10 +14,12 @@ loaded() {
 }
 
 # every file of wap's own, but the compiler (stage 2 below compiles it whole), the files every program meets beside it
-# already (compiled as a program, their words would be defined twice) and the native extension's programs, which run
-# only built to machine code (wap/extensions/native)
+# already (compiled as a program, their words would be defined twice) and the native extension's programs and the
+# types files only a native build reads, types/memory_*.wap, which run only built to machine code
+# (wap/extensions/native)
 NOT_ALONE=(wap/compiler.wap wap/nodes.wap wap/types/types.wap wap/types/prelude.wap wap/types/texts.wap wap/types/c.wap)
-files=($(cd "$root" && git ls-files 'wap/*.wap' | grep -v -x -F "${NOT_ALONE[@]/#/-e}" | grep -v '^wap/extensions/native/'))
+NATIVE_ONLY=(-e '^wap/extensions/native/' -e '^wap/types/memory_')
+files=($(cd "$root" && git ls-files 'wap/*.wap' | grep -v -x -F "${NOT_ALONE[@]/#/-e}" | grep -v "${NATIVE_ONLY[@]}"))
 for file in "${files[@]}"; do
 	check "wap compiles $file and the result loads" "$(loaded "$file")" "loads"
 done

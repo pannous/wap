@@ -6,80 +6,99 @@
 # below); an argument naming no program file is code (program_of); `wap` alone is the console (console.wap).
 use "c.wap"
 use "run.wap"
+use "linking.wap"
 use "compiler.wap"
 use "console.wap"
 use "programs.wap"
+use "host_words.wap"
 
-# the texts the command names, each a C string in its memory
-module_template(): int32 := prim data_address("/wap-XXXXXX.wasm")
-MODULE_SUFFIX_BYTES := 5
-# code given in place of a program file goes to a file of its own, compiled as a file is
-source_template(): int32 := prim data_address("/wap-XXXXXX.wap")
-SOURCE_SUFFIX_BYTES := 4
-warp_suffix(): int32 := prim data_address(".warp")
+# a C function a module the command runs imports, called through wasmtime (host_words.wap); exported here, as only
+# the program's own functions are exports
+host_word(word: int, caller: int, given: int, count: int, results: int, results_count: int) := host_word_answered(word, caller, given, count, results, results_count)
+# C calling back a function the module handed it (lib/native/callbacks.h's trampolines call this export)
+c_callback_answered(slot: int, a: int, b: int, c: int, d: int, e: int, f: int): int := callback_answered(slot, a, b, c, d, e, f)
+# code given in place of a program file goes to a file of its own, compiled as a file is; the module a program compiles
+# to; each a temporary file of this template, its suffix kept
+SOURCE_TEMPLATE := "/wap-XXXXXX.wap"
+MODULE_TEMPLATE := "/wap-XXXXXX.wasm"
 # `wap test [<area>…]`: wap's tests in the current folder, test/wap/run.sh, all of them or those of each area
-test_word(): int32 := prim data_address("test")
-tests_run(): int32 := prim data_address("test/wap/run.sh --wait")
-separator(): int32 := prim data_address(" ")
+TESTS_RUN := "test/wap/run.sh --wait"
 # a wait status's exit code, the byte above its signal's
 STATUS_UNIT := 256
 
-# the program's own arguments, by WASI, into its memory: the count; each argument's address
+# the command line by WASI: the command, the program, its arguments, read into new memory of their own (prelude.wap's
+# arguments() reads them from BYTES_AT, into the words run.wap keeps past it, and maps, which a native build takes not)
 args_sizes_get(count_at: int, bytes_at: int): int := prim args_sizes_get(count_at, bytes_at)
 args_get(addresses_at: int, bytes_at: int): int := prim args_get(addresses_at, bytes_at)
-argument(at: int): int32 := pointer_at(word_at(ARGUMENTS_AT + 4 * at))
+command_line(): list<text> := {
+	args_sizes_get(ARGUMENT_COUNT_AT, ARGUMENT_BYTES_COUNT_AT)
+	addresses = text_address(text_made(4 * word_at(ARGUMENT_COUNT_AT)))
+	args_get(addresses, text_address(text_made(word_at(ARGUMENT_BYTES_COUNT_AT))))
+	words: list<text> = []
+	for i in 0 upto word_at(ARGUMENT_COUNT_AT) { words.add(c_text_from(host_of(pointer_at(word_at(addresses + 4 * i))))) }
+	words
+}
+# the text, then the list's items from item `from` (from 1) on
+followed(first: text, xs: list<text>, from: int): list<text> := {
+	joined = [first]
+	for i in from upto #xs + 1 { joined.add(xs#i) }
+	joined
+}
 
-# a new file in the temporary folder, its path at `at` by the template, `suffix_bytes` of it kept; its open descriptor
-temporary_made(at: int, template: int32, suffix_bytes: int): int := {
-	temporary_path(at, template)
-	mkstemps(pointer_at(at), suffix_bytes)
+# a new file in the temporary folder by the template, `suffix_bytes` of it kept; its path
+temporary_made(template: text, suffix: text): text := {
+	path = temporary_path(template)
+	close(mkstemps(path, byte_count(suffix)))
+	path
 }
 # a program file, as warp tells one (core/native/warp.warp is_warp_file): its name ends in .wap or .warp, or a file of
 # that name is there; any other argument is code
-is_program_file(name: int32): bool := ends_in(name, wap_suffix()) or ends_in(name, warp_suffix()) or realpath(name, 0) != 0
-# the program the argument names: the file, or the code written to a file of its own at SOURCE_AT
-program_of(argument: int32): int32 := if is_program_file(argument) then argument else {
-	source = temporary_made(SOURCE_AT, source_template(), SOURCE_SUFFIX_BYTES)
-	written(source, host_of(argument))
+is_program_file(name: text): bool := name.ends_with(".wap") or name.ends_with(".warp") or realpath(name, 0) != ""
+# the program the argument names: the file, or the code written to a file of its own
+program_of(argument: text): text := {
+	if is_program_file(argument) { return argument }
+	global source_file
+	global source_file = temporary_made(SOURCE_TEMPLATE, ".wap")
+	source = creat(source_file, FILE_MODE)
+	written(source, argument)
 	close(source)
-	pointer_at(SOURCE_AT)
+	source_file
 }
 
 # the tests of the areas named after `test`, run by test/wap/run.sh; its exit status is this run's
-tested(count: int) := {
-	set_word(COMMAND_AT, 0)
-	strcat(pointer_at(COMMAND_AT), host_of(tests_run()))
-	i = 2
-	while i < count {
-		strcat(pointer_at(COMMAND_AT), host_of(separator()))
-		strcat(pointer_at(COMMAND_AT), host_of(argument(i)))
-		i = i + 1
+tested(words: list<text>) := exit(system(followed(TESTS_RUN, words, 3).join(" ")) ÷ STATUS_UNIT)
+
+# the command line with the run's caps taken off it, each an option before the program: `--memory-gb <n>`,
+# `--seconds <n>` (run.wap memory_cap_gb, time_cap_seconds)
+capped(given: list<text>): list<text> := {
+	global memory_cap_gb
+	global time_cap_seconds
+	words = given
+	while #words > 2 and (words#2 == "--memory-gb" or words#2 == "--seconds") {
+		if words#2 == "--memory-gb" { memory_cap_gb = atol(words#3) } else { time_cap_seconds = atol(words#3) }
+		words = followed(words#1, words, 4)
 	}
-	exit(system(pointer_at(COMMAND_AT)) ÷ STATUS_UNIT)
+	words
 }
 
-args_sizes_get(ARGUMENT_COUNT_AT, ARGUMENT_BYTES_COUNT_AT)
-args_get(ARGUMENTS_AT, ARGUMENT_BYTES_AT)
-count = word_at(ARGUMENT_COUNT_AT)
-if count > 1 and strcmp(argument(1), test_word()) == 0 { tested(count) }
-compiler_found()
-if count < 2 {
-	console(module_loaded(pointer_at(COMPILER_AT), CACHE_AT))
+words = capped(command_line())
+if #words > 1 and words#2 == "test" { tested(words) }
+if #words < 2 {
+	console(module_loaded(compiler_path), words#1)
 	exit(0)
 }
+global run_input = words#2
 # a compiled module, `wap m.wasm [arguments…]`: run as it is, its arguments from its file on
-if ends_in(argument(1), module_suffix()) {
-	if not module_ran(module_loaded(argument(1), PROGRAM_CACHE_AT), count - 1, host_list(ARGUMENTS_AT + 4, count - 1), host_of(argument(1))) { ended(word_at(STATUS_AT)) }
+if (words#2).ends_with(MODULE_SUFFIX) {
+	if not module_ran(module_loaded(words#2), followed(words#2, words, 3), words#2) { ended(word_at(STATUS_AT)) }
 	ended(0)
 }
-close(temporary_made(MODULE_AT, module_template(), MODULE_SUFFIX_BYTES))
-program = program_of(argument(1))
+global module_file = temporary_made(MODULE_TEMPLATE, MODULE_SUFFIX)
+program = program_of(words#2)
 # the program's module, compiled or kept from an earlier run; then run: the module, the program's arguments after its
 # file, which is its first (its real path, so program.folder is the source's folder)
 module = program_module(program, compiler_hash())
 if module == 0 { ended(word_at(STATUS_AT)) }
-arguments = host_list(ARGUMENTS_AT + 4, count - 1)
-set_long_at(arguments, program_path(program))
-if not module_ran(module, count - 1, arguments, program_path(program)) { ended(word_at(STATUS_AT)) }
+if not module_ran(module, followed(program_path(program), words, 3), program_path(program)) { ended(word_at(STATUS_AT)) }
 # (an exit, not a value: the program shows none, so its module holds no text)
 ended(0)

@@ -5,31 +5,123 @@
 # module's memory, which the native warp gives C as its pointer.
 use "host.wap"
 
-# where the next text of a C call goes
-c_texts_end = BYTES_AT
+# a call's out-pointers (`sqlite3 **`), each a C pointer's slot from BYTES_AT, its texts after them
+OUT_SLOTS := 4
+POINTER_BYTES := 8
+OUTS_END := BYTES_AT + OUT_SLOTS * POINTER_BYTES
+# where the next text of a C call goes; the out-pointers a call was given
+c_texts_end = OUTS_END
+c_outs = 0
+# the count of the call's last bytes, which a `length` parameter after them gets
+c_bytes_count = 0
 # the most bytes a text C gives back is read for
 C_TEXT_LIMIT := 1000000000
 
 # the texts of a new call, placed from the start again
-c_call_started() := { global c_texts_end = BYTES_AT }
-c_text(t: text): int32 := {
-	global c_texts_end
-	at = c_texts_end
-	memory_holding(at - BYTES_AT + byte_count(t) + 1)
+c_call_started() := { global c_texts_end = OUTS_END; global c_outs = 0 }
+# a text as C takes it, the address of its bytes and a NUL: its own where texts are in the memory, else a copy placed
+c_text(t: text): int32 := c_address(c_text_at(t))
+# (a C function that writes into its text, mkstemps, writes into the text itself where texts are in the memory: give
+# it a text of its own, never a literal)
+c_text_at(t: text): int := if texts_in_memory() then text_address(t) else c_placed(t)
+# a text's bytes and a NUL placed after the call's others, where they start
+c_placed(t: text): int := {
+	at = c_reserved(byte_count(t) + 1)
 	for offset in 0 upto byte_count(t) { set_memory_byte(at + offset, byte_at(t, offset)) }
 	set_memory_byte(at + byte_count(t), 0)
-	global c_texts_end = at + byte_count(t) + 1
-	prim i32.wrap_i64(at)
+	at
 }
-c_text_from(pointer: int): text := {
+# a list of texts as C's NULL-ended `char *[]` (argv, posix_spawn): their C pointers, each text's own or its copy's,
+# the memory's own address as C sees it added to each
+# DEBT: The pointers hold while the memory stays where it is, as wasmtime's reserved memory does; a host that moves the
+#   memory as it grows would leave them dangling.
+c_texts(ts: list<text>): int32 := {
+	at = c_reserved((#ts + 1) * POINTER_BYTES)
+	base = c_memory_seen()
+	slot = at
+	for t in ts {
+		set_memory_int(slot, base + c_text_at(t))
+		slot += POINTER_BYTES
+	}
+	set_memory_int(slot, 0)
+	c_address(at)
+}
+# `count` bytes after the call's others, the memory grown to hold them, where they start; new memory of their own where
+# texts are in the memory, whose memory past BYTES_AT a driver and its texts use (extensions/native/run.wap)
+c_reserved(count: int): int := {
+	if texts_in_memory() { return text_address(text_made(count)) }
+	global c_texts_end
+	at = c_texts_end
+	memory_holding(at - BYTES_AT + count)
+	global c_texts_end = at + count
+	at
+}
+# where C sees the memory's address 0: memmove gives back its destination as C's pointer
+c_memory_seen(): int := c_moved(c_address(BYTES_AT), c_address(BYTES_AT), 0) - BYTES_AT
+c_moved(destination: int32, source: int32, count: int): int := prim foreign("c", "memmove", destination, source, count)
+c_address(at: int): int32 := prim i32.wrap_i64(at)
+set_memory_int(at: int, n: int) := {
+	set_memory_word(at, n % WORD_RANGE)
+	set_memory_word(at + 4, n ÷ WORD_RANGE)
+}
+memory_int(at: int): int := c_word(at) + c_word(at + 4) * WORD_RANGE
+# an out-pointer for C to fill, the call's next slot, NULL until it does
+c_out(): int32 := {
+	global c_outs
+	at = BYTES_AT + c_outs * POINTER_BYTES
+	set_memory_int(at, 0)
+	global c_outs = c_outs + 1
+	c_address(at)
+}
+# a handle C gives back: the pointer its first out-pointer holds when it has one, C's status naming a NULL one
+c_handle(status: int): int := {
+	if c_outs == 0 { return status }
+	pointer = memory_int(BYTES_AT)
+	if pointer == 0 { raise "C gave no pointer, its status ${status}" }
+	pointer
+}
+# the unsigned 32-bit word at an address
+c_word(at: int): int := (memory_word(at) + WORD_RANGE) % WORD_RANGE
+c_text_from(pointer: int): text := if pointer == 0 then "" else c_copied(pointer, c_length(pointer, C_TEXT_LIMIT))
+# a text C gives back as a pointer to its length (8 bytes) and its bytes, which the caller frees
+c_counted_text(pointer: int): text := {
 	if pointer == 0 { return "" }
-	count = c_length(pointer, C_TEXT_LIMIT)
+	c_copy(c_address(BYTES_AT), pointer, POINTER_BYTES)
+	copied = c_copied(pointer + POINTER_BYTES, memory_int(BYTES_AT))
+	c_free(pointer)
+	copied
+}
+# `count` bytes at a C pointer, as a text: copied straight into a new one where texts are in the memory, else through
+# the memory from BYTES_AT
+c_copied(pointer: int, count: int): text := {
+	if texts_in_memory() {
+		copied = text_made(count)
+		c_copy(c_text(copied), pointer, count)
+		return copied
+	}
 	memory_holding(count)
-	c_copy(prim i32.wrap_i64(BYTES_AT), pointer, count)
+	c_copy(c_address(BYTES_AT), pointer, count)
 	memory_text(BYTES_AT, count)
 }
-set_memory_byte(at: int, b: int) := prim i32.store8(at, b)
+c_free(pointer: int) := prim foreign("c", "free", pointer)
+# a list of bytes as a C pointer to their copy, NULs and all; its count the `length` parameter after it gets
+c_bytes(xs: list<int>): int32 := {
+	at = c_reserved(#xs)
+	slot = at
+	for b in xs {
+		set_memory_byte(slot, b)
+		slot += 1
+	}
+	global c_bytes_count = #xs
+	c_address(at)
+}
 c_length(pointer: int, limit: int): int := prim foreign("c", "strnlen", pointer, limit)
 c_copy(destination: int32, source: int, count: int): int := prim foreign("c", "memcpy", destination, source, count)
 # a C int a function gives back, as the int it means
 c_number(n: int32): int := prim i64.extend_i32_s(n)
+# a float as C's float and back; a bool as C's int and back, of which C defines the low byte
+c_float(x: float): float32 := prim f32.demote_f64(x)
+c_double(x: float32): float := prim f64.promote_f32(x)
+c_flag(b: bool): int := if b then 1 else 0
+c_bool(n: int): bool := n % BYTE_RANGE != 0
+BYTE_RANGE := 256

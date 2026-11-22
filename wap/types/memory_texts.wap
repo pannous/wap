@@ -1,0 +1,74 @@
+# How a text holds its UTF-8 bytes in a native build (extensions/native/build.sh), which takes this file for text_bytes.wap, as
+# wasm2c takes no GC type: a text is the address of its byte count (4 bytes), its bytes and a zero in the module's
+# memory, so C takes its bytes at the address + 4 as a C string. The emitter places a literal in the module's data
+# (core/emit/values.wap memory_text); a new text is taken past the memory the module started with, which grows.
+# DEBT: a text's memory is never freed: fine for the native wap's driver and short programs, not for a long-running one
+# (copied over text_bytes.wap in a native build, so beside host.wap)
+use "host.wap"
+
+COUNT_BYTES := 4
+PAGE_BYTES := 65536
+# where the next new text goes; 0 till the first is made
+texts_end: int = 0
+
+# a text as the address it is, and back
+address_of(t: text): int := prim i64.extend_i32_u(t)
+text_at(at: int): text := prim i32.wrap_i64(at)
+# the memory's size in pages
+memory_pages(): int := prim memory.size()
+fd_write(file: int, iovecs_at: int, count: int, written_at: int): int := prim fd_write(file, iovecs_at, count, written_at)
+
+# a text's byte count, a byte (from 0), a new text of the bytes from `start` up to `stop`
+byte_count(t: text): int := memory_word(address_of(t))
+byte_at(t: text, at: int): int := memory_byte(address_of(t) + COUNT_BYTES + at)
+bytes_between(t: text, start: int, stop: int): text := {
+	part = text_made(stop - start)
+	bytes_copied(t, start, stop, part, 0)
+	part
+}
+# a text of `count` zero bytes (the memory grown is zero), and one of them set
+text_made(count: int): text := {
+	at = memory_taken(COUNT_BYTES + count + 1)
+	set_memory_word(at, count)
+	text_at(at)
+}
+# the address of `bytes` new zero bytes past the memory the module started with, which grows; never freed (texts and
+# lists share it, list_items.wap)
+memory_taken(bytes: int): int := {
+	global texts_end
+	end: int = texts_end
+	at = if end == 0 then memory_pages() * PAGE_BYTES else end
+	global texts_end = at + bytes
+	memory_holding(texts_end - BYTES_AT)
+	at
+}
+set_text_byte(t: text, at: int, b: int) := set_memory_byte(address_of(t) + COUNT_BYTES + at, b)
+# the bytes of a text from `start` up to `stop` set in another from `at`
+bytes_copied(source: text, start: int, stop: int, target: text, at: int) := for offset in start upto stop { set_text_byte(target, at + offset - start, byte_at(source, offset)) }
+# texts: equal when their bytes are, joined by +
+==(a: text, b: text): bool := {
+	if byte_count(a) != byte_count(b) { return no }
+	for at in 0 upto byte_count(a) { if byte_at(a, at) != byte_at(b, at) { return no } }
+	yes
+}
++(a: text, b: text): text := {
+	joined = text_made(byte_count(a) + byte_count(b))
+	bytes_copied(a, 0, byte_count(a), joined, 0)
+	bytes_copied(b, 0, byte_count(b), joined, byte_count(a))
+	joined
+}
+# a text's bytes placed in the memory from BYTES_AT (host.wap); a text written to a file, a line end after it when
+# `line` says so
+place(t: text) := {
+	memory_holding(byte_count(t))
+	for at in 0 upto byte_count(t) { set_memory_byte(BYTES_AT + at, byte_at(t, at)) }
+}
+write(t: text, file: int, line: bool) := {
+	set_memory_word(IOVEC_AT, address_of(t) + COUNT_BYTES)
+	set_memory_word(IOVEC_AT + COUNT_BYTES, byte_count(t))
+	fd_write(file, IOVEC_AT, 1, MOVED_AT)
+	if line { write("\n", file, no) }
+}
+# whether a text is in the module's memory, and the address of its bytes there (C's view of it, c.wap)
+texts_in_memory(): bool := yes
+text_address(t: text): int := address_of(t) + COUNT_BYTES
