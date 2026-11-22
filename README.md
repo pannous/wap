@@ -109,10 +109,9 @@ the `Node` enum (`Text`, `Symbol`, `Number`, `Char`, `Key`, `List`, `Type`, `Met
 
 Warp Proven to be (almost) **production ready** by being able to compile the whole language written in wap [itself](https://en.wikipedia.org/wiki/Self-hosting_(compilers))! Wap rewrite Experimental and moving fast. Tests 100% samples passing, general progress viewable in this [dashboard](https://claude.ai/artifact/PupNqVoBxQGvBjVxkqxGuq)  
 
-The language spec lives in the  
-[wiki](https://github.com/pannous/wap/wiki), and parts of it are not implemented yet.  
+The language spec lives in [wiki](https://github.com/pannous/wap/wiki) (not all parts are implemented yet.)  
 **Wap** is now a **self-hosted**, meaning the compiler compiles itself.  
-[Warp] began as a Rust rewrite of  
+[Warp](https://github.com/pannous/warp) began as a Rust rewrite of  
 [Wasp](https://github.com/pannous/wasp) (C++), which followed the Python experiments  
 [Angle](https://github.com/pannous/angle) and [english-script](https://github.com/pannous/english-script);  
 <!-- its compiler is now written in Wap itself ([core](core)), and so is the native `wap` command, which runs programs through wasmtime's C API ([core/native](core/native)). The old Rust compiler is preserved on the branch [rust-bootstrap](https://github.com/pannous/wap/tree/rust-bootstrap). -->
