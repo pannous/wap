@@ -179,8 +179,9 @@ typed_program(program: Block, library: Library, rules: KindRules, signatures: li
 # with it known, once for each round of such variables
 typed_among(program: Block, library: list, rules: KindRules, library_scope: Scope, signatures: list<Signature>, retyped: list<Binding> = [], retypings: list<text> = []) as Block := {
 	s = TypingState()
-	s.retyped = retyped
-	s.retypings = retypings
+	# copies, which this round grows
+	s.retyped = retyped.drop(0)
+	s.retypings = retypings.drop(0)
 	s.kind_rules = rules
 	s.library_scope = library_scope
 	s.ids = definers_of(program)
@@ -192,7 +193,7 @@ typed_among(program: Block, library: list, rules: KindRules, library_scope: Scop
 	typed = try typed_form(program, s, TypeFrame(), ø) catch e { if #s.retyped == #retyped then refused_all(s, [e.message]) else Block([]) }
 	if #s.retyped > #retyped { return typed_among(program, library, rules, library_scope, signatures, s.retyped, s.retypings) }
 	if s.refusals { refused_all(s, []) }
-	for retyping in retypings { hint(retyping) }
+	for retyping in s.retypings { hint(retyping) }
 	statements = statements_in(typed)
 	if s.unknowns > 0 { all_settled(s) }
 	dispatches_completed(s)
@@ -241,7 +242,7 @@ form_typed(n: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := ma
 	Record(name, fields, variants) => s.records.items.find(record => place_key(record_declared(record)) == place_key(name)) ?? refused(n, "typing holds no record declared here: the pipeline lost it")
 	Key(head, Op.None, List(items, Bracket.Curly, separator)) => instance_typed(n, head, items, separator, s, f)
 	Get(subject, key) => part_got(n, typed_form(subject, s, f, ø), key, s, f, expected)
-	List(items, Bracket.Square, separator) => list_typed(n, items, separator, s, f, expected)
+	List(items, Bracket.Square, separator) => parted_rewritten(list_typed(n, items, separator, s, f, expected), n, s, f, expected)
 	List(items, Bracket.Curly, separator) => map_typed(n, items, separator, s, f, expected)
 	Item(subject, key) => item_typed(n, subject, key, s, f)
 	Fn(parameters, body) => function_value_typed(n, parameters, body, s, f)
@@ -375,7 +376,7 @@ name_set_typed(n: Node, place: Node, value: Node, s: TypingState, f: TypeFrame) 
 	name = declared_name(place)
 	declared = substituted(declared_type(place), f.letters)
 	key = place_key(defined_at(name))
-	if declared != ø or is_kind_word(fact_of(n, ASSIGNS), DefinitionKind.Local) { s.fixed += [key] }
+	if declared != ø or is_kind_word(fact_of(n, ASSIGNS), DefinitionKind.Local) { s.fixed.add(key) }
 	wanted = if declared != ø then shaped(declared, s) else type_keyed(key, s.retyped) ?? variable_type(name, s, f)
 	given = typed_form(value, s, f, wanted)
 	# a global functions read before it is set from here on
@@ -398,8 +399,8 @@ NAME_HOLDS = "the name holds"
 retyped(n: Node, key: text, held: Node, given: Node, refusal: text, s: TypingState) as Node := {
 	if key in s.fixed or type_keyed(key, s.retyped) != ø { raise refusal }
 	both = joined_type(held, given, s) ?? ANY_SYMBOL
-	s.retyped += [Binding(key, both)]
-	if both == ANY_SYMBOL { s.retypings += [warning_of(n, "this name held ${type_text(held)} and now ${type_text(given)}, so it holds any from here on: write `let` for a name that keeps its type")] }
+	s.retyped.add(Binding(key, both))
+	if both == ANY_SYMBOL { s.retypings.add(warning_of(n, "this name held ${type_text(held)} and now ${type_text(given)}, so it holds any from here on: write `let` for a name that keeps its type")) }
 	both
 }
 # a list's item or a record's field given a value of its type; the Set itself gives none
