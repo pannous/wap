@@ -17,4 +17,9 @@ print(shown(Box(3)))')" "Box{n: 3}"
 check "a first record holding a list of itself" "$(ran first_tree 'class Tree { n: int; kids: list<Tree> }
 t = Tree(1, [Tree(2, [])])
 #t.kids')" "1"
+# a field given only its default has the default's type (wiki/class.md; OK warp-interviewer 2026-11-21 field-default-type)
+check "a field given only its default" "$(ran field_default 'class Counter { at = 0 }
+c = Counter()
+c.at += 2
+c.at + 1')" "3"
 exit $((failures > 0))
