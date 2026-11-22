@@ -1,0 +1,24 @@
+# How a native build keeps its values in the memory, as wasm2c takes no GC type (core/stage.wap MemoryLayout): texts,
+# lists and enums are i32s, a text's address, a list's or a class's instance's, an enum case's tag; their literals are
+# built by the words of types/memory_lists.wap; an uncaught raise writes its text to stderr and ends the program.
+use "../../core/emit/memory.wap"
+use "../../core/emit/opcodes.wap"
+use "../../core/emit/wasm.wap"
+use "../../core/emit/host.wap"
+
+# the bytes a record's field takes in the memory, as a list's item does (types/memory_lists.wap ITEM_BYTES)
+FIELD_BYTES := 8
+# a text in the memory: its count in these bytes, then its bytes and the one byte past them a line end may take
+# (types/memory_texts.wap)
+MEMORY_TEXT_BYTES := 4
+NATIVE_MEMORY = MemoryLayout{built_by: {"list": ["reserved", "extended"], "record": ["record_reserved", "field_stored"]}, layouts: {"text": I32, "list": I32, "enum": I32}, text_bytes: memory_text_bytes, field_bytes: FIELD_BYTES, raised: raise_written}
+
+# a text in the module's data: its byte count, then its bytes
+memory_text_bytes(t: text) as list<int> := little_endian(#t.bytes, MEMORY_TEXT_BYTES) + t.bytes
+# an uncaught raise, its text the function's local 0: the text and a line end written to stderr, the program ended
+raise_written(fd_write: int, proc_exit: int) as list<int> := {
+	count = local_get(0) + instruction(I32_LOAD, [2, 0])
+	line_end = local_get(0) + count + I32_ADD + i32_const(NEWLINE) + instruction(I32_STORE8, [0, MEMORY_TEXT_BYTES])
+	iovec = i32_const(IOVEC_ADDRESS) + local_get(0) + i32_const(MEMORY_TEXT_BYTES) + I32_ADD + instruction(I32_STORE, [2, 0]) + i32_const(IOVEC_ADDRESS + 4) + count + i32_const(1) + I32_ADD + instruction(I32_STORE, [2, 0])
+	line_end + iovec + i32_const(STDERR) + i32_const(IOVEC_ADDRESS) + i32_const(1) + i32_const(WRITTEN_ADDRESS) + instruction(CALL, [fd_write]) + DROP + i32_const(RAISED_STATUS) + instruction(CALL, [proc_exit])
+}

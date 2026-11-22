@@ -117,6 +117,7 @@ wap/
       lists.wap               growable lists and the maps built on them
       equality.wap            whether two values of one type are equal, for `==` and a map's key search
       values.wap              the value layout (notes/self_hosting.md "Value layout"), reused as it is
+      memory.wap              how a build keeping values in the memory lays them out: the record its extension fills
       wasm.wap                the wasm binary format: modules, sections, instructions; knows no warp form
       opcodes.wap             the format's codes: section ids, value and heap types, opcodes
 
@@ -165,6 +166,7 @@ wap/
       editing.wap             the console's line edited on a terminal: arrows, word moves, deletes, history
       host_words.wap          a program's C imports answered by the C functions of their names; C calling back into it
       linking.wap             where a used module is found: beside its importer, its compiler's folder, wap.wasm's
+      memory.wap              values in the memory, as wasm2c takes no GC type: layouts, literal words, the raise
       programs.wap            a program's machine code kept beside wap.wasm, program-<hash>.cwasm by its sources
       linking.wap             where a module imported by a bare name is: beside the importer, in the compiler folder
                               its wap.compiler section names, else in the installed wap-seed
