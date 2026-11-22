@@ -33,4 +33,10 @@ print(text([#w for w in ["a", "bb"]]))')" "[4, 6]
 check "a comprehension over two lists" "$(ran pairs 'print(text([[x, y] for x in [1, 2] for y in [3, 4]]))
 print(text([x * y for x in [1, 2] for y in [1, 3] if x < y]))')" "[[1, 3], [1, 4], [2, 3], [2, 4]]
 [3, 6]"
+# a list pattern matches the list whatever separates its items, `[a b]` and `[a, b]` being one list (wiki/list.md)
+check "a list pattern, spaced or with commas" "$(ran list_separators 'rule firsts [$a, $b] => print("$a")
+rule lasts [$a $b] => print("$b")
+firsts [1 2]
+lasts [3, 4]')" "1
+4"
 exit $((failures > 0))
