@@ -20,7 +20,7 @@ check=
 [ "${1-}" = --check ] && { check=1; shift; }
 tree=$(cd "${1:-$(git rev-parse --show-toplevel)}" && pwd) || exit 2
 installed=$(command -v wap) || { echo "refresh-seed: no native wap on PATH: install the wap and wap-seed/ of the release wap-seed.lock names" >&2; exit 2; }
-seed=$(dirname "$installed")/wap-seed/wap.wasm
+seed=$(dirname "$(readlink -f "$installed")")/wap-seed/wap.wasm
 [ -f "$seed" ] || { echo "refresh-seed: no seed at $seed" >&2; exit 2; }
 # the scratch folder by its real path: a module's WASI follows no link, and data/ is often one (test/wap/compile.sh)
 mkdir -p "$tree/data" && scratch=$(cd -P "$(mktemp -d "$tree/data/refresh-seed.XXXXXX")" && pwd -P) || exit 2

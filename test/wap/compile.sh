@@ -9,7 +9,7 @@ source "$tree/scripts/lib/wap-beside.sh"
 # one, to a scratch volume)
 data="$(mkdir -p "$tree/data/wap-tests" && cd -P "$tree/data/wap-tests" && pwd -P)"
 # wap's seed, wap built by itself, beside the native wap with its types module and kernel (scripts/refresh-seed.sh)
-seed="$(dirname "$wap")/wap-seed/wap.wasm"
+seed="$(dirname "$(readlink -f "$wap")")/wap-seed/wap.wasm"
 [ -f "$seed" ] || { echo "no wap seed at $seed: scripts/refresh-seed.sh --wap installs it" >&2; exit 2; }
 # wap's compiler built by itself <n> times into <folder>, a folder holding it already kept; prints the module, or the
 # failed step's error. A module reads its types module beside itself (the host reads no link out of a folder): wap0.wasm
