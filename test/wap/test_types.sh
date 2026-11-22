@@ -10,4 +10,10 @@ source "$(dirname "$0")/compile.sh"
 check "a value in an any shows itself by its own type's show" "$(ran shown_any 's(x: any): text := show(x)
 class Box { n: int }
 print s(1) + " " + s(2.5) + " " + s("ab") + " " + s(yes) + " " + s(Box(3))')" "1 2.5 \"ab\" yes Box{n: 3}"
+# a call typed only once a map's item type settles names the instance it gets: `!` of a value whose type settles to
+# text? (warp-wap-reader's `a ?? b` report)
+check "a call deferred till its unknowns settle" "$(ran deferred_settled 'm = {}
+maybe(s: text) as text? := if s == "a" then "yes" else ø
+h(b: bool) := if b then maybe("a") else m.get("a")!
+print(h(yes) ?? "x")')" "yes"
 exit $((failures > 0))
