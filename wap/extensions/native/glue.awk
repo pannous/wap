@@ -42,6 +42,8 @@ function c_value(wasm_type, name) { return wasm_type == "u32" ? "wasi_memory(lib
 	glue = glue sprintf("\tif (!function) function = c_function(\"%s\");\n", unescaped(name))
 	glue = glue sprintf("\t%s%s;\n}\n", (result == "void" ? "" : "return "), call)
 }
+# the program answers host words (main.c wap_host_callback): `void w2c_program_host_word(w2c_program*, u64, …);`
+/^void w2c_program_host_word\(/ { glue = glue "#define PROGRAM_HOST_WORD 1\n" }
 # the instantiation, the imported modules' instances in the header's order: WASI's, and each other module's wrapping it
 /^void wasm2c_[a-z0-9_]+_instantiate\(/ {
 	listed = $0; sub(/^[^,]*, */, "", listed); sub(/\);.*$/, "", listed)

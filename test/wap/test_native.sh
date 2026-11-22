@@ -35,10 +35,7 @@ while n < 5 {
 }
 exit(k)' >/dev/null; echo $?)" "3"
 # the native wap (driver.wap, built by wap): `wap <program>` compiles with the wap.wasm beside it and runs the module
-native_wap="$stage/bin/wap"
-mkdir -p "$stage/bin/wap-seed" && (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$stage/bin/wap-seed/") && cp "$compiler" "$stage/bin/wap-seed/wap.wasm"
-wasmtime_library="$(cd -P "$(dirname "$wap")/lib" && pwd -P)"
-WARP=$wap "$tree/wap/extensions/native/build.sh" "$compiler" "$tree/wap/extensions/native/driver.wap" "$native_wap" -L"$wasmtime_library" -lwarp_wasmtime -Wl,-rpath,"$wasmtime_library" >/dev/null 2>&1
+native_wap=$(native_wap_built "$stage/bin")
 printf '%s\n' 'print "Hello"' >"$stage/hello.wap"
 check "wap hello.wap prints Hello" "$(cd "$stage" && "$native_wap" hello.wap 2>&1)" "Hello"
 printf '%s\n' 'x = 40000000000' 'x + 2' >"$stage/value.wap"
@@ -85,4 +82,64 @@ done"
 check "a link to the native wap runs a program" "$(ln -sf "$native_wap" "$stage/linked-wap" && "$stage/linked-wap" 'print "linked"' 2>&1)" "linked"
 # a program's folder is its source's, wherever its module was written: wap's compiler run from source finds its types
 check "the native wap runs wap's compiler from its source" "$(cd "$stage" && printf '%s\n' 'print "Hello"' >hello_source.wap && "$native_wap" "$tree/wap/compiler.wap" hello_source.wap hello_source.wasm && "$native_wap" hello_source.wasm 2>&1)" "Hello"
+# C calling back a function of the program run (lib/native/callbacks.h, extensions/native/host_words.wap): qsort
+# compares by the program's c_callback_fired
+cat >"$stage/sorted.wap" <<'PROGRAM'
+qsort(base: int32, count: int, size: int, compare: int) := prim foreign("c", "qsort", base, count, size, compare)
+memcpy(destination: int32, source: int, count: int): int := prim foreign("c", "memcpy", destination, source, count)
+c_callback_pointer(slot: int): int := prim foreign("c", "c_callback_pointer", slot)
+address(at: int): int32 := prim i32.wrap_i64(at)
+set_word(at: int, w: int) := prim i32.store(at, w)
+word(at: int): int := prim i32.load(at)
+ARRAY_AT := 2048
+SCRATCH_AT := 3072
+# C's compare of the two ints it points at
+c_callback_fired(slot: int, a: int, b: int, c: int, d: int, e: int, f: int): int := {
+	memcpy(address(SCRATCH_AT), a, 4)
+	memcpy(address(SCRATCH_AT + 4), b, 4)
+	word(SCRATCH_AT) - word(SCRATCH_AT + 4)
+}
+set_word(ARRAY_AT, 3)
+set_word(ARRAY_AT + 4, 1)
+set_word(ARRAY_AT + 8, 2)
+qsort(address(ARRAY_AT), 3, 4, c_callback_pointer(0))
+print "${word(ARRAY_AT)} ${word(ARRAY_AT + 4)} ${word(ARRAY_AT + 8)}"
+PROGRAM
+check "C calls back a function of the program the native wap runs" "$(cd "$stage" && "$native_wap" sorted.wap 2>&1)" "1 2 3"
+# texts in a native program, held in its memory (types/memory_texts.wap): literals, + and interpolation,
+# equality, print, and a text passed to C
+check "a native program's texts" "$(native_ran texts 'strlen(s: text): i64 from '"'"'c'"'"'
+name = "wap"
+greeting = "hello " + name
+print greeting
+print "${greeting} has ${strlen(greeting)} bytes"
+print(if name == "wap" then "same" else "other")')" "hello wap
+hello wap has 9 bytes
+same"
+# a module's `export` is exported by the program that uses it too, under its plain name: C calls back the module's
+# c_callback_fired though the program defines none
+cat >"$stage/comparing.wap" <<'MODULE'
+memcpy(destination: int32, source: int, count: int): int := prim foreign("c", "memcpy", destination, source, count)
+word(at: int): int := prim i32.load(at)
+SCRATCH_AT := 3072
+export c_callback_fired(slot: int, a: int, b: int, c: int, d: int, e: int, f: int): int := {
+	memcpy(prim i32.wrap_i64(SCRATCH_AT), a, 4)
+	memcpy(prim i32.wrap_i64(SCRATCH_AT + 4), b, 4)
+	word(SCRATCH_AT) - word(SCRATCH_AT + 4)
+}
+MODULE
+cat >"$stage/sorting.wap" <<'PROGRAM'
+use "comparing.wap"
+qsort(base: int32, count: int, size: int, compare: int) := prim foreign("c", "qsort", base, count, size, compare)
+c_callback_pointer(slot: int): int := prim foreign("c", "c_callback_pointer", slot)
+set_word(at: int, w: int) := prim i32.store(at, w)
+item(at: int): int := prim i32.load(at)
+ARRAY_AT := 2048
+set_word(ARRAY_AT, 2)
+set_word(ARRAY_AT + 4, 3)
+set_word(ARRAY_AT + 8, 1)
+qsort(prim i32.wrap_i64(ARRAY_AT), 3, 4, c_callback_pointer(0))
+print "${item(ARRAY_AT)} ${item(ARRAY_AT + 4)} ${item(ARRAY_AT + 8)}"
+PROGRAM
+check "C calls back the export of a module the program uses" "$(cd "$stage" && "$native_wap" sorting.wap 2>&1)" "1 2 3"
 exit $((failures > 0))

@@ -8,26 +8,7 @@ static const char PROCESS[] = "c";
 static const char WASMTIME[] = "warp_wasmtime";
 enum { ARENA_ALIGNMENT = 8, TEXT_RECORD = 8, PAGE_BYTES = 65536 }; // primitive.warp ARENA_ALIGNMENT, text_layout's size
 
-// a symbol of the process: the executable's, a library's it links or one opened RTLD_GLOBAL. POSIX's dlopen(NULL)
-// handle, not RTLD_DEFAULT, which glibc declares only under _GNU_SOURCE, and this file comes behind the header wasm2c
-// writes, too late to define it (the v1.8.0 Linux release jobs, card release-linux-bootstrap)
-static void* process_symbol(const char* name) {
-	static void* process;
-	if (!process) process = dlopen(NULL, RTLD_LAZY);
-	return dlsym(process, name);
-}
-void* library_function(const char* library, const char* name);
-// the C function of that name the executable or a library it links has, else the library's own, loaded now (Windows
-// loads no library the executable names but never calls by its import table); a program calling one none has stops here
-static void* native_function(const char* library, const char* name) {
-	void* found = process_symbol(name);
-	if (!found) found = library_function(library, name);
-	if (!found) {
-		fprintf(stderr, "no C function %s in this executable or the libraries it links (%s)\n", name, library);
-		exit(1);
-	}
-	return found;
-}
+#include "libraries.h"
 // an address of the module's memory as a C pointer, the null address NULL; and back
 static void* native_address(struct w2c_wasi__snapshot__preview1* wasi, uint32_t address) { return address ? at(wasi, address) : NULL; }
 static uint32_t module_address(struct w2c_wasi__snapshot__preview1* wasi, void* pointer) {
@@ -36,29 +17,7 @@ static uint32_t module_address(struct w2c_wasi__snapshot__preview1* wasi, void* 
 // an address of the module's memory as the C pointer it is, for a program to hold as a handle (`native_pointer(address:
 // pointer): handle from "c"`): the glue made it the pointer already
 void* native_pointer(void* address) { return address; }
-// a pointer C passed to a callback (lib/callbacks.warp), returned as a handle, which the driver makes its id
-void* pointer_handle(int64_t address) { return (void*)(intptr_t)address; }
-// The C functions a warp function behind lib/callbacks.warp c_callback is passed to C as, one a slot: each calls the
-// driver's c_callback_answered(slot, its six integer arguments), which calls the program's c_callback_fired; float
-// arguments never reach one (they come in other registers)
-typedef uint64_t (*callback_answer_t)(w2c_program*, u64, u64, u64, u64, u64, u64, u64);
-static uint64_t callback_answered(uint64_t slot, uint64_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e, uint64_t f) {
-	static callback_answer_t answer;
-	if (!answer) answer = (callback_answer_t)native_function(PROCESS, "w2c_program_c_callback_answered");
-	return answer(running_wasi->program, slot, a, b, c, d, e, f);
-}
-#define TRAMPOLINE(n) static uint64_t trampoline_##n(uint64_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e, uint64_t f) { return callback_answered(n, a, b, c, d, e, f); }
-TRAMPOLINE(0) TRAMPOLINE(1) TRAMPOLINE(2) TRAMPOLINE(3) TRAMPOLINE(4) TRAMPOLINE(5) TRAMPOLINE(6) TRAMPOLINE(7)
-TRAMPOLINE(8) TRAMPOLINE(9) TRAMPOLINE(10) TRAMPOLINE(11) TRAMPOLINE(12) TRAMPOLINE(13) TRAMPOLINE(14) TRAMPOLINE(15)
-static void* trampolines[] = {trampoline_0, trampoline_1, trampoline_2, trampoline_3, trampoline_4, trampoline_5, trampoline_6, trampoline_7,
-	trampoline_8, trampoline_9, trampoline_10, trampoline_11, trampoline_12, trampoline_13, trampoline_14, trampoline_15};
-void* c_callback_pointer(int64_t slot) {
-	if (slot < 0 || slot >= (int64_t)(sizeof trampolines / sizeof *trampolines)) {
-		fprintf(stderr, "c_callback: at most %zu callbacks a run\n", sizeof trampolines / sizeof *trampolines);
-		exit(1);
-	}
-	return trampolines[slot];
-}
+#include "callbacks.h"
 // the process's environment, for the children it starts (core/native/driver.warp words_run)
 char** process_environment(void) { return environ; }
 // the error number of the C call that failed last (core/native/driver.warp os_failure)
@@ -96,85 +55,6 @@ static uint32_t module_text(struct w2c_wasi__snapshot__preview1* wasi, const cha
 // a C function's address by its name, for a program to hand to a C library as a callback
 void* c_function(char* name) { return native_function(PROCESS, name); }
 
-// The C calls of a module the driver runs (core/native/driver.warp c_called), as the Rust stub makes them (c_calls.rs)
-// where a library lies by the name a program imports it under (`sqlite3`); libc's and libm's are the process's
-// libraries beside the executable first (libwgpu_native), as libwarp_wasmtime is
-// Fixed short folders per platform (user 2026-11-06 library-search-paths): no scan/sort/computed from.
-// macOS: homebrew + local + opt/<name>/Frameworks/<Name>.framework/<Name> + the system's frameworks. Linux:
-// /usr/lib(+triple) + local, lib<name>.so / .so.0 / -2.0.so.0 / .so.1 / .so.6 (usual versioned sonames, FreeType's
-// .so.6; odd ones like libpython3.13.so.1.0 still
-// need a symlink, WARP path, or a computed `from`). Windows: LoadLibrary System32+PATH (not this dlopen list).
-static const char* LIBRARY_PATHS[] = {
-	"%s.dll",
-	"@executable_path/lib%s.dylib",
-	"$ORIGIN/lib%s.so",
-	"lib%s.dylib",
-	"lib%s.so",
-	"lib%s.so.0",
-	"lib%s-2.0.so.0",
-	"lib%s-2.so.0",
-	"lib%s.so.1",
-	"lib%s.so.1.0",
-	"lib%s.so.6",
-	"lib%s3.so",
-	"/opt/homebrew/lib/lib%s.dylib",
-	"/usr/local/lib/lib%s.dylib",
-	"/usr/local/lib/lib%s.so",
-	"/usr/local/lib/lib%s-2.0.so.0",
-	"/usr/local/lib/lib%s3.so",
-	"/usr/lib/lib%s.so",
-	"/usr/lib/lib%s-2.0.so.0",
-	"/usr/lib/lib%s3.so",
-	"/usr/lib/x86_64-linux-gnu/lib%s.so",
-	"/usr/lib/x86_64-linux-gnu/lib%s.so.0",
-	"/usr/lib/x86_64-linux-gnu/lib%s-2.0.so.0",
-	"/usr/lib/x86_64-linux-gnu/lib%s.so.1",
-	"/usr/lib/x86_64-linux-gnu/lib%s3.so",
-	"/usr/lib/aarch64-linux-gnu/lib%s.so",
-	"/usr/lib/aarch64-linux-gnu/lib%s.so.0",
-	"/usr/lib/aarch64-linux-gnu/lib%s-2.0.so.0",
-	"/usr/lib/aarch64-linux-gnu/lib%s.so.1",
-	"/usr/lib/aarch64-linux-gnu/lib%s3.so",
-};
-static const char* PROCESS_LIBRARIES[] = {"c", "m", "libc", "libm"};
-// a library's function, NULL when the library has none of that name: never another library's
-void* library_function(const char* library, const char* name) {
-	for (size_t i = 0; i < sizeof PROCESS_LIBRARIES / sizeof *PROCESS_LIBRARIES; i++)
-		if (!strcmp(library, PROCESS_LIBRARIES[i])) return process_symbol(name);
-	// global: a library's own plugins (python's extension modules) find its symbols; dlsym on the handle still answers
-	// from this library alone
-	int flags = RTLD_NOW | RTLD_GLOBAL;
-	// path as given: contains '/', dlopen that file
-	if (strchr(library, '/')) {
-		void* loaded = dlopen(library, flags);
-		return loaded ? dlsym(loaded, name) : NULL;
-	}
-	char path[4096];
-	for (size_t i = 0; i < sizeof LIBRARY_PATHS / sizeof *LIBRARY_PATHS; i++) {
-		snprintf(path, sizeof path, LIBRARY_PATHS[i], library);
-		void* loaded = dlopen(path, flags);
-		if (loaded) return dlsym(loaded, name);
-	}
-#ifdef __APPLE__
-	// Homebrew framework: /opt/homebrew/opt/<name>/Frameworks/<Name>.framework/<Name>
-	{
-		char Name[256];
-		size_t n = strlen(library);
-		if (n > 0 && n < sizeof Name) {
-			memcpy(Name, library, n + 1);
-			if (Name[0] >= 'a' && Name[0] <= 'z') Name[0] = (char)(Name[0] - 32);
-			snprintf(path, sizeof path, "/opt/homebrew/opt/%s/Frameworks/%s.framework/%s", library, Name, Name);
-			void* loaded = dlopen(path, flags);
-			if (loaded) return dlsym(loaded, name);
-		}
-	}
-	// a system framework by its name: `from 'CoreFoundation'`
-	snprintf(path, sizeof path, "/System/Library/Frameworks/%s.framework/%s", library, library);
-	void* framework = dlopen(path, flags);
-	if (framework) return dlsym(framework, name);
-#endif
-	return NULL;
-}
 // A field of a C struct a program holds as a handle, by its offset (lib/c.warp: SDL_Event's union, FreeType's glyph
 // slot): its bytes as the C type is, a signed integer widened, a float as a double, a pointer as a handle; set_field_*
 // writes one (an AudioStreamBasicDescription, an AudioBufferList pointing at memory of the program's)
@@ -203,18 +83,7 @@ struct bytes_result* field_bytes(const uint8_t* address, int64_t offset, int64_t
 	return result;
 }
 void set_field_bytes(uint8_t* address, int64_t offset, const uint8_t* data, int64_t size) { memcpy(address + offset, data, (size_t)size); }
-// a C function called with up to 8 integers and pointers and up to 8 floats in their registers (the ARM64 and x86-64
-// conventions keep the two apart, `ldexp(double, int)` takes d0 and x0): it reads only the ones its parameters name.
-// Its result is the integer register, or the bits of the float register
-typedef uint64_t (*integer_function)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, double, double, double, double, double, double, double, double);
-typedef double (*float_function)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, double, double, double, double, double, double, double, double);
-uint64_t native_call(void* function, uint64_t* i, double* f, int32_t float_result) {
-	if (!float_result) return ((integer_function)function)(i[0], i[1], i[2], i[3], i[4], i[5], i[6], i[7], f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
-	double result = ((float_function)function)(i[0], i[1], i[2], i[3], i[4], i[5], i[6], i[7], f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
-	uint64_t bits;
-	memcpy(&bits, &result, sizeof bits);
-	return bits;
-}
+#include "native_call.h"
 // One trailing aggregate, after `count` integer arguments (0 to 6) and no floats. `bytes` is `size` bytes, 17 to 128.
 // The carrier is 128 bytes and 16-aligned, which is the same MEMORY class as any aggregate over 16 bytes: on x86-64
 // SysV the C compiler puts it on the stack, and the callee reads its own prefix; on AAPCS64 the compiler passes a
