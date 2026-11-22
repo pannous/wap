@@ -33,4 +33,7 @@ print(text([#w for w in ["a", "bb"]]))')" "[4, 6]
 check "a comprehension over two lists" "$(ran pairs 'print(text([[x, y] for x in [1, 2] for y in [3, 4]]))
 print(text([x * y for x in [1, 2] for y in [1, 3] if x < y]))')" "[[1, 3], [1, 4], [2, 3], [2, 4]]
 [3, 6]"
+# a typed rule's template builds a kernel form it calls by name, as a shape rule's does (core/rules/stages.wap)
+check "a typed rule writing a kernel form" "$(ran typed_form 'rule twice $x: int => If($x > 2, $x + $x, 0)
+print(text(twice 3) + " " + text(twice 1))')" "6 0"
 exit $((failures > 0))
