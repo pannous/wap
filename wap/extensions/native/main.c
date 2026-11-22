@@ -33,6 +33,8 @@ static void* epoch_ticking(void* engine) {
 	for (;;) { sleep(1); epoch_incremented(engine); }
 	return NULL;
 }
+// when this executable was built (commands.wap version)
+const char* wap_built(void) { return __DATE__ " " __TIME__; }
 void epoch_ticker_started(int64_t engine) {
 	pthread_t ticker;
 	pthread_create(&ticker, NULL, epoch_ticking, (void*)(intptr_t)engine);
