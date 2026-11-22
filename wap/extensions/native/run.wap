@@ -9,6 +9,12 @@ ARGUMENT_COUNT_AT := 1040
 ARGUMENT_BYTES_COUNT_AT := 1044
 SIZE_AT := 1048
 DIGITS_AT := 1056
+# the used modules' `finished()` functions the run's end calls: their context, their count, the host block of their
+# externs
+FINISHING_AT := 1536
+FINISHER_COUNT_AT := 1544
+FINISHERS_AT := 1552
+FINISHERS := 16
 ARGUMENTS_AT := 2048
 ARGUMENT_BYTES_AT := 4096
 LINE_AT := 16384
@@ -26,7 +32,7 @@ PATH_BYTES := 4096
 # the host's records the C API fills, by their sizes in bytes: a byte vector (size, data), an instance, an extern
 VECTOR_BYTES := 16
 INSTANCE_BYTES := 16
-EXTERN_BYTES := 24
+EXTERN_BYTES := 32
 # a func's place in its extern, past the kind
 EXTERN_VALUE_OFFSET := 8
 # wasmtime's limits for a run: the compiler's GC heap and its wasm stack (core/native/driver.warp's)
@@ -48,7 +54,6 @@ current_folder(): int32 := prim data_address(".")
 root(): int32 := prim data_address("/")
 reading(): int32 := prim data_address("rb")
 main_name(): int32 := prim data_address("main")
-MAIN_NAME_BYTES := 4
 no_module(): int32 := prim data_address("wap: no module at that path\n")
 newline(): int32 := prim data_address("\n")
 no_module_at(): int32 := prim data_address("wap: no module at ")
@@ -57,11 +62,13 @@ no_word(): int32 := prim data_address("wap: no ")
 in_module(): int32 := prim data_address(" in ")
 # every module exports its memory: a module whose memory the linker holds was started already
 memory_name(): int32 := prim data_address("memory")
-MEMORY_NAME_BYTES := 6
+# what a used module exports to be called when the run ends (host.wap's: the queued sound heard out)
+finished_name(): int32 := prim data_address("finished()")
 EXISTS := 0
 
 # the run ended with this status, its temporary files gone (a path not made yet is an empty one, unlinking nothing)
 ended(status: int) := {
+	each_finished()
 	unlink(pointer_at(MODULE_AT))
 	unlink(pointer_at(SOURCE_AT))
 	exit(status)
@@ -160,9 +167,12 @@ instance_ran(linker: int, context: int, module: int, importer: int, main: bool):
 	instance = host_block(INSTANCE_BYTES)
 	trap_at = host_block(8)
 	if failed(wasmtime_linker_instantiate(linker, context, module, instance, trap_at), trap_at) { return 0 }
-	if not main { return instance }
+	if not main {
+		finisher_kept(context, instance)
+		return instance
+	}
 	item = host_block(EXTERN_BYTES)
-	wasmtime_instance_export_get(context, instance, main_name(), MAIN_NAME_BYTES, item)
+	wasmtime_instance_export_get(context, instance, main_name(), strlen(host_of(main_name())), item)
 	if failed(wasmtime_func_call(context, item + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, trap_at), trap_at) then 0 else instance
 }
 # each module the module imports by a .wasm name (`use "m.wasm"`, extensions/wasm/modules.wap) that the linker holds
@@ -184,10 +194,26 @@ imports_linked(linker: int, context: int, module: int, importer: int): bool := {
 	}
 	linked
 }
+# a used module's `finished()`, when it exports one, kept for the run's end
+finisher_kept(context: int, instance: int) := {
+	item = long_at(host_of(pointer_at(FINISHERS_AT))) + EXTERN_BYTES * word_at(FINISHER_COUNT_AT)
+	if word_at(FINISHER_COUNT_AT) < FINISHERS and wasmtime_instance_export_get(context, instance, finished_name(), strlen(host_of(finished_name())), item) % BOOL_BYTE != 0 {
+		set_long_at(host_of(pointer_at(FINISHING_AT)), context)
+		set_word(FINISHER_COUNT_AT, word_at(FINISHER_COUNT_AT) + 1)
+	}
+}
+# each kept `finished()` called, in the order its module was used
+each_finished() := {
+	i = 0
+	while i < word_at(FINISHER_COUNT_AT) {
+		wasmtime_func_call(long_at(host_of(pointer_at(FINISHING_AT))), long_at(host_of(pointer_at(FINISHERS_AT))) + EXTERN_BYTES * i + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, host_block(8))
+		i = i + 1
+	}
+}
 # whether the linker holds the module of the name vector `from` already, by its memory
 module_started(linker: int, context: int, from: int): bool := {
 	memory = host_block(VECTOR_BYTES)
-	set_long_at(memory, MEMORY_NAME_BYTES)
+	set_long_at(memory, strlen(host_of(memory_name())))
 	set_long_at(memory + 8, host_of(memory_name()))
 	wasmtime_linker_get(linker, context, from, memory, host_block(EXTERN_BYTES)) % BOOL_BYTE != 0
 }
@@ -270,3 +296,4 @@ host_list(addresses: int, count: int): int := {
 }
 
 engine = engine_made()
+set_long_at(host_of(pointer_at(FINISHERS_AT)), host_block(FINISHERS * EXTERN_BYTES))
