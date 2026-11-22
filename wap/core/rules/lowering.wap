@@ -32,6 +32,7 @@ use "../analyze/declarations.wap"
 use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
+use "../type_notation.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/surface.wap"
 use "../parse/cascade.wap"
@@ -71,7 +72,7 @@ lowered_form(language: Language, n: Node) as Node := match n {
 	Key(head, Op.None, List(items, Bracket.Curly, separator)) => if head is symbol then Key(head, Op.None, fields_lowered(language, items, separator, n)) else not_lowered(n)
 	# a type written with its parts, `list<Node>`, stays as written: a named argument's or a case's field's type
 	Key(head, Op.None, List(items, Bracket.Less, separator)) => n
-	Key(head, Op.None, group) => if is_embedded(head) then embedded_text(n, group) else Call(if head is symbol then head else lowered(language, head), arguments_of(group).map(item => argument_lowered(language, item)))
+	Key(head, Op.None, group) => if is_embedded(head) then embedded_text(n, group) else Call(if head is symbol then head else lowered(language, head), call_arguments_lowered(language, head, arguments_of(group)))
 	Key(name, Op.Colon, type) => if name is symbol then n else not_lowered(n)
 	List(items, Bracket.Square, separator) => List(all_lowered(language, items), Bracket.Square, separator)
 	List(items, Bracket.Curly, separator) => if items.all(is_fields) then fields_lowered(language, items, separator, n) else lowered_block(language, statements_of(List(items, Bracket.None, separator)))
@@ -104,7 +105,7 @@ function_value(language: Language, arguments: list) as Node := Fn(parameter_list
 
 # a phrase headed by a word, a call of the word; a number glued to what follows multiplies it, `2x` is 2 * x
 # (wiki/significant-whitespace.md)
-phrase_lowered(language: Language, items: list, n: Node) as Node := if items#1 is symbol then Call(items#1, all_lowered(language, items[1 ..])) else if items#1 is number and #items == 2 then Call(symbol("*"), all_lowered(language, items)) else not_lowered(n)
+phrase_lowered(language: Language, items: list, n: Node) as Node := if items#1 is symbol then Call(items#1, call_arguments_lowered(language, items#1, items[1 ..])) else if items#1 is number and #items == 2 then Call(symbol("*"), all_lowered(language, items)) else not_lowered(n)
 
 # whether a word is parted by a blank from the map after it, `style {a: 1}`: two items, the list [style, {a: 1}], said
 # with the glued call it may have meant (wiki/significant-whitespace.md)
@@ -142,6 +143,17 @@ is_fields(item: Node) as bool := match item {
 }
 # an instance's field, `x: 1`, its value lowered
 # a call's argument lowered: a named one, `by: f`, its value
+# a call's arguments, a block where every definition of the word takes code there a function of no parameters, run by
+# its call: `twice { 4 }` of twice(body: block) (wiki/block.md "A block runs by a call")
+call_arguments_lowered(language: Language, head: Node, arguments: list) as list<Node> := (1 to #arguments).map(at => if is_code_block(arguments#at) and takes_code(language, head, at, #arguments) then Fn(parameter_list(language, Empty), lowered(language, arguments#at)) else argument_lowered(language, arguments#at))
+is_code_block(n: Node) as bool := match n { List(items, Bracket.Curly, separator) => not items.all(is_fields); _ => no }
+# whether every declaration of a word taking this many arguments takes code at this place: a block, or a function of no
+# parameters
+takes_code(language: Language, head: Node, at: int, count: int) as bool := {
+	declared = (if head is symbol and language.declarations.by_name.has(text(head)) then language.declarations.by_name[text(head)] else []).filter(signature => #signature.parameters == count)
+	declared is not empty and declared.all(signature => wants_code(signature.parameters#at))
+}
+wants_code(type: Node?) as bool := type == symbol(BLOCK_WORD) or (function_parts(type) ?? return no).parameters is empty
 argument_lowered(language: Language, argument: Node) as Node := match argument {
 	Key(name, Op.Colon, value) => if name is symbol then field_lowered(language, argument, argument) else lowered(language, argument)
 	_ => lowered(language, argument)
