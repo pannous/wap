@@ -49,5 +49,7 @@ section = out
 section = {}
 out["a"] = section
 section["k"] = "v"
-print out["a"]["k"]')" "v"
+print text(out["a"]["k"])')" "v"
+check "an any holding a list is counted as a list" "$(ran any_count 'xs: any = [5, 6, 7]
+print "${#xs}"')" "3"
 exit $((failures > 0))
