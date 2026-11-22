@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wap's reader (wap/core/parse/reader.wap; wiki/syntax.md): text read as notation, data and code alike, and printed
 # back by `wap format` in canonical warp. The cases are wasp's reader tests and the reader's decisions.
-# Run it with bash test/wap/test_reader.sh; the warp under test is WARP (default the warp on PATH)
+# Run it with bash test/wap/test_reader.sh; its modules run on the native wap on PATH
 source "$(dirname "$0")/format_checks.sh"
 
 # atoms: numbers as their value, texts in double quotes, words as written
