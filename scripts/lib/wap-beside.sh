@@ -3,8 +3,11 @@
 # test/wap/compile.sh and scripts/refresh-seed.sh, which copy and publish them)
 # the warm state a built compiler embeds (wap/compiler.wap WARM_STATE), written from the sources before each build
 WAP_WARM=wap/warm.packed
-# everything in wap/ but what the compiled compiler holds, its own source and its warm state: a new folder there goes along
-WAP_COMPILED=(core compiler.wap "${WAP_WARM##*/}")
+# the library compiled once a built compiler holds (wap/compiler.wap LIBRARY), written before each build
+WAP_LIBRARY_MODULE=wap/types.wasm
+# everything in wap/ but what the compiled compiler holds, its own source, its warm state and its library: a new folder
+# there goes along
+WAP_COMPILED=(core compiler.wap "${WAP_WARM##*/}" "${WAP_LIBRARY_MODULE##*/}")
 WAP_BESIDE=($(cd "$(dirname "${BASH_SOURCE[0]}")/../../wap" && ls | grep -vxF "${WAP_COMPILED[@]/#/-e}"))
 WAP_LIBRARY=lib
 # wap_beside_copied <tree> <folder>: all of it copied from the tree into the folder

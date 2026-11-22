@@ -20,6 +20,7 @@ seed="$(dirname "$(readlink -f "$wap")")/wap-seed/wap.wasm"
 # the warm state a compiler embeds (wap/compiler.wap WARM_STATE): written from the sources by the compiler before it,
 # beside each build's own copy first, so a script sharing the tree never embeds half of one
 warm_state="$tree/$WAP_WARM"
+library_module="$tree/$WAP_LIBRARY_MODULE"
 warm_written() {
 	$wap "$1" --sources warm "$warm_state.$$" 2>&1 && mv "$warm_state.$$" "$warm_state"
 }
@@ -32,11 +33,13 @@ folder_built() {
 	local building=$1.$$ built=$1.$$/wap0.wasm n
 	mkdir -p "$building" && wap_beside_copied "$tree" "$building" || return 1
 	[ -f "$warm_state" ] || : >"$warm_state"
+	[ -f "$library_module" ] || : >"$library_module"
 	$wap "$seed" "$source_compiler" "$built" 2>&1 || return 1
-	# the library compiled once beside the compiler, which programs then read (extensions/wasm/library.wap), by wap0,
-	# which is this tree's source as each next one is, from the sources (wap0 embeds whatever warm state the tree had):
-	# before the warm states, so each holds the library a compile reads
+	# the library compiled once, which each compiler built next holds (extensions/wasm/library.wap), by wap0, which is
+	# this tree's source as each next one is, from the sources (wap0 holds whatever library and warm state the tree had):
+	# beside the compiler, where the warm states read it, and in the tree, where each build takes it
 	$wap "$built" --sources "$building/types/types.wap" "$building/types.wasm" 2>&1 || return 1
+	cp "$building/types.wasm" "$library_module.$$" && mv "$library_module.$$" "$library_module" || return 1
 	for ((n = 1; n <= $2; n++)); do
 		warm_written "$built" || return 1
 		$wap "$built" --sources "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1

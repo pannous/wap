@@ -1,7 +1,8 @@
-# The library compiled once (notes/compile_inputs.md): the types module beside the compiler as the module types.wasm,
-# which a program reads as a module used (modules.wap: its export names declare its functions) instead of the types
-# module's source. The build that writes the module vouches for it, as it does for the compiler beside it: a compile
-# reads no library source to check it.
+# The library compiled once (notes/compile_inputs.md): the types module compiled as the module types.wasm, which a
+# program reads as a module used (modules.wap: its export names declare its functions) instead of the types module's
+# source. The compiler holds the library it was built with in its own bytes (compiler.wap LIBRARY), so no file beside
+# it can drift from it, and writes it beside each module it compiles, named by its hash, so an older library there is
+# never linked in its place.
 use "modules.wap"
 use "../../core/pipeline.wap"
 use "../../core/emit/wasm.wap"
@@ -11,26 +12,32 @@ use "../../core/emit/functions.wap"
 use "../../core/analyze/types.wap"
 use "../../kernel/forms.wap"
 
-# beside the compiler, carrying the files it uses (modules.wap carried_files), so it reads no source
+# where the library stands among the compiler's files, carrying the files it uses (modules.wap carried_files), so it
+# reads no source
 LIBRARY_MODULE = "types.wasm"
-# the custom section naming the folder of the compiler a module was compiled by, where a host looks for a module it
-# imports by a bare name, before the importer's folder, as a dynamic linker reads its rpath: a program finds the library
-# of the compiler that built it
-COMPILER_SECTION = "wap.compiler"
+# a prime below 2^56, so a hash times 31 stays an int
+LIBRARY_HASH_SIZE = 72057594037927931
 
-# the file of the folder the library is read from: the module beside the compiler, else the source; the types module
-# compiled as the program reads the source
-library_file(folder: text, program: text) as text := {
-	module = in_folder(folder, LIBRARY_MODULE)
-	if is_library(folder, program) or not names_beside(module).contains(LIBRARY_MODULE) then TYPES_FILE else LIBRARY_MODULE
+# the library's bytes held, linked by the name its hash gives it; empty bytes hold nothing
+library_held(folder: text, bytes: text) := { if bytes { held_modules[in_folder(folder, LIBRARY_MODULE)] = HeldModule(bytes, "types-${hashed(bytes, LIBRARY_HASH_SIZE)}.wasm") } }
+# the library's module beside the compiler, the one a compiler built next holds (the warm state, written for it, reads
+# it); "" where none is there
+library_beside(folder: text) as text := if names_beside(in_folder(folder, LIBRARY_MODULE)).contains(LIBRARY_MODULE) then read(in_folder(folder, LIBRARY_MODULE)) else ""
+# the file of the folder the library is read from: the module held, else the source; the types module compiled as the
+# program reads the source
+library_file(folder: text, program: text) as text := if is_library(folder, program) or not held_modules.has(in_folder(folder, LIBRARY_MODULE)) then TYPES_FILE else LIBRARY_MODULE
+# the library written beside a module compiled against it, by its linked name, unless it is there already
+library_written(folder: text, library: text, module: text) := {
+	if library != LIBRARY_MODULE { return }
+	held = held_modules[in_folder(folder, LIBRARY_MODULE)]
+	beside_module = beside(module, held.linked)
+	if not exists(beside_module) { write_bytes(beside_module, held.bytes.bytes) }
 }
 # the files the library carries, when the types module is the one compiled
 library_carried(folder: text, program: text) as list<text> := if is_library(folder, program) then carried_files(program) else []
 # the module a program shares its raise tag with: the library when it is read compiled (which defines its tag even
 # where it raises nothing), so a raise in it or in a module compiled against it is caught in the program; else none,
 # the program's tag its own
-raise_module(folder: text, library: text) as text := if library == LIBRARY_MODULE then bare_or_path(in_folder(folder, LIBRARY_MODULE)) else ""
+raise_module(folder: text, library: text) as text := if library == LIBRARY_MODULE then linked_name(in_folder(folder, LIBRARY_MODULE)) else ""
 # whether the program compiled is the library, the types module
 is_library(folder: text, program: text) as bool := module_key(program) == module_key(in_folder(folder, TYPES_FILE))
-# a module's bytes with the folder of the compiler that compiled it (COMPILER_SECTION)
-compiled_by(folder: text, compiled: list<int>) as list<int> := compiled + custom_section(COMPILER_SECTION, normalized_path(folder).bytes)
