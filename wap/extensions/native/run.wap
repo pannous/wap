@@ -26,6 +26,11 @@ EXTERN_VALUE_OFFSET := 8
 # wasmtime's limits for a run: the compiler's GC heap and its wasm stack (core/native/driver.warp's)
 GC_HEAP_BYTES := 134217728
 WASM_STACK_BYTES := 251658240
+# the run's clock on (a C bool): epoch deadlines, the time cap below
+EPOCH_INTERRUPTION := 1
+# the engine's settings its machine code depends on, which every cache's hash starts from (compiler.wap), so wap builds
+# of other settings keep caches of their own and never refuse each other's
+ENGINE_SETTINGS := [GC_HEAP_BYTES, WASM_STACK_BYTES, EPOCH_INTERRUPTION]
 # a run's caps, as scripts/guarded.sh's: a store's memory in GB, its seconds; `--memory-gb <n>` and `--seconds <n>`
 # before the program change them (driver.wap). One runaway wap took 90 GB of a 32 GB Mac, 2026-11-22
 memory_cap_gb: int = 12
@@ -47,6 +52,9 @@ FAILED := 1
 EXISTS := 0
 FILE_MODE := 420
 MODULE_SUFFIX := ".wasm"
+# what a program's run calls, and a used module's: its top level but the value shown (core/emit/emitter.wap)
+MAIN_NAME := "main"
+INIT_NAME := "warp/start"
 # every module exports its memory: a module whose memory the linker holds was started already
 MEMORY_NAME := "memory"
 # what a used module exports to be called when the run ends (host.wap's: the queued sound heard out)
@@ -119,7 +127,7 @@ engine_made(): int := {
 	wasmtime_config_wasm_exceptions_set(config, 1)
 	warp_config_gc_heap_initial_size_set(config, GC_HEAP_BYTES)
 	warp_config_wasm_stack_set(config, WASM_STACK_BYTES)
-	wasmtime_config_epoch_interruption_set(config, 1)
+	wasmtime_config_epoch_interruption_set(config, EPOCH_INTERRUPTION)
 	made = wasm_engine_new_with_config(config)
 	epoch_ticker_started(made)
 	made
@@ -160,16 +168,17 @@ module_of(bytes: int, size: int): int := {
 	if failed(wasmtime_module_new(engine, bytes, size, module_at), host_block(8)) then 0 else long_at(module_at)
 }
 # the module of the file at the path `importer` instantiated in the context, what it imports by a .wasm name
-# linked first, then its main run when `main` asks (a program's, a console line's; a module another uses only starts):
-# the instance, 0 where a step failed
+# linked first, then its main run when `main` asks (a program's, a console line's), else its warp/start (a module
+# another uses, its top level but the value shown, where it has one): the instance, 0 where a step failed
 instance_ran(linker: int, context: int, module: int, importer: text, main: bool): int := {
 	if not imports_linked(linker, context, module, importer) { return 0 }
 	instance = host_block(INSTANCE_BYTES)
 	trap_at = host_block(8)
 	if failed(wasmtime_linker_instantiate(linker, context, module, instance, trap_at), trap_at) { return 0 }
-	if not main { return finisher_kept(context, instance) }
+	if not main { finisher_kept(context, instance) }
 	item = host_block(EXTERN_BYTES)
-	wasmtime_instance_export_get(context, instance, "main", byte_count("main"), item)
+	name = if main then MAIN_NAME else INIT_NAME
+	if wasmtime_instance_export_get(context, instance, name, byte_count(name), item) % BOOL_BYTE == 0 { return instance }
 	if failed(wasmtime_func_call(context, item + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, trap_at), trap_at) then 0 else instance
 }
 # each module the module imports by a .wasm name (`use "m.wasm"`) the linker holds no instance of yet run and kept in
@@ -231,8 +240,8 @@ instance_defined(linker: int, context: int, name: text, importer: text, main: bo
 	instance = if module == 0 then 0 else instance_ran(linker, context, module, path, main)
 	instance != 0 and exports_more(module) and not failed(wasmtime_linker_define_instance(linker, context, name, byte_count(name), instance), host_block(8))
 }
-# whether the module exports more than every program does, its main and its memory
-BASE_EXPORTS := 2
+# whether the module exports more than every program does, its main, its warp/start and its memory
+BASE_EXPORTS := 3
 exports_more(module: int): bool := {
 	exports = host_block(VECTOR_BYTES)
 	wasmtime_module_exports(module, exports)

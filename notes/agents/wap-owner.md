@@ -80,6 +80,7 @@ wap/
       matcher.wap             running a compiled Matcher against code, its holes bound; and specificity
       templates.wap           building a rule's output: splicing, fresh names, free words resolved in the rule's module
       stages.wap              shape rules (stage 1): rules indexed by head, run over operated code
+      heads.wap               the rules' heads: the word a rule's pattern is indexed by
       termination.wap         the rules checked to end: no chain of them rewrites forever
       lines.wap               a program's lines as the rules read them: a line led by a rule word
       declared.wap            declaration rules (stage 2): holes that ask the declarations, after declare
@@ -163,10 +164,13 @@ wap/
       host_words.wap          a program's C imports answered by the C functions of their names; C calling back into it
       linking.wap             where a used module is found: beside its importer, its compiler's folder, wap.wasm's
       programs.wap            a program's machine code kept beside wap.wasm, program-<hash>.cwasm by its sources
+      linking.wap             where a module imported by a bare name is: beside the importer, in the compiler folder
+                              its wap.compiler section names, else in the installed wap-seed
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
     packed.wap                a Node as compact bytes and back, pack and unpack: each text and repeated subtree once
     warm.wap                  the compiler's warm state: the files it reads before a program, operated, packed
     wasm/                     a compiled wap module used as its source
+      library.wap             the library compiled once, types.wasm: read in place of its source when its stamp fits
       modules.wap             use "m.wasm": its functions declared from their export names, the rest (rules, enums,
                               classes, generic bodies) read from its wap section as source (Language.readers[".wasm"])
 

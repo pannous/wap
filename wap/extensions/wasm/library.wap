@@ -1,0 +1,75 @@
+# The library compiled once (notes/compile_inputs.md): the types module beside the compiler as the module types.wasm,
+# which a program reads as a module used (modules.wap: its export names declare its functions) instead of the types
+# module's source. The module carries the hash of the source it was compiled from; a module of other source is stale,
+# said on the standard error, and the source is read as before.
+use "modules.wap"
+use "../../core/pipeline.wap"
+use "../../core/emit/wasm.wap"
+use "../../core/paths.wap"
+use "../../core/stage.wap"
+use "../../core/emit/functions.wap"
+use "../../core/analyze/types.wap"
+use "../../kernel/forms.wap"
+
+# beside the compiler, carrying the files it uses (modules.wap carried_files), so it reads no source
+LIBRARY_MODULE = "types.wasm"
+# the custom section holding the hash of the source the module was compiled from, then that source's files, one a line,
+# each as from the compiler's folder: a check reads them without reading which files include which
+LIBRARY_SECTION = "wap.library"
+# a prime below 2^56, so a hash times 31 stays an int
+LIBRARY_HASH_SIZE = 72057594037927931
+# the custom section naming the folder of the compiler a module was compiled by, where a host looks for a module it
+# imports by a bare name after the importer's folder, as a dynamic linker reads its rpath: a program finds the library
+# of the compiler that built it
+COMPILER_SECTION = "wap.compiler"
+
+# the file of the folder the library is read from: the module when it is of the source beside the compiler, else the source, a stale
+# module said; the types module compiled as the program, or a compiler with no module beside it, reads the source
+library_file(folder: text, program: text) as text := {
+	source = in_folder(folder, TYPES_FILE)
+	module = in_folder(folder, LIBRARY_MODULE)
+	if is_library(folder, program) or not names_beside(module).contains(module.split("/").last) { return TYPES_FILE }
+	stamp = custom_text(read(module), LIBRARY_SECTION).split("\n")
+	if stamp#1 == sources_hash(stamp.drop(1).map(file => in_folder(folder, file))) { return LIBRARY_MODULE }
+	eprint("the library is read from its source: ${module} is of other source (compile ${source} into it)")
+	TYPES_FILE
+}
+# the files the library carries, when the types module is the one compiled
+library_carried(folder: text, program: text) as list<text> := if is_library(folder, program) then carried_files(program) else []
+# the module a program shares its raise tag with: the library when it is read compiled (which defines its tag even
+# where it raises nothing), so a raise in it or in a module compiled against it is caught in the program; else none,
+# the program's tag its own
+raise_module(folder: text, library: text) as text := if library == LIBRARY_MODULE then bare_or_path(in_folder(folder, LIBRARY_MODULE)) else ""
+# the library's code without the words that travel as source, functions and values (travelling_with): no function
+# compiled once calls one, so the module holds none of them, nor imports the C functions they call
+library_code(folder: text, program: text, typed: Block, travelling: list<text>) as Block := {
+	if not is_library(folder, program) { return typed }
+	Block(statements_in(typed).filter(statement => not travelling.contains(word_given(statement) ?? "")))
+}
+# the words of the library that travel as source, as it runs on the memories of the programs using it: those that
+# reach the memory (modules.wap memory_words) and every function and value of its typed code that reaches one, through
+# the modules it uses (host.wap's memory words) or a lambda typing lifted out of a travelling function; any other
+# module runs on its own memory, a host calling back its functions there, and keeps them all
+travelling_of(folder: text, program: text, own: Module, typed: Block) as list<text> := if is_library(folder, program) then travelling_with(statements_in(typed), travelling_words(own)) else []
+# whether the program compiled is the library, the types module
+is_library(folder: text, program: text) as bool := module_key(program) == module_key(in_folder(folder, TYPES_FILE))
+travelling_with(statements: list<Node>, words: list<text>) as list<text> := {
+	grown = words + statements.filter(statement => word_given(statement) != ø and not words.contains(word_given(statement)!) and reaches_memory(statement, words)).map(statement => word_given(statement)!)
+	if #grown == #words then words else travelling_with(statements, grown)
+}
+# the word a top-level statement of typed code gives: a function's, or a value's it assigns
+word_given(statement: Node) as text? := match statement {
+	Define(name, parameters, body) => text(defined_name(statement))
+	Set(place, value) => text(declared_name(place))
+	_ => ø
+}
+# a module's bytes with the folder of the compiler that compiled it (COMPILER_SECTION)
+compiled_by(folder: text, compiled: list<int>) as list<int> := compiled + custom_section(COMPILER_SECTION, normalized_path(folder).bytes)
+# a module's bytes with the library's stamp, when it is the types module compiled
+library_stamped(folder: text, program: text, compiled: list<int>) as list<int> := {
+	if not is_library(folder, program) { return compiled }
+	files = written_files(in_folder(folder, TYPES_FILE)) + carried_files(in_folder(folder, TYPES_FILE))
+	stamp: list<int> = ([sources_hash(files)] + files.map(file => file.replace(folder + "/", ""))).join("\n").bytes
+	compiled + custom_section(LIBRARY_SECTION, stamp)
+}
+sources_hash(files: list<text>) as text := text(hashed(files.map(read).join(""), LIBRARY_HASH_SIZE))
