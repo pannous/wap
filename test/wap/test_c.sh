@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # C functions as lib writes them (wiki/c.md; lib/c.warp, `strlen(s: text): i64 from 'c'`), lowered by
 # wap/extensions/c/foreign.wap and described for the native warp by wap/extensions/c/functions.wap: a program calls them, its
-# texts going to C and coming back. Run it with bash test/wap/test_c.sh; the warp under test is WARP (default the warp
-# on PATH)
+# texts going to C and coming back. Run it with bash test/wap/test_c.sh; its modules run on the native wap on PATH
 source "$(dirname "$0")/compile.sh"
 
 check "a program calls C functions written as C has them, texts going in and coming back" "$(ran c_lines "strlen(s: text): i64 from 'c'

@@ -6,9 +6,9 @@
 #   wap/extensions/native/build.sh <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]
 # the arguments after the executable are the C compiler's, the libraries the program's C functions are in:
 # `-Llib -lwarp_wasmtime -Wl,-rpath,@executable_path/lib` for the native wap (driver.wap)
-# The warp that runs the compiler is WARP (default the warp on PATH). The build's files go in <executable>.build/
+# The compiler runs on the native wap on PATH, else on wasmtime (scripts/lib/wap-host.sh). The build's files go in
+# <executable>.build/
 set -euo pipefail
-WARP=${WARP:-warp}
 C_COMPILER=cc
 # -rdynamic: the executable's own C functions (main.c native_call, wap_host_callback) are found by name as libc's are
 C_FLAGS="-O2 -rdynamic"
@@ -20,6 +20,7 @@ WABT_HEADERS=include
 compiler=$1 program=$2 executable=$3
 shift 3
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$here/../../../scripts/lib/wap-host.sh"
 library="$(cd -P "$here/../../../lib" && pwd -P)"
 wasm2c=$(command -v wasm2c) || { echo "no wasm2c on the PATH (brew install wabt)" >&2; exit 1; }
 wabt="$(cd -P "$(dirname "$(readlink -f "$wasm2c")")/.." && pwd -P)"
@@ -32,7 +33,7 @@ mkdir -p "$building/compiler"
 # (the library the compiler compiled once, types/types.wasm, and its warm state are the GC ones: a native build reads
 # its library anew, --sources)
 cp "$here/text_bytes.wap" "$building/compiler/types/text_bytes.wap" && rm -f "$building/compiler/types/types.wasm"
-"$WARP" --no-window "$building/compiler/wap.wasm" --sources native "$program" "$building/$MODULE_NAME.wasm"
+wap_ran "$building/compiler/wap.wasm" --sources native "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
 awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"
 "$C_COMPILER" $C_FLAGS -I"$building" -I"$wabt/$WASM2C_RUNTIME" -I"$wabt/$WABT_HEADERS" -I"$library" -o "$executable" \

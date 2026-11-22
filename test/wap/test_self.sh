@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The self-build, file by file (notes/backbone.md milestone 2, point 2): wap compiles one of its own
 # files, each alone, and the module it makes loads and runs. Source: warp-lead's self-build plan,
-# 2026-11-18. Run it with bash test/wap/test_self.sh; the warp under test is WARP (default the warp on PATH)
+# 2026-11-18. Run it with bash test/wap/test_self.sh; its modules run on the native wap on PATH
 source "$(dirname "$0")/compile.sh"
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
 # how many CPU seconds wap1 may take to compile wap's compiler (milestone 2, notes/backbone.md)
@@ -10,7 +10,7 @@ SELF_COMPILE_SECONDS=60
 # what loading the module wap makes of a file of wap's own says: "loads", or the compiler's or the run's error
 loaded() {
 	local module="$stage/$(basename "$1" .wap).wasm"
-	$warp "$compiler" "$root/$1" "$module" 2>&1 && $warp "$module" >/dev/null 2>&1 && echo loads
+	$wap "$compiler" "$root/$1" "$module" 2>&1 && $wap "$module" >/dev/null 2>&1 && echo loads
 }
 
 # every file of wap's own, but the compiler (stage 2 below compiles it whole), the files every program meets beside it
@@ -30,7 +30,7 @@ wap1_built() { [ -f "$wap1" ] || { echo "$wap1"; return 1; }; }
 self_built_ran() {
 	wap1_built || return
 	printf '%s\n' "$2" >"$stage/$1.wap"
-	$warp "$wap1" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && $warp "$stage/$1.wasm" 2>&1
+	$wap "$wap1" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && $wap "$stage/$1.wasm" 2>&1
 }
 check "the compiler wap makes of itself compiles a program that runs" "$(self_built_ran hello 'print "hello from wap"')" "hello from wap"
 # and compiles wap's compiler in under a minute (milestone 2, notes/backbone.md), its CPU seconds (user and system),
@@ -38,7 +38,7 @@ check "the compiler wap makes of itself compiles a program that runs" "$(self_bu
 self_compile_time() {
 	wap1_built || return
 	local cpu seconds TIMEFORMAT="%U %S"
-	cpu=$( { time $warp "$wap1" "$source_compiler" "$stage/self/wap2.wasm" >"$stage/self/compiled.txt" 2>&1; } 2>&1 ) || { cat "$stage/self/compiled.txt"; return; }
+	cpu=$( { time $wap "$wap1" "$source_compiler" "$stage/self/wap2.wasm" >"$stage/self/compiled.txt" 2>&1; } 2>&1 ) || { cat "$stage/self/compiled.txt"; return; }
 	seconds=$(echo "$cpu" | awk '{ printf "%d", $1 + $2 }')
 	[ $seconds -lt $SELF_COMPILE_SECONDS ] && echo "under a minute" || echo "$seconds s CPU"
 }
