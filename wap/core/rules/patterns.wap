@@ -31,6 +31,13 @@ use "../bindings.wap"
 
 # the shapes a hole can ask for, beside Node and the declared patterns
 SHAPES = ["Symbol", "List", "Key", "Text", "Number", "Char"]
+# what a pattern's builder writes: the Node cases it builds with, the enums of a group's parts, a case's dot; its line
+SYMBOL_CASE = "Symbol"
+LIST_CASE = "List"
+BRACKET_TYPE = "Bracket"
+SEPARATOR_TYPE = "Separator"
+CASE_DOT = "."
+BUILDER_LINE = 1
 # the groups that are Empty when they hold nothing, `()`: a rule's round group of no items fits it
 EMPTY_GROUPS = [Bracket.Round]
 # the separators that end a statement, one for matching: a block's statements fit a pattern whether `;` or line ends
@@ -175,9 +182,11 @@ declare_pattern(language: Language, name: Node, shape: Node) as Declared := {
 # list, that gives its shape with them at their places, a value of the pattern's type (wiki/pattern-matching.md "Named
 # patterns as types"): `pattern Call = (Call $called: Node $arguments...: Node)` declares
 # Call(called: Node, arguments: list<Node>): Call := List([Symbol("Call"), called, ...arguments], Bracket.Round,
-# Separator.Space), so Call(f, [x]) is (Call f x)
+# Separator.Space), so Call(f, [x]) is (Call f x), built as the operator stage reads it, at a line of its own
 pattern_builder(language: Language, pattern: Declared) as Node := {
-	builder = top_level_statements(operated_program(language, notation("${pattern.name}(${hole_nodes(pattern.shape).map(hole_parameter).join(", ")})${built_type(pattern.shape, pattern.name)} := ${body_text(pattern.shape, hole_variable)}", pattern.name)))#1
+	head = called_with(pattern.name, hole_nodes(pattern.shape).map(hole_parameter))
+	typed = match pattern.shape { List(items, Bracket.Square, separator) => head; _ => Key(head, Op.Colon, symbol(pattern.name)) }
+	builder = positioned(Call(symbol(DEFINE_SPELLING), [typed, body_code(pattern.shape, hole => symbol(hole_variable(hole)))]), BUILDER_LINE, BUILDER_LINE)
 	leftmost_marked(leftmost_marked(builder, PATTERN_HOLES, data_list(pattern.holes.map(hole => symbol(hole_variable(hole))))), PATTERN_TAKEN, pattern.taken)
 }
 # n with a fact on its leftmost word, the name a definition `f(x): T := body` defines; an operator's leftmost word is
@@ -189,11 +198,11 @@ leftmost_marked(n: Node, name: text, value: Node) as Node := match n {
 	_ => n
 }
 # a hole as its builder's parameter: of its type, Node when it has none, a rest hole a list<Node>
-hole_parameter(hole: Node) as text := hole_variable(hole_key(hole)) + (if is_rest_hole(hole) then ": list<Node>" else ": " + text(if hole_type(hole) is Empty then NODE_SYMBOL else hole_type(hole)))
+hole_parameter(hole: Node) as Node := Key(symbol(hole_variable(hole_key(hole))), Op.Colon, if is_rest_hole(hole) then Key(symbol(LIST_TYPE), Op.None, List([NODE_SYMBOL], Bracket.Less, Separator.None)) else if hole_type(hole) is Empty then NODE_SYMBOL else hole_type(hole))
 hole_variable(hole: text) as text := if hole.ends_with(REST_MARK) then hole[1 .. #hole - #REST_MARK] else hole[1 ..]
 # A declared pattern's shape as the Node pattern that takes it apart, its holes those its call's parts fill:
 # `Call(f, args)` in an arm is List([Symbol("Call"), f, ...args], Bracket.Round, Separator.Space)
-shape_taken(language: Language, pattern: Declared) as Node := lowered(language, top_level_statements(shaped_program(language, operated_program(language, notation(body_text(pattern.shape, hole => HOLE_SIGN + hole_variable(hole)), pattern.name))))#1)
+shape_taken(language: Language, pattern: Declared) as Node := lowered(language, top_level_statements(shaped_program(language, body_code(pattern.shape, hole => symbol(HOLE_SIGN + hole_variable(hole)))))#1)
 # A declared pattern's call in an arm, its parts at its holes in order, by the facts its builder's name carries
 pattern_taken(called: Node, parts: list, builder: Node) as Node := {
 	holes = fact_items(builder, PATTERN_HOLES)
@@ -208,23 +217,25 @@ holes_filled(n: Node, bindings: map<text, Node>) as Node := match n {
 	List(items, bracket, separator) => refitted(List(items.map(item => holes_filled(item, bindings)), bracket, separator), n)
 	_ => n
 }
-# A pattern's body as code: a list in square brackets a list value, `[$a: int, $b: int]` builds [a, b] and takes a
-# list apart; any other body the node of its shape (wiki/pattern-matching.md "Named patterns as types")
-body_text(shape: Node, hole_written: (text) -> text) as text := match shape {
-	List(items, Bracket.Square, separator) => "[${items_text(items, hole_written)}]"
-	_ => shape_text(shape, hole_written)
+# A pattern's body as code, as the operator stage reads it: a list in square brackets a list value, `[$a: int, $b: int]`
+# builds [a, b] and takes a list apart; any other body the node of its shape (wiki/pattern-matching.md "Named patterns
+# as types")
+body_code(shape: Node, hole_written: (text) -> Node) as Node := match shape {
+	List(items, Bracket.Square, separator) => items_code(items, hole_written)
+	_ => shape_code(shape, hole_written)
 }
-# a group's items as code, parted by commas
-items_text(items: list, hole_written: (text) -> text) as text := items.map(item => shape_text(item, hole_written)).join(", ")
-# the type a builder writes it gives: a node body's the pattern's name, a shape narrowing Node; a list's what its items give
-built_type(shape: Node, name: text) as text := match shape { List(items, Bracket.Square, separator) => ""; _ => ": " + name }
-# The code of a shape: a name its symbol, a group its list, a hole as written by `hole_written`, a rest hole's items
-# spread into the group
-shape_text(shape: Node, hole_written: (text) -> text) as text := match shape {
-	Symbol(name) => if is_hole(shape) then (if is_rest_hole(shape) then REST_MARK else "") + hole_written(hole_key(shape)) else "Symbol(\"${spelling_written(shape)}\")"
-	List(items, bracket, separator) => "List([${items_text(items, hole_written)}], Bracket.${bracket}, Separator.${separator})"
+# a group's items as a list value, `[a, b]`
+items_code(items: list, hole_written: (text) -> Node) as Node := List(items.map(item => shape_code(item, hole_written)), Bracket.Square, if #items > 1 then Separator.Comma else Separator.None)
+# The code of a shape: a name its symbol, `Symbol("Call")`, a group its list, `List([…], Bracket.Round,
+# Separator.Space)`, a hole as `hole_written` writes it, a rest hole's items spread into the group, `...arguments`
+shape_code(shape: Node, hole_written: (text) -> Node) as Node := match shape {
+	Symbol(name) => if not is_hole(shape) then called_with(SYMBOL_CASE, [Text(spelling_written(shape))]) else if is_rest_hole(shape) then List([symbol(REST_MARK), hole_written(hole_key(shape))], Bracket.None, Separator.None) else hole_written(hole_key(shape))
+	List(items, bracket, separator) => called_with(LIST_CASE, [items_code(items, hole_written), case_code(BRACKET_TYPE, text(bracket)), case_code(SEPARATOR_TYPE, text(separator))])
 	_ => refused(shape, "a pattern's builder writes names, holes and groups, not this part yet")
 }
+# `f(a, b)` (`f()` with an Empty group, as the reader gives it) and `Type.Case` as the operator stage reads them
+called_with(name: text, arguments: list<Node>) as Node := Key(symbol(name), Op.None, if arguments is empty then Empty else List(arguments, Bracket.Round, if #arguments > 1 then Separator.Comma else Separator.None))
+case_code(type: text, case: text) as Node := Call(symbol(CASE_DOT), [symbol(type), symbol(case)])
 
 # a group of one item, `($f: $t)`, is that item: matched and compiled as it (rules/matcher.wap)
 grouped_item(n: Node) as Node? := match n {
