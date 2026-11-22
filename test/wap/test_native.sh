@@ -63,6 +63,10 @@ check "a program file stays after its run" "$(cd "$stage" && "$native_wap" hello
 # stays for the lines after it and an effect happens once
 check "the console keeps a definition and runs each line once" "$(printf '%s\n' 'f(x: int) as int := x * 2' 'print "once"' 'f(21)' | "$native_wap" 2>&1)" "once
 42"
+# a line that only prints defines nothing, though its module exports the exception tag: no later line runs it again
+check "the console runs a line that only prints once, after a value" "$(printf '%s\n' 'x = 5' 'print "a"' 'x + 1' | "$native_wap" 2>&1)" "5
+a
+6"
 # a program using a compiled module (use "m.wasm", extensions/wasm/modules.wap): the native wap links its instance
 check "a native wap run links a module the program uses" "$(printf '%s\n' 'add(a: int, b: int) as int := a + b' >"$stage/adding.wap" && $wap "$compiler" "$stage/adding.wap" "$stage/adding.wasm" 2>&1 && "$native_wap" "use \"$stage/adding.wasm\"
 add(40, 2)" 2>&1)" "42"
@@ -180,4 +184,67 @@ check "C calls back the export of a module the program uses" "$(cd "$stage" && "
 # its time cap stops and names the cap and the program
 printf 'n = 0\nwhile yes { n = n + 1 }\n' >"$stage/spinning.wap"
 check "a run past its time cap stops, naming the cap and the program" "$(cd "$stage" && "$native_wap" --seconds 1 spinning.wap 2>&1 | grep -o 'wap: spinning.wap ran past the time cap of 1 s')" "wap: spinning.wap ran past the time cap of 1 s"
+# the console on a terminal edits its line (wap/extensions/native/editing.wap): each line typed with the keys' escape
+# sequences as macOS Terminal, iTerm and xterm send them, on a pseudo terminal, HOME the stage so the history is the
+# session's; what the console shows for each line, one a line
+console_typed() {
+	HOME="$stage" python3 - "$native_wap" "$@" <<'EOF'
+import os, pty, re, select, signal, sys, time
+# a line's run is over when the prompt starts a new line (each key redraws it after a carriage return)
+PROMPT, NEXT_PROMPT, WAIT_SECONDS = "› ".encode(), "\n› ".encode(), 60
+child, terminal = pty.fork()
+if child == 0:
+    os.execv(sys.argv[1], [sys.argv[1]])
+output = b""
+def read_until(mark: bytes, count: int) -> None:
+    global output
+    end = time.time() + WAIT_SECONDS
+    while output.count(mark) < count and time.time() < end:
+        if select.select([terminal], [], [], 0.2)[0]:
+            output += os.read(terminal, 4096)
+read_until(PROMPT, 1)
+for typed in sys.argv[2:]:
+    start = len(output)
+    os.write(terminal, os.fsencode(typed) + b"\r")
+    read_until(NEXT_PROMPT, output.count(NEXT_PROMPT) + 1)
+    lines = [part.rstrip("\r").split("\r")[-1].strip() for part in re.sub(rb"\x1b\[[0-9;]*[A-Za-z]", b"", output[start:]).decode(errors="replace").split("\n")]
+    print(" ".join(line for line in lines if line and not line.startswith("›")))
+os.write(terminal, b"\x04")
+end = time.time() + WAIT_SECONDS
+while os.waitpid(child, os.WNOHANG)[0] == 0:
+    if time.time() > end:
+        print("the console did not end on Ctrl+D")
+        os.kill(child, signal.SIGKILL)
+        break
+    # (read on: a terminal's process ends only once what it wrote is read)
+    if select.select([terminal], [], [], 0.2)[0]:
+        try:
+            os.read(terminal, 4096)
+        except OSError:
+            pass
+EOF
+}
+LEFT=$'\e[D' RIGHT=$'\e[C' UP=$'\e[A' HOME_KEY=$'\e[H' END_KEY=$'\e[F' DELETE=$'\e[3~' BACKSPACE=$'\x7f' CTRL_A=$'\x01' CTRL_E=$'\x05'
+ALT_LEFT=$'\e[1;3D' ALT_DELETE=$'\e[3;3~' ALT_BACKSPACE=$'\e\x7f'
+check "the console edits its line: arrows, Home/End, Ctrl+A/E, deletes, word moves, the lines before" "$(console_typed \
+	"50+1" "+1${HOME_KEY}41${END_KEY}*1" "+1${CTRL_A}44${CTRL_E}*1" "4196${LEFT}${LEFT}${LEFT}${DELETE}" "4${LEFT}3${RIGHT}0" \
+	"foo bar 47${HOME_KEY}${ALT_DELETE}${ALT_DELETE}" "49 foo bar${ALT_BACKSPACE}${ALT_BACKSPACE}" "2 * 2${ALT_LEFT}${ALT_LEFT}${ALT_LEFT}1" \
+	"print \"aé\"${LEFT}${LEFT}${BACKSPACE}" "${UP}${UP}" 2>&1)" "51
+42
+45
+496
+340
+47
+49
+24
+é
+24"
+# an enum of cases without fields in a native program, each case its tag (notes/native.md); an uncaught raise its text on
+# stderr and exit status 1
+check "a native program picks and compares an enum's cases" "$(native_ran coins 'exit(code: int) := prim proc_exit(code)
+enum Coin { Penny, Dime }
+pick(x: int): Coin := if x > 0 then Dime else Penny
+exit(if pick(1) == Dime then 3 else 4)' >/dev/null; echo $?)" "3"
+check "a native program's uncaught raise says its text and exits with 1" "$(native_ran raising 'raise "out of coins"'; echo "exit $?")" "out of coins
+exit 1"
 exit $((failures > 0))
