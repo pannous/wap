@@ -34,4 +34,10 @@ section = {}
 out["a"] = section
 section["k"] = "v"
 print "${out.keys} ${out["a"] is map}"')" "[a] yes"
+# a word a blank parts from the map after it is two items, said with the glued call (decision spaced-is-two,
+# wiki/significant-whitespace.md)
+check "a word spaced from a map is two items, with a warning" "$(ran parted 'pair = [1, 2]
+x = pair {a: 1}
+print "${#x}"' | sed 's/.*: a blank/a blank/')" "a blank parts pair from the map after it, so these are two items: write pair{…} for the call: pair {a: 1}
+2"
 exit $((failures > 0))
