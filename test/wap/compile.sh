@@ -24,8 +24,9 @@ warm_written() {
 	$wap "$1" --sources warm "$warm_state.$$" 2>&1 && mv "$warm_state.$$" "$warm_state"
 }
 compiler_built() {
-	local folder=$1 last=$2
-	[ -f "$folder/wap$last.wasm" ] || folder_built "$folder" "$last" || return 1
+	local folder=$1 last=$2 said
+	# (what the build says is printed only when it fails: a notice of a build that went on is no part of the path)
+	[ -f "$folder/wap$last.wasm" ] || said=$(folder_built "$folder" "$last") || { echo "$said"; return 1; }
 	echo "$folder/wap$last.wasm"
 }
 folder_built() {

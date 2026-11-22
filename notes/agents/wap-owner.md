@@ -161,6 +161,7 @@ wap/
       compiler.wap            wap.wasm compiling a source; a module's machine code kept beside it by its hash
       console.wap             `wap` alone: each line a module, linked to the earlier lines' kept instances
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
+      editing.wap             the console's line edited on a terminal: arrows, word moves, deletes, history
       host_words.wap          a program's C imports answered by the C functions of their names; C calling back into it
       linking.wap             where a used module is found: beside its importer, its compiler's folder, wap.wasm's
       programs.wap            a program's machine code kept beside wap.wasm, program-<hash>.cwasm by its sources
