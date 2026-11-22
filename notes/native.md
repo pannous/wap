@@ -58,3 +58,5 @@ warp-host-fixer; this file is the inventory.
 - Workarounds of native gaps, each to go when its gap closes: the driver reads its arguments by its own loop (prelude's
   arguments() maps and writes from BYTES_AT), joins lists by add (list + is wrong natively), reads files by fopen
   (read() takes an optional), and declares fopen's result i64 (a `handle` result raises, which emits GC helpers).
+- Waiting for native optionals (read() reachable natively): a test_native line reading a file over 64K, the proof of
+  host.wap's scratch(count); and read() then returning its scratch text cut to the bytes read, not a second copy.
