@@ -30,7 +30,7 @@ mkdir -p "$building" && building="$(cd -P "$building" && pwd -P)"
 source "$here/../../../scripts/lib/wap-beside.sh"
 mkdir -p "$building/compiler"
 (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$building/compiler/") && cp "$compiler" "$building/compiler/wap.wasm"
-# (the library the compiler compiled once, types/types.wasm, and its warm state are the GC ones: a native build reads
+# (the library the compiler compiled once, types.wasm, and its warm state are the GC ones: a native build reads
 # its library anew, from its sources, --sources)
 cp "$building/compiler/types/memory_texts.wap" "$building/compiler/types/text_bytes.wap" && cp "$building/compiler/types/memory_lists.wap" "$building/compiler/types/list_items.wap"
 wap_ran "$building/compiler/wap.wasm" --sources native "$program" "$building/$MODULE_NAME.wasm"
