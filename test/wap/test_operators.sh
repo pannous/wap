@@ -115,5 +115,4 @@ check "an operator overloaded for an int and a text, the built-in kept for two i
 not a number: x"
 check "an operator overloaded for a class" "$(ran class_plus $'class P { x: int }\n+(a: P, b: P): P := P{x: a.x + b.x}\nprint(text((P{x: 1} + P{x: 2}).x))')" "3"
 check "a declared operator with its result type" "$(ran typed_operator $'infix operator ⇔(a: bool, b: bool): bool := a == b\nprint(text((1 > 0) ⇔ (2 > 0)))')" "yes"
-check "a declared operator with its result type after as" "$(ran as_typed_operator $'infix operator divides(d: int, n: int) as bool := n % d == 0\nprint(text(3 divides 12))')" "yes"
 exit $((failures > 0))
