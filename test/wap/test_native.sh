@@ -76,6 +76,8 @@ hi
 ho"
 # a compiled module given in place of a program runs as it is, with its arguments (as the compiler runs)
 check "wap runs a compiled module with its arguments" "$(printf '%s\n' 'print args#2' >"$stage/arguments.wap" && "$native_wap" "$compiler" "$stage/arguments.wap" "$stage/arguments.wasm" && "$native_wap" "$stage/arguments.wasm" first second 2>&1)" "second"
+# a module rebuilt without a word a program it runs imports: the run names that word and the module
+check "a run names the word its module no longer exports" "$(cd "$stage" && printf '%s\n' 'one() as int := 1' 'two() as int := 2' >words.wap && "$native_wap" "$compiler" words.wap words.wasm && printf '%s\n' 'use "words.wasm"' 'print text(two())' >wording.wap && "$native_wap" "$compiler" wording.wap wording.wasm && printf '%s\n' 'one() as int := 1' >words.wap && "$native_wap" "$compiler" words.wap words.wasm && "$native_wap" wording.wasm 2>&1)" "wap: no two() → int in words.wasm"
 # C calling back a function of the program run (lib/native/callbacks.h, extensions/native/host_words.wap): qsort
 # compares by the program's c_callback_fired
 cat >"$stage/sorted.wap" <<'PROGRAM'
