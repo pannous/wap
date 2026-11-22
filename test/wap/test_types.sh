@@ -27,4 +27,11 @@ ab"
 check "an int given a float holds the float, said nothing" "$(ran widened 'y = 2
 y = 2.5
 print "${y * 2}"')" "5"
+# a map's value type that would hold itself settles as any, so untyped nested maps work (decision untyped-nested-maps)
+check "a map holding a map of its own type holds any" "$(ran nested_maps 'out = {}
+section = out
+section = {}
+out["a"] = section
+section["k"] = "v"
+print "${out.keys} ${out["a"] is map}"')" "[a] yes"
 exit $((failures > 0))
