@@ -26,7 +26,7 @@ MEMORY_OPERATIONS = [".load", ".store", "memory."]
 # under its header line
 wasm_source(path: text) as text := {
 	bytes = read(path)
-	([custom_text(bytes, WAP_SECTION)] + exports_of(bytes).filter(declared_export).map(item => if item.kind == GLOBAL_KIND then foreign_value(path, item.header) else foreign_definition(path, item.header))).join("\n")
+	([custom_text(bytes, WAP_SECTION)] + exports_of(bytes).map(item => if item.kind == GLOBAL_KIND then foreign_value(path, item.header) else foreign_definition(path, item.header))).join("\n")
 }
 # `x: int = prim foreign("m.wasm", "x: int")`: m's global, the one x every module using m shares
 foreign_value(path: text, header: text) as text := "${header} = prim foreign(\"${path}\", \"${header}\")"
@@ -126,7 +126,7 @@ custom_text(bytes: text, name: text) as text := {
 	}
 	""
 }
-# what a module's bytes export, read from its export section: each one's name and its kind
+# the functions and values a module's bytes export, read from its export section: each one's header line and its kind
 class WasmReader { bytes: text; at: int = PREAMBLE_BYTES }
 class ModuleExport { header: text; kind: int }
 exports_of(bytes: text) as list<ModuleExport> := {
@@ -134,20 +134,19 @@ exports_of(bytes: text) as list<ModuleExport> := {
 	while r.at < byte_count(bytes) {
 		id = next_byte(r)
 		size = unsigned_read(r)
-		if id == EXPORT_SECTION { return (0 upto unsigned_read(r)).map(each => item_export(r)) }
+		if id == EXPORT_SECTION { return (0 upto unsigned_read(r)).flat_map(each => item_export(r)) }
 		r.at += size
 	}
 	[]
 }
-# one export: its name, its kind and its index
-item_export(r: WasmReader) as ModuleExport := {
+# one export: its name, its kind and its index; kept when its name is a function's header line (main's is none) or a
+# value's
+item_export(r: WasmReader) as list<ModuleExport> := {
 	name = name_read(r)
 	kind = next_byte(r)
 	unsigned_read(r)
-	ModuleExport(name, kind)
+	if kind == FUNCTION_KIND and name.contains("(") or kind == GLOBAL_KIND then [ModuleExport(name, kind)] else []
 }
-# an export a using module declares: a function under its header line (main's is none) or a value
-declared_export(item: ModuleExport) as bool := item.kind == FUNCTION_KIND and item.header.contains("(") or item.kind == GLOBAL_KIND
 next_byte(r: WasmReader) as int := {
 	r.at += 1
 	byte_at(r.bytes, r.at - 1)
