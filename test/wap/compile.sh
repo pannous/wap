@@ -74,7 +74,9 @@ tree_wap_built() {
 	[ -x "$folder/wap" ] || { native_wap_built "$folder.$$" >/dev/null || return 1; [ -x "$folder/wap" ] && rm -rf "$folder.$$" || mv "$folder.$$" "$folder"; }
 	echo "$folder/wap"
 }
-if command -v wasm2c >/dev/null; then wap=$(tree_wap_built) || exit 1; else echo "no wasm2c: the installed wap runs the modules, not this tree's" >&2; fi
+# and the programs are compiled by the copy of the compiler beside it, as a user's are, so the library it writes goes
+# beside that copy, never into the tree
+if command -v wasm2c >/dev/null; then wap=$(tree_wap_built) && compiler="$(dirname "$wap")/wap-seed/wap.wasm" || exit 1; else echo "no wasm2c: the installed wap runs the modules, not this tree's" >&2; fi
 # each test script its own folder in the tree's data/ (never the system's temporary folder)
 stage="$data/$$"
 mkdir -p "$stage" || exit 1
