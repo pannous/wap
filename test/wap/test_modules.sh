@@ -179,6 +179,27 @@ print(text(natural_compare("a2", "a10") < 0))')" "yes"
 # a folder right in the library holds modules too, lib/native's C bindings among them; import is use
 check "import name brings in a module from a folder of the library" "$(ran use_library_folder 'import z
 print(text(compressBound(100)))')" "113"
+# ini: keys before any section stay at the top level beside the sections (lib/ini.warp, card lib-ini-toml)
+check "ini keeps the keys before any section" "$(ran use_ini 'use ini
+print to_ini(parse_ini("top = 1
+[db]
+host = x"))')" "top = 1
+
+[db]
+host = x"
+# list: the standard list words beyond the types module's, typed (lib/list.warp, notes/lib_coverage.md)
+check "the list module's words take typed lists" "$(ran use_list 'use list
+print text(chunk([1, 2, 3, 4, 5], 2))
+print text(median([3, 1, 2, 4]))
+print text(combinations([1, 2, 3], 2))')" "[[1, 2], [3, 4], [5]]
+2.5
+[[1, 2], [1, 3], [2, 3]]"
+# path's glob classes and machine_math's powers of two (lib/path.warp, lib/machine_math.warp, notes/lib_coverage.md)
+check "path globs a class of letters, machine_math raises two" "$(ran use_path_math 'use path
+use machine_math
+print text(path_matches("b.txt", "[a-c].txt"))
+print text(round(two_to(10.0)))')" "yes
+1024"
 # a library word given an any reaches its definition for the type the any holds (decision any-values, warp-reviewer)
 check "a library word takes an any holding its type" "$(ran use_any 'use ini
 a: any = parse_ini("top = 1")
