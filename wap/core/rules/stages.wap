@@ -29,13 +29,12 @@ REFUSE_WORD = "refuse"
 # writes holds it no more, so it fires once where a stage wrote it, and the termination check passes it
 WHERE_WORD = "where"
 DEFINITION = "="
-# the head of a pattern that starts with a hole: tried on every node
-NO_HEAD = ""
-# the head of a pattern that is one word, before the word
-WORD_HEAD = "word "
 # what a rule writes that writes nothing, `=> ()`: the empty statement sequence, whose no statements its list takes in
 # its place; not ø, a value a rule may write, `rule ø => Empty()`
 NOTHING_WRITTEN = List([], Bracket.None, Separator.Newline)
+# a walk's notes (rewritten_by): whether a rule fired, whether the node in hand changed, by a rule or a regrouping
+FIRED = 0
+CHANGED = 1
 
 # code after a stage's rules, and whether any of them fired
 class Fired { code: Node, fired: bool }
@@ -116,32 +115,6 @@ words_told(language: Language, items: list, block: bool) := {
 takes_block(m: Matcher) as bool := m.test == Test.Sequence and m.bracket == Bracket.Curly or m.test == Test.Hole and m.type != Empty and matches(m, SAMPLE_BLOCK, {})
 SAMPLE_BLOCK = List([symbol("x")], Bracket.Curly, Separator.Newline)
 
-# The heads a node is indexed under, most specific first: a phrase's first word, a declared form's name with its
-# first word (`Call/+` for (Call + a b)), a key's operator, a word alone; NO_HEAD last, where rules starting with a hole wait.
-heads_of(language: Language, n: Node) as list<text> := match n {
-	List(items, bracket, separator) => list_heads(language, items) + shape_heads(items, bracket, separator) + [NO_HEAD]
-	Key(left, Op.None, List(items, bracket, separator)) => glued_heads(left, bracket) + ["key " + (Op.None as text), NO_HEAD]
-	Key(left, Op.None, Empty) => EMPTY_GROUPS.flat_map(bracket => glued_heads(left, bracket)) + ["key " + (Op.None as text), NO_HEAD]
-	Key(left, op, right) => ["key " + (op as text), NO_HEAD]
-	# a word standing alone, `break`: the rules of that one word, apart from those of the phrases it heads
-	Symbol(name) => [WORD_HEAD + spelling_written(n), NO_HEAD]
-	_ => [NO_HEAD]
-}
-# A list under its bracket and separator, then its bracket alone: `$then... if $c` is a space phrase starting with a hole,
-# indexed there, not among the rules tried on any code; a pattern of one part matches any separator, so it waits under
-# its bracket
-shape_heads(items: list, bracket: Bracket, separator: Separator) as list<text> := (if #items > 1 then ["${bracket} ${separator}"] else []) + ["${bracket}"]
-
-# a glued call or index, `f(x)`, `xs[i]`: under its name and bracket, then under its bracket alone (`$f($x)`, `$xs[$i]`)
-glued_heads(left: Node, bracket: Bracket) as list<text> := (if left is symbol and not is_hole(left) then ["${spelling_written(left)} ${bracket}"] else []) + ["glued ${bracket}"]
-
-list_heads(language: Language, items: list) as list<text> := {
-	if #items == 0 or is_hole(items#1) or not (items#1 is symbol) { return [] }
-	first = spelling_written(items#1)
-	if language.patterns.has(first) and #items > 1 and items#2 is symbol and not is_hole(items#2) { return [first + "/" + spelling_written(items#2), first] }
-	[first]
-}
-
 # A rule may refuse a spelling with a fix-it, `rule … => refuse "put the inner if in braces"`: the message, ø for a
 # template that writes code
 refusal_of(template: Node) as text? := phrase_text(template, REFUSE_WORD)
@@ -163,16 +136,26 @@ shaped_program(language: Language, program: Node) as Node := {
 }
 
 # Code with a stage's rules applied top-down: a node rewritten by the most specific rule that fits, again until none
-# does, then its parts. Says whether any rule fired, so typing can run again after stage 3.
+# does, then its parts. Says whether any rule fired, so typing can run again after stage 3. A node no rule changed and
+# no regrouping reshaped, itself or below, is kept as it is, never rebuilt
 rewritten_by(language: Language, rules: Rules, code: Node) as Fired := {
-	fired = [no]
+	fired = [no, no]
 	result = rules_applied(language, rules, code, fired)
-	Fired(result, fired[0])
+	Fired(result, fired[FIRED])
 }
 
 rules_applied(language: Language, rules: Rules, n: Node, fired: list) as Node := {
-	whole = rewritten(language, rules, unglued(language, n), fired)
-	replaced(whole, parts_applied(language, rules, whole, fired))
+	outer = fired[CHANGED]
+	fired[CHANGED] = no
+	whole = rewritten(language, rules, noted(fired, unglued(language, n)) ?? n, fired)
+	built = parts_applied(language, rules, whole, fired)
+	if not fired[CHANGED] { fired[CHANGED] = outer; return n }
+	replaced(whole, built)
+}
+# a node the walk regrouped, noted as a change; ø, none regrouped, notes none
+noted(fired: list, regrouped: Node?) as Node? := {
+	if regrouped != ø { fired[CHANGED] = yes }
+	regrouped
 }
 
 # A block or group of one phrase, `{ if c { a } }`, `(if c then a else b)`, holds the phrase's words: its one statement
@@ -181,14 +164,14 @@ rules_applied(language: Language, rules: Rules, n: Node, fired: list) as Node :=
 parts_applied(language: Language, rules: Rules, whole: Node, fired: list) as Node := {
 	applied = part => rules_applied(language, rules, part, fired)
 	match whole {
-		List(items, Bracket.None, Separator.Space) => with_parts(inner_rewritten(language, rules, items, whole), applied)
+		List(items, Bracket.None, Separator.Space) => with_parts(noted(fired, inner_rewritten(language, rules, items, whole)) ?? whole, applied)
 		List(items, bracket, Separator.Space) => {
 			phrase = with_facts_of(List(items, Bracket.None, Separator.Space), whole)
-			if one_phrase(language, items, bracket) then group_kept(applied(phrase), bracket)
-			else if bracket == Bracket.Square and items#1 is symbol and language.phrase_words.leading.has(spelling_written(items#1)) then List([applied(phrase)], bracket, Separator.None)
+			if one_phrase(language, items, bracket) then noted(fired, group_kept(applied(phrase), bracket))!
+			else if bracket == Bracket.Square and items#1 is symbol and language.phrase_words.leading.has(spelling_written(items#1)) then noted(fired, List([applied(phrase)], bracket, Separator.None))!
 			else with_parts(whole, applied)
 		}
-		List(items, bracket, separator) => with_facts_of(List(lines_of(language, items, separator).flat_map(part => spread(applied(part))), bracket, separator), whole)
+		List(items, bracket, separator) => with_facts_of(List(statements_applied(language, items, separator, applied, fired), bracket, separator), whole)
 		# a key's word names, a field, a parameter or a map's key, `{yes: 1}`: no rule of one word takes it, its value is code
 		Key(left, Op.Colon, right) => if left is symbol then with_facts_of(Key(left, Op.Colon, applied(right)), whole) else with_parts(whole, applied)
 		_ => with_parts(whole, applied)
@@ -197,14 +180,14 @@ parts_applied(language: Language, rules: Rules, whole: Node, fired: list) as Nod
 # A phrase no rule fits whole, whose later word heads a rule that fits from there on, `print match x {…}`: that part
 # is the earlier words' last argument, as in `print -x`: it groups in round brackets, `print (match x {…})`, a group of
 # one phrase the walk rewrites as one, and the grouping `wap format` prints
-inner_rewritten(language: Language, rules: Rules, items: list, whole: Node) as Node := {
+inner_rewritten(language: Language, rules: Rules, items: list, whole: Node) as Node? := {
 	for at in 2 to #items {
 		part = items[at - 1 ..]
 		if items#at is symbol and rules.by_head.has(spelling_written(items#at)) and #rule_applied(language, rules, phrase_placed(part, Bracket.None, whole)) > 0 {
 			return List(items[.. at - 1] + [phrase_placed(part, Bracket.Round, whole)], Bracket.None, Separator.Space)
 		}
 	}
-	whole
+	ø
 }
 
 # words as one phrase in those brackets, where the phrase they come from was written
@@ -213,18 +196,28 @@ phrase_placed(words: list, bracket: Bracket, origin: Node) as Node := with_facts
 # code with every grouping a rule head inside a phrase makes written out, nothing rewritten: what `wap format` prints;
 # a rule or pattern line is printed as written
 groupings_written(language: Language, n: Node) as Node := match n {
-	List(items, Bracket.None, Separator.Space) => if declares(items) then n else phrase_written(language, unglued(language, n))
+	List(items, Bracket.None, Separator.Space) => if declares(items) then n else phrase_written(language, unglued(language, n) ?? n)
 	_ => with_facts_of(with_parts(n, part => groupings_written(language, part)), n)
 }
 phrase_written(language: Language, phrase: Node) as Node := match phrase {
-	List(items, Bracket.None, Separator.Space) => with_facts_of(with_parts(inner_rewritten(language, language.shape_rules, items, phrase), part => groupings_written(language, part)), phrase)
+	List(items, Bracket.None, Separator.Space) => with_facts_of(with_parts(inner_rewritten(language, language.shape_rules, items, phrase) ?? phrase, part => groupings_written(language, part)), phrase)
 	_ => refused(phrase, "only a spaced phrase is written by its rules")
 }
 declares(items: list) as bool := items#1 == symbol(RULE_WORD) or items#1 == symbol(PATTERN_WORD)
 
 # A rule's result as the items it stands for in its list or block: a statement sequence, `A; B`, its statements; a row a
 # rule wrote, `$a, $rest...`, its items; none for a rule that wrote nothing, `()`. Each item keeps the rule that wrote it.
-spread(result: Node) as list := spread_items(result) ?? [result]
+spread(result: Node, fired: list) as list := {
+	items = spread_items(result) ?? return [result]
+	fired[CHANGED] = yes
+	items
+}
+# a list's statements, lines a later line continues joined (a change), each with the rules applied
+statements_applied(language: Language, items: list, separator: Separator, applied: (Node) -> Node, fired: list) as list := {
+	lines = lines_of(language, items, separator)
+	if #lines != #items { fired[CHANGED] = yes }
+	lines.flat_map(line => spread(applied(line), fired))
+}
 # the items a rule's sequence or row stands for, ø for any other result
 spread_items(result: Node) as list? := match result {
 	List(items, Bracket.None, separator) => if STATEMENT_SEPARATORS.contains(separator) or separator == Separator.Comma and fact_of(result, RULE) != ø then items.map(item => with_rule_of(item, result)) else ø
@@ -249,7 +242,8 @@ rewritten(language: Language, rules: Rules, n: Node, fired: list) as Node := {
 	current = n
 	steps = rule_applied(language, rules, current)
 	while steps is not empty {
-		fired[0] = yes
+		fired[FIRED] = yes
+		fired[CHANGED] = yes
 		if steps#1 is Empty { return steps#1 }
 		current = replaced(current, steps#1)
 		steps = rule_applied(language, rules, current)
