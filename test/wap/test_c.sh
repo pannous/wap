@@ -33,4 +33,8 @@ free(pointer: handle): void from 'c'
 memory = posix_memalign(16, 64)
 print(text(memory > 0))
 free(memory)")" "yes"
+check "a list of texts crosses as C's NULL-ended array of strings" "$(ran texts_line "posix_spawnp(process: out, file: text, actions: handle, attributes: handle, arguments: texts, environment: texts): handle from 'c'
+waitpid(process: handle, status: handle, options: i32): void from 'c'
+child = posix_spawnp(\"echo\", 0, 0, [\"echo\", \"spawned\", \"by C\"], [])
+waitpid(child, 0, 0)")" "spawned by C"
 exit $((failures > 0))
