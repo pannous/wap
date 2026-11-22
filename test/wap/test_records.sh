@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wap's records (wap/kernel/forms.wap Record; wiki/class.md): a class a used module declares, its constructor and fields
 # there for the program (the rest is test/test_records.wap; a second module file needs a script).
-# Run it with bash test/wap/test_records.sh; the warp under test is WARP (default the warp on PATH)
+# Run it with bash test/wap/test_records.sh; its modules run on the native wap on PATH
 source "$(dirname "$0")/compile.sh"
 
 printf '%s\n' 'class Point { x: int; y: int }' >"$stage/points.wap"
