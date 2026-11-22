@@ -60,4 +60,10 @@ shifted(a: int, b: int): int := prim i64.shr_u(a, b)
 left(a: int, b: int): int := prim i64.rotl(a, b)
 right(a: int, b: int): int := prim i64.rotr(a, b)
 print([ones(255), leading(1), trailing(8), both(12, 10), either(12, 10), differ(12, 10), shifted(-1, 60), left(1, 65), right(1, 1)].map(n => text(n)).join(" "))')" "8 63 3 8 14 6 15 2 -9223372036854775808"
+# a block given where a function or a block is wanted is a function of no parameters (wiki/block.md "A block runs by a
+# call")
+check "a block given to a function parameter runs by its call" "$(ran block_function 'twice(b: () -> int) := b() + b()
+print "${twice { 4 }}"')" "8"
+check "a block given to a block parameter runs by its call" "$(ran block_parameter 'twice(body: block) := body() + body()
+print "${twice { 4 }}"')" "8"
 exit $((failures > 0))
