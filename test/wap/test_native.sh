@@ -130,6 +130,10 @@ for at in 1 to 10 { numbers.add(at) }
 print "${#names} names, the last ${names#3}"
 print "${#numbers} numbers, total ${total(numbers)}, the third ${numbers#3}"')" "3 names, the last cy
 12 numbers, total 62, the third 1"
+check "a native program's lists joined and copied" "$(native_ran joined 'xs = ["a"] + ["b", "c"]
+ys = copy(xs)
+ys.add("d")
+print xs.join("+") + " " + ys.join("+")')" "a+b+c a+b+c+d"
 # a module's `export` is exported by the program that uses it too, under its plain name: C calls back the module's
 # c_callback_fired though the program defines none
 cat >"$stage/comparing.wap" <<'MODULE'
