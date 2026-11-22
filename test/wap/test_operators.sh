@@ -108,4 +108,12 @@ xs = [1, 2, 3]
 print(text(-(3).squared) + " " + text(#(xs).next) + " " + text(#((xs).filter(x => x > 1))) + " " + text(#xs.filter(x => x > 1)))')" "9 4 2 2"
 # a rule's word before an operator is an operand, as any word is
 format_check '2 * no + 1' '2 * no + 1'
+# a built-in operator overloaded by its operands' types, its built-in kept where they fit (wiki/operator.md "Operator
+# overloading"); a declared operator's result type written as a function's
+check "an operator overloaded for an int and a text, the built-in kept for two ints" "$(ran overloaded_plus $'+(a: int, b: text): text := if is_digit(b#1) then text(a) + b else raise "not a number: ${b}"\nprint(1 + "2")\nprint(text(1 + 2))\nprint(1 + "x")')" "12
+3
+not a number: x"
+check "an operator overloaded for a class" "$(ran class_plus $'class P { x: int }\n+(a: P, b: P): P := P{x: a.x + b.x}\nprint(text((P{x: 1} + P{x: 2}).x))')" "3"
+check "a declared operator with its result type" "$(ran typed_operator $'infix operator ⇔(a: bool, b: bool): bool := a == b\nprint(text((1 > 0) ⇔ (2 > 0)))')" "yes"
+check "a declared operator with its result type after as" "$(ran as_typed_operator $'infix operator divides(d: int, n: int) as bool := n % d == 0\nprint(text(3 divides 12))')" "yes"
 exit $((failures > 0))
