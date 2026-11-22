@@ -40,4 +40,16 @@ check "a word spaced from a map is two items, with a warning" "$(ran parted 'pai
 x = pair {a: 1}
 print "${#x}"' | sed 's/.*: a blank/a blank/')" "a blank parts pair from the map after it, so these are two items: write pair{…} for the call: pair {a: 1}
 2"
+# an any holding a list or a map is used as its own type: shown by its items, read by its keys (notes/first_principles.md
+# "dynamic where we can't infer the type", "any list fits a bare list")
+check "an any holding a list is shown by its items" "$(ran any_list 'a: any = [1, 2]
+print "${a}"')" "[1, 2]"
+check "an entry of a map held in an any is read by its key" "$(ran any_map 'out = {}
+section = out
+section = {}
+out["a"] = section
+section["k"] = "v"
+print text(out["a"]["k"])')" "v"
+check "an any holding a list is counted as a list" "$(ran any_count 'xs: any = [5, 6, 7]
+print "${#xs}"')" "3"
 exit $((failures > 0))
