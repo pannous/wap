@@ -83,4 +83,6 @@ check "a used module's finished runs at the run's end" "$(cd "$stage" && printf 
 done"
 # a link to the native wap (as a package manager installs one) finds the wap-seed/ beside the file itself
 check "a link to the native wap runs a program" "$(ln -sf "$native_wap" "$stage/linked-wap" && "$stage/linked-wap" 'print "linked"' 2>&1)" "linked"
+# a program's folder is its source's, wherever its module was written: wap's compiler run from source finds its types
+check "the native wap runs wap's compiler from its source" "$(cd "$stage" && printf '%s\n' 'print "Hello"' >hello_source.wap && "$native_wap" "$tree/wap/compiler.wap" hello_source.wap hello_source.wasm && "$native_wap" hello_source.wasm 2>&1)" "Hello"
 exit $((failures > 0))
