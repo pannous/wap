@@ -17,6 +17,12 @@ seed="$(dirname "$(command -v "$warp")")/wap-seed/wap.wasm"
 # to write is known; wap1.wasm the source compiled by wap0 beside a copy of the tree's types module, each next one by
 # the one before. The folder is built whole beside it and then put in its place, so scripts sharing it never read half a
 # module or a types being copied
+# the warm state a compiler embeds (wap/compiler.wap WARM_STATE): written from the sources by the compiler before it,
+# beside each build's own copy first, so a script sharing the tree never embeds half of one
+warm_state="$tree/$WAP_WARM"
+warm_written() {
+	$warp "$1" --sources warm "$warm_state.$$" 2>&1 && mv "$warm_state.$$" "$warm_state"
+}
 compiler_built() {
 	local folder=$1 last=$2
 	[ -f "$folder/wap$last.wasm" ] || folder_built "$folder" "$last" || return 1
@@ -25,9 +31,11 @@ compiler_built() {
 folder_built() {
 	local building=$1.$$ built=$1.$$/wap0.wasm n
 	mkdir -p "$building" && wap_beside_copied "$tree" "$building" || return 1
+	[ -f "$warm_state" ] || : >"$warm_state"
 	$warp "$seed" "$source_compiler" "$built" 2>&1 || return 1
 	for ((n = 1; n <= $2; n++)); do
-		$warp "$built" "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
+		warm_written "$built" || return 1
+		$warp "$built" --sources "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
 		built="$building/wap$n.wasm"
 	done
 	# another script may have put the same folder in place meanwhile: the first one stays
