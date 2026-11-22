@@ -27,6 +27,9 @@ use "../paths.wap"
 
 USE_WORD = "use"
 INCLUDE_WORD = "include"
+EXPORT_WORD = "export"
+# on a program, the names it defines with `export`, each a Text (a used module's, the program exports them too)
+EXPORTS = "exports"
 # `use folder`: the source files beside the using file, by their endings; `use name`: the module of that name beside
 # the using file, else in the standard library's folder beside the compiler
 FOLDER_WORD = "folder"
@@ -37,12 +40,25 @@ UNBUILT_SCOPES = ["package", "project"]
 # what a top-level statement that declares nothing is told
 NO_DECLARATION = "a module declares a name with its signature, or a type"
 
-declared_program(program: Node) as Node := {
+declared_program(written: Node) as Node := {
+	program = refitted(rebuilt_statements(written, top_level_statements(written).map(statement => unexported(statement) ?? statement)), written)
 	ids = definers_of(program)
 	statements = top_level_statements(program).map(statement => names_identified(statement, ids))
-	declared = refitted(rebuilt_statements(program, statements), program)
+	declared = with_fact(refitted(rebuilt_statements(program, statements), program), EXPORTS, data_list(exported_names(written)))
 	with_definers(with_fact(declared, USES, data_list(used_files(program).map(file => Text(file)))), ids)
 }
+# `export f(…) := …`: the definition, which a program using its module exports too, under its plain name (wiki
+# keyword.md); ø for any other statement
+unexported(statement: Node) as Node? := match statement {
+	Call(called, arguments) => if text(called) == ":=" then refitted(Call(called, [export_stripped(arguments#1) ?? return ø, arguments#2]), statement) else ø
+	_ => ø
+}
+export_stripped(head: Node) as Node? := match head {
+	List(items, Bracket.None, Separator.Space) => if #items == 2 and items#1 == symbol(EXPORT_WORD) then items#2 else ø
+	Key(left, op, right) => Key(export_stripped(left) ?? return ø, op, right)
+	_ => ø
+}
+exported_names(program: Node) as list<Node> := top_level_statements(program).map(unexported).filter(statement => statement != ø).map(statement => Text(text(declaration_name(declaration_of(statement!)!))))
 # the files a program's `use` lines name, each once however often named, resolved against its own folder: plain
 # notation, readable before any stage
 used_files(program: Node) as list := files_named(program, USE_WORD).unique
