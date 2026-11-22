@@ -41,4 +41,10 @@ check "a typed rule holding a value under a name" "$(ran typed_held 'rule twice 
 held = 10
 y = twice 4
 print(text(y + (twice 1) + held))')" "20"
+# a list pattern matches the list whatever separates its items, `[a b]` and `[a, b]` being one list (wiki/list.md)
+check "a list pattern, spaced or with commas" "$(ran list_separators 'rule firsts [$a, $b] => print("$a")
+rule lasts [$a $b] => print("$b")
+firsts [1 2]
+lasts [3, 4]')" "1
+4"
 exit $((failures > 0))

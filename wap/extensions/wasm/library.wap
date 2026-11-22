@@ -6,6 +6,7 @@ use "modules.wap"
 use "../../core/pipeline.wap"
 use "../../core/emit/wasm.wap"
 use "../../core/paths.wap"
+use "../../core/stage.wap"
 use "../../core/emit/functions.wap"
 use "../../core/analyze/types.wap"
 use "../../kernel/forms.wap"
@@ -23,24 +24,42 @@ LIBRARY_HASH_SIZE = 72057594037927931
 library_file(folder: text, program: text) as text := {
 	source = in_folder(folder, TYPES_FILE)
 	module = in_folder(folder, LIBRARY_MODULE)
-	if module_key(program) == module_key(source) or not names_beside(module).contains(module.split("/").last) { return TYPES_FILE }
+	if is_library(folder, program) or not names_beside(module).contains(module.split("/").last) { return TYPES_FILE }
 	stamp = custom_text(read(module), LIBRARY_SECTION).split("\n")
 	if stamp#1 == sources_hash(stamp.drop(1).map(file => in_folder(folder, file))) { return LIBRARY_MODULE }
 	eprint("the library is read from its source: ${module} is of other source (compile ${source} into it)")
 	TYPES_FILE
 }
-# the module a program shares its raise tag with: the library when it is read compiled, so a raise in it is caught in
-# the program; else none, the program's tag its own
+# the module a program shares its raise tag with: the library when it is read compiled (which defines its tag even
+# where it raises nothing), so a raise in it or in a module compiled against it is caught in the program; else none,
+# the program's tag its own
 raise_module(folder: text, library: text) as text := if library == LIBRARY_MODULE then in_folder(folder, LIBRARY_MODULE) else ""
-# the library's code without the words that travel as source: no function compiled once calls one (memory_words
-# takes their callers too), so the module holds none of them, nor imports the C functions they call
+# the library's code without the words that travel as source, functions and values (travelling_with): no function
+# compiled once calls one, so the module holds none of them, nor imports the C functions they call
 library_code(folder: text, program: text, typed: Block, travelling: list<text>) as Block := {
-	if module_key(program) != module_key(in_folder(folder, TYPES_FILE)) { return typed }
-	Block(statements_in(typed).filter(statement => not (statement is Define and travelling.contains(text(defined_name(statement))))))
+	if not is_library(folder, program) { return typed }
+	Block(statements_in(typed).filter(statement => not travelling.contains(word_given(statement) ?? "")))
+}
+# the words of the library that travel as source, as it runs on the memories of the programs using it: those that
+# reach the memory (modules.wap memory_words) and every function and value of its typed code that reaches one, through
+# the modules it uses (host.wap's memory words) or a lambda typing lifted out of a travelling function; any other
+# module runs on its own memory, a host calling back its functions there, and keeps them all
+travelling_of(folder: text, program: text, own: Module, typed: Block) as list<text> := if is_library(folder, program) then travelling_with(statements_in(typed), travelling_words(own)) else []
+# whether the program compiled is the library, the types module
+is_library(folder: text, program: text) as bool := module_key(program) == module_key(in_folder(folder, TYPES_FILE))
+travelling_with(statements: list<Node>, words: list<text>) as list<text> := {
+	grown = words + statements.filter(statement => word_given(statement) != ø and not words.contains(word_given(statement)!) and reaches_memory(statement, words)).map(statement => word_given(statement)!)
+	if #grown == #words then words else travelling_with(statements, grown)
+}
+# the word a top-level statement of typed code gives: a function's, or a value's it assigns
+word_given(statement: Node) as text? := match statement {
+	Define(name, parameters, body) => text(defined_name(statement))
+	Set(place, value) => text(declared_name(place))
+	_ => ø
 }
 # a module's bytes with the library's stamp, when it is the types module compiled
 library_stamped(folder: text, program: text, compiled: list<int>) as list<int> := {
-	if module_key(program) != module_key(in_folder(folder, TYPES_FILE)) { return compiled }
+	if not is_library(folder, program) { return compiled }
 	files = written_files(in_folder(folder, TYPES_FILE))
 	stamp: list<int> = ([sources_hash(files)] + files.map(file => file.replace(folder + "/", ""))).join("\n").bytes
 	compiled + custom_section(LIBRARY_SECTION, stamp)
