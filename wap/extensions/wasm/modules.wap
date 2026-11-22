@@ -23,7 +23,6 @@ MORE_BYTES = 128
 SOURCE_ENDING = ".wap"
 PART_SECTION = "wap "
 # the parts of the names of wasm's instructions on the linear memory
-MEMORY_OPERATIONS = [".load", ".store", "memory."]
 
 # the source a compiled module stands for: its wap section, then a definition of each function and value it exports
 # under its header line, the module named as the host finds it (bare_or_path)
@@ -43,19 +42,15 @@ foreign_value(path: text, header: text) as text := "${header} = prim foreign(\"$
 # The functions a module compiles once and exports, those its files write with every parameter typed and a body of
 # their own, not a primitive, each the only statement of its phrase, and its values, each a global the modules using it
 # share; the rest of its code travels as wap source, every statement of a phrase (a class, its constructor, its show)
-# together. A function that reaches the linear memory travels as source too, so it runs on the memory of the program
-# calling it, a text it places for a C call where that call reads it, and so does a value such a function names, and a
-# function naming that value
-compiled_once(module: Module, records: Records, touching: list<text>) as list<Signature> := {
+# together. The library's functions run on the one memory every program calling it imports (core/emit/wasm.wap), so a
+# text placed for a C call is where that call reads it
+compiled_once(module: Module, records: Records) as list<Signature> := {
 	statements = top_level_statements(module.code)
-	typed = module.signatures.filter(signature => is_function(signature) and all_typed(signature, records) and compiled_body(defining_statement(module.code, signature)!) and not touching.contains(signature.name))
+	typed = module.signatures.filter(signature => is_function(signature) and all_typed(signature, records) and compiled_body(defining_statement(module.code, signature)!))
 	ids = typed.map(signature => definer_id(signature.definer))
 	kept = statements.filter(statement => not defined_by(statement, ids)).map(statement => line_place(statement_place(statement)))
-	values = module.signatures.filter(value => is_value(value) and not touching.contains(value.name))
-	typed.filter(signature => not kept.contains(line_place(defining_statement(module.code, signature)!))) + values
+	typed.filter(signature => not kept.contains(line_place(defining_statement(module.code, signature)!))) + module.signatures.filter(is_value)
 }
-# the words of a module that travel as source for the memory they reach (compiled_once)
-travelling_words(module: Module) as list<text> := memory_words(top_level_statements(module.code), module.signatures.filter(is_value).map(value => value.name))
 # the functions the modules a program uses write with `export`, which the program exports too under their plain names;
 # a name the program defines itself is refused
 library_exports(modules: list<Module>) as list<Signature> := {
@@ -65,30 +60,6 @@ library_exports(modules: list<Module>) as list<Signature> := {
 	exported
 }
 compiled_body(statement: Node) as bool := match statement { Call(called, arguments) => not arguments#2 is Prim; _ => no }
-declared_word(statement: Node) as text? := if declaration_of(statement) == ø then ø else text(declaration_name(declaration_of(statement)!))
-# the words whose statements load or store memory, call C, or name a word that does, and the values they name: a function that
-# names such a value names the program's own
-memory_words(statements: list<Node>, values: list<text>, words: list<text> = []) as list<text> := {
-	reached = statements.filter(statement => declared_word(statement) != ø and reaches_memory(statement, words))
-	named = values.filter(value => reached.any(statement => names_word(statement, value)))
-	grown = reached.map(statement => declared_word(statement)!) + named.filter(value => not reached.any(statement => declared_word(statement) == value))
-	if #grown == #words then words else memory_words(statements, values, grown)
-}
-reaches_memory(n: Node, words: list<text>) as bool := match n {
-	Prim(operation, arguments) => MEMORY_OPERATIONS.any(part => text(operation).contains(part)) or calls_c(text(operation), arguments) or arguments.any(argument => reaches_memory(argument, words))
-	Symbol(name) => words.contains(name)
-	_ => inner_nodes(n).any(part => reaches_memory(part, words))
-}
-# a C function works on the memory of the module calling it: a foreign of a library, not of a wasm module
-calls_c(operation: text, arguments: list<Node>) as bool := operation == FOREIGN and arguments and not text(arguments#1).ends_with(MODULE_ENDING)
-names_word(n: Node, word: text) as bool := match n {
-	Symbol(name) => name == word
-	_ => inner_nodes(n).any(part => names_word(part, word))
-}
-inner_nodes(n: Node) as list<Node> := match n {
-	Call(called, arguments) => [called] + arguments
-	_ => direct_parts(unwrapped(n))
-}
 defined_by(statement: Node, ids: list<text>) as bool := declaration_of(statement) != ø and ids.contains(definer_id(declaration_name(declaration_of(statement)!)))
 # the wap section's source: the module's files as written, each top-level statement but the definitions compiled
 # once, which their export names declare, and the includes, whose files follow in their place
