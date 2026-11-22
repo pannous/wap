@@ -16,6 +16,7 @@ KEYS_MODE := "stty -icanon -echo -isig min 1"
 LINES_MODE := "stty icanon echo isig"
 # where the lines typed on a terminal stay for the next console, below the home folder
 HISTORY_FILE := "/.wap_history"
+APPENDING := "a"
 EMPTY_LINE_INTERRUPTED := "\n(Ctrl+C again or Ctrl+D to exit)\n"
 LINE_INTERRUPTED := "^C\n"
 # the keys, as a terminal sends them
@@ -70,9 +71,9 @@ EDIT_DELETE := 10
 EDIT_WORD_BEFORE := 11
 EDIT_WORD_AFTER := 12
 
-# the line edited on the terminal after the prompt, and its newline, as console.wap line_read gives a line; "" at the input's end
-edited_line(prompt: text): text := {
-	history = history_read()
+# the line edited on the terminal after the prompt, and its newline, as console.wap line_read gives a line; "" at the input's end.
+# The history is the lines typed before, the line added to it
+edited_line(prompt: text, history: list<text>): text := {
 	system(KEYS_MODE)
 	# (the prompt once the terminal gives keys: what is typed after it is edited, never echoed by the terminal)
 	written(STANDARD_OUTPUT, prompt)
@@ -101,9 +102,9 @@ edited_line(prompt: text): text := {
 			edit = edit_of(c)
 			if edit == EDIT_LEFT and at > 0 { at = character_before(line, at) }
 			if edit == EDIT_RIGHT and at < byte_count(line) { at = character_after(line, at) }
-			if (edit == EDIT_UP and back < lines_in(history)) or (edit == EDIT_DOWN and back > 0) {
+			if (edit == EDIT_UP and back < #history) or (edit == EDIT_DOWN and back > 0) {
 				back = if edit == EDIT_UP then back + 1 else back - 1
-				line = if back == 0 then "" else history_line(history, lines_in(history) - back)
+				line = if back == 0 then "" else history#(#history + 1 - back)
 				at = byte_count(line)
 			}
 			if edit == EDIT_START { at = 0 }
@@ -127,7 +128,7 @@ edited_line(prompt: text): text := {
 	system(LINES_MODE)
 	written(STANDARD_OUTPUT, "\n")
 	if ended { return "" }
-	if byte_count(line) > 0 { history_written(history + line + "\n") }
+	if byte_count(line) > 0 { history_added(history, line) }
 	line + "\n"
 }
 # the next byte the terminal gives, -1 at its end
@@ -232,32 +233,29 @@ redrawn(prompt: text, line: text, at: int) := {
 # a terminal control sequence: ESC [ and the rest
 control(rest: text): text := byte_text(KEY_ESCAPE) + "[" + rest
 
-# --- the history: the lines typed before, one a line ---
+# --- the history: the lines typed before, one a line of HISTORY_FILE ---
 history_path(): text := getenv("HOME") + HISTORY_FILE
-history_read(): text := {
+# the history's lines, read once for the console
+history_read(): list<text> := {
 	size_at = host_block(8)
 	block = file_read(history_path(), size_at)
-	if block == 0 then "" else c_copied(block, long_at(size_at))
-}
-history_written(history: text) := {
-	file = creat(history_path(), FILE_MODE)
-	written(file, history)
-	close(file)
-}
-lines_in(history: text): int := {
-	count = 0
-	for i in 0 upto byte_count(history) { if byte_at(history, i) == NEWLINE { count = count + 1 } }
-	count
-}
-# the history's line n, from 0
-history_line(history: text, n: int): text := {
+	all = if block == 0 then "" else c_copied(block, long_at(size_at))
+	lines: list<text> = []
 	start = 0
-	seen = 0
-	while seen < n {
-		if byte_at(history, start) == NEWLINE { seen = seen + 1 }
-		start = start + 1
+	for at in 0 upto byte_count(all) {
+		if byte_at(all, at) == NEWLINE {
+			lines.add(bytes_between(all, start, at))
+			start = at + 1
+		}
 	}
-	stop = start
-	while byte_at(history, stop) != NEWLINE { stop = stop + 1 }
-	bytes_between(history, start, stop)
+	lines
+}
+# a line added to the history and appended to its file
+history_added(history: list<text>, line: text) := {
+	history.add(line)
+	file = fopen(history_path(), APPENDING)
+	# (a home folder it cannot write keeps the history for this console only)
+	if file == 0 { return }
+	fputs(line + "\n", file)
+	fclose(file)
 }
