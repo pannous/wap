@@ -35,26 +35,42 @@ use "extensions/c/functions.wap"
 use "extensions/wasm/library.wap"
 use "core/stage.wap"
 use "core/analyze/types.wap"
+use "extensions/warm.wap"
+
+# the warm state this compiler was built with (extensions/warm.wap): every file it reads before a program, operated
+# already, so it reads no source; `--sources` reads them instead, as a compiler built without one does (empty)
+WARM_STATE := embedded("warm.packed")
+SOURCES_OPTION = "--sources"
+from_sources = #args > 0 and args#1 == SOURCES_OPTION
+given = if from_sources then args[1 ..] else args
+warm = not from_sources and WARM_STATE != ""
 
 language = base_language()
 # the extensions this compiler is built with: a compiled module read as the source it stands for; C functions as lib
 # writes them
 language.readers[".wasm"] = wasm_source
 language.readers[".wap"] = part_source
+if warm { warm_brought(language, program.folder, WARM_STATE) }
 rules_loaded(language, operated_file(language, in_folder(program.folder, C_FUNCTION_RULES)))
-if #args < 2 { raise "usage: warp wap/compiler.wap <program> <module.wasm>, or format <program>" }
-types = language_loaded(language, program.folder, library_file(program.folder, args#1))
+rules_files_loaded(language, program.folder)
+if warm { rules_checked(language) }
+if #given < 2 { raise "usage: warp wap/compiler.wap [--sources] <program> <module.wasm>, format <program>, or warm <state file>" }
+library = library_file(program.folder, given#1)
+types = types_declared(language, program.folder, library)
 # a module: its functions compiled once each and exported, the rest of its code as wap source in its wap section
 compiled(file: text, module: text) as list := {
 	modules = declared_modules(language, file)
 	typed = typed_modules(language, modules, types)
 	own = modules.last
-	exported = compiled_once(own, added_records(Records(), statements_in(typed)))
-	m = emitted(typed, file, exported.map(signature => export_key(signature.definer)))
+	travelling = travelling_words(own)
+	exported = compiled_once(own, added_records(Records(), statements_in(typed)), travelling)
+	m = emitted(library_code(program.folder, file, typed, travelling), file, exported.map(signature => export_key(signature.definer)), raise_module(program.folder, library))
 	carried = library_carried(program.folder, file)
 	m.header = header_source(file, own, exported, file_name(module), carried)
 	library_stamped(program.folder, file, c_described(m, module_bytes(m)) + carried_sections(carried))
 }
 
 # (the native `wap` compiles as the native warp does: the program's folder, its lib/ and runtime follow, unread here)
-if args#1 == "format" { code = read_notation(language, args#2); words_known(language, code); print formatted(language, groupings_written(language, operated_program(language, code))) } else { write_bytes(args#2, compiled(args#1, args#2)) }
+if given#1 == "format" { code = read_notation(language, given#2); words_known(language, code); print formatted(language, groupings_written(language, operated_program(language, code))) }
+else if given#1 == "warm" { write_bytes(given#2, bytes(warm_state(language, program.folder))) }
+else { write_bytes(given#2, compiled(given#1, given#2)) }

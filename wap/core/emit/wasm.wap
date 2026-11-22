@@ -27,6 +27,10 @@ class WasmModule {
 	memory_data: list<int> = []
 	# exception tags, each its bytes
 	tags: list<list<int>> = []
+	# the module the raise tag is imported from, "" for a tag of the module's own: a program reading a compiled library
+	# shares the library's, so a raise in the library is caught in the program (library.wap raise_module)
+	tag_module: text = ""
+	tag_imports: list<list<int>> = []
 	# the functions `ref.func` refers to, declared once each
 	referenced: list<int> = []
 	# types known by a name, each its index; the names whose type is being built; the indices reserved for names
@@ -237,6 +241,11 @@ added_tag(m: WasmModule, parameters: list<list<int>>) as int := {
 	m.tags += [[EXCEPTION_TAG] + unsigned(added_type(m, function_type(parameters, [])))]
 	#m.tags - 1
 }
+# an imported exception tag of these types, numbered before the module's own
+imported_tag(m: WasmModule, module: text, name: text, parameters: list<list<int>>) as int := {
+	m.tag_imports += [named(module) + named(name) + [TAG_KIND, EXCEPTION_TAG] + unsigned(added_type(m, function_type(parameters, [])))]
+	#m.tag_imports - 1
+}
 # a block of a type running `body`, an exception of the tag thrown in it caught: its values taken to the label that far out
 try_table(type: list<int>, tag: int, label: int, body: list<int>) as list<int> := TRY_TABLE + type + unsigned(1) + [CATCH] + unsigned(tag) + unsigned(label) + body + END
 # A text's bytes in the memory, a zero after them (a C string): their address. The data lies past the first page, whose
@@ -266,12 +275,14 @@ module_bytes(m: WasmModule) as list<int> := {
 	passive = m.texts.map(bytes => [PASSIVE_SEGMENT] + bytes_vector(bytes)) + (if #m.memory_data == 0 then [] else [[ACTIVE_SEGMENT] + i32_const(DATA_ADDRESS) + END + bytes_vector(m.memory_data)])
 	memory_pages = [[0x00] + unsigned(1 + (#m.memory_data + PAGE_BYTES - 1) ÷ PAGE_BYTES)]
 	segment_count = [DATA_COUNT_SECTION] + unsigned(#unsigned(#passive)) + unsigned(#passive)
-	MAGIC + VERSION + section(TYPE_SECTION, type_entries(m)) + section(IMPORT_SECTION, m.imports + m.global_imports) + section(FUNCTION_SECTION, declarations) + section(MEMORY_SECTION, memory_pages) + section(TAG_SECTION, m.tags) + section(GLOBAL_SECTION, m.globals.map(global => global.type + [global.mutability] + global.initial + END)) + section(EXPORT_SECTION, m.exports) + declared_references(m) + segment_count + section(CODE_SECTION, codes) + section(DATA_SECTION, passive) + names_section(m) + (if m.header is empty then [] else custom_section(WAP_SECTION, m.header.bytes))
+	MAGIC + VERSION + section(TYPE_SECTION, type_entries(m)) + section(IMPORT_SECTION, m.imports + m.global_imports + m.tag_imports) + section(FUNCTION_SECTION, declarations) + section(MEMORY_SECTION, memory_pages) + section(TAG_SECTION, m.tags) + section(GLOBAL_SECTION, m.globals.map(global => global.type + [global.mutability] + global.initial + END)) + section(EXPORT_SECTION, m.exports) + declared_references(m) + segment_count + section(CODE_SECTION, codes) + section(DATA_SECTION, passive) + names_section(m) + (if m.header is empty then [] else custom_section(WAP_SECTION, m.header.bytes))
 }
 # the custom section `name`, its subsection of function names, each a function's index and name in their order
 NAME_SECTION = "name"
 FUNCTION_NAMES = 1
 WAP_SECTION = "wap"
+# the ending of a compiled module's file, the name a module importing it knows it by
+MODULE_ENDING = ".wasm"
 names_section(m: WasmModule) as list<int> := {
 	known = m.imported_functions.map(function => function.name) + m.functions.map(function => function.name)
 	names = counted((0 to #known - 1).filter(index => known[index] is not empty).map(index => unsigned(index) + named(known[index])))

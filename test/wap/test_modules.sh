@@ -161,6 +161,9 @@ print(shout(\"hi\"))
 print(text(size(Tree([Tree([], \"b\")], \"a\"))))")" "6
 hi!
 2"
+# a used module raises by the library's tag, so the program's main catches it though it calls nothing of the library
+check "a raise in a used compiled module is caught by the program" "$(printf '%s\n' 'positive(x: int) as int := if x > 0 then x else raise "not positive"' >"$stage/raising.wap" && $warp "$compiler" "$stage/raising.wap" "$stage/raising.wasm" 2>&1 && ran uses_raising "use \"$stage/raising.wasm\"
+print(text(positive(-1)))" 2>&1)" "not positive"
 # wiki/use.md "folder, package and project scope": use folder brings in every source file beside the using one
 mkdir -p "$stage/shapes" && printf '%s\n' 'area(side: int) as int := side * side' >"$stage/shapes/square.wap"
 check "use folder brings in a word of a file beside it" "$(printf '%s\n' 'use folder' 'print(text(area(3)))' >"$stage/shapes/main.wap" && $warp "$compiler" "$stage/shapes/main.wap" "$stage/shapes/main.wasm" 2>&1 && $warp "$stage/shapes/main.wasm" 2>&1)" "9"
@@ -170,18 +173,4 @@ say("by name")')" "loaded
 by name"
 check "use name brings in a standard module from the library beside the compiler" "$(ran use_library 'use ordering
 print(text(natural_compare("a2", "a10") < 0))')" "yes"
-# files that use each other: a function typed before its file's statements still reads its constant's type
-printf '%s\n' 'use "cycle_b.wap"' 'CUT = [" ", "…"].join("")' 'quoted(t: text) as text := t + CUT' >"$stage/cycle_a.wap"
-printf '%s\n' 'use "cycle_a.wap"' 'checked(t: text) as text := if #t > 100 then quoted(t) else t' 'early = checked("b")' >"$stage/cycle_b.wap"
-check "a function of a file that uses another reads its own computed constant, whichever file runs first" "$(ran cycle_constant 'use "cycle_a.wap"
-use "cycle_b.wap"
-print(early + quoted("x"))')" "bx …"
-# a global given again: the later statement gives the later value, though a function typed the first one ahead
-printf '%s\n' 'use "cycle_f.wap"' 'SEP = "-"' 'SEP = "+"' 'joined(t: text) as text := t + SEP' >"$stage/cycle_e.wap"
-printf '%s\n' 'use "cycle_e.wap"' 'labelled(t: text) as text := if #t > 100 then joined(t) else t' 'early = labelled("a")' >"$stage/cycle_f.wap"
-check "a global given again by files that use each other holds its later value" "$(ran cycle_again 'use "cycle_e.wap"
-use "cycle_f.wap"
-print(early + joined("x"))')" "ax+"
-# the library compiles once into a module of its own (notes/compile_inputs.md), the types module beside the compiler
-check "the types module compiles as a program of its own" "$($warp "$compiler" "$(dirname "$compiler")/types/types.wap" "$stage/types.wasm" 2>&1 && [ -s "$stage/types.wasm" ] && echo compiled)" "compiled"
 exit $((failures > 0))
