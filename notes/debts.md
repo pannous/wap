@@ -35,7 +35,6 @@ Owned elsewhere, not ranked here:
 | sugar/records.wap:15 and rules/templates.wap:27, a template's output is not the shape its text parses to (as/`:` two rules; DERIVED on every word) | medium: met again by the operator `as` form (general-overload-mechanism) | templates built from their forms |
 | rules/templates.wap:134, True()/False()/Empty() named beside types/nodes.wap | low | templates see declared Records |
 | rules/stages.wap:235, a rewrite that loops forever hangs | medium: a hang, not a refusal | a step bound with a named refusal, small |
-| rules/stages.wap:267, the source avoids `!= ø` on an optional record for an old seed | low | pure shrink once the seed compares an optional with ø: try first |
 | analyze/types.wap:23, boxed any in the compiler's own source | medium: milestone 2 | the guardrail list shrinks entry by entry |
 | parse/operators.wap:33, a program's own alias lines are not read | low | rule engine reads alias lines |
 | wap/nodes.wap:24, Op's spellings twice (enum and operators table) | medium: 48 of 63 cases | Op from the table once old warp no longer reads wap's source: check whether it still must |
