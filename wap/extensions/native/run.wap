@@ -26,6 +26,17 @@ EXTERN_VALUE_OFFSET := 8
 # wasmtime's limits for a run: the compiler's GC heap and its wasm stack (core/native/driver.warp's)
 GC_HEAP_BYTES := 134217728
 WASM_STACK_BYTES := 251658240
+# a run's caps, as scripts/guarded.sh's: a store's memory in GB, its seconds; `--memory-gb <n>` and `--seconds <n>`
+# before the program change them (driver.wap). One runaway wap took 90 GB of a 32 GB Mac, 2026-11-22
+memory_cap_gb: int = 12
+time_cap_seconds: int = 1800
+GB := 1073741824
+NO_CAP := -1
+# what wasmtime says when a store passes its time cap, its memory cap
+TIME_CAP_PASSED := "wasm trap: interrupt"
+MEMORY_CAP_PASSED := "out of memory"
+# the program or module the run was given, named when it passes a cap (driver.wap)
+run_input: text = ""
 # C's whence for fseek, a C bool's byte, the file descriptor of standard error, a path's mode that asks whether it is
 # there, the mode of a file the driver writes (rw-r--r--)
 FROM_START := 0
@@ -52,8 +63,15 @@ ended(status: int) := {
 }
 # a text written to the file
 written(file: int, t: text) := write(file, host_of(c_text(t)), byte_count(t))
-# (wasmtime's messages end in a C string's 0, which a reader of the output would take for binary data)
-said_vector(vector: int): bool := write(STANDARD_ERROR, long_at(vector + 8), strlen(long_at(vector + 8))) >= 0
+# (wasmtime's messages end in a C string's 0, which a reader of the output would take for binary data); a message of
+# a passed cap is followed by the cap, the input and the option that changes it
+said_vector(vector: int): bool := {
+	message = c_text_from(long_at(vector + 8))
+	eprint(message)
+	if message.contains(TIME_CAP_PASSED) { eprint("wap: ${run_input} ran past the time cap of ${time_cap_seconds} s (--seconds <n> before the program changes it)") }
+	if message.contains(MEMORY_CAP_PASSED) { eprint("wap: ${run_input} passed the memory cap of ${memory_cap_gb} GB (--memory-gb <n> before the program changes it)") }
+	yes
+}
 # whether a call failed: its error or trap said, the status at STATUS_AT; an exit() of status 0 is no failure, one of
 # another status a failure the program said itself
 failed(error: int, trap_at: int): bool := {
@@ -101,12 +119,18 @@ engine_made(): int := {
 	wasmtime_config_wasm_exceptions_set(config, 1)
 	warp_config_gc_heap_initial_size_set(config, GC_HEAP_BYTES)
 	warp_config_wasm_stack_set(config, WASM_STACK_BYTES)
-	wasm_engine_new_with_config(config)
+	wasmtime_config_epoch_interruption_set(config, 1)
+	made = wasm_engine_new_with_config(config)
+	epoch_ticker_started(made)
+	made
 }
-# a store's context whose WASI gives the host argument list, the standard files, the environment, the current folder
-# and the root
+# a store's context, within the run's caps, whose WASI gives the host argument list, the standard files, the
+# environment, the current folder and the root
 context_made(arguments: list<text>): int := {
-	context = wasmtime_store_context(wasmtime_store_new(engine, 0, 0))
+	store = wasmtime_store_new(engine, 0, 0)
+	wasmtime_store_limiter(store, memory_cap_gb * GB, NO_CAP, NO_CAP, NO_CAP, NO_CAP)
+	context = wasmtime_store_context(store)
+	wasmtime_context_set_epoch_deadline(context, time_cap_seconds)
 	wasi = wasi_config_new()
 	wasi_config_set_argv(wasi, #arguments, arguments)
 	wasi_config_inherit_stdin(wasi)

@@ -156,4 +156,8 @@ qsort(prim i32.wrap_i64(ARRAY_AT), 3, 4, c_callback_pointer(0))
 print "${item(ARRAY_AT)} ${item(ARRAY_AT + 4)} ${item(ARRAY_AT + 8)}"
 PROGRAM
 check "C calls back the export of a module the program uses" "$(cd "$stage" && "$native_wap" sorting.wap 2>&1)" "1 2 3"
+# a run within caps, as scripts/guarded.sh's (warp-supervisor 2026-11-22, after a runaway wap took 90 GB): one past
+# its time cap stops and names the cap and the program
+printf 'n = 0\nwhile yes { n = n + 1 }\n' >"$stage/spinning.wap"
+check "a run past its time cap stops, naming the cap and the program" "$(cd "$stage" && "$native_wap" --seconds 1 spinning.wap 2>&1 | grep -o 'wap: spinning.wap ran past the time cap of 1 s')" "wap: spinning.wap ran past the time cap of 1 s"
 exit $((failures > 0))
