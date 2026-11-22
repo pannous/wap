@@ -36,4 +36,9 @@ print(text([x * y for x in [1, 2] for y in [1, 3] if x < y]))')" "[[1, 3], [1, 4
 # a typed rule's template builds a kernel form it calls by name, as a shape rule's does (core/rules/stages.wap)
 check "a typed rule writing a kernel form" "$(ran typed_form 'rule twice $x: int => If($x > 2, $x + $x, 0)
 print(text(twice 3) + " " + text(twice 1))')" "6 0"
+# a typed rule's template that defines a name: each firing its own, fresh (core/rules/typed.wap)
+check "a typed rule holding a value under a name" "$(ran typed_held 'rule twice $x: int => { held = $x; held + held }
+held = 10
+y = twice 4
+print(text(y + (twice 1) + held))')" "20"
 exit $((failures > 0))
