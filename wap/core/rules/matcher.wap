@@ -20,19 +20,19 @@ use "../analyze/declarations.wap"
 # whether the code fits the matcher, its holes bound in `bindings` (a hole met twice must meet equal code)
 # Round brackets around one key or call only group it: `($f: $t)` in a pattern is the key, and code in such brackets is
 # matched as its key; a hole or a sequence still takes the group as written. Brackets around a phrase or a list keep their meaning.
-matches(m: Matcher, n: Node, bindings: map<text, Node>) as bool := match m.test {
-	Test.Hole => hole_matches(m, n, bindings)
-	Test.Sequence => sequence_matches(m, n, bindings)
+matches(m: Matcher, n: Node, bindings: map<text, Node>) as bool := match m {
+	Hole => hole_matches(m, n, bindings)
+	Sequence => sequence_matches(m, n, bindings)
 	_ => item_matches(m, grouped_item(n) ?? n, bindings)
 }
-item_matches(m: Matcher, n: Node, bindings: map<text, Node>) as bool := match m.test {
-	Test.Literal => same_atom(m, n)
-	Test.Repeat => repeat_matches(m.parts#1, [n], bindings)
-	Test.Pair => match n { Key(left, op, right) => op == m.op and matches(m.parts#1, left, bindings) and matches(m.parts#2, right, bindings); _ => no }
+item_matches(m: Matcher, n: Node, bindings: map<text, Node>) as bool := match m {
+	Literal => same_atom(m, n)
+	Repeat(part) => repeat_matches(part, [n], bindings)
+	Pair(op, left, right) => match n { Key(given_left, given_op, given_right) => given_op == op and matches(left, given_left, bindings) and matches(right, given_right, bindings); _ => no }
 	_ => refused(n, "this matcher tests no single item")
 }
 
-hole_matches(m: Matcher, n: Node, bindings: map<text, Node>) as bool := {
+hole_matches(m: Hole, n: Node, bindings: map<text, Node>) as bool := {
 	if not of_shape(m, n) { return no }
 	if bindings.has(m.name) { return "${bindings[m.name]}" == "${n}" }
 	bindings[m.name] = taken_by_hole(m, n)
@@ -40,16 +40,16 @@ hole_matches(m: Matcher, n: Node, bindings: map<text, Node>) as bool := {
 }
 # the code a hole takes; a name a declaration hole read carries the name of the declaration it was read as, so binding
 # refuses a local that hides that declaration (core/bindings.wap READ_WITH)
-taken_by_hole(m: Matcher, n: Node) as Node := if m.stage == DECLARED_STAGE then with_fact(n, READ_WITH, hole_declaration(m, n)!.definer) else n
+taken_by_hole(m: Hole, n: Node) as Node := if m.stage == DECLARED_STAGE then with_fact(n, READ_WITH, hole_declaration(m, n)!.definer) else n
 
 # whether code is a literal matcher's atom: a word spelled by any alias of it, anything else written alike
-same_atom(m: Matcher, n: Node) as bool := match m.literal {
+same_atom(m: Literal, n: Node) as bool := match m.literal {
 	Symbol(name) => match n { Symbol(other) => canonical_word(other) == m.spelled; _ => no }
 	_ => "${n}" == m.spelled
 }
 canonical_word(spelling: text) as text := word_aliased(aliased(spelling, Fixity.Anywhere))
 
-sequence_matches(m: Matcher, n: Node, bindings: map<text, Node>) as bool := match n {
+sequence_matches(m: Sequence, n: Node, bindings: map<text, Node>) as bool := match n {
 	List(items, bracket, separator) => bracket == m.bracket and (#m.parts < 2 or #items < 2 or bracket == Bracket.Square or separators_fit(m.separator, separator)) and parts_match(m.parts, braced_items(items, bracket), bindings)
 	Empty => EMPTY_GROUPS.contains(m.bracket) and parts_match(m.parts, [], bindings)
 	_ => no
@@ -67,7 +67,7 @@ separators_fit(wanted: Separator, given: Separator) as bool := wanted == given o
 parts_match(parts: list, items: list, bindings: map<text, Node>) as bool := {
 	if parts is empty { return items is empty }
 	part = parts#1
-	if not part.rest { return items is not empty and matches(part, items#1, bindings) and parts_match(parts[1 ..], items[1 ..], bindings) }
+	if not takes_run(part) { return items is not empty and matches(part, items#1, bindings) and parts_match(parts[1 ..], items[1 ..], bindings) }
 	known = bindings.keys
 	for taken in 0 to #items {
 		if taken_by(part, items[.. taken], bindings) and parts_match(parts[1 ..], items[taken ..], bindings) { return yes }
@@ -76,7 +76,9 @@ parts_match(parts: list, items: list, bindings: map<text, Node>) as bool := {
 	no
 }
 
-taken_by(m: Matcher, items: list, bindings: map<text, Node>) as bool := if m.test == Test.Repeat then repeat_matches(m.parts#1, items, bindings) else rest_matches(m, items, bindings)
+# whether a part takes a run of items: a rest hole, `$xs...`, or a repetition
+takes_run(m: Matcher) as bool := match m { Hole(name, type, stage, declarations, pattern, rest) => rest; Repeat => yes; _ => no }
+taken_by(m: Matcher, items: list, bindings: map<text, Node>) as bool := match m { Repeat(part) => repeat_matches(part, items, bindings); Hole => rest_matches(m, items, bindings); _ => no }
 
 # each item fits the repeated part on its own; each hole of it is bound to the sequence of what it met
 repeat_matches(part: Matcher, items: list<Node>, bindings: map<text, Node>) as bool := {
@@ -93,27 +95,27 @@ repeat_matches(part: Matcher, items: list<Node>, bindings: map<text, Node>) as b
 }
 
 # the names a matcher binds when it fits: its holes, a repetition's under `$p...`
-names_bound(m: Matcher) as list<text> := match m.test {
-	Test.Hole => [m.name]
-	Test.Repeat => names_bound(m.parts#1).map(name => name + REST_MARK)
-	_ => m.parts.flat_map(names_bound)
+names_bound(m: Matcher) as list<text> := match m {
+	Hole(name, type, stage, declarations, pattern, rest) => [name]
+	Repeat(part) => names_bound(part).map(name => name + REST_MARK)
+	_ => parts_of(m).flat_map(names_bound)
 }
 
-rest_matches(m: Matcher, items: list, bindings: map<text, Node>) as bool := {
+rest_matches(m: Hole, items: list, bindings: map<text, Node>) as bool := {
 	for item in items { if not of_shape(m, item) { return no } }
 	bindings[m.name] = List(items, Bracket.None, Separator.Space)
 	yes
 }
 
 # whether code has the shape a hole asks for
-of_shape(m: Matcher, n: Node) as bool := {
+of_shape(m: Hole, n: Node) as bool := {
 	if m.stage == TYPED_STAGE { return if spelling_written(m.type) == VALUE_HOLE then gives_value(n) else fits_type(n, m.type) }
 	if m.stage == DECLARED_STAGE { return hole_declaration(m, n) != ø }
 	pattern = m.pattern ?? return of_type(m, n)
 	matches(pattern.matcher, n, {})
 }
 # whether code is of the shape a hole's type names, Symbol, List, Key, Text, Number or Node
-of_type(m: Matcher, n: Node) as bool := {
+of_type(m: Hole, n: Node) as bool := {
 	type = spelling_written(m.type)
 	if m.type == Empty or type == NODE_TYPE { return yes }
 	match type {
@@ -128,7 +130,7 @@ of_type(m: Matcher, n: Node) as bool := {
 
 # the declaration of a name, among those in force, that a declaration hole asks for: a function, or a test of one
 # value, its result bool; ø when the code is no such name
-hole_declaration(m: Matcher, n: Node) as Signature? := {
+hole_declaration(m: Hole, n: Node) as Signature? := {
 	declared = m.declarations.by_name
 	if not is_name(n) or not declared.has(spelling_written(n)) { return ø }
 	functions = declared[spelling_written(n)].filter(signature => is_function(signature))
@@ -137,11 +139,11 @@ hole_declaration(m: Matcher, n: Node) as Signature? := {
 }
 
 # the stage a matcher's rule runs in, the latest any of its holes asks for: stage 3 on typed code
-matcher_stage(m: Matcher) as int := if m.test == Test.Hole then m.stage else m.parts.map(matcher_stage).fold(SHAPE_STAGE, (a, b) -> max(a, b))
+matcher_stage(m: Matcher) as int := match m { Hole(name, type, stage, declarations, pattern, rest) => stage; _ => parts_of(m).map(matcher_stage).fold(SHAPE_STAGE, (a, b) -> max(a, b)) }
 
 # how specific a pattern is: a literal part counts twice a typed hole, as it fits one node, a type many
-specificity(m: Matcher) as int := match m.test {
-	Test.Literal => 2
-	Test.Hole => if m.type == Empty or spelling_written(m.type) == NODE_TYPE then 0 else 1
-	_ => 1 + m.parts.map(specificity).fold(0, (a, b) -> a + b)
+specificity(m: Matcher) as int := match m {
+	Literal => 2
+	Hole(name, type, stage, declarations, pattern, rest) => if type == Empty or spelling_written(type) == NODE_TYPE then 0 else 1
+	_ => 1 + parts_of(m).map(specificity).fold(0, (a, b) -> a + b)
 }

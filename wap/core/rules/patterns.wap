@@ -58,14 +58,20 @@ VALUE_HOLE = "value"
 # its shape as the Node pattern that takes a value apart, `taken`
 class Declared { name: text, shape: Node, holes: list<text>, matcher: Matcher, taken: Node = Empty }
 
-# what a part of a pattern asks of the code at its place
-enum Test { Hole, Literal, Sequence, Pair, Repeat }
 # the declarations stage 2 reads, by name: those of the module it rewrites, of the modules it uses and of the types
 # module
 class Declarations { by_name: map<text, list<Signature>> }
-# a hole's matcher knows, from when it was compiled, the stage its type asks for, which declared pattern it names and
-# the declarations it reads; a literal's, how the literal is spelled
-class Matcher { test: Test, name: text = "", type: Node = Empty, stage: int = SHAPE_STAGE, pattern: Declared? = ø, declarations: Declarations = Declarations({}), rest: bool = no, literal: Node = Empty, bracket: Bracket = Bracket.None, separator: Separator = Separator.None, op: Op = Op.None, parts: list<Matcher> = [], spelled: text = "" }
+# what a part of a pattern asks of the code at its place: a hole knows, from when it was compiled, the stage its type
+# asks for, which declared pattern it names and the declarations it reads; a literal, how it is spelled
+enum Matcher {
+	Hole(name: text, type: Node, stage: int, declarations: Declarations, pattern: Declared?, rest: bool)
+	Literal(literal: Node, spelled: text)
+	Sequence(bracket: Bracket, separator: Separator, parts: list<Matcher>)
+	Pair(op: Op, left: Matcher, right: Matcher)
+	Repeat(part: Matcher)
+}
+# the matchers a matcher is made of
+parts_of(m: Matcher) as list<Matcher> := match m { Sequence(bracket, separator, parts) => parts; Pair(op, left, right) => [left, right]; Repeat(part) => [part]; _ => [] }
 
 # ---- holes
 
@@ -114,12 +120,12 @@ typed_hole(hole: Node, type: Node) as Node := with_fact(hole, TYPE, type)
 # a normalized pattern compiled to its matcher; a declared pattern written as a call, `If($c, $a, $b)`, is its shape
 compiled_pattern(language: Language, n: Node) as Matcher := {
 	repeated = repeated_part(n)
-	if repeated != ø then Matcher(Test.Repeat, rest: yes, parts: [compiled_pattern(language, ungrouped(repeated))]) else shape_matcher(language, n)
+	if repeated != ø then Repeat(compiled_pattern(language, ungrouped(repeated))) else shape_matcher(language, n)
 }
 # a literal's matcher, which knows how the literal is spelled, a word by its canonical spelling, once
-literal_matcher(n: Node) as Matcher := Matcher(Test.Literal, literal: n, spelled: match n { Symbol(name) => canonical_word(name); _ => "${n}" })
+literal_matcher(n: Node) as Matcher := Literal(n, match n { Symbol(name) => canonical_word(name); _ => "${n}" })
 shape_matcher(language: Language, n: Node) as Matcher := match n {
-	Symbol(name) => if is_hole(n) then Matcher(Test.Hole, name: hole_key(n), type: hole_type(n), stage: hole_stage(language, hole_type(n)), declarations: language.declarations, pattern: pattern_called(language, hole_type(n)), rest: is_rest_hole(n)) else literal_matcher(n)
+	Symbol(name) => if is_hole(n) then Hole(hole_key(n), hole_type(n), hole_stage(language, hole_type(n)), language.declarations, pattern_called(language, hole_type(n)), is_rest_hole(n)) else literal_matcher(n)
 	Key(head, Op.None, List(arguments, Bracket.Round, separator)) => {
 		if names_pattern(language, head) then compiled_pattern(language, instance(language, pattern_called(language, head)!, arguments)) else pair_matcher(language, n, head, Op.None, List(arguments, Bracket.Round, separator))
 	}
@@ -127,7 +133,7 @@ shape_matcher(language: Language, n: Node) as Matcher := match n {
 	List(items, bracket, separator) => if grouped_item(n) != ø and not is_hole(items#1) then compiled_pattern(language, items#1) else sequence_matcher(language, items, bracket, separator)
 	_ => literal_matcher(n)
 }
-sequence_matcher(language: Language, items: list, bracket: Bracket, separator: Separator) as Matcher := Matcher(Test.Sequence, bracket: bracket, separator: separator, parts: items.map(item => compiled_pattern(language, item)))
+sequence_matcher(language: Language, items: list, bracket: Bracket, separator: Separator) as Matcher := Sequence(bracket, separator, items.map(item => compiled_pattern(language, item)))
 
 # Repetition, as in macros by example: `($p => $r)...` in a pattern takes items that each fit `$p => $r`, binding $p
 # and $r to the sequences of their matches (as a rest hole binds, under `$p...`); in a template `Arm($p, $r)...`
@@ -137,7 +143,7 @@ repeated_part(n: Node) as Node? := match n {
 	_ => ø
 }
 
-pair_matcher(language: Language, n: Node, left: Node, op: Op, right: Node) as Matcher := Matcher(Test.Pair, op: op, parts: [compiled_pattern(language, left), compiled_pattern(language, right)])
+pair_matcher(language: Language, n: Node, left: Node, op: Op, right: Node) as Matcher := Pair(op, compiled_pattern(language, left), compiled_pattern(language, right))
 
 # the declared pattern a name calls, ø for any other name
 pattern_called(language: Language, head: Node) as Declared? := if names_pattern(language, head) then language.patterns[text(head)] else ø
@@ -171,7 +177,7 @@ hole_nodes(n: Node) as list<Node> := match n {
 declare_pattern(language: Language, name: Node, shape: Node) as Declared := {
 	normal = bracketed_normalized(shape)
 	# known before its matcher is compiled, so the pattern may name itself
-	declared = Declared(spelling_written(name), normal, holes_in(normal), Matcher(Test.Literal))
+	declared = Declared(spelling_written(name), normal, holes_in(normal), Literal(Empty, ""))
 	language.patterns[declared.name] = declared
 	declared.matcher = compiled_pattern(language, normal)
 	declared.taken = shape_taken(language, declared)
