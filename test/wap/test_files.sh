@@ -12,6 +12,7 @@ check "a file that cannot be read" "$(ran read_missing "print read(\"$stage/miss
 check "the command line, the program first" "$(ran command_line 'for each in arguments() { print each }' >/dev/null; $wap "$stage/command_line.wasm" a "b c")" "$stage/command_line.wasm
 a
 b c"
+check "the run's environment, each entry zero-ended" "$(ran environment 'print text(wasi_environment().contains("WAP_ENVIRONMENT_CHECK=seen"))' >/dev/null; WAP_ENVIRONMENT_CHECK=seen $wap "$stage/environment.wasm")" "yes"
 check "bytes written to a file, made or emptied first" "$(ran bytes_written "write_bytes(\"$stage/written.bin\", [104, 105, 33])
 print read(\"$stage/written.bin\")
 write_bytes(\"$stage/written.bin\", [111, 107])
