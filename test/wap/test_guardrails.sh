@@ -28,13 +28,15 @@
 #                    two spaces deeper than its folder's line `<folder>/`; never allowlisted
 #   copied-growth    a list or text is grown in place or built once, never copied whole for each part: no `xs += [x]`,
 #                    `xs = xs + [x]` or `t = t + "…"` (xs.add(x); types/texts.wap concatenated)
+#   no-warp          wap stands on its own: no script runs the warp binary (wap's modules run on the native wap, else on
+#                    wasmtime, scripts/lib/wap-host.sh); never allowlisted
 # Today's exceptions are in guardrails_allowed.txt, `<rule> <key> <count>`, key a function for one-fit and a file for
 # the others. The list only shrinks: a count above it fails naming file:line and the rule, a count below it fails
 # until the line is lowered or dropped. Run it with bash test/wap/test_guardrails.sh; it compiles nothing
 # the rules are the ones the header above names, each checked by the finder of its name (one-fit: one_fit)
 RULES=$(sed -n 's/^#   \([a-z][a-z-]*\) .*/\1/p' "${BASH_SOURCE[0]}")
 # the rules no allowlist line excuses: a spot of theirs is a failure at once
-UNLISTED="emit-boxes get-reads-places in-tree core-no-extension kernel-emitted"
+UNLISTED="emit-boxes get-reads-places in-tree core-no-extension kernel-emitted no-warp"
 OWNERS=notes/agents/wap-owner.md
 KERNEL=wap/kernel/forms.wap
 EMITTER=wap/core/emit/emitter.wap
@@ -47,6 +49,8 @@ ANY_TYPE='(:|->|<|,|[^a-z_]as)[ \t]*any([^a-z_?]|$)|[^a-z_.]any[?]'
 TYPE_BUILDERS="generic_type|type_built|function_type_of|optional_type|list_type|map_type|function_value_type"
 SAME_TYPE_NAMES='^(same|fits)_types?$'
 TYPE_PARAMETERS="given|held|these|those"
+# a line that runs warp: its binary named by a variable, looked up on PATH, picked by WARP_BINAR[Y] or called as a command
+RUNS_WARP='[$][{]?warp([^a-z_]|$)|command -v "?warp([^a-z_]|$)|WARP_BINAR[Y]|(^|[;&|({]|[$][(])[[:space:]]*"?warp"?[[:space:]]'
 
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
 allowed="$root/test/wap/guardrails_allowed.txt"
@@ -149,6 +153,9 @@ kernel_emitted() {
 }
 copied_growth() {
 	perl -ne 'print "$ARGV:$.:$_" if /\b([a-z_.]+) \+= \[|\b([a-z_.]+) = \2 \+ \[|\b([a-z_]+) = \3 \+ .*("|\btext\(|\bshow\()/; close ARGV if eof' $wap_files | filed copied-growth
+}
+no_warp() {
+	git ls-files '*.sh' | xargs grep -nE "$RUNS_WARP" | filed no-warp
 }
 in_tree() {
 	printf '%s\n' $wap_files | grep -vxF -f <(tree_paths) | awk '{ printf "in-tree\t%s\t%s:1\tno line in the tree of notes/agents/wap-owner.md\n", $0, $0 }'
