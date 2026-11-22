@@ -1,0 +1,61 @@
+# Where the native wap finds a module another one imports by name (wap/extensions/native, run.wap links it), as a
+# dynamic linker looks: beside the importing module, else in the folder of the compiler that built the importer, which
+# the compiler records in it as rpath is recorded (custom section "wap.compiler", extensions/wasm/library.wap), else
+# beside the installed compiler. A program so finds the types module of the compiler that built it, whichever ran.
+use "c.wap"
+use "run.wap"
+
+no_module_at(): int32 := prim data_address("wap: no module at ")
+nor_at(): int32 := prim data_address(" nor at ")
+compiler_section(): int32 := prim data_address("wap.compiler")
+EXISTS := 0
+# a wasm file: its magic and version before the sections; a custom section's id; a LEB128 byte's payload and its
+# continuation bit
+WASM_HEADER_BYTES := 8
+CUSTOM_SECTION := 0
+LEB_PAYLOAD := 128
+
+# the path of the module a name names: a bare name (no slash) beside the importing module at the host's path, else in
+# the compiler folder the importer records, else beside the installed compiler; any other name is its path; 0 where
+# neither place has it, said
+module_path(name: int, importer: int): int := {
+	if index(name, SLASH) != 0 { return name }
+	near = beside(importer, name, strlen(name))
+	if access(near, EXISTS) == 0 { return near }
+	recorded = recorded_folder(importer)
+	far = beside(if recorded == 0 then host_of(pointer_at(COMPILER_AT)) else recorded, name, strlen(name))
+	if access(far, EXISTS) == 0 then far else missing_said(near, far)
+}
+missing_said(near: int, far: int): int := {
+	said(no_module_at())
+	written(STANDARD_ERROR, near)
+	said(nor_at())
+	written(STANDARD_ERROR, far)
+	said_none(newline())
+}
+
+# the folder the module at the host's path records as its compiler's, a host path ending in a slash; 0 where it
+# records none
+recorded_folder(path: int): int := {
+	size_at = host_block(8)
+	bytes = file_read(path, size_at)
+	if bytes == 0 { return 0 }
+	at = bytes + WASM_HEADER_BYTES
+	while at < bytes + long_at(size_at) {
+		id = host_byte(at)
+		size = leb_at(at + 1)
+		content = leb_end(at + 1)
+		if id == CUSTOM_SECTION and leb_at(content) == strlen(host_of(compiler_section())) and memcmp(leb_end(content), host_of(compiler_section()), leb_at(content)) == 0 {
+			name_end = leb_end(content) + leb_at(content)
+			folder = host_block(PATH_BYTES)
+			strlcat(folder, strndup(name_end, content + size - name_end), PATH_BYTES)
+			strlcat(folder, host_of(root()), PATH_BYTES)
+			return folder
+		}
+		at = content + size
+	}
+	0
+}
+# the unsigned LEB128 number at the host's address; where the bytes after it start
+leb_at(at: int): int := if host_byte(at) < LEB_PAYLOAD then host_byte(at) else host_byte(at) - LEB_PAYLOAD + LEB_PAYLOAD * leb_at(at + 1)
+leb_end(at: int): int := if host_byte(at) < LEB_PAYLOAD then at + 1 else leb_end(at + 1)
