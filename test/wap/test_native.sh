@@ -227,4 +227,12 @@ check "the console edits its line: arrows, Home/End, Ctrl+A/E, deletes, word mov
 24
 é
 24"
+# an enum of cases without fields in a native program, each case its tag (notes/native.md); an uncaught raise its text on
+# stderr and exit status 1
+check "a native program picks and compares an enum's cases" "$(native_ran coins 'exit(code: int) := prim proc_exit(code)
+enum Coin { Penny, Dime }
+pick(x: int): Coin := if x > 0 then Dime else Penny
+exit(if pick(1) == Dime then 3 else 4)' >/dev/null; echo $?)" "3"
+check "a native program's uncaught raise says its text and exits with 1" "$(native_ran raising 'raise "out of coins"'; echo "exit $?")" "out of coins
+exit 1"
 exit $((failures > 0))
