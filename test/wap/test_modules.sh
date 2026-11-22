@@ -194,4 +194,10 @@ print text(median([3, 1, 2, 4]))
 print text(combinations([1, 2, 3], 2))')" "[[1, 2], [3, 4], [5]]
 2.5
 [[1, 2], [1, 3], [2, 3]]"
+# path's glob classes and machine_math's powers of two (lib/path.warp, lib/machine_math.warp, notes/lib_coverage.md)
+check "path globs a class of letters, machine_math raises two" "$(ran use_path_math 'use path
+use machine_math
+print text(path_matches("b.txt", "[a-c].txt"))
+print text(round(two_to(10.0)))')" "yes
+1024"
 exit $((failures > 0))
