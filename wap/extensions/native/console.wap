@@ -6,76 +6,54 @@ use "c.wap"
 use "run.wap"
 use "compiler.wap"
 
-# the standard files the console reads and prompts on, the newline, the sources' file mode (rw-r--r--), the base of
-# the line numbers
+# the standard files the console reads and prompts on, the newline
 STANDARD_INPUT := 0
 STANDARD_OUTPUT := 1
 NEWLINE := 10
-FILE_MODE := 420
-DECIMAL := 10
-session_template(): int32 := prim data_address("/wap-console-XXXXXX")
-prompt(): int32 := prim data_address("› ")
-use_before(): int32 := prim data_address("use \"")
-use_after(): int32 := prim data_address("\"\n")
+WAP_SUFFIX := ".wap"
+PROMPT := "› "
 
-console(compiler: int) := {
-	temporary_path(NAME_AT, session_template())
-	mkdtemp(pointer_at(NAME_AT))
+console(compiler: int, command: text) := {
+	global source_file
+	global module_file
 	# (by its real path: WASI follows no link out of the root, and the temporary folder often is one)
-	set_word(SESSION_AT, 0)
-	strcat(pointer_at(SESSION_AT), realpath(pointer_at(NAME_AT), 0))
+	session = realpath(mkdtemp(temporary_path("/wap-console-XXXXXX")), 0)
 	linker = linker_made()
-	context = context_made(1, host_list(ARGUMENTS_AT, 1))
+	context = context_made([command])
 	lines = 0
-	while line_read() {
-		line_path(SOURCE_AT, lines + 1, wap_suffix())
-		line_path(MODULE_AT, lines + 1, module_suffix())
-		source_written(lines)
-		if compiled(compiler, pointer_at(SOURCE_AT), pointer_at(MODULE_AT)) and instance_defined(linker, context, pointer_at(MODULE_AT), host_of(pointer_at(MODULE_AT)), yes) { lines = lines + 1 }
+	line = line_read()
+	while line != "" {
+		global source_file = line_path(session, lines + 1, WAP_SUFFIX)
+		global module_file = line_path(session, lines + 1, MODULE_SUFFIX)
+		source_written(source_file, line, session, lines)
+		if compiled(compiler, source_file, module_file) and instance_defined(linker, context, module_file, module_file, yes) { lines = lines + 1 }
+		line = line_read()
 	}
-	n = 1
-	while n <= lines + 1 {
-		line_path(SOURCE_AT, n, wap_suffix())
-		unlink(pointer_at(SOURCE_AT))
-		line_path(MODULE_AT, n, module_suffix())
-		unlink(pointer_at(MODULE_AT))
-		n = n + 1
+	for n in 1 upto lines + 2 {
+		unlink(line_path(session, n, WAP_SUFFIX))
+		unlink(line_path(session, n, MODULE_SUFFIX))
 	}
-	rmdir(pointer_at(SESSION_AT))
+	rmdir(session)
 }
-# a line of standard input at LINE_AT, its newline dropped, the prompt shown first on a terminal; whether one came
-line_read(): bool := {
-	if isatty(STANDARD_INPUT) % BOOL_BYTE != 0 { written(STANDARD_OUTPUT, host_of(prompt())) }
-	length = 0
-	got = bytes_read(STANDARD_INPUT, pointer_at(LINE_AT), 1)
-	while got > 0 and memory_byte(LINE_AT + length) != NEWLINE and length < LINE_BYTES - 1 {
-		length = length + 1
-		got = bytes_read(STANDARD_INPUT, pointer_at(LINE_AT + length), 1)
+# a line of standard input ended by a newline, the prompt shown first on a terminal; "" at the input's end
+line_read(): text := {
+	if isatty(STANDARD_INPUT) % BOOL_BYTE != 0 { written(STANDARD_OUTPUT, PROMPT) }
+	cell = text_made(1)
+	line = ""
+	got = bytes_read(STANDARD_INPUT, c_text(cell), 1)
+	while got > 0 and byte_at(cell, 0) != NEWLINE {
+		line = line + cell
+		got = bytes_read(STANDARD_INPUT, c_text(cell), 1)
 	}
-	set_word(LINE_AT + length, 0)
-	got > 0 or length > 0
+	if got > 0 or line != "" then line + "\n" else ""
 }
-# <session>/<n><suffix> at `at`
-line_path(at: int, n: int, suffix: int32) := {
-	set_word(at, 0)
-	strcat(pointer_at(at), host_of(pointer_at(SESSION_AT)))
-	strcat(pointer_at(at), host_of(root()))
-	strcat(pointer_at(at), host_of(digits_of(n, DECIMAL)))
-	strcat(pointer_at(at), host_of(suffix))
-}
-# the line's source at SOURCE_AT: the line, then a use of each earlier line's module (after it, so what the compiler
-# says of the line is of its line 1)
-source_written(lines: int) := {
-	source = creat(pointer_at(SOURCE_AT), FILE_MODE)
-	written(source, host_of(pointer_at(LINE_AT)))
-	written(source, host_of(newline()))
-	n = 1
-	while n <= lines {
-		written(source, host_of(use_before()))
-		line_path(NAME_AT, n, module_suffix())
-		written(source, host_of(pointer_at(NAME_AT)))
-		written(source, host_of(use_after()))
-		n = n + 1
-	}
+# <session>/<n><suffix>
+line_path(session: text, n: int, suffix: text): text := "${session}/${n}${suffix}"
+# the line's source at the path: the line, then a use of each earlier line's module (after it, so what the compiler says of the
+# line is of its line 1)
+source_written(path: text, line: text, session: text, lines: int) := {
+	source = creat(path, FILE_MODE)
+	written(source, line)
+	for n in 1 upto lines + 1 { written(source, "use \"${line_path(session, n, MODULE_SUFFIX)}\"\n") }
 	close(source)
 }
