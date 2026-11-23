@@ -132,7 +132,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - length.md (2 lines):
 - library-cli.md (232 lines):
 - library-collections.md (47 lines): ✓ c354c23 (lib/collections.wap, test/test_collections.wap 6 ✓ + Counter/LRU red until any-char-equality)
-- library-complex.md (36 lines):
+- library-complex.md (36 lines): wap-wiki-lib
 - library-compress.md (40 lines):
 - library-config-formats.md (67 lines):
 - library-csv.md (32 lines): ✓ 95f2e02 (lib/csv.wap, test/test_csv.wap 3 ✓; print of nested texts unquoted, with wap-interviewer)
