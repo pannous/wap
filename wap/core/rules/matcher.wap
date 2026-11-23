@@ -50,7 +50,7 @@ same_atom(m: Matcher, n: Node) as bool := match m.literal {
 canonical_word(spelling: text) as text := word_aliased(aliased(spelling, Fixity.Anywhere))
 
 sequence_matches(m: Matcher, n: Node, bindings: map<text, Node>) as bool := match n {
-	List(items, bracket, separator) => bracket == m.bracket and (#m.parts < 2 or #items < 2 or bracket == Bracket.Square or separators_fit(m.separator, separator)) and parts_match(m.parts, items_matched(m, items, bracket, separator), bindings)
+	List(items, bracket, separator) => bracket == m.bracket and (#m.parts < 2 or #items < 2 or bracket == Bracket.Square or separators_fit(m.separator, separator)) and parts_fit(m.parts, items_matched(m, items, bracket, separator), bindings)
 	Empty => EMPTY_GROUPS.contains(m.bracket) and parts_match(m.parts, [], bindings)
 	_ => no
 }
@@ -65,6 +65,14 @@ braced_items(items: list, bracket: Bracket) as list := if bracket != Bracket.Cur
 # `[a b]` and `[a, b]` being one list
 separators_fit(wanted: Separator, given: Separator) as bool := wanted == given or STATEMENT_SEPARATORS.contains(given) and (wanted == Separator.Space or STATEMENT_SEPARATORS.contains(wanted))
 
+# a block glued to its head, `Point{x: 1}`, is one item, or the head and the block where a rule writes them apart:
+# `class Point{x: int}` fits `class $name { $members... }`
+parts_fit(parts: list, items: list, bindings: map<text, Node>) as bool := {
+	known = bindings.keys
+	parts_match(parts, items, bindings) or items.any(n => #unglued(n) > 1) and forgot_since(bindings, known) and parts_match(parts, items.flat_map(unglued), bindings)
+}
+unglued(n: Node) as list := match n { Key(head, Op.None, block) => match block { List(items, Bracket.Curly, separator) => [head, block]; _ => [n] }; _ => [n] }
+
 # Parts matched against items in order. A rest hole takes as few items as let the parts after it match, all that
 # remain when it is last: `if $c... then $a...` stops the condition at the first then. A failed try leaves no binding.
 parts_match(parts: list, items: list, bindings: map<text, Node>) as bool := {
@@ -74,10 +82,12 @@ parts_match(parts: list, items: list, bindings: map<text, Node>) as bool := {
 	known = bindings.keys
 	for taken in 0 to #items {
 		if taken_by(part, items[.. taken], bindings) and parts_match(parts[1 ..], items[taken ..], bindings) { return yes }
-		for name in bindings.keys { if not known.contains(name) { bindings.remove(name) } }
+		forgot_since(bindings, known)
 	}
 	no
 }
+# the bindings made since `known` was taken undone, as a failed try leaves none
+forgot_since(bindings: map<text, Node>, known: list<text>) as bool := { for name in bindings.keys { if not known.contains(name) { bindings.remove(name) } }; yes }
 
 taken_by(m: Matcher, items: list, bindings: map<text, Node>) as bool := if m.test == Test.Repeat then repeat_matches(m.parts#1, items, bindings) else rest_matches(m, items, bindings)
 
