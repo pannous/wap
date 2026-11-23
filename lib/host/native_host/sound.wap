@@ -1,50 +1,56 @@
-// The native warp's sound (card warp-sound-c, decision sound-plays), a part of lib/host/native_host.warp: lib/sound.warp's
-// host words, which the playground answers in web/playground/host-sound.js, natively over SDL3's audio, the system's
-// decoders and CoreMIDI by plain FFI.
-// Each sound plays on a stream of its own to the default device, SDL mixing it over the ones still playing; the run's
-// end waits till they are heard out. A quiet run sounds nothing.
-// A file is decoded to 16-bit values at the rate and channel count asked (0: the file's own): on macOS by AudioToolbox
-// (wav, mp3, flac, aac, m4a), elsewhere a WAV by SDL3 and an MP3 by libmpg123, then mixed and resampled linearly here
+# The native wap's sound (card warp-sound-c, decision sound-plays), a part of lib/host/native_host.wap: lib/sound.warp's
+# host words, which the playground answers in web/playground/host-sound.js, natively over SDL3's audio, the system's
+# decoders and CoreMIDI by plain FFI.
+# Each sound plays on a stream of its own to the default device, SDL mixing it over the ones still playing; the run's
+# end waits till they are heard out. A quiet run sounds nothing.
+# A file is decoded to 16-bit values at the rate and channel count asked (0: the file's own): on macOS by AudioToolbox
+# (wav, mp3, flac, aac, m4a), elsewhere a WAV by SDL3 and an MP3 by libmpg123, then mixed and resampled linearly here
 
-SAMPLE_BYTES = 2
-HEARD_OUT_POLL_MS = 10
-// what the device still holds when a stream's queue is empty
-DEVICE_TAIL_MS = 100
-DECODE_CHUNK_FRAMES = 4096
-POINTER_CELL_BYTES = 8
+use SDL3
+use c
+use file
+use bits
+use "platform.wap"
 
-global sound_streams = []
-// 0 not asked yet, 1 SDL's audio started, -1 none here (no SDL3, no device)
+SAMPLE_BYTES := 2
+HEARD_OUT_POLL_MS := 10
+# what the device still holds when a stream's queue is empty
+DEVICE_TAIL_MS := 100
+DECODE_CHUNK_FRAMES := 4096
+POINTER_CELL_BYTES := 8
+
+global sound_streams: list<int> = []
+# 0 not asked yet, 1 SDL's audio started, -1 none here (no SDL3, no device)
 global audio_state = 0
 
 audio_started() := {
 	if audio_state == 0 { audio_state = if library_function("SDL3", "SDL_Init") != 0 and sdl_started(SDL_INIT_AUDIO) then 1 else -1 }
 	audio_state == 1
 }
-audio_spec(rate: int, channels: int) as list := little_endian(SDL_AUDIO_S16LE, 4) + little_endian(channels, 4) + little_endian(rate, 4)
+audio_spec(rate: int, channels: int): list := little_endian(SDL_AUDIO_S16LE, 4) + little_endian(channels, 4) + little_endian(rate, 4)
 still_sounding() := {
 	for stream in sound_streams { if SDL_GetAudioStreamQueued(stream) > 0 { return yes } }
 	no
 }
-// the streams that played out closed, so a long run keeps none it no longer needs
+# the streams that played out closed, so a long run keeps none it no longer needs
 finished_closed() := {
-	sounding = []
+	sounding: list<int> = []
 	for stream in sound_streams {
-		if SDL_GetAudioStreamQueued(stream) > 0 { sounding += [stream] } else { SDL_DestroyAudioStream(stream) }
+		if SDL_GetAudioStreamQueued(stream) > 0 { sounding.add(stream) } else { SDL_DestroyAudioStream(stream) }
 	}
 	sound_streams = sounding
 }
-// at the run's end: its sounds heard out, then their streams closed
+# at the run's end: its sounds heard out, then their streams closed
 sounds_heard_out() := {
-	if count(sound_streams) == 0 { return ø }
+	if #sound_streams == 0 { return ø }
 	while still_sounding() { SDL_Delay(HEARD_OUT_POLL_MS) }
 	SDL_Delay(DEVICE_TAIL_MS)
 	finished_closed()
 }
 
-// little-endian 16-bit samples (a list of bytes), the channels interleaved, sounding from now on: 0, else -1 (no SDL3,
-// no audio device here)
-host_sound_played(pcm, rate: int, channels: int) as int := {
+# little-endian 16-bit samples (a list of bytes), the channels interleaved, sounding from now on: 0, else -1 (no SDL3,
+# no audio device here)
+host_sound_played(pcm: list<int>, rate: int, channels: int): int := {
 	if muted() { return 0 }
 	if not audio_started() { return -1 }
 	finished_closed()
@@ -53,123 +59,129 @@ host_sound_played(pcm, rate: int, channels: int) as int := {
 	SDL_PutAudioStreamData(stream, pcm)
 	SDL_FlushAudioStream(stream)
 	SDL_ResumeAudioStreamDevice(stream)
-	sound_streams += [stream]
+	sound_streams.add(stream)
 	0
 }
-// the page's voice clock kept around a task (lib/sound.warp voice_kept): natively the voice is lib/sound.warp's alone
-host_sound_voice_kept() as int := 0
-host_sound_voice_back(voice: int) as int := 0
-host_sound_voice_joined(voice: int) as int := 0
-// an audio file sounding from now on, as decoded at its own rate: 0, else -1
-host_sound_file_played(path) as int := {
+# the page's voice clock kept around a task (lib/sound.warp voice_kept): natively the voice is lib/sound.warp's alone
+host_sound_voice_kept(): int := 0
+host_sound_voice_back(voice: int): int := 0
+host_sound_voice_joined(voice: int): int := 0
+# a sound decoded: its rate, its channels and its 16-bit values, the channels interleaved
+class Decoded { rate: int, channels: int, values: list<int> }
+# an audio file sounding from now on, as decoded at its own rate: 0, else -1
+host_sound_file_played(path: text): int := {
 	if muted() { return 0 }
-	decoded = sound_file_decoded(text(path), 0, 0)
-	if decoded is text { return -1 }
-	host_sound_played([byte for value in decoded[2 ..] for byte in little_endian(value, SAMPLE_BYTES)], decoded[0], decoded[1])
+	try {
+		decoded = sound_file_decoded(path, 0, 0)
+		host_sound_played([byte for value in decoded.values for byte in little_endian(value, SAMPLE_BYTES)], decoded.rate, decoded.channels)
+	} else -1
 }
-// [rate, channels, then the 16-bit values, the channels interleaved], else the reason it is not decoded (a text)
-host_sound_file_decoded(path, rate: int, channels: int) as any := sound_file_decoded(text(path), rate, channels)
-sound_file_decoded(path: text, rate: int, channels: int) as any := {
+# [rate, channels, then the 16-bit values, the channels interleaved]; raises the reason a file is not decoded
+host_sound_file_decoded(path: text, rate: int, channels: int): list<int> := {
+	decoded = sound_file_decoded(path, rate, channels)
+	[decoded.rate, decoded.channels] + decoded.values
+}
+sound_file_decoded(path: text, rate: int, channels: int): Decoded := {
 	decoded = if on_mac() then toolbox_decoded(path, rate, channels) else sdl_decoded(path, rate, channels)
-	if decoded is text or not mp3_named(path) { return decoded }
+	if not mp3_named(path) { return decoded }
 	trimmed_to_length(decoded, mp3_tagged_length(read_bytes(path)))
 }
-mp3_named(path: text) as bool := path.ends_with(".mp3") or path.ends_with(".MP3")
+mp3_named(path: text): bool := path.ends_with(".mp3") or path.ends_with(".MP3")
 
-// An MP3's true length (decision mp3-true-length), as the page's decodeAudioData gives it: the Xing/Info frame's LAME
-// tag counts the frames and names the encoder's delay and padding, silence a decoder may hand out around the music.
-// [samples a channel, padding, the file's rate], [] for a file without such a tag
-MP3_RATES = [[11025, 12000, 8000], [0, 0, 0], [22050, 24000, 16000], [44100, 48000, 32000]]
-XING_FRAMES = 1
-XING_BYTES = 2
-XING_TOC = 4
-XING_QUALITY = 8
-LAME_GAPS_AT = 21
-XING_MARKS = [[88, 105, 110, 103], [73, 110, 102, 111]] // "Xing", "Info"
-ID3_MARK = [73, 68, 51] // "ID3"
-// where the first audio frame starts, after an ID3v2 tag
-id3_size(bytes: list) as int := {
-	if count(bytes) < 10 or bytes[0 ..< 3] != ID3_MARK { return 0 }
+# An MP3's true length (decision mp3-true-length), as the page's decodeAudioData gives it: the Xing/Info frame's LAME
+# tag counts the frames and names the encoder's delay and padding, silence a decoder may hand out around the music.
+# [samples a channel, padding, the file's rate], [] for a file without such a tag
+MP3_RATES := [[11025, 12000, 8000], [0, 0, 0], [22050, 24000, 16000], [44100, 48000, 32000]]
+XING_FRAMES := 1
+XING_BYTES := 2
+XING_TOC := 4
+XING_QUALITY := 8
+LAME_GAPS_AT := 21
+XING_MARKS := [[88, 105, 110, 103], [73, 110, 102, 111]] # "Xing", "Info"
+ID3_MARK := [73, 68, 51] # "ID3"
+# where the first audio frame starts, after an ID3v2 tag
+id3_size(bytes: list<int>): int := {
+	if #bytes < 10 or bytes[0 ..< 3] != ID3_MARK { return 0 }
 	tag = 0
-	for at in 6 ..< 10 { tag = (tag << 7) + both_bits(bytes[at], 0x7F) }
-	10 + tag + (if both_bits(bytes[5], 0x10) != 0 then 10 else 0)
+	for at in 6 ..< 10 { tag = (tag << 7) + (bytes[at] & 0x7F) }
+	10 + tag + (if (bytes[5] & 0x10) != 0 then 10 else 0)
 }
-flag_bytes(flags: int, flag: int, size: int) as int := if both_bits(flags, flag) != 0 then size else 0
-mp3_tagged_length(bytes: list) as list := {
-	size = count(bytes)
+flag_bytes(flags: int, flag: int, size: int): int := if (flags & flag) != 0 then size else 0
+mp3_tagged_length(bytes: list<int>): list<int> := {
+	size = #bytes
 	frame = id3_size(bytes)
-	if frame + 4 > size or bytes[frame] != 0xFF or both_bits(bytes[frame + 1], 0xE6) != 0xE2 { return [] }
-	version = both_bits(shift_right(bytes[frame + 1], 3), 3)
-	rate_index = both_bits(shift_right(bytes[frame + 2], 2), 3)
-	mono = shift_right(bytes[frame + 3], 6) == 3
+	if frame + 4 > size or bytes[frame] != 0xFF or (bytes[frame + 1] & 0xE6) != 0xE2 { return [] }
+	version = (bytes[frame + 1] >>> 3) & 3
+	rate_index = (bytes[frame + 2] >>> 2) & 3
+	mono = (bytes[frame + 3] >>> 6) == 3
 	mpeg1 = version == 3
 	xing = frame + 4 + (if mpeg1 then (if mono then 17 else 32) else (if mono then 9 else 17))
-	if rate_index == 3 or xing + 12 > size or bytes[xing ..< xing + 4] not in XING_MARKS { return [] }
+	if rate_index == 3 or xing + 12 > size or not XING_MARKS.contains(bytes[xing ..< xing + 4]) { return [] }
 	flags = bytes_int(bytes[xing + 4 ..< xing + 8])
 	lame = xing + 8 + flag_bytes(flags, XING_FRAMES, 4) + flag_bytes(flags, XING_BYTES, 4) + flag_bytes(flags, XING_TOC, 100) + flag_bytes(flags, XING_QUALITY, 4)
-	if both_bits(flags, XING_FRAMES) == 0 or lame + LAME_GAPS_AT + 3 > size { return [] }
+	if (flags & XING_FRAMES) == 0 or lame + LAME_GAPS_AT + 3 > size { return [] }
 	gaps = lame + LAME_GAPS_AT
-	delay = (bytes[gaps] << 4) + shift_right(bytes[gaps + 1], 4)
-	padding = (both_bits(bytes[gaps + 1], 0x0F) << 8) + bytes[gaps + 2]
+	delay = (bytes[gaps] << 4) + (bytes[gaps + 1] >>> 4)
+	padding = ((bytes[gaps + 1] & 0x0F) << 8) + bytes[gaps + 2]
 	samples = bytes_int(bytes[xing + 8 ..< xing + 12]) * (if mpeg1 then 1152 else 576)
 	if samples <= delay + padding { return [] }
 	[samples - delay - padding, padding, MP3_RATES[version][rate_index]]
 }
-// the decoded frames cut to the tagged length: whatever the decoder gave before the music off the front, the padding
-// off the end; as decoded when it gave no more than that
-trimmed_to_length(decoded: list, tagged: list) as list := {
-	if count(tagged) == 0 { return decoded }
-	channels = decoded[1]
-	frame_count = (count(decoded) - 2) /! channels
-	scale = decoded[0] / (tagged[2] as float)
+# the decoded frames cut to the tagged length: whatever the decoder gave before the music off the front, the padding
+# off the end; as decoded when it gave no more than that
+trimmed_to_length(decoded: Decoded, tagged: list<int>): Decoded := {
+	if #tagged == 0 { return decoded }
+	channels = decoded.channels
+	frame_count = #decoded.values ÷ channels
+	scale = decoded.rate / (tagged[2] as float)
 	kept = round(tagged[0] * scale) as int
 	tail = round(tagged[1] * scale) as int
 	if kept + tail > frame_count { return decoded }
-	start = 2 + (frame_count - kept - tail) * channels
-	[decoded[0], channels] + decoded[start ..< start + kept * channels]
+	start = (frame_count - kept - tail) * channels
+	Decoded(decoded.rate, channels, decoded.values[start ..< start + kept * channels])
 }
-// the values of `count` 16-bit samples in C memory
-values_at(samples, count: int) as list := [field_i16(samples, SAMPLE_BYTES * at) for at in 0 ..< count]
-// [rate, channels, then the values of the chunks read, one after another]
-decoded_of(rate: int, channels: int, chunks: list) as list := [rate, channels] + [value for values in chunks for value in values]
-// u32 fields of a C struct set, each [offset, value]
-fields_set(memory, fields: list) := {
+# the values of `count` 16-bit samples in C memory
+values_at(samples: int, count: int): list<int> := [field_i16(samples, SAMPLE_BYTES * at) for at in 0 ..< count]
+# the values of the chunks read, one after another
+decoded_of(rate: int, channels: int, chunks: list<list<int>>): Decoded := Decoded(rate, channels, [value for values in chunks for value in values])
+# u32 fields of a C struct set, each [offset, value]
+fields_set(memory: int, fields: list<list<int>>) := {
 	for field in fields { set_field_i32(memory, field[0], field[1]) }
 }
 
-// AudioToolbox's ExtAudioFile: the file's format read, the client's set to 16-bit samples at the rate and channels
-// asked (the file's own for 0), read in chunks; it converts, and an MP3's encoder delay and padding are left out
+# AudioToolbox's ExtAudioFile: the file's format read, the client's set to 16-bit samples at the rate and channels
+# asked (the file's own for 0), read in chunks; it converts, and an MP3's encoder delay and padding are left out
 CFURLCreateFromFileSystemRepresentation(allocator: handle, path: text, length: i64, folder: bool): handle from 'CoreFoundation'
 ExtAudioFileOpenURL(url: handle, file: out): handle from 'AudioToolbox'
 ExtAudioFileGetProperty(file: handle, property: i32, size: handle, value: handle): i32 from 'AudioToolbox'
 ExtAudioFileSetProperty(file: handle, property: i32, size: i32, value: handle): i32 from 'AudioToolbox'
 ExtAudioFileRead(file: handle, frames: handle, buffers: handle): i32 from 'AudioToolbox'
 ExtAudioFileDispose(file: handle): i32 from 'AudioToolbox'
-FILE_DATA_FORMAT = 0x66666D74 // 'ffmt'
-CLIENT_DATA_FORMAT = 0x63666D74 // 'cfmt'
-LINEAR_PCM = 0x6C70636D // 'lpcm'
-SIGNED_PACKED = 12 // kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked
-// AudioStreamBasicDescription: the rate an f64, then u32 fields
-FORMAT_BYTES = 40
-FORMAT_RATE_AT = 0
-FORMAT_ID_AT = 8
-FORMAT_FLAGS_AT = 12
-FORMAT_PACKET_BYTES_AT = 16
-FORMAT_PACKET_FRAMES_AT = 20
-FORMAT_FRAME_BYTES_AT = 24
-FORMAT_CHANNELS_AT = 28
-FORMAT_BITS_AT = 32
-// AudioBufferList of one AudioBuffer: their count, then the buffer's channels, size and data
-BUFFER_LIST_BYTES = 24
-BUFFER_COUNT_AT = 0
-BUFFER_CHANNELS_AT = 8
-BUFFER_SIZE_AT = 12
-BUFFER_DATA_AT = 16
-toolbox_decoded(path: text, rate: int, channels: int) as any := {
+FILE_DATA_FORMAT := 0x66666D74 # 'ffmt'
+CLIENT_DATA_FORMAT := 0x63666D74 # 'cfmt'
+LINEAR_PCM := 0x6C70636D # 'lpcm'
+SIGNED_PACKED := 12 # kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked
+# AudioStreamBasicDescription: the rate an f64, then u32 fields
+FORMAT_BYTES := 40
+FORMAT_RATE_AT := 0
+FORMAT_ID_AT := 8
+FORMAT_FLAGS_AT := 12
+FORMAT_PACKET_BYTES_AT := 16
+FORMAT_PACKET_FRAMES_AT := 20
+FORMAT_FRAME_BYTES_AT := 24
+FORMAT_CHANNELS_AT := 28
+FORMAT_BITS_AT := 32
+# AudioBufferList of one AudioBuffer: their count, then the buffer's channels, size and data
+BUFFER_LIST_BYTES := 24
+BUFFER_COUNT_AT := 0
+BUFFER_CHANNELS_AT := 8
+BUFFER_SIZE_AT := 12
+BUFFER_DATA_AT := 16
+toolbox_decoded(path: text, rate: int, channels: int): Decoded := {
 	url = CFURLCreateFromFileSystemRepresentation(0, path, strlen(path), no)
 	file = ExtAudioFileOpenURL(url)
 	CFRelease(url)
-	if file == 0 { return path + ": not decoded, AudioToolbox reads wav, mp3, flac, aac and m4a" }
+	if file == 0 { raise path + ": not decoded, AudioToolbox reads wav, mp3, flac, aac and m4a" }
 	format = calloc(1, FORMAT_BYTES)
 	size = calloc(1, POINTER_CELL_BYTES)
 	set_field_i32(size, 0, FORMAT_BYTES)
@@ -183,33 +195,32 @@ toolbox_decoded(path: text, rate: int, channels: int) as any := {
 	chunk = calloc(DECODE_CHUNK_FRAMES, frame_bytes)
 	buffers = calloc(1, BUFFER_LIST_BYTES)
 	frames_read = calloc(1, POINTER_CELL_BYTES)
-	chunks = []
+	chunks: list<list<int>> = []
 	read = DECODE_CHUNK_FRAMES
 	while read > 0 {
 		fields_set(buffers, [[BUFFER_COUNT_AT, 1], [BUFFER_CHANNELS_AT, channels], [BUFFER_SIZE_AT, DECODE_CHUNK_FRAMES * frame_bytes]])
 		set_field_pointer(buffers, BUFFER_DATA_AT, chunk)
 		set_field_i32(frames_read, 0, DECODE_CHUNK_FRAMES)
 		read = if ExtAudioFileRead(file, frames_read, buffers) == 0 then field_u32(frames_read, 0) else 0
-		chunks += [values_at(chunk, read * channels)]
+		chunks.add(values_at(chunk, read * channels))
 	}
 	ExtAudioFileDispose(file)
 	for memory in [format, size, chunk, buffers, frames_read] { free(memory) }
 	decoded_of(rate, channels, chunks)
 }
 
-// elsewhere: a WAV by SDL3 (any of its sample formats, made 16-bit), an MP3 by libmpg123, both at the file's own rate
-// and channels, then made the rate and channels asked
-sdl_decoded(path: text, rate: int, channels: int) as any := {
+# elsewhere: a WAV by SDL3 (any of its sample formats, made 16-bit), an MP3 by libmpg123, both at the file's own rate
+# and channels, then made the rate and channels asked
+sdl_decoded(path: text, rate: int, channels: int): Decoded := {
 	own = if mp3_named(path) then mpg123_decoded(path) else wav_decoded(path)
-	if own is text { return own }
-	converted(own, if rate > 0 then rate else own[0], if channels > 0 then channels else own[1])
+	converted(own, if rate > 0 then rate else own.rate, if channels > 0 then channels else own.channels)
 }
-wav_decoded(path: text) as any := {
-	if library_function("SDL3", "SDL_LoadWAV") == 0 { return path + ": decoding a WAV needs SDL3 (apt install libsdl3-0)" }
+wav_decoded(path: text): Decoded := {
+	if library_function("SDL3", "SDL_LoadWAV") == 0 { raise path + ": decoding a WAV needs SDL3 (apt install libsdl3-0)" }
 	spec = calloc(1, SDL_AUDIO_SPEC_BYTES)
 	samples = calloc(1, POINTER_CELL_BYTES)
 	size = calloc(1, POINTER_CELL_BYTES)
-	if not SDL_LoadWAV(path, spec, samples, size) { return path + ": not decoded, " + SDL_GetError() }
+	if not SDL_LoadWAV(path, spec, samples, size) { raise path + ": not decoded, " + SDL_GetError() }
 	rate = field_i32(spec, SDL_AUDIO_RATE_AT)
 	channels = field_i32(spec, SDL_AUDIO_CHANNELS_AT)
 	wanted = calloc(1, SDL_AUDIO_SPEC_BYTES)
@@ -217,11 +228,11 @@ wav_decoded(path: text) as any := {
 	made = calloc(1, POINTER_CELL_BYTES)
 	made_size = calloc(1, POINTER_CELL_BYTES)
 	SDL_ConvertAudioSamples(spec, field_pointer(samples, 0), field_i32(size, 0), wanted, made, made_size)
-	values = values_at(field_pointer(made, 0), field_i32(made_size, 0) /! SAMPLE_BYTES)
+	values = values_at(field_pointer(made, 0), field_i32(made_size, 0) ÷ SAMPLE_BYTES)
 	SDL_free(field_pointer(samples, 0))
 	SDL_free(field_pointer(made, 0))
 	for memory in [spec, samples, size, wanted, made, made_size] { free(memory) }
-	[rate, channels] + values
+	Decoded(rate, channels, values)
 }
 mpg123_new(decoder: handle, error: handle): handle from 'mpg123'
 mpg123_open(decoder: handle, path: text): i32 from 'mpg123'
@@ -231,12 +242,12 @@ mpg123_format(decoder: handle, rate: i64, channels: i32, encodings: i32): i32 fr
 mpg123_read(decoder: handle, into: handle, size: i64, done: handle): i32 from 'mpg123'
 mpg123_close(decoder: handle): i32 from 'mpg123'
 mpg123_delete(decoder: handle): void from 'mpg123'
-MPG123_OK = 0
-MPG123_ENC_SIGNED_16 = 0xD0
-mpg123_decoded(path: text) as any := {
-	if library_function("mpg123", "mpg123_new") == 0 { return path + ": decoding an MP3 needs libmpg123 (apt install libmpg123-0, brew install mpg123)" }
+MPG123_OK := 0
+MPG123_ENC_SIGNED_16 := 0xD0
+mpg123_decoded(path: text): Decoded := {
+	if library_function("mpg123", "mpg123_new") == 0 { raise path + ": decoding an MP3 needs libmpg123 (apt install libmpg123-0, brew install mpg123)" }
 	decoder = mpg123_new(0, 0)
-	if mpg123_open(decoder, path) != MPG123_OK { return path + ": not decoded by libmpg123" }
+	if mpg123_open(decoder, path) != MPG123_OK { raise path + ": not decoded by libmpg123" }
 	rate_cell = calloc(1, POINTER_CELL_BYTES)
 	channels_cell = calloc(1, POINTER_CELL_BYTES)
 	encoding = calloc(1, POINTER_CELL_BYTES)
@@ -248,48 +259,48 @@ mpg123_decoded(path: text) as any := {
 	chunk_bytes = DECODE_CHUNK_FRAMES * SAMPLE_BYTES * channels
 	chunk = calloc(1, chunk_bytes)
 	done = calloc(1, POINTER_CELL_BYTES)
-	chunks = []
+	chunks: list<list<int>> = []
 	read = chunk_bytes
 	while read > 0 {
 		mpg123_read(decoder, chunk, chunk_bytes, done)
 		read = field_i64(done, 0)
-		chunks += [values_at(chunk, read /! SAMPLE_BYTES)]
+		chunks.add(values_at(chunk, read ÷ SAMPLE_BYTES))
 	}
 	mpg123_close(decoder)
 	mpg123_delete(decoder)
 	for memory in [rate_cell, channels_cell, encoding, chunk, done] { free(memory) }
 	decoded_of(rate, channels, chunks)
 }
-// [rate, channels, values…] at another rate and channel count: each frame's channels averaged into one, or the first
-// repeated into more, then resampled linearly (as the playground's host-sound.js remixed and resampled)
-converted(decoded: list, rate: int, channels: int) as list := {
-	own_rate = decoded[0]
-	own_channels = decoded[1]
-	values = decoded[2 ..]
-	frame_count = count(values) /! own_channels
+# a sound at another rate and channel count: each frame's channels averaged into one, or the first repeated into more,
+# then resampled linearly (as the playground's host-sound.js remixed and resampled)
+converted(decoded: Decoded, rate: int, channels: int): Decoded := {
+	own_rate = decoded.rate
+	own_channels = decoded.channels
+	values = decoded.values
+	frame_count = #values ÷ own_channels
 	mixed = if channels == own_channels then values else [frame_mixed(values, frame * own_channels, own_channels, channels, channel) for frame in 0 ..< frame_count for channel in 0 ..< channels]
-	if rate == own_rate { return [rate, channels] + mixed }
-	made = frame_count * rate /! own_rate
-	[rate, channels] + [resampled_at(mixed, frame * own_rate / (rate as float), channels, channel, frame_count - 1) for frame in 0 ..< made for channel in 0 ..< channels]
+	if rate == own_rate { return Decoded(rate, channels, mixed) }
+	made = frame_count * rate ÷ own_rate
+	Decoded(rate, channels, [resampled_at(mixed, frame * own_rate / (rate as float), channels, channel, frame_count - 1) for frame in 0 ..< made for channel in 0 ..< channels])
 }
-// one value of a frame remixed: the frame's channels averaged into one, else its channel, the last one repeated
-frame_mixed(values: list, start: int, own_channels: int, channels: int, channel: int) as int := {
+# one value of a frame remixed: the frame's channels averaged into one, else its channel, the last one repeated
+frame_mixed(values: list<int>, start: int, own_channels: int, channels: int, channel: int): int := {
 	if channels > 1 { return values[start + min(channel, own_channels - 1)] }
 	total = 0
 	for at in 0 ..< own_channels { total += values[start + at] }
 	round(total / own_channels) as int
 }
-// a channel's value at a place between two frames, weighed by how near each is
-resampled_at(values: list, place: float, channels: int, channel: int, last: int) as int := {
+# a channel's value at a place between two frames, weighed by how near each is
+resampled_at(values: list<int>, place: float, channels: int, channel: int, last: int): int := {
 	before = floor(place) as int
 	share = place - before
 	round(values[min(before, last) * channels + channel] * (1 - share) + values[min(before + 1, last) * channels + channel] * share) as int
 }
 
-// MIDI out (card midi-output-native, decision midi-native): the bytes of one message to the output named (the first
-// for ""), else to warp's own virtual source "warp" that a synth app listens to: 0 sent, MIDI_NO_OUTPUT for no output of
-// that name, MIDI_FAILED, MIDI_UNSUPPORTED where no MIDI is built in yet (Linux: ALSA to come). A quiet run sends
-// nothing, as it hears nothing. host_midi_ports: the devices' names, one a line, ø where no MIDI is built in
+# MIDI out (card midi-output-native, decision midi-native): the bytes of one message to the output named (the first
+# for ""), else to wap's own virtual source "wap" that a synth app listens to: 0 sent, MIDI_NO_OUTPUT for no output of
+# that name, MIDI_FAILED, MIDI_UNSUPPORTED where no MIDI is built in yet (Linux: ALSA to come). A quiet run sends
+# nothing, as it hears nothing. host_midi_ports: the devices' names, one a line, ø where no MIDI is built in
 MIDIClientCreate(name: handle, notify: handle, context: handle, client: out): i64 from 'CoreMIDI'
 MIDIOutputPortCreate(client: u32, name: handle, port: out): i64 from 'CoreMIDI'
 MIDISourceCreate(client: u32, name: handle, source: out): i64 from 'CoreMIDI'
@@ -302,20 +313,20 @@ MIDIPacketListInit(packets: handle): handle from 'CoreMIDI'
 MIDIPacketListAdd(packets: handle, size: i64, packet: handle, time: i64, length: i64, data: bytes): handle from 'CoreMIDI'
 MIDISend(port: u32, destination: u32, packets: handle): i32 from 'CoreMIDI'
 MIDIReceived(source: u32, packets: handle): i32 from 'CoreMIDI'
-MIDI_FAILED = -1
-MIDI_NO_OUTPUT = -2
-MIDI_UNSUPPORTED = -3
-MIDI_PACKETS_BYTES = 1024
+MIDI_FAILED := -1
+MIDI_NO_OUTPUT := -2
+MIDI_UNSUPPORTED := -3
+MIDI_PACKETS_BYTES := 1024
 global midi_client = 0
 global midi_output_port = 0
 global midi_virtual_source = 0
 midi_started() := {
-	if midi_client == 0 { midi_client = MIDIClientCreate(cf_text("warp"), 0, 0) }
-	if midi_client != 0 and midi_output_port == 0 { midi_output_port = MIDIOutputPortCreate(midi_client, cf_text("warp out")) }
+	if midi_client == 0 { midi_client = MIDIClientCreate(cf_text("wap"), 0, 0) }
+	if midi_client != 0 and midi_output_port == 0 { midi_output_port = MIDIOutputPortCreate(midi_client, cf_text("wap out")) }
 	midi_output_port != 0
 }
-// an endpoint's name as the system shows it (kMIDIPropertyDisplayName, a CFString CoreMIDI keeps)
-endpoint_name(endpoint: int) as text := {
+# an endpoint's name as the system shows it (kMIDIPropertyDisplayName, a CFString CoreMIDI keeps)
+endpoint_name(endpoint: int): text := {
 	property = field_pointer(library_function("CoreMIDI", "kMIDIPropertyDisplayName"), 0)
 	name = MIDIObjectGetStringProperty(endpoint, property)
 	if name == 0 { return "" }
@@ -323,33 +334,33 @@ endpoint_name(endpoint: int) as text := {
 	CFRelease(name)
 	shown
 }
-output_named(port: text) as int := {
+output_named(port: text): int := {
 	for i in 0 ..< MIDIGetNumberOfDestinations() {
 		output = MIDIGetDestination(i)
 		if port == "" or endpoint_name(output) == port { return output }
 	}
 	0
 }
-host_midi_sent(port, message) as int := {
+host_midi_sent(port: text, message: list<int>): int := {
 	if not on_mac() { return MIDI_UNSUPPORTED }
 	if muted() { return 0 }
 	if not midi_started() { return MIDI_FAILED }
 	packets = calloc(1, MIDI_PACKETS_BYTES)
-	MIDIPacketListAdd(packets, MIDI_PACKETS_BYTES, MIDIPacketListInit(packets), 0, count(message), message)
-	output = output_named(text(port))
-	sent = midi_packets_sent(text(port), output, packets)
+	MIDIPacketListAdd(packets, MIDI_PACKETS_BYTES, MIDIPacketListInit(packets), 0, #message, message)
+	output = output_named(port)
+	sent = midi_packets_sent(port, output, packets)
 	free(packets)
 	sent
 }
-midi_packets_sent(port: text, output: int, packets) as int := {
+midi_packets_sent(port: text, output: int, packets: int): int := {
 	if output != 0 { return if MIDISend(midi_output_port, output, packets) == 0 then 0 else MIDI_FAILED }
 	if port != "" { return MIDI_NO_OUTPUT }
-	if midi_virtual_source == 0 { midi_virtual_source = MIDISourceCreate(midi_client, cf_text("warp")) }
+	if midi_virtual_source == 0 { midi_virtual_source = MIDISourceCreate(midi_client, cf_text("wap")) }
 	if midi_virtual_source == 0 { return MIDI_FAILED }
 	if MIDIReceived(midi_virtual_source, packets) == 0 then 0 else MIDI_FAILED
 }
-// the inputs' names (inputs: 1) or the outputs', one a line; ø where no MIDI is built in
-host_midi_ports(inputs: int) as any := {
+# the inputs' names (inputs: 1) or the outputs', one a line; ø where no MIDI is built in
+host_midi_ports(inputs: int): text? := {
 	if not on_mac() { return ø }
 	names = if inputs == 1 then [endpoint_name(MIDIGetSource(i)) for i in 0 ..< MIDIGetNumberOfSources()] else [endpoint_name(MIDIGetDestination(i)) for i in 0 ..< MIDIGetNumberOfDestinations()]
 	names.join("\n")
