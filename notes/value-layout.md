@@ -65,3 +65,95 @@ node{
     type=Integer
 }
 ```
+
+## internal and user types (from wiki/type.md)
+
+Wap and wasp have internal types which should mostly be isolated from users,  
+as well as exposed types which should be the ones used by developers:
+
+### user types
+
+* [[number]]
+* [[string]]
+* [[any]] object, implicit default type 
+* [[list]]s and [[map]]s often don't need their type exposed: `x=[1 2 3];y={a:1 b:2 c:3}`  
+
+Having [[list]]s and [[map]]s as universal builtin types with no explicit type may come as surprise, but this is one of them main premises if not [[inventions]] of wasp.
+
+How can any, list and map be the default type at the same time?  
+Any node can have arbitrary children and thus act as a list.
+Any node can have arbitrary properties and thus act as a map.
+Any list can contain pairs and thus act as a map.
+In fact map are just lists of pairs under the hood.
+
+
+While every node is any node, there are specializations:
+
+### Internal types
+
+A node has these different **internal primitive** types(kinds),  
+all aligning to 64 bits in the form of [[smart pointer]]s:
+
+* [[nil]]s : Null types
+* [[object]]s : {…} [[block]] [[data]]  with children denoted by {}, closures
+* [[group]]s : (…) meta params parameter attributes lists denoted by ()
+* [[pattern]]s : […] selectors matches, annotations! [public export extern] function mul(x,y){x*y}
+* [[string]]s
+* [[long]]s : also for storing ints and bools 
+* [[real]]s : for storing floats and doubles
+* [[pointer]]s : internal wasm [[pointer]]
+
+Adding children to primitive types is allowed yet usually discouraged.
+Since mostly primitive are held by [[reference]]s (in [[variable]] [[pair]]s), this is a non-issue as
+properties can be added to references freely:
+<!-- dropped: meta on plain values
+```text
+x=4
+x.even=true // meta information
+```  
+-->
+This will internally be represented as (psydocode:)
+
+```text
+# pseudocode (not runnable): internal node shape
+{node name="x" value=4 kind=long children=[{even=true}]}
+```
+
+[[NodeTypes.h]] and [[NodeValues.h]]
+To avoid name clashing, all type names end with s:
+
+# Internal types
+
+There are three types of type in Wap:
+wasm types  (i32u etc)
+wasp types  ([[kind]] of [[node]]) number, strings etc primitives Wap types (classes of [[node]] [[object]]s) Date,
+Time, etc
+
+## Internal [[value]] kind
+
+The internal value [[type]] known as node “kind” corresponds losely with the node “type” which is a pointer to another
+node.  
+Example pseudocode:
+
+```text
+# pseudocode (not runnable): internal value kind vs type pointer
+node{
+    value.longy=1
+    kind=longs,
+    type=BoolType
+}
+node{
+    value.longy=1
+    kind=longs,
+    type=Integer
+}
+```
+
+Hereby [[enum]]s and other complex data with the same primitive value can still be differentiated unless the emitted
+wasm is optimized.
+
+### Typed [[list]]s / arrays
+Internal representation 
+Typed arrays have Node kind `Type::arrays` and any Node type.
+
+In object space types are just references to [[Node]]
