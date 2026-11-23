@@ -45,8 +45,9 @@ print(text(f()))')" "0"
 check "sqlite3 runs a query: a row, its int and its text" "$(ran sqlite_page 'use sqlite3
 db = sqlite3_open(":memory:")
 stmt = sqlite3_prepare_v2(db, "select 1+2, '"'"'wap'"'"'", -1)
-print(text(sqlite3_step(stmt)) + " " + text(sqlite3_column_int(stmt, 0)) + " " + sqlite3_column_text(stmt, 1))
-sqlite3_finalize(stmt); sqlite3_close(db)')" "100 3 wap"
+row = text(sqlite3_step(stmt)) + " " + text(sqlite3_column_int(stmt, 0)) + " " + sqlite3_column_text(stmt, 1)
+sqlite3_finalize(stmt); sqlite3_close(db)
+print(row)')" "100 3 wap"
 check "a number that is no handle of this run is an error" "$(ran no_handle 'use sqlite3
 sqlite3_step(42)' 2>&1 | grep -c 'no handle of this run')" "1"
 check "qsort calls back a lambda through c_callback" "$(ran qsort_page 'use c
@@ -56,4 +57,15 @@ m = calloc(4, 8)
 set_field_i64(m, 0, 3); set_field_i64(m, 8, 1); set_field_i64(m, 16, 4); set_field_i64(m, 24, 2)
 qsort(m, 4, 8, c_callback((a, b) => field_i64(a, 0) - field_i64(b, 0), ["handle", "handle"]))
 print(text([0, 1, 2, 3].map(i => field_i64(m, 8 * i))))')" "[1, 2, 3, 4]"
+# an unsigned int and a text the caller owns cross (wap/extensions/c/foreign.wap)
+check "an unsigned int and an owned text cross" "$(ran c_words "strdup(s: text): owned_text from 'c'
+htonl(n: u32): u32 from 'c'
+print(strdup(\"wap\") + \" \" + text(htonl(4278190080)))")" "wap 255"
+# a struct given by value, `bytes<40>` (wgpu's callback infos): C reads its copy, and the caller's stays as it was
+printf '%s\n' '#include <stdint.h>' '#include <stdlib.h>' 'struct s40 { int64_t a[5]; };' 'int64_t sum40(struct s40 s) { s.a[0] = 0; return s.a[1] + s.a[2] + s.a[3] + s.a[4]; }' 'int64_t first40(struct s40 s) { return s.a[0]; }' 'struct s40* made40(void) { struct s40* s = malloc(sizeof *s); for (int i = 0; i < 5; i++) s->a[i] = i + 1; return s; }' >"$stage/s40.c" && cc -shared -o "$stage/libs40.dylib" "$stage/s40.c"
+check "a C struct given by value" "$(ran struct_by_value "sum40(s: bytes<40>): i64 from '$stage/libs40.dylib'
+first40(s: bytes<40>): i64 from '$stage/libs40.dylib'
+made40(): handle from '$stage/libs40.dylib'
+m = made40()
+print(text(sum40(m)) + \" \" + text(first40(m)))")" "14 1"
 exit $((failures > 0))

@@ -49,7 +49,7 @@ warp-host-fixer; this file is the inventory.
 - `import cbrt from "m"`, `import (getenv, strlen) from "c"` (warp's form; parked 2026-11-21 by warp-interviewer, samples
   write `use m`, `use c`). If wanted: declarations.wap phrase_part reads `use <names> from <library>` as `use <library>`
   (about 3 lines) and refuses a named function the module does not declare, naming the module to declare it in (about
-  4). samples/native/c_calls.warp keeps the form: warp's @primitive mode reads no `use c`.
+  4). samples/native/c_calls.wap keeps the form: warp's @primitive mode reads no `use c`.
 
 ## Who needs what
 - wap's tests: C functions of 'c' and 'm' only.

@@ -11,25 +11,23 @@ use "regex.wap"
 
 # --- values
 
-json_kind(x: any): text := {
-	if x == ø then "null"
-	else if x is bool then "boolean"
-	else if x is int or x is float then "number"
-	else if x is text then "string"
-	else if is_list(x) then "array"
-	else if is_map(x) then "object"
-	else "non-JSON value"
+# a value's kind, spelled as a schema's "type" names it; Integer is a schema's name for a whole Number
+enum JsonKind { Null = "null", Boolean = "boolean", Number = "number", String = "string", Array = "array", Object = "object", Integer = "integer", Foreign = "non-JSON value" }
+json_kind(x: any): JsonKind := {
+	if x == ø then JsonKind.Null
+	else if x is bool then JsonKind.Boolean
+	else if x is int or x is float then JsonKind.Number
+	else if x is text then JsonKind.String
+	else if is_list(x) then JsonKind.Array
+	else if is_map(x) then JsonKind.Object
+	else JsonKind.Foreign
 }
 number_of(x: any): float := if x is int then float(x as int) else x as float
 is_whole(x: any): bool := x is int or (x is float and floor(x as float) == x as float)
 # JSON's equality: numbers by value, objects whatever their keys' order
 json_equal(a: any, b: any): bool := {
 	kind = json_kind(a)
-	if kind != json_kind(b) then no
-	else if kind == "array" then arrays_equal(as_data_list(a), as_data_list(b))
-	else if kind == "object" then objects_equal(as_data_map(a), as_data_map(b))
-	else if kind == "number" then number_of(a) == number_of(b)
-	else a == b
+	kind == json_kind(b) and match kind { Array: arrays_equal(as_data_list(a), as_data_list(b)); Object: objects_equal(as_data_map(a), as_data_map(b)); Number: number_of(a) == number_of(b); other: a == b }
 }
 arrays_equal(a: list<any>, b: list<any>): bool := {
 	if #a != #b { return no }
@@ -54,7 +52,7 @@ pointer_of(tokens: list<text>): text := tokens.map(token => "/" + token.replace(
 # written as a number or as -
 array_index(token: text, size: int, past_end: bool, pointer: text): int := {
 	if token == "-" and past_end { return size }
-	digits = token != "" and token.codepoints.all(c => c >= '0' and c <= '9') and not (#token > 1 and token.starts_with("0"))
+	digits = is_digits(token) and not (#token > 1 and token.starts_with("0"))
 	if not digits { raise "json pointer ${pointer}: ${token} is no array index" }
 	n = int(token)
 	if n > size or (n == size and not past_end) { raise "json pointer ${pointer}: index ${token} is past the end of an array of ${size}" }
@@ -79,11 +77,13 @@ json_pointer_has(doc: any, pointer: text): bool := try {
 
 # --- JSON Patch
 
-# a change at the place the tokens name: "add", "remove" or "replace" value
-class Change { tokens: list<text>, how: text, value: any, pointer: text }
+# a JSON Patch operation, spelled as its "op" member
+enum PatchOp { Add = "add", Remove = "remove", Replace = "replace", Test = "test", Copy = "copy", Move = "move" }
+# a change at the place the tokens name: Add, Remove or Replace value
+class Change { tokens: list<text>, how: PatchOp, value: any, pointer: text }
 # doc with the change made from the token at depth on, copied along the way only
 changed(doc: any, change: Change, depth: int): any := {
-	if depth == #change.tokens then (if change.how == "remove" then ø else change.value)
+	if depth == #change.tokens then (if change.how == PatchOp.Remove then ø else change.value)
 	else if is_map(doc) then object_changed(as_data_map(doc), change, depth)
 	else if is_list(doc) then array_changed(as_data_list(doc), change, depth)
 	else raise "json pointer ${change.pointer}: ${change.tokens[depth]} reaches into a ${json_kind(doc)}"
@@ -91,19 +91,19 @@ changed(doc: any, change: Change, depth: int): any := {
 object_changed(doc: map<text, any>, change: Change, depth: int): map<text, any> := {
 	token = change.tokens[depth]
 	final = depth + 1 == #change.tokens
-	if not doc.has(token) and not (final and change.how == "add") { raise "json pointer ${change.pointer}: no member ${token}" }
+	if not doc.has(token) and not (final and change.how == PatchOp.Add) { raise "json pointer ${change.pointer}: no member ${token}" }
 	out = merge({}, doc)
-	if final and change.how == "remove" { out.remove(token) }
+	if final and change.how == PatchOp.Remove { out.remove(token) }
 	else if final { out[token] = change.value }
 	else { out[token] = changed(doc[token], change, depth + 1) }
 	out
 }
 array_changed(doc: list<any>, change: Change, depth: int): list<any> := {
 	final = depth + 1 == #change.tokens
-	i = array_index(change.tokens[depth], #doc, final and change.how == "add", change.pointer)
+	i = array_index(change.tokens[depth], #doc, final and change.how == PatchOp.Add, change.pointer)
 	added: list<any> = [change.value]
-	if final and change.how == "add" { return doc[0:i] + added + doc[i:] }
-	if final and change.how == "remove" { return doc[0:i] + doc[i + 1:] }
+	if final and change.how == PatchOp.Add { return doc[0:i] + added + doc[i:] }
+	if final and change.how == PatchOp.Remove { return doc[0:i] + doc[i + 1:] }
 	out = doc[0:]
 	out[i] = if final then change.value else changed(doc[i], change, depth + 1)
 	out
@@ -115,23 +115,31 @@ member(op: map<text, any>, name: text): any := {
 patch_step(doc: any, step: any): any := {
 	if not is_map(step) { raise "the operation is no JSON object but a JSON ${json_kind(step)}" }
 	op = as_data_map(step)
-	verb = "${member(op, "op")}"
+	verb = "${member(op, "op")}" as PatchOp
 	target = "${member(op, "path")}"
 	tokens = pointer_tokens(target)
-	if verb == "add" or verb == "replace" { return changed(doc, Change(tokens, verb, member(op, "value"), target), 0) }
-	if verb == "remove" { return changed(doc, Change(tokens, verb, ø, target), 0) }
-	if verb == "test" {
-		found = walked(doc, tokens, target)
-		if not json_equal(found, member(op, "value")) { raise "the value at ${target} is ${show(found)}, not ${show(op["value"])}" }
-		return doc
+	placed = (here: any, how: PatchOp, value: any) => changed(here, Change(tokens, how, value, target), 0)
+	# TODO `Add or Replace:` once a case key lists alternatives (test_switch_wanted.wap)
+	match verb {
+		Add: placed(doc, verb, member(op, "value"))
+		Replace: placed(doc, verb, member(op, "value"))
+		Remove: placed(doc, verb, ø)
+		Test: tested(doc, tokens, target, member(op, "value"))
+		Copy: placed(doc, PatchOp.Add, walked(doc, pointer_tokens(from_of(op)), from_of(op)))
+		Move: moved(doc, tokens, target, from_of(op))
 	}
-	if verb != "copy" and verb != "move" { raise "op ${verb} is unknown" }
-	source = "${member(op, "from")}"
+}
+from_of(op: map<text, any>): text := "${member(op, "from")}"
+tested(doc: any, tokens: list<text>, target: text, wanted: any): any := {
+	found = walked(doc, tokens, target)
+	if not json_equal(found, wanted) { raise "the value at ${target} is ${show(found)}, not ${show(wanted)}" }
+	doc
+}
+moved(doc: any, tokens: list<text>, target: text, source: text): any := {
 	source_tokens = pointer_tokens(source)
 	value = walked(doc, source_tokens, source)
-	if verb == "copy" { return changed(doc, Change(tokens, "add", value, target), 0) }
 	if #tokens > #source_tokens and pointer_of(tokens.take(#source_tokens)) == source { raise "it moves ${source} into its own child ${target}" }
-	changed(changed(doc, Change(source_tokens, "remove", ø, source), 0), Change(tokens, "add", value, target), 0)
+	changed(changed(doc, Change(source_tokens, PatchOp.Remove, ø, source), 0), Change(tokens, PatchOp.Add, value, target), 0)
 }
 # where an operation points, for its error
 target_of(step: any): text := if is_map(step) and as_data_map(step).has("path") then " (${as_data_map(step)["path"]})" else ""
@@ -157,7 +165,7 @@ merge_patched(target: any, patch: any): any := {
 	for key in keys(changes) {
 		if changes[key] == ø { out.remove(key) }
 		else {
-			before = if out.has(key) then out[key] else ø
+			before = out.get(key)
 			out[key] = merge_patched(before, changes[key])
 		}
 	}
@@ -204,8 +212,8 @@ check_schema(x: any, s: map<text, any>, tokens: list<text>, v: Validation) := {
 		check_typed(x, s, tokens, v)
 	}
 }
-type_holds(x: any, kinds: any): bool := if is_list(kinds) then as_data_list(kinds).any(kind => kind_holds(x, "${kind}")) else kind_holds(x, "${kinds}")
-kind_holds(x: any, kind: text): bool := if kind == "integer" then is_whole(x) else json_kind(x) == kind
+type_holds(x: any, kinds: any): bool := if is_list(kinds) then as_data_list(kinds).any(kind => kind_holds(x, "${kind}" as JsonKind)) else kind_holds(x, "${kinds}" as JsonKind)
+kind_holds(x: any, kind: JsonKind): bool := if kind == JsonKind.Integer then is_whole(x) else json_kind(x) == kind
 types_text(kinds: any): text := if is_list(kinds) then as_data_list(kinds).map(kind => "${kind}").join(" or ") else "${kinds}"
 # the checks past the type
 check_typed(x: any, s: map<text, any>, tokens: list<text>, v: Validation) := {
@@ -229,24 +237,26 @@ check_typed(x: any, s: map<text, any>, tokens: list<text>, v: Validation) := {
 passing(x: any, schemas: any, tokens: list<text>, v: Validation): int := as_data_list(schemas).filter(part => errors_of(x, part, tokens, v.root) is empty).count
 # the limit a schema keyword sets, as a float
 limit(s: map<text, any>, keyword: text): float := number_of(s[keyword])
-# whether n breaks the schema's limit of that keyword
-NUMBER_LIMITS := [["minimum", "is less than the minimum"], ["maximum", "is more than the maximum"], ["exclusiveMinimum", "is not more than"], ["exclusiveMaximum", "is not less than"]]
-breaks(keyword: text, n: float, bound: float): bool := {
-	if keyword == "minimum" then n < bound
-	else if keyword == "maximum" then n > bound
-	else if keyword == "exclusiveMinimum" then n <= bound
-	else n >= bound
-}
+# a schema keyword limiting numbers: whether a number breaks its bound, and the error saying so
+class NumberLimit { keyword: text, breaks: (float, float) -> bool, message: text }
+NUMBER_LIMITS := [
+	NumberLimit("minimum", (n, bound) => n < bound, "is less than the minimum"),
+	NumberLimit("maximum", (n, bound) => n > bound, "is more than the maximum"),
+	NumberLimit("exclusiveMinimum", (n, bound) => n <= bound, "is not more than"),
+	NumberLimit("exclusiveMaximum", (n, bound) => n >= bound, "is not less than")
+]
 check_number(x: any, s: map<text, any>, tokens: list<text>, v: Validation) := {
 	n = number_of(x)
 	for rule in NUMBER_LIMITS {
-		if s.has(rule[0]) and breaks(rule[0], n, limit(s, rule[0])) { found(v, tokens, "${show(x)} ${rule[1]} ${show(s[rule[0]])}") }
+		if s.has(rule.keyword) and rule.breaks(n, limit(s, rule.keyword)) { found(v, tokens, "${show(x)} ${rule.message} ${show(s[rule.keyword])}") }
 	}
 	if s.has("multipleOf") and not is_multiple(n, limit(s, "multipleOf")) { found(v, tokens, "${show(x)} is not a multiple of ${show(s["multipleOf"])}") }
 }
+# how far a quotient may be off a whole number for a multiple, float steps not being exact
+MULTIPLE_TOLERANCE := 0.000000001
 is_multiple(n: float, step: float): bool := {
 	q = n / step
-	abs(q - floor(q + 0.5)) < 0.000000001
+	abs(q - floor(q + 0.5)) < MULTIPLE_TOLERANCE
 }
 # whether a count is below the keyword's limit, or above it
 below(size: int, s: map<text, any>, keyword: text): bool := s.has(keyword) and float(size) < limit(s, keyword)

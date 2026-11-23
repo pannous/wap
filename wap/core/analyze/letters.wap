@@ -159,6 +159,8 @@ bound_as(letter: Node, type: Node, bound: list<Binding>, s: TypingState) as list
 	# a letter bound to any, or to number, takes each value that boxes into it: a map as a map<text, any>'s value
 	if same_type(held, type) or reads_as(held, type, s.records) or boxed_fit(type, held) { return bound }
 	if has_unknowns(held) or has_unknowns(type) { return unified(held, type, bound, s) }
+	# a letter bound to a function type takes a function value of that type: `xs.add(a => f(a))`
+	if function_parts(held) != ø and function_value_parts(type) != ø { return unified(held, type, bound, s) }
 	# bound to a shape and to the type it narrows, the letter is that type: `[Call(…)] + inner` of a list<Node> adds
 	# two list<Node>s
 	if same_type(narrowed_type(type) ?? type, held) { return bound }
@@ -174,7 +176,7 @@ itself_bound(letter: Node, bound: list<Binding>) as list<Binding>? := if is_unkn
 # (wiki/conversion.md "a range is a list of its numbers"); ø for others
 read_type(given: Node?, wanted: Node?, records: Records) as Node? := {
 	if wanted == NODE_SYMBOL and given != ø and (text(given) in ATOM_TYPES or given != NODE_SYMBOL and bare_fit(given, ENUM_SYMBOL, records)) { return wanted }
-	if given == symbol(CHAR_TYPE) then TEXT_SYMBOL else if given == RANGE_SYMBOL then list_type(INT_SYMBOL) else ø
+	read_of(given)
 }
 # whether a value of the given type is read as one of the held type: an atom as a Node, a char as its text, a range as
 # a list
@@ -185,10 +187,19 @@ reads_as(held: Node, given: Node, records: Records) as bool := {
 # the letters bound with those a function value binds against a function type, [parameter types, result type]: its
 # function typed for the parameter types, its result the type's result; ø when it takes others or gives another
 function_value_bound(wanted: FunctionType, value: Node, bound: list<Binding>, s: TypingState) as list<Binding>? := {
-	parameters = wanted.parameters.map(type => type_substituted(type, bound))
+	# a letter only the value's written parameter types bind, `f: (A) -> B` given double_it(x: int), bound so first
+	own = written_parameters(value, #wanted.parameters, s)
+	known = (1 to #own).fold(bound, (held, at) => if own#at == ø then held else unified(wanted.parameters#at, own#at!, held, s) ?? held)
+	parameters = wanted.parameters.map(type => type_substituted(type, known))
 	if parameters.any(type => has_letters(type, s.records)) { return ø }
 	result = (value_function_typed(parameters, value, s) ?? return ø).result ?? return ø
-	unified(wanted.result, result, bound, s) ?? (if conversion(result, wanted.result, s) in STATIC_CONVERSIONS then bound else ø)
+	unified(wanted.result, result, known, s) ?? (if conversion(result, wanted.result, s) in STATIC_CONVERSIONS then known else ø)
+}
+# the parameter types a function value's definition writes, the last count of them (a function value's own takes its
+# value first), ø where one is untyped or holds a letter
+written_parameters(value: Node, count: int, s: TypingState) as list<Node?> := {
+	definition = definition_keyed(text((function_value_parts(value) ?? return [])#1), s) ?? return []
+	definition.parameters.drop(#definition.parameters - count).map(type => if type == ø or has_letters(type!, s.records) then ø else type)
 }
 # the function of a value of this type, fn<key, capture types…>, typed for these parameter types, a function value's
 # own one taking the value first; ø when its parameters take others
