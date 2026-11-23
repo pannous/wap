@@ -73,7 +73,6 @@ VALUE_TYPES := ["f32", "vec2f", "vec3f", "vec4f"]
 VALUE_ALIGNMENTS := [1, 2, 4, 4]
 VEC4F_BYTES := 16
 # WGSL's 16-bit float, a device feature (webgpu.h WGPUFeatureName_ShaderF16): an array<f16> holds two to a word
-HALF := "f16"
 HALF_BYTES := 2
 HALF_BITS := 16
 FEATURE_SHADER_F16 := 11
@@ -1202,9 +1201,8 @@ compute_dispatched(encoder: int, drawing: Drawing): bool := {
 			return no
 		}
 		# a field holds what its shader says; the program's values are floats
-		integer = array.element == "u32" or array.element == "i32"
-		if integer and not found[0].field and array.name != INDICES_NAME and array.name != INDIRECT_NAME {
-			failed(array.name + " is float values, and the compute shader asks for " + array.element)
+		if integer_cell(array.cell) and not found[0].field and array.name != INDICES_NAME and array.name != INDIRECT_NAME {
+			failed(array.name + " is float values, and the compute shader asks for " + (array.cell as text))
 			return no
 		}
 		entries.add(Binding(array.binding, found[0].buffer, found[0].bytes))
@@ -1610,7 +1608,7 @@ shown_again() := {
 # declares the storage array of that name, f32 unless array<i32> or array<u32>; the arrays it left come back as a map,
 # in the order given. `arrays` a list: the numbers at @binding(0), they come back as a list. Each number crosses as a
 # cell of the array's element: an f32, i32 or u32, or an f16, two to a word
-class StorageArray { name: text, binding: int, element: text, given: list<any>, writes: bool, type: text }
+class StorageArray { name: text, binding: int, cell: Cell, given: list<any>, writes: bool, type: text }
 # the storage arrays the shader declares: `@binding(1) var<storage, read_write> counts: array<i32>`
 storage_arrays(shader: text): list<StorageArray> := {
 	declared: list<StorageArray> = []
@@ -1622,10 +1620,9 @@ storage_arrays(shader: text): list<StorageArray> := {
 		if not parts[i].contains(">") { continue }
 		declaration = parts[i].split(">")[1 ..].join(">").trim()
 		name = leading(declaration, NAME_BYTES)
-		element = "f32"
-		for cell in ["i32", "u32", HALF] { if declaration.contains("array<" + cell) { element = cell } }
+		cell = cell_of(if declaration.contains("array<") then leading(declaration.split("array<")[1], NAME_BYTES) else "")
 		type = declaration.split(":")[1 ..].join(":").split(";")[0].trim()
-		declared.add(StorageArray(name, binding, element, [], parts[i].split(">")[0].contains("read_write"), type))
+		declared.add(StorageArray(name, binding, cell, [], parts[i].split(">")[0].contains("read_write"), type))
 	}
 	declared
 }
@@ -1655,21 +1652,45 @@ arrays_named(given: map<text, list<any>>, declared: list<StorageArray>): list<St
 }
 # a C pointer `by` bytes on
 pointer_moved(pointer: int, by: int): int := pointer_handle(handle_pointer(pointer) + by)
-# an array's numbers as the shader reads them, its element's cells
+# the numbers a storage array holds, by the element word the shader declares; a vector's lanes are f32
+enum Cell { F32 = "f32", I32 = "i32", U32 = "u32", F16 = "f16" }
+cell_of(word: text): Cell := match word {
+	"i32" => I32
+	"u32" => U32
+	"f16" => F16
+	other => F32
+}
+integer_cell(cell: Cell): bool := match cell {
+	I32 => yes
+	U32 => yes
+	other => no
+}
+cell_bytes(cell: Cell): int := match cell {
+	F16 => HALF_BYTES
+	other => WORD_BYTES
+}
+cell_bits(cell: Cell, x: any): int := match cell {
+	F32 => f32_bits(float(x))
+	F16 => f16_bits(float(x))
+	other => low_bits(int(x), 32)
+}
+# the index-th number the shader left in the mapped array
+cell_read(cell: Cell, mapped: int, index: int): any := match cell {
+	F16 => f16_float(low_bits(field_i16(mapped, HALF_BYTES * index), HALF_BITS))
+	F32 => f32_float(field_u32(mapped, WORD_BYTES * index))
+	I32 => field_i32(mapped, WORD_BYTES * index)
+	U32 => field_u32(mapped, WORD_BYTES * index)
+}
+# an array's numbers as the shader reads them, its cells
 array_buffer(array: StorageArray): int := cells_kept(array.name, array_cells(array), BUFFER_STORAGE + BUFFER_COPY_SRC)
-array_cells(array: StorageArray): list<int> := if array.element == HALF then halves_paired([f16_bits(float(x)) for x in array.given]) else [cell_bits(array.element, x) for x in array.given]
+array_cells(array: StorageArray): list<int> := {
+	cells = [cell_bits(array.cell, x) for x in array.given]
+	if array.cell == F16 then halves_paired(cells) else cells
+}
 # two-byte cells two to a word, the first in the low half, as WGSL's array<f16> holds them
 halves_paired(halves: list<int>): list<int> := [halves[2 * w] + (if 2 * w + 1 < #halves then halves[2 * w + 1] << HALF_BITS else 0) for w in 0 .. (#halves + 1) /! 2]
-# an array's bytes: its cells' (two each of an f16), whole words, as WebGPU copies and binds a buffer
-buffer_bytes(array: StorageArray): int := (#array.given * cell_bytes(array.element) + WORD_BYTES - 1) /! WORD_BYTES * WORD_BYTES
-cell_bytes(element: text): int := if element == HALF then HALF_BYTES else WORD_BYTES
-cell_bits(element: text, x: any): int := if element == "f32" then f32_bits(float(x)) else low_bits(int(x), 32)
-# the index-th number the shader left in the mapped array
-cell_read(element: text, mapped: int, index: int): any := {
-	if element == HALF { return f16_float(low_bits(field_i16(mapped, HALF_BYTES * index), HALF_BITS)) }
-	bits = field_u32(mapped, WORD_BYTES * index)
-	if element == "f32" then f32_float(bits) else if element == "i32" and bits >= 1 << 31 then bits - (1 << 32) else bits
-}
+# an array's bytes: its cells', whole words, as WebGPU copies and binds a buffer
+buffer_bytes(array: StorageArray): int := (#array.given * cell_bytes(array.cell) + WORD_BYTES - 1) /! WORD_BYTES * WORD_BYTES
 # the shader run over the arrays: what each left, read back as numbers
 arrays_computed(shader: text, order: list<StorageArray>, workgroups: int): list<list<any>>? := {
 	scope_opened()
@@ -1697,7 +1718,7 @@ arrays_computed(shader: text, order: list<StorageArray>, workgroups: int): list<
 	for a in 0 .. #order {
 		mapped = buffer_mapped(readbacks[a], sizes[a])
 		if mapped == 0 { return ø }
-		left.add([cell_read(order[a].element, mapped, i) for i in 0 .. #order[a].given])
+		left.add([cell_read(order[a].cell, mapped, i) for i in 0 .. #order[a].given])
 		wgpuBufferUnmap(readbacks[a])
 	}
 	wgpuBindGroupRelease(bindings)
