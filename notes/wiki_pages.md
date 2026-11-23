@@ -227,22 +227,22 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - signal.md (134 lines): wap-wiki, tests test_signal_wanted.wap the forms still to build (lib events: test_events.wap); asked (sketch, todos, wasp fences)
 - signature.md (35 lines): wap-wiki, tests test_signature_wanted.wap; asked (… and :: headers, number wrong value)
 - significant-whitespace.md (49 lines): wap-wiki, tests test_significant_whitespace_page.wap green, test_significant_whitespace_wanted.wap; asked (border cases, todos)
-- smart-pointer.md (170 lines): wap-wiki; asked (internals: move to notes)
+- smart-pointer.md (170 lines): moved to notes/smart-pointers.md
 - sound.md (166 lines):
 - space.md (3 lines): wap-wiki, tests test_space_wanted.wap
 - SPECIFICATION.md (285 lines):
 - standalone.md (0 lines):
 - standard-library.md (567 lines):
 - strict.md (16 lines): wap-wiki, tests test_strict_wanted.wap
-- string.md (123 lines): wap-wiki, tests test_string_page.wap green, test_string_wanted.wap; asked (graphemes, Cursor)
-- struct.md (271 lines):
-- style-guide.md (21 lines):
-- swift-is-the-better-rust.md (83 lines):
-- swift.md (4 lines):
+- string.md (123 lines): wap-wiki, tests test_string_page.wap green, test_string_wanted.wap; count is code points (char.md)
+- struct.md (271 lines): wap-wiki, tests test_struct_wanted.wap; asked (internals to notes, WIT forms)
+- style-guide.md (21 lines): wap-wiki; asked (// comments, --flags)
+- swift-is-the-better-rust.md (83 lines): wap-wiki, essay, no forms
+- swift.md (4 lines): wap-wiki, essay, no forms
 - switch.md (89 lines): ✓ wap-wiki-lib, tests test_switch_page.wap green, test_switch_wanted.wap red (branch switch-page 0105433)
-- symbol.md (67 lines):
+- symbol.md (67 lines): wap-wiki; asked (:symbols, = declarations)
 - symbolism.md (275 lines):
-- syntax.md (56 lines):
+- syntax.md (56 lines): wap-wiki, tests test_syntax_wanted.wap (colon if in test_bad_wanted); asked (bare class fields)
 - task.md (31 lines): ✓ 7b3f116 (lib/tasks.wap, test/test_tasks.wap 8 ✓; go of a call and overlapping tasks not yet, red in test/wap/test_tasks.sh)
 - text.md (1 lines):
 - thread.md (49 lines):
