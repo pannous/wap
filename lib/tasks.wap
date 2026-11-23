@@ -1,0 +1,55 @@
+# The standard module tasks (wiki/task.md, wiki/async.md), in plain wap: `go { … }` makes a Task of the block,
+# `await job` (or `finish job`) runs it to its end and gives its value, an error inside it raised by the await. A task
+# runs when it is awaited, its value kept, so a second await gives the same value without running it again.
+# `pause job` (or `stop job`, which says so) holds it (an await resumes it), `cancel job` ends it without a result:
+# awaiting it raises "job was cancelled", while a task already done keeps its value. `once_finished(job, act)` runs act
+# when it is done.
+# Not yet (they need the host's threads): tasks that overlap, a task giving the others their turn at its sleep, a task
+# nobody awaits finishing at the program's end; and `go f(x)` without the braces.
+
+CANCELLED := "job was cancelled"
+
+class Task {
+	body: () -> any
+	done: bool = no
+	cancelled: bool = no
+	paused: bool = no
+	value: any = ø
+	failure: text = ""
+	finish_handlers: list<() -> any> = []
+}
+
+go(body: () -> any): Task := Task(body)
+
+# the task run to its end, once: its value, its error raised again, a cancelled one's refusal
+await(job: Task): any := {
+	if job.cancelled { raise CANCELLED }
+	if not job.done {
+		job.paused = no
+		job.value = try job.body() catch e { job.failure = text(e); ø }
+		job.done = yes
+		for act in job.finish_handlers { act() }
+	}
+	if job.failure != "" { raise job.failure }
+	job.value
+}
+# `finish job` is `await job`
+finish(job: Task): any := await(job)
+# every task's value, in their order
+await_all(jobs: list<Task>): list<any> := jobs.map(job => await(job))
+
+pause(job: Task) := { job.paused = yes }
+resume(job: Task) := { job.paused = no }
+# `stop job` pauses it, as a stopped job of a shell, and says so
+stop(job: Task) := {
+	hint("stop pauses the task; to end it: cancel it")
+	pause(job)
+}
+# ends a task that is not done yet; a done one keeps its value
+cancel(job: Task) := { if not job.done { job.cancelled = yes } }
+is_done(job: Task): bool := job.done or job.cancelled
+
+# act runs once the task is done, at once when it is done already
+once_finished(job: Task, act: () -> any) := {
+	if job.done { act() } else { job.finish_handlers.add(act) }
+}
