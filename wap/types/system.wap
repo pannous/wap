@@ -3,6 +3,12 @@
 
 use "host.wap"
 
+# splitmix64's gamma, a generator's step, and its mixer's two factors; a byte's bits
+GOLDEN_GAMMA := 0x9E3779B97F4A7C15
+MIX_FIRST := 0xBF58476D1CE4E5B9
+MIX_SECOND := 0x94D049BB133111EB
+BYTE_MASK := 255
+
 # the text of the file at a path, relative to the current folder or from the root (/…)
 read(path: text): text := {
 	file = opened(path, 0, READ_AND_SEEK, "cannot read ")
@@ -75,10 +81,30 @@ started_env(name: text): text? := {
 # quoted "~/x" works too; a run without one is told so, never handed "ø/…"
 home_expanded(path: text): text := if path == "~" or path.starts_with("~/") then home_folder() + path[1 ..] else path
 home_folder(): text := started_env("HOME") ?? raise("~ is the home folder, and this run has none ($HOME is unset)")
-# milliseconds since 1970 by the wall clock: WASI's clock_time_get puts the nanoseconds at 0, as two words
-wall_clock_ms(): int := {
-	clock_time_get(WALL_CLOCK, NANOS_PER_MILLI, 0)
-	(memory_word(0) + memory_word(4) * WORD_RANGE) ÷ NANOS_PER_MILLI
+# milliseconds since 1970 by the wall clock
+wall_clock_ms(): int := clock_nanos(WALL_CLOCK, NANOS_PER_MILLI) ÷ NANOS_PER_MILLI
+# the program paused for ms milliseconds: WASI's poll_oneoff on one subscription to the monotonic clock
+sleep_ms(ms: int) := {
+	at = scratch(SUBSCRIPTION_BYTES + EVENT_BYTES + 8)
+	for word in 0 upto SUBSCRIPTION_BYTES ÷ 4 { set_memory_word(at + 4 * word, 0) }
+	set_memory_word(at + CLOCK_AT, MONOTONIC_CLOCK)
+	set_memory_word(at + TIMEOUT_AT, ms * NANOS_PER_MILLI % WORD_RANGE)
+	set_memory_word(at + TIMEOUT_AT + 4, ms * NANOS_PER_MILLI ÷ WORD_RANGE)
+	poll_oneoff(at, at + SUBSCRIPTION_BYTES, 1, at + SUBSCRIPTION_BYTES + EVENT_BYTES)
+}
+# n bytes of the host's randomness (WASI random_get), for secrets: each XORed with a byte of the monotonic clock's
+# nanoseconds mixed by splitmix64, so a host whose random_get is weak does not make them reconstructable
+random_bytes(n: int): list<int> := {
+	at = scratch(n)
+	random_get(at, n)
+	nanos = clock_nanos(MONOTONIC_CLOCK, 1)
+	(0 upto n).map(offset => memory_byte(at + offset) xor (splitmixed(nanos + offset * GOLDEN_GAMMA) & BYTE_MASK))
+}
+# splitmix64's mixer: a number whose every bit depends on all of z's (lib/random.wap's generator steps by GOLDEN_GAMMA)
+splitmixed(z: int): int := {
+	z = (z xor (z >>> 30)) * MIX_FIRST
+	z = (z xor (z >>> 27)) * MIX_SECOND
+	z xor (z >>> 31)
 }
 # the arguments after the program's file: `warp prog.wasm a b` gives ["a", "b"]
 args := arguments().drop(1)
