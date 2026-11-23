@@ -255,7 +255,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - try.md (38 lines): wap-wiki, tests test_try_wanted.wap (failed in test_keyword_wanted)
 - tuple.md (19 lines): wap-wiki, tests test_tuple_page.wap green; asked (element-wise +, x[0])
 - type-inference.md (12 lines): wap-wiki, tests test_type_inference_wanted.wap
-- type.md (331 lines):
+- type.md (331 lines): wap-wiki, tests test_type_page.wap green, test_type_wanted.wap; asked (unions read as if, internals)
 - typing.md (13 lines): wap-wiki, tests test_typing_wanted.wap
 - unicode.md (18 lines): wap-wiki, tests test_unicode_wanted.wap
 - uniscript.md (471 lines):
