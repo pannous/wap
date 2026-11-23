@@ -36,6 +36,11 @@ You have two queues, plans first:
   the line is there; whether it is true is yours to read).
 - Code in the wrong layer (AGENTS.md "Three layers"), vocabulary tables in core/, a core form for an edge case.
 - A quiet fallback that hides a problem instead of refusing loudly.
+- warp's slop carried in by a port (native host, libraries, samples): a workaround for a missing form, repeated code,
+  a domain table in the wrong layer, an environment variable, a warp-only shape (a list spelled as a delimited text,
+  options parsed by hand per option). Much of warp copies over as it is; the slop does not. "Keep things red rather
+  than ugly" (user): the piece that only works through the hack stays red with a card, a rearchitecture goes to
+  wap-interviewer.
 For a speed-relevant change, ask for its instruction counts on hello, `use units; 1` and `use storage` before and
 after; the landing's speed gate refuses more than 20% slower (measured twice), but a plan is cheaper to fix than a landing.
 
