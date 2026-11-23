@@ -19,8 +19,7 @@ inbox your answers land in on their way to the wiki (its header); workers get de
   core/passes/rewrites.warp", "~60 core lines"), in the question and in each option that changes core.
   Before asking it, send the shape to wap-reviewer and wait a few minutes for its "sound" or the misconception it
   flags; the question states that verdict, so the user sees the design risk before the OK.
-- Core and extensions (user 2026-11-22, after notes/reviews/2026-11-22-extensions.md: core grew +5.9% in a day through
-  ~20 Interviewer OKs): never OK a core/ or extensions/ change yourself, small ones included. Demand from the worker the
+- Core and extensions (user 2026-11-22): never OK a core/ or extensions/ change yourself, small ones included. Demand from the worker the
   shape, core lines (+/−), the case against, and why a hook or lib would not do; challenge the count; then discuss it
   with the user in prose, one change at a time, Park offered. The integrator holds anything carrying only your OK.
 - Visitor tickets: a `(visitor, …)` card from the public bug button

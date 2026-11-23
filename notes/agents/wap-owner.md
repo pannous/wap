@@ -212,7 +212,7 @@ source uses, and every landing names the functions of wap it turned green (scrip
 (test/wap/) and `# DEBT:` comments are append-only, open to all. A bug of the old compiler that blocks wap
 goes to wap-native as a repro; work around it or go on meanwhile. A new file belongs to the stage of its folder.
 
-Since wap compiles itself (2026-11-20), wap work comes from notes/backbone.md "Architecture changes, in order" and the
+wap compiles itself; its work comes from notes/backbone.md "Architecture changes, in order" and the
 open milestone-2 points (user 2026-11-20); anything else is a `# DEBT:` comment at its code.
 
 Trim before handoff (user 2026-11-18): before handing a branch off, try deleting each of its edits, one at a time, after

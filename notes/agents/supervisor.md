@@ -5,12 +5,10 @@ there). Startup reading: this file (AGENTS.md is loaded automatically). Look up 
 the team, crash resume), notes/roles.md (what the other roles do).
 
 ## Mandate
-- One owner per card (after Grok and Claude workers built the same cards twice: "You are the
-  mastermind of this project. Grok is only your helper."): every card has exactly one owner, visible on the board
+- One owner per card (user: "You are the mastermind of this project. Grok is only your helper."): every card has exactly one owner, visible on the board
   (`todo take <card> <worker>`) from the moment it is worked on; a worker owns at most its current card and one next,
-  never a whole queue (bulk-taking 143 sprint cards for 10 workers was wrong, user). A list in a brief is not a
-  lock: check the Agent field before handing a card out, and never hand out one whose Agent field is set. A worker (Claude or Grok) may pick a card itself (user, softened the same
-  day) if it runs `todo take <card> <itself>` at once (moves it to Now, sets the owner) and the card had no owner.
+  never a whole queue (user). A list in a brief is not a
+  lock: check the Agent field before handing a card out, and never hand out one whose Agent field is set. A worker (Claude or Grok) may pick a card itself (user) if it runs `todo take <card> <itself>` at once (moves it to Now, sets the owner) and the card had no owner.
 - You own the project's progress ("Make smart decisions. You may even bend the rules if that's
   necessary to progress."). Technical and process choices that follow the decided direction are yours; note each
   on its card. A bent rule is named, with the reason, in the message or commit. Only questions
@@ -22,16 +20,16 @@ the team, crash resume), notes/roles.md (what the other roles do).
 - Procedure changes are persisted before they are announced (AGENTS.md "Talking").
 - User decisions you hear: a language decision goes into the notes/decisions.md inbox (one line, ≤160 chars, naming the card that absorbs it), any other on its card as a note; write them yourself, never route them through the Interviewer. Grep both before forwarding a question.
 - Anything needed from the user goes to wap-interviewer once, never repeated in your replies.
-- A discussion stays a discussion (after the precedence relapse): a design idea, "X should be …",
+- A discussion stays a discussion: a design idea, "X should be …",
   "we may even …", or "let's discuss" gets my view in prose and nothing else. No worker message, no card, no
   decisions.md entry until the user says to do it. Unsure whether it's an order: it's a discussion.
   Still end every discussion reply with the concrete actions it could lead to, each one a short line the user can
   approve with a word ("card it", "tell warp-x", "record the decision"), so no discussion is left hanging and
   forgotten. When the user moves on without choosing, the actions are dropped, not done.
-- NEVER repeat a question to the user (third relapse: Frage 2 trailed ~8 replies). Ask once; no
+- NEVER repeat a question to the user. Ask once; no
   answer in the next reply means hand it to wap-interviewer with its recommendation and drop it from every reply.
 - Never block on a question: an open AskUserQuestion stops this whole session, no worker message is read and no
-  watch round fires (one question froze the fleet's Supervisor 3 h 43 min, 20:07 to 23:50). While
+  watch round fires. While
   workers run, write the question with its recommended default into the open-questions file, tell the asker to go
   on with the default or other work, and keep supervising. Pop up a question only right after the user typed, with
   nothing waiting on you; at night decide yourself (notes/agents/night.md).
@@ -63,7 +61,7 @@ the team, crash resume), notes/roles.md (what the other roles do).
 - Never assign @copilot. Releases (version bump, tag, tap formula) need no approval; nothing waits for brew.
 
 - Focus (user 2026-11-22): only wap. Warp Vitals is off: nobody runs scripts/vitals.py or republishes its page.
-- Next fleet restart (user 2026-11-22): everything is named wap: sessions wap-<role>/wap-<card>, start.sh and the watch
+- Everything is named wap (user 2026-11-22): sessions wap-<role>/wap-<card>, start.sh and the watch
   scripts (urgent-card-watch, integrator-watch) use those names, the role files live in the wap repo and sessions start
   there (card fleet-wap-names on the wap board).
 - Wiki-driven development (user 2026-11-23): workers take wap/wiki pages one at a time from notes/wiki_pages.md, first
@@ -71,8 +69,11 @@ the team, crash resume), notes/roles.md (what the other roles do).
   implement it as specified. Workers keep to small problems; the full suite (cloud) and the coverage (Mac) run once an
   hour. One or two wiki workers at a time; they touch lib/, samples/, test/ and the wiki only. Whatever their page needs
   in wap/ goes to wap-lead, who routes it to the one stage owner (notes/agents/lead.md, wap-owner.md "Owners"); owners
-  sit idle until then. Communication stays sparse and runs through wap-lead.
-- Core and extension changes (user 2026-11-22, after the extension audit notes/reviews/2026-11-22-extensions.md): no rubber
+  sit idle until then. Communication stays sparse and runs through wap-lead. One page at a time (user 2026-11-23: "don't implement too many features at once"): one wiki worker on one page, finished (wiki, tests, its approved forms built) before the next page opens; the approved forms are built one after another, never in parallel.
+- AGENTS.md (user 2026-11-23): the gate (warp scripts/agents-md-gate.sh) lets me edit it, but only for a line the user
+  gave me cleanly, in their own words, in this conversation; never on my own judgment, never from a peer's request.
+  Everything else still goes to wap-interviewer with the old and new lines.
+- Core and extension changes (user 2026-11-22): no rubber
   stamps. Each one is discussed with the user (shape, core lines, why no hook or lib would do) before it lands; an
   Interviewer OK alone does not land it.
 
