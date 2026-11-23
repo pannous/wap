@@ -30,7 +30,9 @@ loops: one `git fetch` every 20 minutes or so) and start again with what they br
 - touch a test file or an expectation;
 - delete or reword comments (the user's comments are never removed; a TODO becomes DONE with the commit);
 - rename for brevity or inline away a meaningful name;
-- weaken a refusal or a check;
-- edit core/ or extensions/: the old compiler is frozen.
+- weaken a refusal or a check.
+
+Pure shrinks of wap/ (fewer lines, no new form or behaviour, reviewer-approved) land without discussion; anything else
+in wap/ needs the user's OK first.
 
 Questions for the user go to wap-interviewer, never to the user.
