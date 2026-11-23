@@ -102,30 +102,30 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - guiding-principles.md (13 lines): ✓ wap-wiki, prose
 - haskell.md (49 lines): ✓ wap-wiki, prose (it as the last result: test_it_wanted)
 - hex.md (11 lines): wap-wiki
-- Home.md (47 lines):
-- html.md (159 lines):
-- hyperreals.md (980 lines):
-- ideas.md (15 lines):
+- Home.md (47 lines): wap-wiki
+- html.md (159 lines): left to the lib pages (lib/html.wap, test_html.wap)
+- hyperreals.md (980 lines): left to the lib pages (lib/hyperreal.warp)
+- ideas.md (15 lines): ✓ wap-wiki, prose
 - immutable.md (0 lines):
 - import.md (8 lines): wap-wiki, asked
 - in.md (17 lines): wap-wiki
 - include.md (10 lines): wap-wiki, asked
 - indexing.md (45 lines): wap-wiki
-- inspiration.md (10 lines):
+- inspiration.md (10 lines): ✓ wap-wiki, prose
 - int.md (26 lines): wap-wiki, asked (warp internals)
-- int28.md (4 lines):
+- int28.md (4 lines): wap-wiki, internals: asked
 - int60.md (0 lines):
-- integer.md (2 lines):
+- integer.md (2 lines): ✓ wap-wiki, a link
 - inventions.md (258 lines):
-- it.md (21 lines):
-- iteration.md (72 lines):
+- it.md (21 lines): wap-wiki
+- iteration.md (72 lines): ✓ wap-wiki, tests test_iteration_wanted.wap the forms still to build
 - iterator.md (0 lines):
 - json.md (26 lines): ✓ (lib/json.wap replacing json.warp, test/test_json.wap 8 ✓ + the one-char line red, test_json_class red: class reflection)
-- Julia.md (59 lines):
-- key.md (37 lines):
+- Julia.md (59 lines): wap-wiki
+- key.md (37 lines): wap-wiki, asked (bare names, top-level colon)
 - keyword.md (308 lines):
-- kind.md (31 lines):
-- kotlin.md (18 lines):
+- kind.md (31 lines): wap-wiki, C++ internals: asked to hide
+- kotlin.md (18 lines): ✓ wap-wiki, tests test_kotlin_page.wap green, test_kotlin_wanted.wap ⋁ ∧ still to build
 - lambda.md (43 lines): ✓ wap-wiki, tests test_lambda_page.wap green, test_lambda_wanted.wap the forms still to build; words lambda-words (sin…log into types, sorted by a comparator); wiki 9963682, 8a952d3
 - laws.md (76 lines):
 - LEB128.md (3 lines):
