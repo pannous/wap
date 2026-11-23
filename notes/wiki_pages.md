@@ -154,7 +154,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-reference.md (36 lines):
 - library-regex.md (107 lines):
 - library-slugs.md (36 lines): ✓ 45356f7 (lib/slugs.wap, test/test_slugs.wap 8 ✓; lib/text.wap holds upper and words until types has them)
-- library-tables.md (47 lines):
+- library-tables.md (47 lines): wap-wiki-lib
 - library-template.md (37 lines): ✓ 26959ef (lib/template.wap, lib/html.wap html_escape, test/test_template.wap 3 ✓; `{items: []}` not yet (card any-values), nested-map sections wait for any-truth-crash)
 - library-time-patterns-durations.md (42 lines):
 - library-unicode.md (33 lines):
