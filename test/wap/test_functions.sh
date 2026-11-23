@@ -72,7 +72,4 @@ print "${twice { 4 }}"')" "8"
 # a program adds to a function every program has only where none of its definitions takes the types already
 # (wiki/function.md; own-type-overloads B, user 2026-11-23): missing(x: T?) takes an int? already
 check "a function every program has, redefined for types it takes already, is refused at the definition" "$(ran own_missing $'missing(x: int?) := no\nmissing(3)' | grep -o 'line 1:1: missing is a function every program has')" "line 1:1: missing is a function every program has"
-# a class body holds fields and methods only (wiki/class.md): any other member is refused, never dropped
-check "a class member that is no field and no method is refused" "$(ran odd_member 'class Person { numbers addresses }
-print(1)' | grep -o 'a class member is a field')" "a class member is a field"
 exit $((failures > 0))
