@@ -208,6 +208,11 @@ print text(round(two_to(10.0)))')" "yes
 check "a library word takes an any holding its type" "$(ran use_any 'use ini
 a: any = parse_ini("top = 1")
 print to_ini(a)')" "top = 1"
+# a word whose definition takes a raw parameter, in a used file, takes its braced block verbatim (wiki/dsl.md)
+printf '%s\n' 'html(page: raw): text := page.trim()' >"$stage/pages.wap"
+check "a used file's raw word takes its block verbatim" "$(ran raw_used 'use "pages.wap"
+page = html { <p>it'"'"'s {here}</p> }
+print page')" "<p>it's {here}</p>"
 exit $((failures > 0))
 # a module's alias lines name its words other ways, in the module and in the files using it (wiki/alias.md)
 printf '%s\n' 'sine(x: int) := x * 2' 'alias sin => sine' 'alias magnitude <= mag' 'magnitude(x: int) := x + 1' 'twice_sin(x: int) := sin(x) * 2' >"$stage/trig.wap"
