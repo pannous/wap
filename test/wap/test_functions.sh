@@ -24,6 +24,9 @@ check "a program statement wap refuses still lets the functions beside it be typ
 worse(x: int) as int := bad(x) + 1
 also(x: int) as text := 3
 print(text(worse(21)))' | grep -o 'line [0-9]*:\|calls [a-z]*' | tr '\n' ' ')" "line 1: line 2: calls bad line 3: line 4: calls worse "
+check "a library function wap refuses for the user's types: the user's line says the first reason" "$(ran library_root 'class Ship { size: int }
+ships = [Ship(2), Ship(1)]
+print(ships.sorted())' | grep 'library_root.wap line 3' | grep -o 'no < takes (Ship, Ship)')" "no < takes (Ship, Ship)"
 # a module names its functions (wiki/wasm-representation.md: names by wasm convention), so a host's backtrace shows them
 check "a crash's backtrace names the function it happened in" "$(ran crash 'class P { n: int }
 g(x: int) as P? := if x > 0 then P(x) else ø
@@ -66,4 +69,7 @@ check "a block given to a function parameter runs by its call" "$(ran block_func
 print "${twice { 4 }}"')" "8"
 check "a block given to a block parameter runs by its call" "$(ran block_parameter 'twice(body: block) := body() + body()
 print "${twice { 4 }}"')" "8"
+# a program adds to a function every program has only where none of its definitions takes the types already
+# (wiki/function.md; own-type-overloads B, user 2026-11-23): missing(x: T?) takes an int? already
+check "a function every program has, redefined for types it takes already, is refused at the definition" "$(ran own_missing $'missing(x: int?) := no\nmissing(3)' | grep -o 'line 1:1: missing is a function every program has')" "line 1:1: missing is a function every program has"
 exit $((failures > 0))

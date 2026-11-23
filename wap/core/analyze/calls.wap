@@ -245,7 +245,7 @@ chosen_definition(n: Node, called: Node, scopes: list, given: list, expected: No
 	dispatcher = dispatching(called, candidates, types, s)
 	if dispatcher != ø { return dispatcher }
 	fitting = candidates.filter(definition => takes_fitting(definition, given, s) and not reads_all_nodes(definition, given, s))
-	exact = fitting.filter(definition => takes(definition, given, s, (argument, wanted) -> fits_exactly(argument, wanted, s)))
+	exact = fitting.filter(definition => takes(definition, given, s, (argument, wanted) -> fits_exactly(argument, wanted, s)) and not (1 to #given).any(at => wrapped_at(definition, given, at)))
 	if #fitting > 1 { fitting = if exact then exact else fewest_conversions(fitting, given, s) }
 	if #fitting > 1 { fitting = most_specific(fitting, s) }
 	if #fitting > 1 { fitting = innermost(fitting, scopes) }
@@ -264,8 +264,11 @@ fewest_conversions(definitions: list<Signature>, given: list, s: TypingState) as
 }
 conversions_taken(definition: Signature, given: list, s: TypingState) as int := {
 	types = definition.parameters
-	#((1 to #given).filter(at => at <= #types and not fits_exactly(given#at, types#at, s)))
+	#((1 to #given).filter(at => at <= #types and not fits_exactly(given#at, types#at, s) or wrapped_at(definition, given, at)))
 }
+# whether an argument is wrapped into the optional its parameter is written as: `==(a: T?, b: T?)` takes two anys
+# only by wrapping, so `==(a: T, b: T)` is theirs
+wrapped_at(definition: Signature, given: list, at: int) as bool := at <= #definition.parameters and wraps(definition.parameters#at, value_type(given#at))
 # whether a definition takes these arguments, each one fitting its parameter
 # (a parameter typed by generic letters takes an argument whose type binds them alike, and one of a function type a
 # function value whose function gives that type's result for its parameters, see letters_bound); the arguments known
@@ -346,6 +349,25 @@ conforms(given: Node?, wanted: Node?, s: TypingState) as bool := {
 	protocol = protocol_named(s.records, wanted)
 	protocol != ø and given != ø and fields_of(protocol).all(word => does_word(given, word, s))
 }
+# A program adds to a function every program has only where none of its definitions takes these types already
+# (wiki/function.md): `+(n: int, t: Ship)` adds one, `round(x)` and `missing(x: int?)` are taken; a function taking a
+# class or an enum of the program or a module it uses is its own, a class's maker belongs to the class, a rule's
+# function to its form; a module the program uses may replace one (test_modules.sh)
+overloads_checked(defined: list<Signature>, declared: list<Signature>, library: list<Signature>, s: TypingState) := {
+	words: map<text, list<Signature>> = {}
+	for word in library.filter(word => word.kind == DefinitionKind.Function) { words[word.name] = if words.has(word.name) then words[word.name] + [word] else [word] }
+	own = declared.filter(signature => signature.kind == DefinitionKind.Record).map(signature => signature.name)
+	for signature in defined {
+		if signature.kind == DefinitionKind.Function and words.has(signature.name) and not (own.contains(signature.name) or has_fact(signature.definer, DERIVED) or signature.parameters.any(type => names_type(type, own))) and words[signature.name].any(word => taken_alike(word, signature, s)) { refused(signature.definer, "${signature.name} is a function every program has, which takes these types already: give this one another name, or take a type the program declares, `${signature.name}(s: Ship) := …`") }
+	}
+}
+# whether two definitions take the same values: as many parameters, a value reaching both of each pair
+taken_alike(word: Signature, signature: Signature, s: TypingState) as bool := #word.parameters == #signature.parameters and (1 to #word.parameters).all(at => either_takes(word.parameters#at, signature.parameters#at, s))
+# whether a value reaches parameters of both types: one untyped, or one taking the other's values as a call fits them
+# (as they are, boxed or wrapped, a letter binding it, a protocol it does)
+either_takes(a: Node?, b: Node?, s: TypingState) as bool := a == ø or b == ø or [[a!, b!], [b!, a!]].any(pair => conversion(pair#2, pair#1, s) in STATIC_CONVERSIONS or unified(pair#1, pair#2, [], s) != ø or conforms(pair#2, pair#1, s))
+# whether a written type names one of these types, inside list<…>, an optional or a function type too
+names_type(type: Node?, names: list<text>) as bool := type != ø and (names.contains(text(type!)) or (type_parts(type) ?? []).any(part => names_type(part, names)))
 # the protocol words these types lack for these definitions' protocol parameters, as a refusal's fix-it
 words_missing(definitions: list<Signature>, types: list, s: TypingState) as text := {
 	lacking = []
@@ -405,10 +427,14 @@ called_name(definition: Signature, s: TypingState) as text := "${definition.name
 function_typed(definition: Signature, argument_types: list, s: TypingState, at: Node) as TypedFunction := {
 	key = definition.key
 	name = called_name(definition, s)
-	if s.refusals.any(each => each.key == key) { refused(at, "this calls ${name}, which wap refuses") }
+	library = has_fact(define_of(definition, s), UNBOUND)
+	known = s.refusals.find(each => each.key == key)
+	if known != ø { calling_refused(at, name, known!.first, library) }
+	before = #s.refusals
 	try shaped_typed(shaped_once(definition, s), argument_types, s, at) catch e {
-		s.refusals += [Refusal(key, e.message)]
-		refused(at, "this calls ${name}, which wap refuses")
+		first = if #s.refusals > before then s.refusals#(before + 1).first else e.message
+		s.refusals += [Refusal(key, e.message, first)]
+		calling_refused(at, name, first, library)
 	}
 }
 # A function typed for these argument types, once per tuple: its parameters, then its body, its result the written
