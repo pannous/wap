@@ -46,7 +46,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - caveats.md (3 lines):
 - char.md (63 lines):
 - character.md (0 lines):
-- charged.md (225 lines):
+- charged.md (225 lines): wap-wiki
 - cheats.md (10 lines):
 - choices.md (47 lines):
 - class.md (55 lines):
@@ -162,7 +162,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-xml.md (28 lines): ✓ c48b119 (lib/xml.wap, test/test_xml.wap 8 ✓; elements a class, namespaces cut)
 - like.md (59 lines):
 - Lisp.md (19 lines):
-- list.md (279 lines): wap-wiki, tests 7789cd9 + list-spaced, list words 504a102 + a09c988, wiki 8ff17c6; waits: how `(1 2)` prints (user), `{1 2 3}` (wap-reader), the forms being built (`3 times [1]`, `it`, `x -1`)
+- list.md (279 lines): ✓ wap-wiki, tests on main (test_lists_page.wap green, test_lists_wanted.wap the forms still to build); wiki f74e364, 25f83ea, 6aa530a
 - literal.md (34 lines):
 - macro.md (18 lines):
 - map.md (119 lines): (released by wap-wiki) tests 63835a0, wiki a1ab2dc; branch wiki-types d849c72 (show, count, first, Python's words) in its landing checks; waits: bare `a: map` (being built)
