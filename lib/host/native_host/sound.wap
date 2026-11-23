@@ -18,31 +18,35 @@ HEARD_OUT_POLL_MS := 10
 DEVICE_TAIL_MS := 100
 DECODE_CHUNK_FRAMES := 4096
 POINTER_CELL_BYTES := 8
+INT_BYTES := 4
 
-global sound_streams: list<int> = []
-# 0 not asked yet, 1 SDL's audio started, -1 none here (no SDL3, no device)
-global audio_state = 0
+# SDL's audio: not asked for yet, started, or none here (no SDL3, no device)
+enum AudioState { Unasked, Started, Absent }
+# the sound's state: its audio, the streams still playing
+class Audio { state: AudioState = Unasked, streams: list<int> = [] }
+global audio = Audio()
 
-audio_started() := {
-	if audio_state == 0 { audio_state = if library_function("SDL3", "SDL_Init") != 0 and sdl_started(SDL_INIT_AUDIO) then 1 else -1 }
-	audio_state == 1
+audio_started(): bool := {
+	if audio.state == Unasked { audio.state = if sdl_present() and sdl_started(SDL_INIT_AUDIO) then Started else Absent }
+	audio.state == Started
 }
-audio_spec(rate: int, channels: int): list := little_endian(SDL_AUDIO_S16LE, 4) + little_endian(channels, 4) + little_endian(rate, 4)
+# SDL_AudioSpec's three i32 fields
+audio_spec(rate: int, channels: int): list<int> := [SDL_AUDIO_S16LE, channels, rate].flat_map(field => little_endian(field, INT_BYTES))
 still_sounding() := {
-	for stream in sound_streams { if SDL_GetAudioStreamQueued(stream) > 0 { return yes } }
+	for stream in audio.streams { if SDL_GetAudioStreamQueued(stream) > 0 { return yes } }
 	no
 }
 # the streams that played out closed, so a long run keeps none it no longer needs
 finished_closed() := {
 	sounding: list<int> = []
-	for stream in sound_streams {
+	for stream in audio.streams {
 		if SDL_GetAudioStreamQueued(stream) > 0 { sounding.add(stream) } else { SDL_DestroyAudioStream(stream) }
 	}
-	sound_streams = sounding
+	audio.streams = sounding
 }
 # at the run's end: its sounds heard out, then their streams closed
 sounds_heard_out() := {
-	if #sound_streams == 0 { return ø }
+	if #audio.streams == 0 { return ø }
 	while still_sounding() { SDL_Delay(HEARD_OUT_POLL_MS) }
 	SDL_Delay(DEVICE_TAIL_MS)
 	finished_closed()
@@ -59,7 +63,7 @@ host_sound_played(pcm: list<int>, rate: int, channels: int): int := {
 	SDL_PutAudioStreamData(stream, pcm)
 	SDL_FlushAudioStream(stream)
 	SDL_ResumeAudioStreamDevice(stream)
-	sound_streams.add(stream)
+	audio.streams.add(stream)
 	0
 }
 # the page's voice clock kept around a task (lib/sound.warp voice_kept): natively the voice is lib/sound.warp's alone
@@ -216,7 +220,7 @@ sdl_decoded(path: text, rate: int, channels: int): Decoded := {
 	converted(own, if rate > 0 then rate else own.rate, if channels > 0 then channels else own.channels)
 }
 wav_decoded(path: text): Decoded := {
-	if library_function("SDL3", "SDL_LoadWAV") == 0 { raise path + ": decoding a WAV needs SDL3 (apt install libsdl3-0)" }
+	if not library_has("SDL3", "SDL_LoadWAV") { raise path + ": decoding a WAV needs SDL3 (apt install libsdl3-0)" }
 	spec = calloc(1, SDL_AUDIO_SPEC_BYTES)
 	samples = calloc(1, POINTER_CELL_BYTES)
 	size = calloc(1, POINTER_CELL_BYTES)
@@ -245,7 +249,7 @@ mpg123_delete(decoder: handle): void from 'mpg123'
 MPG123_OK := 0
 MPG123_ENC_SIGNED_16 := 0xD0
 mpg123_decoded(path: text): Decoded := {
-	if library_function("mpg123", "mpg123_new") == 0 { raise path + ": decoding an MP3 needs libmpg123 (apt install libmpg123-0, brew install mpg123)" }
+	if not library_has("mpg123", "mpg123_new") { raise path + ": decoding an MP3 needs libmpg123 (apt install libmpg123-0, brew install mpg123)" }
 	decoder = mpg123_new(0, 0)
 	if mpg123_open(decoder, path) != MPG123_OK { raise path + ": not decoded by libmpg123" }
 	rate_cell = calloc(1, POINTER_CELL_BYTES)
@@ -317,13 +321,13 @@ MIDI_FAILED := -1
 MIDI_NO_OUTPUT := -2
 MIDI_UNSUPPORTED := -3
 MIDI_PACKETS_BYTES := 1024
-global midi_client = 0
-global midi_output_port = 0
-global midi_virtual_source = 0
-midi_started() := {
-	if midi_client == 0 { midi_client = MIDIClientCreate(cf_text("wap"), 0, 0) }
-	if midi_client != 0 and midi_output_port == 0 { midi_output_port = MIDIOutputPortCreate(midi_client, cf_text("wap out")) }
-	midi_output_port != 0
+# CoreMIDI's client, its output port and wap's virtual source, made at their first use
+class Midi { client: int = 0, output_port: int = 0, virtual_source: int = 0 }
+global midi = Midi()
+midi_started(): bool := {
+	if midi.client == 0 { midi.client = MIDIClientCreate(cf_text("wap"), 0, 0) }
+	if midi.client != 0 and midi.output_port == 0 { midi.output_port = MIDIOutputPortCreate(midi.client, cf_text("wap out")) }
+	midi.output_port != 0
 }
 # an endpoint's name as the system shows it (kMIDIPropertyDisplayName, a CFString CoreMIDI keeps)
 endpoint_name(endpoint: int): text := {
@@ -353,11 +357,11 @@ host_midi_sent(port: text, message: list<int>): int := {
 	sent
 }
 midi_packets_sent(port: text, output: int, packets: int): int := {
-	if output != 0 { return if MIDISend(midi_output_port, output, packets) == 0 then 0 else MIDI_FAILED }
+	if output != 0 { return if MIDISend(midi.output_port, output, packets) == 0 then 0 else MIDI_FAILED }
 	if port != "" { return MIDI_NO_OUTPUT }
-	if midi_virtual_source == 0 { midi_virtual_source = MIDISourceCreate(midi_client, cf_text("wap")) }
-	if midi_virtual_source == 0 { return MIDI_FAILED }
-	if MIDIReceived(midi_virtual_source, packets) == 0 then 0 else MIDI_FAILED
+	if midi.virtual_source == 0 { midi.virtual_source = MIDISourceCreate(midi.client, cf_text("wap")) }
+	if midi.virtual_source == 0 { return MIDI_FAILED }
+	if MIDIReceived(midi.virtual_source, packets) == 0 then 0 else MIDI_FAILED
 }
 # the inputs' names (inputs: 1) or the outputs', one a line; ø where no MIDI is built in
 host_midi_ports(inputs: int): text? := {
