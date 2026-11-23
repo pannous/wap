@@ -133,10 +133,11 @@ instance_added(typed: TypedFunction, s: TypingState) := {
 name_for(word: text, definer: Node) as Node := with_fact(placed_like(symbol(word), definer), DEFINER, fact_of(definer, DEFINER) ?? refused(definer, "a definer without an id"))
 # a name typing writes once for the whole program, wherever it is wanted, with an id of its own
 name_once(word: text, at: Node, s: TypingState) as Node := identified(placed_like(symbol(word), at), s.ids)
-# a function wap refuses: its key and why
+# a function wap refuses: its key, why, and the first reason of its chain, a function it calls refused first
 class Refusal {
 	key: text
 	message: text
+	first: text
 }
 # A function typed for one tuple of argument types: the function, its argument types, its result's type (ø until its
 # body gives it) and the Define it became
@@ -174,13 +175,15 @@ class TypeFrame {
 	late: list<Node> = []
 }
 
-# the program typed, after the types module's functions it calls, the typed rules firing as it is typed
-typed_program(program: Block, library: Library, rules: KindRules, signatures: list<Signature>) as Block := typed_among(program, statements_in(library.code), rules, library.scope, library.signatures + signatures)
+# the program typed, after the types module's functions it calls, the typed rules firing as it is typed; its definitions
+# first checked against the functions every program has (words): those its own file writes, beside the types every
+# module it uses declares
+typed_program(program: Block, library: Library, rules: KindRules, signatures: list<Signature>, words: list<Signature>, written: list<Signature>) as Block := typed_among(program, statements_in(library.code), rules, library.scope, library.signatures + signatures, TypingState(), written, words, signatures)
 # the program typed, after the library's records and those of its definitions it calls, each definition shaped and
 # bound when typing first reaches it (core/analyze/calls.wap reached)
 # A variable given a value of another type holds the type both meet in from its first value on, so typing starts over
 # with it known, once for each round of such variables
-typed_among(program: Block, library: list, rules: KindRules, library_scope: Scope, signatures: list<Signature>, before: TypingState = TypingState()) as Block := {
+typed_among(program: Block, library: list, rules: KindRules, library_scope: Scope, signatures: list<Signature>, before: TypingState = TypingState(), defined: list<Signature> = [], words: list<Signature> = [], declared: list<Signature> = []) as Block := {
 	s = TypingState()
 	# what the round before learnt of the variables it retyped, copies this round grows: their types and the hints;
 	# and, shared, the unknowns their types may name and the function values those hold
@@ -196,6 +199,7 @@ typed_among(program: Block, library: list, rules: KindRules, library_scope: Scop
 	s.definitions = signatures.filter(signature => is_function(signature))
 	definitions_held(defines, s)
 	records_added(library, s)
+	overloads_checked(defined, declared, words, s)
 	values = library_values(library).map(value => typed_form(value, s, TypeFrame(), ø))
 	typed = try typed_form(program, s, TypeFrame(), ø) catch e { if #s.retyped == #before.retyped then refused_all(s, [e.message]) else Block([]) }
 	if #s.retyped > #before.retyped { return typed_among(program, library, rules, library_scope, signatures, s) }
@@ -386,7 +390,7 @@ receiver_field(name: Node) as Node := {
 name_set_typed(n: Node, place: Node, value: Node, s: TypingState, f: TypeFrame) as Node := {
 	name = declared_name(place)
 	# a name written `any` holds the type of what it is given (a later other type retypes it)
-	declared = substituted(declared_type(place), f.letters)
+	declared = opened(substituted(declared_type(place), f.letters), s)
 	if declared != ø and shaped(declared, s) == ANY_SYMBOL { declared = ø }
 	key = place_key(defined_at(name))
 	if declared != ø or is_kind_word(fact_of(n, ASSIGNS), DefinitionKind.Local) { s.fixed.add(key) }
@@ -405,6 +409,9 @@ name_set_typed(n: Node, place: Node, value: Node, s: TypingState, f: TypeFrame) 
 	with_fact(refitted(Set(with_name_fact(place, TYPE, held), given), n), TYPE, held)
 }
 
+# a variable's bare container kind as its open type, `a: map` a map<α1, α2> and `a: list` a list<α1>, as `{}` and `[]`
+# are: their uses settle the unknowns (wiki/map.md)
+opened(type: Node?, s: TypingState) as Node? := if type == symbol(LIST_TYPE) then list_type(unknown_type(s)) else if type == symbol(MAP_TYPE) then map_type(unknown_type(s), unknown_type(s)) else type
 # a variable given a value of another type than it holds: from its first value on it holds the type both meet in, any
 # said with a warning, an int that becomes a float said nothing; a let, a written type or a name made so already keeps
 # its type, refused as conversion refuses it

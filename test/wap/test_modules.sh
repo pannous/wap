@@ -177,6 +177,9 @@ say("by name")')" "loaded
 by name"
 check "use name brings in a standard module from the library beside the compiler" "$(ran use_library 'use ordering
 print(text(natural_compare("a2", "a10") < 0))')" "yes"
+# the library's own module comes before one of that name in its folders: lib/regex.wap, not lib/crates/regex.warp (wiki/use.md)
+check "use name finds the library's own module before its folders'" "$(ran use_library_root 'use regex
+print(text(escaped_code("n")))')" "10"
 # a folder right in the library holds modules too, lib/native's C bindings among them; import is use
 check "import name brings in a module from a folder of the library" "$(ran use_library_folder 'import z
 print(text(compressBound(100)))')" "113"

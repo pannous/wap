@@ -1,0 +1,247 @@
+# The standard module cli (wiki/library-cli.md): command line options parsed from a spec, a list of maps, one an
+# option: {name: "count", short: "n", kind: "int", default: 1, help: "how many"}. parse_args(spec, argv) gives every
+# option's value in a map, with help: yes for -h or --help (then nothing is checked); a mistake raises "cli: …".
+# parse_commands(globals, commands, argv) reads git-style commands. cli_help, cli_commands_help and cli_command_text
+# write the help in python argparse's layout.
+use map
+use text
+
+# the help text's option column is this wide, its text starting two columns later
+OPTION_COLUMN := 22
+
+# one option of a spec, its keys read
+class Option {
+	name: text, short: text, kind: text, default: any, has_default: bool, required: bool, many: bool,
+	positional: bool, choices: list<any>, help: text
+}
+options_of(spec: list<T>): list<Option> := data_list(spec).map(entry => option_of(as_data_map(entry)))
+option_of(m: map<text, any>): Option := {
+	choices: list<any> = []
+	if m.has("choices") { choices = as_data_list(m["choices"]) }
+	Option(entry_text(m, "name"), entry_text(m, "short"), if m.has("kind") then "${m["kind"]}" else "text", if m.has("default") then m["default"] else ø, m.has("default"), is_set(m, "required"), is_set(m, "many"), is_set(m, "positional"), choices, entry_text(m, "help"))
+}
+entry_text(m: map<text, any>, key: text): text := if m.has(key) then "${m[key]}" else ""
+is_set(m: map<text, any>, key: text): bool := m.has(key) and m[key] == yes
+is_flag(o: Option): bool := o.kind == "flag"
+# the option as the user writes it: --name, or the bare name of a positional
+written(o: Option): text := if o.positional then o.name else "--${o.name}"
+# what an option holds before the arguments are read
+start_value(o: Option): any := {
+	if o.has_default then o.default
+	else if o.many then empty_list()
+	else if is_flag(o) then no
+	else ø
+}
+empty_list(): list<any> := []
+
+# whether an argument is an option, not a value: -x and --x are; - and a negative number (-5, -2.5) are not
+is_dashed(a: text): bool := a.starts_with("-") and a != "-" and not is_digits(a[1:].replace(".", ""))
+long_option(options: list<Option>, name: text): Option? := {
+	for o in options {
+		if not o.positional and o.name == name { return o }
+	}
+	ø
+}
+short_option(options: list<Option>, letter: text): Option? := {
+	for o in options {
+		if o.short == letter { return o }
+	}
+	ø
+}
+# a value text as the option's kind wants it, one of its choices when it has them
+value_of(o: Option, t: text): any := {
+	value = converted(o, t)
+	if #o.choices > 0 and not o.choices.any(choice => choice == value) { raise "cli: ${written(o)} is one of ${o.choices.map(choice => "${choice}").join(", ")}, not ${t}" }
+	value
+}
+converted(o: Option, t: text): any := {
+	if o.kind == "int" {
+		digits = if t.starts_with("-") then t[1:] else t
+		if digits == "" or not is_digits(digits) { raise "cli: ${written(o)} wants an int, not ${t}" }
+		return int(t)
+	}
+	if o.kind == "float" { return try float(t) catch e { raise "cli: ${written(o)} wants a number, not ${t}" } }
+	t
+}
+
+# the arguments being read: the place reached, the values so far, the options given, the positionals met
+class Reading { argv: list<text>, at: int, result: map<text, any>, given: list<text>, positionals: list<text> }
+# the next argument as an option's value, refused when there is none or it is an option itself
+next_value(r: Reading, shown: text): text := {
+	if r.at >= #r.argv or is_dashed(r.argv[r.at]) { raise "cli: ${shown} needs a value" }
+	r.at += 1
+	r.argv[r.at - 1]
+}
+set_value(r: Reading, o: Option, value: any) := {
+	if o.many { r.result[o.name] = as_data_list(r.result[o.name]) + listed(value) } else { r.result[o.name] = value }
+	r.given.add(o.name)
+}
+listed(value: any): list<any> := [value]
+
+parse_args(spec: list<T>, argv: list<text>): map<text, any> := {
+	rest: list<text> = []
+	parsed(options_of(spec), argv, no, rest)
+}
+# the arguments read against the options; with stop the options end at the first positional, which with all after
+# it goes into rest (for a command)
+parsed(options: list<Option>, argv: list<text>, stop: bool, rest: list<text>): map<text, any> := {
+	result: map<text, any> = {help: no}
+	for o in options { result[o.name] = start_value(o) }
+	r = Reading(argv, 0, result, [], [])
+	options_ended = no
+	while r.at < #argv {
+		a = argv[r.at]
+		r.at += 1
+		if stop and (options_ended or not is_dashed(a)) {
+			for x in argv.drop(r.at - 1) { rest.add(x) }
+			r.at = #argv
+		} else if options_ended or not is_dashed(a) {
+			r.positionals.add(a)
+		} else if a == "--" {
+			options_ended = yes
+		} else if a == "--help" or a == "-h" {
+			result["help"] = yes
+			return result
+		} else if a.starts_with("--") {
+			long_read(r, options, a[2:])
+		} else {
+			shorts_read(r, options, a[1:])
+		}
+	}
+	positionals_placed(r, options)
+	for o in options {
+		if o.required and not r.given.contains(o.name) { raise "cli: missing required ${written(o)}" }
+	}
+	result
+}
+# --name, --name=value, --name value, --no-name
+long_read(r: Reading, options: list<Option>, body: text) := {
+	equals = find(body, "=") - 1
+	name = if equals >= 0 then body[0:equals] else body
+	o = long_option(options, name)
+	if o == ø and name.starts_with("no-") {
+		negated = long_option(options, name[3:])
+		if negated == ø or not is_flag(negated) { raise "cli: unknown option --${name}" }
+		if equals >= 0 { raise "cli: --${name} takes no value" }
+		set_value(r, negated, no)
+	} else if o == ø {
+		raise "cli: unknown option --${name}"
+	} else if is_flag(o) {
+		if equals >= 0 { raise "cli: --${name} takes no value" }
+		set_value(r, o, yes)
+	} else {
+		value = if equals >= 0 then body[equals + 1:] else next_value(r, "--${name}")
+		set_value(r, o, value_of(o, value))
+	}
+}
+# -v, -vq, -n5, -vn 5: flags one letter each, the first option taking a value ends the letters
+shorts_read(r: Reading, options: list<Option>, letters: text) := {
+	k = 0
+	while k < #letters {
+		letter = letters[k:k + 1]
+		o = short_option(options, letter)
+		if o == ø { raise "cli: unknown option -${letter}" }
+		if is_flag(o) {
+			set_value(r, o, yes)
+			k += 1
+		} else {
+			attached = letters[k + 1:]
+			value = if attached != "" then attached else next_value(r, "-${letter}")
+			set_value(r, o, value_of(o, value))
+			k = #letters
+		}
+	}
+}
+# the positionals in spec order; one with many takes what the later single ones leave
+positionals_placed(r: Reading, options: list<Option>) := {
+	slots = options.filter(o => o.positional)
+	p = 0
+	for s in 0 upto #slots {
+		o = slots[s]
+		later = slots.drop(s + 1).filter(x => not x.many).count
+		if o.many {
+			taken = max(0, #r.positionals - p - later)
+			r.result[o.name] = r.positionals.drop(p).take(taken).map(x => value_of(o, x))
+			p += taken
+		} else if p < #r.positionals {
+			set_value(r, o, value_of(o, r.positionals[p]))
+			p += 1
+		} else if not o.has_default {
+			raise "cli: missing ${o.name}"
+		}
+	}
+	if p < #r.positionals { raise "cli: unexpected ${r.positionals[p]}" }
+}
+
+# --- help
+
+# an option's column, its text from the next column on (on the line below when the option is wider)
+help_line(part: text, words: text): text := {
+	if words == "" { return "  " + part }
+	padded = if #part < OPTION_COLUMN then part + " " * (OPTION_COLUMN - #part) else part + "\n" + " " * (OPTION_COLUMN + 2)
+	"  " + padded + words
+}
+metavar(o: Option): text := if #o.choices > 0 then "{" + o.choices.map(choice => "${choice}").join(",") + "}" else upper(o.name)
+# an option as the usage line shows it
+usage_part(o: Option): text := {
+	if o.positional {
+		shown = if #o.choices > 0 then metavar(o) else o.name
+		return if o.many then "[${shown} ...]" else shown
+	}
+	part = "--${o.name}" + value_part(o)
+	if o.required then part else "[${part}]"
+}
+value_part(o: Option): text := if is_flag(o) then "" else " " + metavar(o)
+# an option as its help line shows it, and its text
+option_part(o: Option): text := {
+	short = if o.short != "" then "-${o.short}, " else ""
+	negated = if is_flag(o) then ", --no-${o.name}" else ""
+	short + "--${o.name}" + value_part(o) + negated
+}
+option_words(o: Option): text := {
+	shown_default = if o.has_default and not is_flag(o) then "(default ${o.default})" else ""
+	required = if o.required then "(required)" else ""
+	[o.help, shown_default, required].filter(words => words != "").join(" ")
+}
+cli_help(program: text, spec: list<T>): text := help_of(program, options_of(spec))
+help_of(program: text, options: list<Option>): text := {
+	usage = ["usage: ${program} [-h]"] + options.map(usage_part)
+	positionals = options.filter(o => o.positional)
+	listed_positionals: list<text> = []
+	if #positionals > 0 { listed_positionals = ["", "positional arguments:"] + positionals.map(o => help_line(o.name, o.help)) }
+	named = ["", "options:", help_line("-h, --help", "show this help")] + options.filter(o => not o.positional).map(o => help_line(option_part(o), option_words(o)))
+	([usage.join(" ")] + listed_positionals + named).join("\n")
+}
+
+# --- commands, git style: `prog [global options] command [its options]`; commands maps each name to its spec, or to
+# {help: "one line", options: spec}
+
+command_options(command: any): list<Option> := if is_list(command) then options_of(as_data_list(command)) else options_of(as_data_list(as_data_map(command)["options"]))
+command_words(command: any): text := if is_map(command) then entry_text(as_data_map(command), "help") else ""
+command_names(commands: map<text, any>): list<text> := keys(commands)
+
+parse_commands(globals: list<T>, commands: map<text, V>, argv: list<text>): map<text, any> := {
+	table = data_map(commands)
+	rest: list<text> = []
+	result = parsed(options_of(globals), argv, yes, rest)
+	result["command"] = ø
+	if result["help"] == yes { return result }
+	names = command_names(table).join(", ")
+	if rest is empty { raise "cli: missing command (${names})" }
+	name = rest[0]
+	if not table.has(name) { raise "cli: unknown command ${name} (${names})" }
+	own = parsed(command_options(table[name]), rest.drop(1), no, [])
+	merged = merge(result, own)
+	merged["command"] = name
+	merged
+}
+# the help of a program with commands: its globals, then each command with its line
+cli_commands_help(program: text, globals: list<T>, commands: map<text, V>): text := {
+	table = data_map(commands)
+	top = help_of(program, options_of(globals)).split("\n")
+	names = "{" + command_names(table).join(",") + "}"
+	listed_commands = ["", "commands:"] + command_names(table).map(name => help_line(name, command_words(table[name])))
+	([top[0] + " ${names} ..."] + listed_commands + top.drop(1)).join("\n")
+}
+# the help of one command: `prog add -h`
+cli_command_text(program: text, commands: map<text, V>, name: text): text := help_of("${program} ${name}", command_options(data_map(commands)[name]))
