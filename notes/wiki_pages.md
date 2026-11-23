@@ -235,7 +235,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - standard-library.md (567 lines):
 - strict.md (16 lines): wap-wiki, tests test_strict_wanted.wap
 - string.md (123 lines): wap-wiki, tests test_string_page.wap green, test_string_wanted.wap; count is code points (char.md)
-- struct.md (271 lines): wap-wiki, tests test_struct_wanted.wap; asked (internals to notes, WIT forms)
+- struct.md (271 lines): wap-wiki, tests test_struct_page.wap green, test_struct_wanted.wap
 - style-guide.md (21 lines): wap-wiki; asked (// comments, --flags)
 - swift-is-the-better-rust.md (83 lines): wap-wiki, essay, no forms
 - swift.md (4 lines): wap-wiki, essay, no forms
