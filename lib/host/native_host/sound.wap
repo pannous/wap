@@ -140,6 +140,10 @@ trimmed_to_length(decoded: Decoded, tagged: list<int>): Decoded := {
 values_at(samples: int, count: int): list<int> := [field_i16(samples, SAMPLE_BYTES * at) for at in 0 ..< count]
 # the values of the chunks read, one after another
 decoded_of(rate: int, channels: int, chunks: list<list<int>>): Decoded := Decoded(rate, channels, [value for values in chunks for value in values])
+# a C call's status, 0 for done, else the decode raises the library's reason
+checked(status: int, reason: text) := { if status != 0 { raise reason } }
+toolbox_checked(status: int, path: text, doing: text) := checked(status, "${path}: AudioToolbox could not ${doing} (status ${status})")
+mpg123_checked(status: int, path: text) := checked(status, "${path}: " + mpg123_plain_strerror(status))
 # u32 fields of a C struct set, each [offset, value]
 fields_set(memory: int, fields: list<list<int>>) := {
 	for field in fields { set_field_i32(memory, field[0], field[1]) }
@@ -181,13 +185,13 @@ toolbox_decoded(path: text, rate: int, channels: int): Decoded := {
 	format = calloc(1, FORMAT_BYTES)
 	size = calloc(1, POINTER_CELL_BYTES)
 	set_field_i32(size, 0, FORMAT_BYTES)
-	ExtAudioFileGetProperty(file, FILE_DATA_FORMAT, size, format)
+	toolbox_checked(ExtAudioFileGetProperty(file, FILE_DATA_FORMAT, size, format), path, "read its format")
 	rate = if rate > 0 then rate else round(field_f64(format, FORMAT_RATE_AT)) as int
 	channels = if channels > 0 then channels else field_u32(format, FORMAT_CHANNELS_AT)
 	frame_bytes = SAMPLE_BYTES * channels
 	fields_set(format, [[FORMAT_ID_AT, LINEAR_PCM], [FORMAT_FLAGS_AT, SIGNED_PACKED], [FORMAT_PACKET_BYTES_AT, frame_bytes], [FORMAT_PACKET_FRAMES_AT, 1], [FORMAT_FRAME_BYTES_AT, frame_bytes], [FORMAT_CHANNELS_AT, channels], [FORMAT_BITS_AT, 8 * SAMPLE_BYTES]])
 	set_field_f64(format, FORMAT_RATE_AT, rate)
-	ExtAudioFileSetProperty(file, CLIENT_DATA_FORMAT, FORMAT_BYTES, format)
+	toolbox_checked(ExtAudioFileSetProperty(file, CLIENT_DATA_FORMAT, FORMAT_BYTES, format), path, "convert it to 16-bit samples")
 	chunk = calloc(DECODE_CHUNK_FRAMES, frame_bytes)
 	buffers = calloc(1, BUFFER_LIST_BYTES)
 	frames_read = calloc(1, POINTER_CELL_BYTES)
@@ -197,7 +201,8 @@ toolbox_decoded(path: text, rate: int, channels: int): Decoded := {
 		fields_set(buffers, [[BUFFER_COUNT_AT, 1], [BUFFER_CHANNELS_AT, channels], [BUFFER_SIZE_AT, DECODE_CHUNK_FRAMES * frame_bytes]])
 		set_field_pointer(buffers, BUFFER_DATA_AT, chunk)
 		set_field_i32(frames_read, 0, DECODE_CHUNK_FRAMES)
-		read = if ExtAudioFileRead(file, frames_read, buffers) == 0 then field_u32(frames_read, 0) else 0
+		toolbox_checked(ExtAudioFileRead(file, frames_read, buffers), path, "read it")
+		read = field_u32(frames_read, 0)
 		chunks.add(values_at(chunk, read * channels))
 	}
 	ExtAudioFileDispose(file)
@@ -223,7 +228,7 @@ wav_decoded(path: text): Decoded := {
 	fields_set(wanted, [[SDL_AUDIO_FORMAT_AT, SDL_AUDIO_S16LE], [SDL_AUDIO_CHANNELS_AT, channels], [SDL_AUDIO_RATE_AT, rate]])
 	made = calloc(1, POINTER_CELL_BYTES)
 	made_size = calloc(1, POINTER_CELL_BYTES)
-	SDL_ConvertAudioSamples(spec, field_pointer(samples, 0), field_i32(size, 0), wanted, made, made_size)
+	if not SDL_ConvertAudioSamples(spec, field_pointer(samples, 0), field_i32(size, 0), wanted, made, made_size) { raise path + ": not converted, " + SDL_GetError() }
 	values = values_at(field_pointer(made, 0), field_i32(made_size, 0) ÷ SAMPLE_BYTES)
 	SDL_free(field_pointer(samples, 0))
 	SDL_free(field_pointer(made, 0))
@@ -238,29 +243,33 @@ mpg123_format(decoder: handle, rate: i64, channels: i32, encodings: i32): i32 fr
 mpg123_read(decoder: handle, into: handle, size: i64, done: handle): i32 from 'mpg123'
 mpg123_close(decoder: handle): i32 from 'mpg123'
 mpg123_delete(decoder: handle): void from 'mpg123'
+mpg123_plain_strerror(status: i32): text from 'mpg123'
+# mpg123's statuses: done, the end of the file, and a new format, which a read after mpg123_format may tell
 MPG123_OK := 0
+MPG123_DONE := -12
+MPG123_NEW_FORMAT := -11
 MPG123_ENC_SIGNED_16 := 0xD0
 mpg123_decoded(path: text): Decoded := {
 	if not library_has("mpg123", "mpg123_new") { raise path + ": decoding an MP3 needs libmpg123 (apt install libmpg123-0, brew install mpg123)" }
 	decoder = mpg123_new(0, 0)
-	if mpg123_open(decoder, path) != MPG123_OK { raise path + ": not decoded by libmpg123" }
+	mpg123_checked(mpg123_open(decoder, path), path)
 	rate_cell = calloc(1, POINTER_CELL_BYTES)
 	channels_cell = calloc(1, POINTER_CELL_BYTES)
 	encoding = calloc(1, POINTER_CELL_BYTES)
-	mpg123_getformat(decoder, rate_cell, channels_cell, encoding)
+	mpg123_checked(mpg123_getformat(decoder, rate_cell, channels_cell, encoding), path)
 	rate = field_i64(rate_cell, 0)
 	channels = field_i32(channels_cell, 0)
-	mpg123_format_none(decoder)
-	mpg123_format(decoder, rate, channels, MPG123_ENC_SIGNED_16)
+	mpg123_checked(mpg123_format_none(decoder), path)
+	mpg123_checked(mpg123_format(decoder, rate, channels, MPG123_ENC_SIGNED_16), path)
 	chunk_bytes = DECODE_CHUNK_FRAMES * SAMPLE_BYTES * channels
 	chunk = calloc(1, chunk_bytes)
 	done = calloc(1, POINTER_CELL_BYTES)
 	chunks: list<list<int>> = []
-	read = chunk_bytes
-	while read > 0 {
-		mpg123_read(decoder, chunk, chunk_bytes, done)
-		read = field_i64(done, 0)
-		chunks.add(values_at(chunk, read ÷ SAMPLE_BYTES))
+	status = MPG123_OK
+	while status != MPG123_DONE {
+		status = mpg123_read(decoder, chunk, chunk_bytes, done)
+		if status != MPG123_DONE and status != MPG123_NEW_FORMAT { mpg123_checked(status, path) }
+		chunks.add(values_at(chunk, field_i64(done, 0) ÷ SAMPLE_BYTES))
 	}
 	mpg123_close(decoder)
 	mpg123_delete(decoder)

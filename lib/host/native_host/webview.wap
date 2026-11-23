@@ -65,8 +65,9 @@ class WebView {
 	message_floats: int = 0
 	# AppKit's and WebKit's classes are there once their frameworks are loaded (a symbol of each asked for loads it)
 	frameworks_asked: bool = no
-	# a page's loading: the navigation delegate's two answers end it
+	# a page's loading: the navigation delegate's two answers end it, a failed one with its reason
 	page_loading_ended: bool = no
+	page_loading_failure: text = ""
 	page_loading: int = 0
 	# the page's events not yet given to the program, each its {event, detail} as JSON
 	page_events: list<text> = []
@@ -184,7 +185,10 @@ application_made(policy: int) := {
 }
 
 loading_ended(receiver: int, selector: int, shown_in: int, navigation: int) := { web.page_loading_ended = yes }
-loading_failed(receiver: int, selector: int, shown_in: int, navigation: int, failure: int) := { web.page_loading_ended = yes }
+loading_failed(receiver: int, selector: int, shown_in: int, navigation: int, failure: int) := {
+	web.page_loading_failure = ns_text(told(failure, "localizedDescription"))
+	web.page_loading_ended = yes
+}
 page_message(receiver: int, selector: int, controller: int, message: int) := {
 	body = told(message, "body")
 	if is_kind(body, "NSString") { web.page_events.add(ns_text(body)) }
@@ -227,22 +231,24 @@ view_made(width: float, height: float): int := {
 	sent(configuration, "setURLSchemeHandler:forURLScheme:", [callbacks, ns_string(CALLBACK_SCHEME)])
 	sent_with_floats(told(class_named("WKWebView"), "alloc"), "initWithFrame:configuration:", [configuration], [0.0, 0.0, width, height])
 }
-# the HTML shown in the view, waited for: no when it did not load in time
-page_loaded(shown_in: int, html: text): bool := {
+# the HTML shown in the view, waited for; raises why it did not load, or that it did not in time
+page_loaded(shown_in: int, html: text) := {
 	if web.page_loading == 0 { web.page_loading = instance_of(class_made("WapHostLoading", [method_of("webView:didFinishNavigation:", loading_ended), method_of("webView:didFailNavigation:withError:", loading_failed)])) }
 	web.page_loading_ended = no
+	web.page_loading_failure = ""
 	sent(shown_in, "setNavigationDelegate:", [web.page_loading])
 	sent(shown_in, "loadHTMLString:baseURL:", [ns_string(html), sent(class_named("NSURL"), "URLWithString:", [ns_string(PAGE_ORIGIN)])])
 	loaded = spun(() => web.page_loading_ended, ANSWER_MS)
 	sent(shown_in, "setNavigationDelegate:", [0])
-	loaded
+	if not loaded { raise "the page did not load in ${ANSWER_MS ÷ MS_PER_SECOND} s" }
+	if web.page_loading_failure != "" { raise "the page did not load: " + web.page_loading_failure }
 }
 # the run's hidden web view, made at its first use: the process never becomes an app on screen for it
 hidden_view(): int := {
 	if web.hidden_view != 0 { return web.hidden_view }
 	application_made(POLICY_PROHIBITED)
 	web.hidden_view = view_made(1.0, 1.0)
-	if not page_loaded(web.hidden_view, EMPTY_PAGE) { eprint("the hidden web view did not load") }
+	page_loaded(web.hidden_view, EMPTY_PAGE)
 	web.hidden_view
 }
 
@@ -342,10 +348,6 @@ window_answered(called: text, member: text, arguments: any): any? := {
 	happened
 }
 
-# a promise the view gave is awaited there (callAsyncJavaScript), so none is ever pending for the program to wait for
-# (lib/prelude.warp foreign_settled; the page keeps one: host-foreign.js)
-foreign_pending(): int := 0
-foreign_await(): any? := ø
 # foreign_call(runtime, module, member, call, arguments), as the page's host-foreign.js foreignCall answers it
 foreign_call(runtime: text, module: any, member: text, call: int, arguments: any): any? := {
 	pool = objc_autoreleasePoolPush()
@@ -368,15 +370,12 @@ foreign_answered(runtime: text, module: any, member: text, call: bool, arguments
 	parse_json(answer)
 }
 
-# `wap app check`: the text the page shows, read in the hidden web view; "" for a page that did not load, said
+# `wap app check`: the text the page shows, read in the hidden web view; raises why a page did not load
 webview_page_text(html: text): text := {
 	pool = objc_autoreleasePoolPush()
 	shown_in = hidden_view()
-	shown = if page_loaded(shown_in, html) then try answered(shown_in, "return document.body?.innerText ?? ''", "", "") catch failure { not_loaded(": " + failure.message) } else not_loaded("")
+	page_loaded(shown_in, html)
+	shown = answered(shown_in, "return document.body?.innerText ?? ''", "", "")
 	objc_autoreleasePoolPop(pool)
 	shown
-}
-not_loaded(why: text): text := {
-	eprint("the page did not load" + why)
-	""
 }

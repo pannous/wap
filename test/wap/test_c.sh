@@ -67,4 +67,6 @@ first40(s: bytes<40>): i64 from '$stage/libs40.dylib'
 made40(): handle from '$stage/libs40.dylib'
 m = made40()
 print(text(sum40(m)) + \" \" + text(first40(m)))")" "14 1"
+check "the native wap tells its programs the library's folder" "$(ran library_folder "wap_library_folder(): text from 'c'
+print(text(exists(wap_library_folder() + \"/json.wap\")))")" "yes"
 exit $((failures > 0))
