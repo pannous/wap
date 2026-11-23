@@ -1,0 +1,71 @@
+# The standard module random (wiki/random.md, wiki/standard-library.md "random"): pseudo-random numbers by splitmix64
+# in plain wap, not for secrets. A Random is one generator, `rng = Random(seed: 42)`, giving the same numbers after
+# the same seed; the words without a generator (random, random_below, choice, shuffle, sample, normal …) share one,
+# seeded from the clock until seed(n) makes a run repeat. `random()` is a float from 0 up to 1, random(a, b) one from
+# a up to b, of two whole numbers a whole number from a to b, both ends included (a die: random(1, 6)).
+use math
+
+class Random { seed: int }
+
+# splitmix64's step: the state moves on by the golden gamma, its next number mixed out of it
+GOLDEN_GAMMA := 0x9E3779B97F4A7C15
+MIX_FIRST := 0xBF58476D1CE4E5B9
+MIX_SECOND := 0x94D049BB133111EB
+# a float's 53 bits of precision
+FLOAT_BITS := 53
+
+# the generator's next number, any int
+next(rng: Random): int := {
+	rng.seed += GOLDEN_GAMMA
+	z = (rng.seed xor (rng.seed >>> 30)) * MIX_FIRST
+	z = (z xor (z >>> 27)) * MIX_SECOND
+	z xor (z >>> 31)
+}
+# a float from 0 up to 1
+next_float(rng: Random): float := (next(rng) >>> (64 - FLOAT_BITS)) / 2.0 ^ FLOAT_BITS
+# a whole number from 0 up to n
+next_below(rng: Random, n: int): int := {
+	if n <= 0 { raise "random_below(${n}): n must be above 0" }
+	(next(rng) >>> 1) % n
+}
+
+# the generator the words without one share
+shared_generator: Random = Random(wall_clock_ms())
+seed(n: int) := { shared_generator.seed = n }
+
+random(): float := next_float(shared_generator)
+random(a: float, b: float): float := a + (b - a) * random()
+random(a: int, b: int): int := a + random_below(b - a + 1)
+random_below(n: int): int := next_below(shared_generator, n)
+
+choice(xs: list<T>): T := if xs is empty then raise "choice of an empty list" else xs[random_below(#xs)]
+# a new list in random order (Fisher-Yates); xs keeps its order
+shuffle(xs: list<T>): list<T> := {
+	out = xs.take(#xs)
+	for i in (0 upto #out).map(k => #out - 1 - k) {
+		j = random_below(i + 1)
+		swapped = out[i]
+		out[i] = out[j]
+		out[j] = swapped
+	}
+	out
+}
+# k of the items, each at most once, in random order
+sample(xs: list<T>, k: int): list<T> := shuffle(xs).take(min(k, #xs))
+# xs[i] with the chance weights[i] / the weights' sum; a zero weight is never drawn
+weighted_choice(xs: list<T>, weights: list<float>): T := {
+	if xs is empty or #weights != #xs or weights.any(w => w < 0) or weights.sum <= 0 { raise "weighted_choice needs one weight >= 0 per item, some above 0" }
+	r = random() * weights.sum
+	sums = (0 upto #xs).map(i => weights.take(i + 1).sum)
+	found = sums.index_where(total => r < total)
+	# rounding can leave r at the sum itself: then the last item
+	at = if found == 0 then #xs - 1 else found - 1
+	xs[at]
+}
+# a normally distributed float (Box-Muller); 1 - random() is never 0, so log never sees 0
+normal(mean: float, sd: float): float := {
+	if sd < 0 { raise "normal needs sd >= 0, not ${sd}" }
+	mean + sd * sqrt(-2.0 * log(1.0 - random())) * cos(2.0 * π * random())
+}
+# an exponentially distributed float with the mean 1 / rate
+random_exponential(rate: float): float := if rate <= 0 then raise "random_exponential needs rate > 0, not ${rate}" else 0.0 - log(1.0 - random()) / rate

@@ -1,0 +1,353 @@
+# The standard module markdown (wiki/library-markdown.md): markdown_html(t), Markdown to HTML in CommonMark's output
+# form. Blocks: ATX headings, paragraphs, fenced code (its info word the language class) and indented code, block
+# quotes, bullet and ordered lists (nested by indentation, loose when a blank line parts their items), thematic
+# breaks, GFM tables with alignment, and HTML blocks passed through (a line starting with a tag, up to a blank line).
+# Inline: *em* and _em_, **strong** and __strong__, ~~strike~~, `code`, [links](url "title"), ![images](url),
+# <autolinks>, inline tags passed through, hard breaks (two spaces or a backslash at a line's end), backslash escapes
+# and the entities written as such. Not covered: setext headings, reference links, lazy continuation lines and
+# CommonMark's finer delimiter rules.
+use text
+
+PUNCTUATION := "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+BULLETS := "-*+"
+EMPHASIS := "*_~"
+FENCES := ["```", "~~~"]
+ESCAPED := [["&", "&amp;"], ["<", "&lt;"], [">", "&gt;"], ["\"", "&quot;"]]
+
+markdown_html(source: text): text := blocks_html(source.replace("\r\n", "\n").split("\n"), no)
+
+# --- lines
+
+char_at(t: text, at: int): text := t[at:at + 1]
+indent_of(line: text): int := {
+	n = 0
+	while char_at(line, n) == " " { n += 1 }
+	n
+}
+is_blank(line: text): bool := trim(line) == ""
+unindented(line: text, n: int): text := line[min(n, indent_of(line)):]
+is_digit_text(c: text): bool := c != "" and "0123456789".contains(c)
+
+heading_level(line: text): int := {
+	t = unindented(line, 3)
+	level = 0
+	while level < 7 and char_at(t, level) == "#" { level += 1 }
+	if level >= 1 and level <= 6 and (#t == level or char_at(t, level) == " ") then level else 0
+}
+is_rule(line: text): bool := {
+	t = line.replace(" ", "")
+	#t >= 3 and indent_of(line) <= 3 and "-*_".contains(char_at(t, 0)) and t.codepoints.all(c => text(c) == char_at(t, 0))
+}
+fence_of(line: text): text := {
+	t = unindented(line, 3)
+	found = FENCES.filter(f => t.starts_with(f))
+	if found is empty then "" else found[0]
+}
+is_quote(line: text): bool := indent_of(line) <= 3 and unindented(line, 3).starts_with(">")
+is_html_start(line: text): bool := {
+	t = unindented(line, 3)
+	t.starts_with("<") and (#t > 1 and (char_at(t, 1) == "/" or char_at(t, 1).lower() != char_at(t, 1).upper()))
+}
+# a list item's marker: its kind ("-", "*", "+" or "." / ")" for an ordered one), its start number and where its
+# content begins; ø when the line starts no item
+class Marker { kind: text, start: int, content_at: int }
+marker_of(line: text): Marker? := {
+	at = indent_of(line)
+	if at > 3 { return ø }
+	if BULLETS.contains(char_at(line, at)) and (char_at(line, at + 1) == " " or at + 1 == #line) { return Marker(char_at(line, at), 1, at + 2) }
+	digits = at
+	while is_digit_text(char_at(line, digits)) { digits += 1 }
+	ending = char_at(line, digits)
+	if digits == at or digits - at > 9 or (ending != "." and ending != ")") or (char_at(line, digits + 1) != " " and digits + 1 != #line) { return ø }
+	Marker(ending, int(line[at:digits]), digits + 2)
+}
+# whether a line ends a paragraph by starting another block
+starts_block(line: text): bool := {
+	marker = marker_of(line)
+	heading_level(line) > 0 or is_rule(line) or fence_of(line) != "" or is_quote(line) or is_html_start(line) or (marker != ø and (marker!.kind == "-" or marker!.kind == "*" or marker!.kind == "+" or marker!.start == 1))
+}
+
+# --- tables
+
+cells_of(line: text): list<text> := {
+	t = trim(line)
+	inner = t[(if t.starts_with("|") then 1 else 0):(if t.ends_with("|") and not t.ends_with("\\|") then #t - 1 else #t)]
+	cells: list<text> = []
+	cell = ""
+	at = 0
+	while at < #inner {
+		if inner[at:at + 2] == "\\|" {
+			cell += "|"
+			at += 2
+		} else if char_at(inner, at) == "|" {
+			cells.add(trim(cell))
+			cell = ""
+			at += 1
+		} else {
+			cell += char_at(inner, at)
+			at += 1
+		}
+	}
+	cells + [trim(cell)]
+}
+is_delimiter_row(line: text): bool := line.contains("-") and cells_of(line).all(cell => #cell > 0 and cell.replace(":", "").replace("-", "") == "" and cell.contains("-"))
+align_of(cell: text): text := if cell.starts_with(":") and cell.ends_with(":") then "center" else if cell.ends_with(":") then "right" else if cell.starts_with(":") then "left" else ""
+table_cell(tag: text, align: text, content: text): text := "<${tag}${if align == "" then "" else " align=\"${align}\""}>${inline_html(content)}</${tag}>"
+cell_or_empty(cells: list<text>, i: int): text := if i < #cells then cells[i] else ""
+table_html(head: text, delimiter: text, rows: list<text>): text := {
+	aligns = cells_of(delimiter).map(align_of)
+	header = cells_of(head)
+	row_html = (cells: list<text>, tag: text) => "<tr>\n" + (0 upto #aligns).map(i => table_cell(tag, aligns[i], cell_or_empty(cells, i)) + "\n").join("") + "</tr>\n"
+	body = if rows is empty then "" else "<tbody>\n" + rows.map(row => row_html(cells_of(row), "td")).join("") + "</tbody>\n"
+	"<table>\n<thead>\n" + row_html(header, "th") + "</thead>\n" + body + "</table>\n"
+}
+
+# --- blocks
+
+# the HTML of lines; in a tight list item its paragraphs go without <p>
+blocks_html(lines: list<text>, tight: bool): text := {
+	out = ""
+	i = 0
+	while i < #lines {
+		line = lines[i]
+		marker = marker_of(line)
+		fence = fence_of(line)
+		if is_blank(line) { i += 1 }
+		else if fence != "" {
+			# TODO (card method-call-index) one expression once the reader indexes a call's result
+			info_words = trim(unindented(line, 3)[#fence:]).split(" ")
+			info = info_words[0]
+			body: list<text> = []
+			i += 1
+			while i < #lines and not unindented(lines[i], 3).starts_with(fence) {
+				body.add(unindented(lines[i], indent_of(line)))
+				i += 1
+			}
+			i += 1
+			class_attribute = if info == "" then "" else " class=\"language-${escaped(info)}\""
+			out += "<pre><code${class_attribute}>" + body.map(l => escaped(l) + "\n").join("") + "</code></pre>\n"
+		} else if indent_of(line) >= 4 {
+			body: list<text> = []
+			while i < #lines and (indent_of(lines[i]) >= 4 or is_blank(lines[i])) {
+				body.add(unindented(lines[i], 4))
+				i += 1
+			}
+			while #body > 0 and is_blank(body.last) { body = body.take(#body - 1) }
+			out += "<pre><code>" + body.map(l => escaped(l) + "\n").join("") + "</code></pre>\n"
+		} else if heading_level(line) > 0 {
+			level = heading_level(line)
+			content = trim(unindented(line, 3)[level:])
+			while content.ends_with("#") { content = content[0:#content - 1] }
+			out += "<h${level}>${inline_html(trim(content))}</h${level}>\n"
+			i += 1
+		} else if is_rule(line) {
+			out += "<hr />\n"
+			i += 1
+		} else if is_quote(line) {
+			inner: list<text> = []
+			while i < #lines and is_quote(lines[i]) {
+				rest = unindented(lines[i], 3)[1:]
+				content = if rest.starts_with(" ") then rest[1:] else rest
+				inner.add(content)
+				i += 1
+			}
+			out += "<blockquote>\n" + blocks_html(inner, no) + "</blockquote>\n"
+		} else if marker != ø {
+			items: list<list<text>> = []
+			loose = no
+			first = marker!
+			while i < #lines and marker_of(lines[i]) != ø and marker_of(lines[i])!.kind == first.kind {
+				at = marker_of(lines[i])!.content_at
+				item = [lines[i][min(at, #lines[i]):]]
+				i += 1
+				while i < #lines and (is_blank(lines[i]) or indent_of(lines[i]) >= at) {
+					item.add(unindented(lines[i], at))
+					i += 1
+				}
+				while #item > 1 and is_blank(item.last) {
+					item = item.take(#item - 1)
+					if i < #lines and marker_of(lines[i]) != ø { loose = yes }
+				}
+				if item.drop(1).any(is_blank) { loose = yes }
+				items.add(item)
+			}
+			ordered = first.kind == "." or first.kind == ")"
+			opening = if not ordered then "<ul>" else if first.start == 1 then "<ol>" else "<ol start=\"${first.start}\">"
+			out += opening + "\n" + items.map(item => list_item_html(item, not loose)).join("") + (if ordered then "</ol>" else "</ul>") + "\n"
+		} else if is_html_start(line) {
+			while i < #lines and not is_blank(lines[i]) {
+				out += lines[i] + "\n"
+				i += 1
+			}
+		} else if line.contains("|") and i + 1 < #lines and is_delimiter_row(lines[i + 1]) {
+			rows: list<text> = []
+			start = i
+			i += 2
+			while i < #lines and not is_blank(lines[i]) and lines[i].contains("|") {
+				rows.add(lines[i])
+				i += 1
+			}
+			out += table_html(lines[start], lines[start + 1], rows)
+		} else {
+			paragraph = [line]
+			i += 1
+			while i < #lines and not is_blank(lines[i]) and not starts_block(lines[i]) {
+				paragraph.add(lines[i])
+				i += 1
+			}
+			paragraph = paragraph.map(l => l[indent_of(l):])
+			content = inline_html(paragraph.join("\n").trim_end_spaces())
+			out += if tight then content + "\n" else "<p>${content}</p>\n"
+		}
+	}
+	out
+}
+# a list item: a tight one's lone paragraph inline, its other blocks on their own lines
+list_item_html(lines: list<text>, tight: bool): text := {
+	inner = blocks_html(lines, tight)
+	if inner == "" then "<li></li>\n"
+	else if tight and not inner.starts_with("<") then "<li>" + (if inner.split("\n").count == 2 then inner[0:#inner - 1] else inner) + "</li>\n"
+	else "<li>\n" + inner + "</li>\n"
+}
+trim_end_spaces(t: text): text := {
+	end = #t
+	while end > 0 and char_at(t, end - 1) == " " { end -= 1 }
+	t[0:end]
+}
+
+# --- inline
+
+escaped(t: text): text := ESCAPED.fold(t, (out, pair) => out.replace(pair[0], pair[1]))
+# where the closing run of the delimiter starts at or after from: preceded by no space, and for _ followed by no
+# letter or digit; 0-based, -1 for none
+closing_at(t: text, delimiter: text, from: int): int := {
+	at = from
+	while at + #delimiter <= #t {
+		if t[at:at + #delimiter] == delimiter and char_at(t, at - 1) != " " and char_at(t, at - 1) != "\n" and not (delimiter.starts_with("_") and is_word_char(char_at(t, at + #delimiter))) { return at }
+		at += if char_at(t, at) == "\\" then 2 else 1
+	}
+	-1
+}
+is_word_char(c: text): bool := c != "" and (c.lower() != c.upper() or is_digit_text(c))
+# the link's destination and title in "(url "title")" starting at from; ø when it is none
+class Target { url: text, title: text, after: int }
+target_at(t: text, from: int): Target? := {
+	if char_at(t, from) != "(" { return ø }
+	close = find(t[from:], ")")
+	if close == 0 { return ø }
+	inside = trim(t[from + 1:from + close - 1])
+	quote = find(inside, " \"")
+	url = if quote == 0 then inside else trim(inside[0:quote - 1])
+	title = if quote == 0 then "" else inside[quote + 1:#inside - 1]
+	bare = if url.starts_with("<") and url.ends_with(">") then url[1:#url - 1] else url
+	Target(bare, title, from + close)
+}
+# a link or image starting at the place: its HTML and where it ends; ø for none
+class Link { html: text, after: int }
+link_at(t: text, at: int): Link? := {
+	image = char_at(t, at) == "!"
+	open = if image then at + 1 else at
+	if char_at(t, open) != "[" { return ø }
+	close = bracket_end(t, open)
+	if close < 0 { return ø }
+	target = target_at(t, close + 1)
+	if target == ø { return ø }
+	Link(link_html(t[open + 1:close], target!, image), target!.after)
+}
+link_html(label: text, target: Target, image: bool): text := {
+	title = if target.title == "" then "" else " title=\"${escaped(target.title)}\""
+	if image then "<img src=\"${escaped(target.url)}\" alt=\"${escaped(label)}\"${title} />"
+	else "<a href=\"${escaped(target.url)}\"${title}>${inline_html(label)}</a>"
+}
+# where the bracket opened at from closes, nested brackets counted; -1 for none
+bracket_end(t: text, from: int): int := {
+	depth = 0
+	at = from
+	while at < #t {
+		c = char_at(t, at)
+		if c == "\\" { at += 1 }
+		else if c == "[" { depth += 1 }
+		else if c == "]" {
+			depth -= 1
+			if depth == 0 { return at }
+		}
+		at += 1
+	}
+	-1
+}
+is_entity(t: text, at: int): bool := {
+	semi = find(t[at:], ";")
+	semi > 2 and semi < 12 and t[at + 1:at + semi - 1].codepoints.all(c => is_word_char(text(c)) or c == '#')
+}
+
+# the address of an autolink <scheme:…> or <name@host> at the place, "" for none
+autolink_of(t: text, at: int): text := {
+	close = find(t[at:], ">")
+	address = if close == 0 then "" else t[at + 1:at + close - 1]
+	if address != "" and not address.contains(" ") and (address.contains(":") or address.contains("@")) then address else ""
+}
+
+inline_html(t: text): text := {
+	out = ""
+	at = 0
+	while at < #t {
+		c = char_at(t, at)
+		if c == "\\" and at + 1 < #t and PUNCTUATION.contains(char_at(t, at + 1)) {
+			out += escaped(char_at(t, at + 1))
+			at += 2
+		} else if c == "\\" and char_at(t, at + 1) == "\n" {
+			out += "<br />\n"
+			at += 2
+		} else if c == "\n" {
+			out = trim_end_spaces(out) + (if t[0:at].ends_with("  ") then "<br />\n" else "\n")
+			at += 1
+		} else if c == "`" {
+			run = 1
+			while char_at(t, at + run) == "`" { run += 1 }
+			fence = "`" * run
+			close = find(t[at + run:], fence)
+			if close == 0 {
+				out += fence
+				at += run
+			} else {
+				code = t[at + run:at + run + close - 1].replace("\n", " ")
+				stripped = if #code > 1 and code.starts_with(" ") and code.ends_with(" ") then code[1:#code - 1] else code
+				out += "<code>${escaped(stripped)}</code>"
+				at += run + close - 1 + run
+			}
+		} else if c == "<" and autolink_of(t, at) != "" {
+			address = autolink_of(t, at)
+			href = if address.contains(":") then address else "mailto:" + address
+			out += "<a href=\"${escaped(href)}\">${escaped(address)}</a>"
+			at += #address + 2
+		} else if c == "<" and is_html_start(t[at:]) and find(t[at:], ">") > 0 {
+			out += t[at:at + find(t[at:], ">")]
+			at += find(t[at:], ">")
+		} else if c == "&" and is_entity(t, at) {
+			out += t[at:at + find(t[at:], ";")]
+			at += find(t[at:], ";")
+		} else if link_at(t, at) != ø {
+			link = link_at(t, at)!
+			out += link.html
+			at = link.after
+		} else if EMPHASIS.contains(c) {
+			run = 1
+			while char_at(t, at + run) == c { run += 1 }
+			size = if c == "~" then 2 else min(run, 2)
+			delimiter = c * size
+			close = if run >= size and char_at(t, at + size) != " " and not (c == "_" and is_word_char(char_at(t, at - 1))) then closing_at(t, delimiter, at + size + 1) else -1
+			if close < 0 {
+				out += escaped(t[at:at + run])
+				at += run
+			} else {
+				tag = if c == "~" then "del" else if size == 2 then "strong" else "em"
+				out += "<${tag}>${inline_html(t[at + size:close])}</${tag}>"
+				at = close + size
+			}
+		} else {
+			out += escaped(c)
+			at += 1
+		}
+	}
+	out
+}
