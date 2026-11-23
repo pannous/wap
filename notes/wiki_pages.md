@@ -210,8 +210,8 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - rant.md (15 lines): wap-wiki, links; asked (wasp)
 - README.md (0 lines):
 - real.md (0 lines):
-- reference.md (69 lines):
-- reflection.md (127 lines):
+- reference.md (69 lines): wap-wiki, tests test_reference_page.wap green, test_reference_wanted.wap; asked (TODO section, inout)
+- reflection.md (127 lines): wap-wiki, tests test_reflection_wanted.wap the forms still to build (params/fields/methods/signature in test_keyword_wanted)
 - repl.md (1 lines):
 - required.md (1 lines):
 - result.md (19 lines):
