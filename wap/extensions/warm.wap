@@ -20,13 +20,21 @@ STANDARD_ENTRY = "<standard>"
 USED_ONLY = ["extra", "host"]
 
 # the files the language read so far, packed: [path: [code, [word, …]], …], and the standard library's words, each
-# with the module defining it: <standard>: [word: path, …]
+# with the modules defining it: <standard>: [word: [path, …], …]
 warm_state(language: Language, wap_folder: text) as text := pack(List(language.operated.keys.map(file => Key(Text(file), Op.Colon, List([language.operated[file].code, List(language.operated[file].words.map(word => Text(word)), Bracket.Square, Separator.Comma)], Bracket.Square, Separator.Comma))) + [standard_entry(language, wap_folder)], Bracket.Square, Separator.Comma), path => marked(wap_folder, path))
-standard_entry(language: Language, wap_folder: text) as Node := Key(Text(STANDARD_ENTRY), Op.Colon, List(standard_signatures(language, wap_folder).map(signature => Key(Text(signature.name), Op.Colon, Text(signature.module))), Bracket.Square, Separator.Comma))
-# the words the standard library's modules define at their tops, each naming its module: read from the sources by a
-# compiler without a warm state, so a cold and a warm compile know the same words
-standard_signatures(language: Language, wap_folder: text) as list<Signature> := standard_files(in_folder(wap_folder, LIBRARY_FOLDER)).flat_map(file => unique(words_named(read_notation(language, file))).map(word => standard_signature(word, file)))
-standard_signature(word: text, file: text) as Signature := Signature(word, word, DefinitionKind.Standard, Text(file), module: file)
+standard_entry(language: Language, wap_folder: text) as Node := {
+	standard = standard_words(language, wap_folder)
+	Key(Text(STANDARD_ENTRY), Op.Colon, List(standard.keys.map(word => Key(Text(word), Op.Colon, List(standard[word].map(file => Text(file)), Bracket.Square, Separator.Comma))), Bracket.Square, Separator.Comma))
+}
+# the words the standard library's modules define at their tops, each with the modules defining it: read from the
+# sources by a compiler without a warm state, so a cold and a warm compile know the same words
+standard_words(language: Language, wap_folder: text) as map<text, list<text>> := {
+	standard: map<text, list<text>> = {}
+	for file in standard_files(in_folder(wap_folder, LIBRARY_FOLDER)) {
+		for word in unique(words_named(read_notation(language, file))) { standard[word] = (if standard.has(word) then standard[word] else []) + [file] }
+	}
+	standard
+}
 # the standard library's modules: its own and those of its folders, but the folders only a `use` brings in
 standard_files(library: text) as list<text> := ([library] + list_files(library).filter(entry => not entry.contains(".") and not (entry in USED_ONLY)).map(entry => library + "/" + entry)).flat_map(folder => list_files(folder).filter(name => name.ends_with(".wap")).map(name => folder + "/" + name))
 
@@ -36,16 +44,16 @@ warm_brought(language: Language, wap_folder: text, state: text) := {
 	if state == "" { return }
 	match unpack(state, path => unmarked(wap_folder, path)) {
 		List(files, bracket, separator) => for file in files { match file {
-			Key(Text(path), op, List(kept, square, comma)) => if path == STANDARD_ENTRY { language.standard = kept.map(standard_word) } else { language.operated[path] = Operated(kept#1, items_of(kept#2).map(word => text(word))) }
+			Key(Text(path), op, List(kept, square, comma)) => if path == STANDARD_ENTRY { for word in kept { standard_word_brought(language, word) } } else { language.operated[path] = Operated(kept#1, items_of(kept#2).map(word => text(word))) }
 			_ => raise "warm state: no file entry: ${text(file)}"
 		} }
 		_ => raise "warm state: no list of files"
 	}
 }
 
-# a word of the standard library, as its entry holds it, `primes: "<wap>/lib/math.wap"`
-standard_word(entry: Node) as Signature := match entry {
-	Key(Text(word), op, Text(file)) => Signature(word, word, DefinitionKind.Standard, Text(file), module: file)
+# a word of the standard library, as its entry holds it, `primes: ["<wap>/lib/math.wap"]`
+standard_word_brought(language: Language, entry: Node) := match entry {
+	Key(Text(word), op, files) => language.standard[word] = items_of(files).map(file => text(file))
 	_ => raise "warm state: no standard word: ${text(entry)}"
 }
 

@@ -36,12 +36,13 @@ TYPES_DEPTH = -2
 
 # the program bound inside the modules it uses and the types module, whose declarations (`name: signature`) it may use;
 # two modules defining one name are refused, used or not
-bound_program(program: Block, types: list<Signature>, modules: list<Module>) as Block := {
-	known = identified_program(program, types, modules)
+bound_program(program: Block, types: list<Signature>, modules: list<Module>, standard: map<text, list<text>>) as Block := {
+	known = identified_program(program, types, modules, standard)
 	finished(known, known.statements.map(statement => bound(statement, known.scope, PROGRAM_DEPTH)))
 }
-# the words around a program: the modules it uses, then the types module's, outermost
-scope_around(types: list<Signature>, modules: list<Module>) as Scope := scope_of(modules_scope(modules) + types_scope(types))
+# the words around a program: the modules it uses, then the types module's, outermost, and the standard library's
+# beyond them
+scope_around(types: list<Signature>, modules: list<Module>, standard: map<text, list<text>> = {}) as Scope := Scope([Layer(modules_scope(modules) + types_scope(types))], no, standard)
 # the types module's words, outermost
 types_scope(types: list<Signature>) as list<Definition> := types.flat_map(signature => library_words(signature, TYPES_DEPTH))
 # a library's words: a function of the types module or of a used module, or a used module's variable, `x = 1`, or a
@@ -64,7 +65,7 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	Call(called, arguments) => module_call(n, called, arguments, scope, depth) ?? if is_type_test(called, scope) then type_test_bound(n, called, arguments, scope, depth) else if rest_named(n) != ø then refitted(Call(called, all_bound(arguments, scope, depth)), n) else field_called(n, called, arguments, scope, depth) ?? refitted(Call(called_bound(with_receiver(called, scope, depth), #arguments, scope, depth), arguments.map(argument => argument_bound(argument, scope, depth))), n)
 	Prim(operation, arguments) => refitted(Prim(operation, all_bound(arguments, scope, depth)), n)
 	If(condition, then_part, else_part) => refitted(If(bound(condition, scope, depth), bound(then_part, scope, depth), bound(else_part, scope, depth)), n)
-	While(condition, body) => refitted(While(bound(condition, scope, depth), bound(body, Scope(scope.layers, scope.looped or depth == PROGRAM_DEPTH), depth)), n)
+	While(condition, body) => refitted(While(bound(condition, scope, depth), bound(body, Scope(scope.layers, scope.looped or depth == PROGRAM_DEPTH, scope.standard), depth)), n)
 	Try(body, handler) => refitted(Try(bound(body, scope, depth), handler_bound(handler, scope, depth)), n)
 	Case(subject, arms) => refitted(Case(bound(subject, scope, depth), arms.map(arm => arm_bound(arm, scope, depth))), n)
 	Return(value) => refitted(Return(bound(value, scope, depth)), n)
@@ -254,12 +255,11 @@ resolved(name: Node, scope: Scope, depth: int) as Node := resolved_taking(name, 
 called_bound(called: Node, given: int, scope: Scope, depth: int) as Node := if called is symbol then resolved_taking(called, given, scope, depth) else bound(called, scope, depth)
 resolved_taking(name: Node, given: int?, scope: Scope, depth: int) as Node := {
 	meant = if has_fact(name, DERIVED) then rule_word_meant(text(name), scope) else definitions_meant(text(name), scope)
-	# a name nothing defines, or only a standard module the code does not use, is read as the word its alias gives,
-	# `length` count (types/operators.wap word_aliases)
-	if meant is empty or unused_standard(meant) {
+	# a name nothing defines is read as the word its alias gives, `length` count (types/operators.wap word_aliases),
+	# else as a standard module's word
+	if meant is empty {
 		alias = word_aliased(text(name))
-		if alias != text(name) and not definitions_meant(alias, scope) is empty { return resolved_taking(refitted(symbol(alias), name), given, scope, depth) }
-		if meant is empty { refused(name, "nothing defines this name, neither the program nor the library") }
+		if alias != text(name) and (not definitions_meant(alias, scope) is empty or scope.standard.has(alias)) { return resolved_taking(refitted(symbol(alias), name), given, scope, depth) }
 		return standard_word_bound(name, scope)
 	}
 	innermost = if meant#1.kind == DefinitionKind.Case then unambiguous_case(name, meant#1, given, scope) else meant#1
