@@ -1,0 +1,155 @@
+# The standard module units (wiki/unit.md): `use units`. A unit is a value, the quantity of one of it, so `5km` is
+# 5 * km, and `90km/h` or `9.81m/s²` are a quotient and a power of units. A quantity keeps its amount in SI base units
+# and shows in the unit it was written in: `3km + 500m == 3500m`, `print 120min` prints 120min. Quantities of different
+# dimensions neither add nor compare (a DimensionError). `q in h` is the plain number of hours, `q.to(km)` the quantity
+# shown in km. `quantity("5 km")` and `quantity(5, "km")` read a unit given as data, by its symbol or its long name
+# (meter, meters). Temperatures count from a zero of their own (°C, °F, K): they convert and compare, and add only in
+# one unit. `°` is π/180, so `sin(30°)` takes degrees.
+use math
+use time
+
+# a dimension packs the power of each base quantity, one byte each, so multiplying quantities adds their dimensions
+LENGTH := 1
+MASS := 256
+DURATION := 65536
+TEMPERATURE := 16777216
+PIXELS := 4294967296
+AREA := 2 * LENGTH
+VOLUME := 3 * LENGTH
+FREQUENCY := 0 - DURATION
+FORCE := MASS + LENGTH - 2 * DURATION
+DENSITY := PIXELS - LENGTH
+# a quantity's dimension and the name its errors give it
+DIMENSION_NAMES := {"1": "length", "256": "mass", "65536": "duration", "16777216": "temperature", "4294967296": "pixels"}
+# shown amounts are rounded to this many digits after the point, so 0.1 + 0.2 shows 0.3
+SHOWN_DIGITS := 1e12
+
+# a unit: its symbol, its long name (whose plural adds s), its size in SI base units and where its scale starts
+class Unit { symbol: text, name: text, size: float, dimension: int, zero: float }
+# an amount in SI base units, shown in a unit
+class Quantity { si: float, unit: Unit }
+
+# every unit declared, for reading units given as text
+UNITS: list<Quantity> = []
+unit(symbol: text, name: text, size: float, dimension: int, zero: float = 0.0): Quantity := {
+	one = Quantity(size + zero, Unit(symbol, name, size, dimension, zero))
+	UNITS.add(one)
+	one
+}
+prefixed(symbol: text, name: text, factor: float, base: Quantity): Quantity := unit(symbol + base.unit.symbol, name + base.unit.name, factor * base.unit.size, base.unit.dimension)
+kilo(base: Quantity): Quantity := prefixed("k", "kilo", 1000.0, base)
+centi(base: Quantity): Quantity := prefixed("c", "centi", 0.01, base)
+milli(base: Quantity): Quantity := prefixed("m", "milli", 0.001, base)
+micro(base: Quantity): Quantity := prefixed("µ", "micro", 0.000001, base)
+nano(base: Quantity): Quantity := prefixed("n", "nano", 0.000000001, base)
+
+m = unit("m", "meter", 1.0, LENGTH)
+km = kilo(m)
+cm = centi(m)
+mm = milli(m)
+inch = unit("inch", "inche", 0.0254, LENGTH)
+ft = unit("ft", "feet", 0.3048, LENGTH)
+yd = unit("yd", "yard", 0.9144, LENGTH)
+mi = unit("mi", "mile", 1609.344, LENGTH)
+g = unit("g", "gram", 0.001, MASS)
+kg = kilo(g)
+mg = milli(g)
+lb = unit("lb", "pound", 0.45359237, MASS)
+s = unit("s", "second", 1.0, DURATION)
+ms = milli(s)
+µs = micro(s)
+ns = nano(s)
+min = unit("min", "minute", 60.0, DURATION)
+h = unit("h", "hour", 3600.0, DURATION)
+day = unit("day", "day", 86400.0, DURATION)
+K = unit("K", "kelvin", 1.0, TEMPERATURE)
+°C = unit("°C", "celsius", 1.0, TEMPERATURE, 273.15)
+°F = unit("°F", "fahrenheit", 5.0 / 9.0, TEMPERATURE, 459.67 * 5.0 / 9.0)
+px = unit("px", "pixel", 1.0, PIXELS)
+Hz = unit("Hz", "hertz", 1.0, FREQUENCY)
+kHz = kilo(Hz)
+N = unit("N", "newton", 1.0, FORCE)
+L = unit("L", "liter", 0.001, VOLUME)
+ml = milli(L)
+ha = unit("ha", "hectare", 10000.0, AREA)
+dpi = unit("dpi", "dots per inch", 1.0 / 0.0254, DENSITY)
+# a degree, π/180: `sin(30°)` is 0.5
+° = π / 180
+# the long names a program writes glued, `3010meters`, `90minutes`
+meters = m
+seconds = s
+minutes = min
+hours = h
+
+# the quantity's amount counted in its own unit
+shown(q: Quantity): float := round((q.si - q.unit.zero) / q.unit.size * SHOWN_DIGITS) / SHOWN_DIGITS
+text(q: Quantity): text := "${shown(q)}${q.unit.symbol}"
+dimension_name(dimension: int): text := DIMENSION_NAMES.get("${dimension}") ?? "quantity"
+# the amount of b when it has a's dimension, else a DimensionError naming both
+same_dimension(a: Quantity, b: Quantity, doing: text): float := {
+	if a.unit.dimension != b.unit.dimension { raise "DimensionError: ${text(a)} ${doing} ${text(b)}: a ${dimension_name(a.unit.dimension)} and a ${dimension_name(b.unit.dimension)}" }
+	b.si
+}
+# temperatures add only in one unit: each counts from its own zero
+summand(a: Quantity, b: Quantity, doing: text): float := {
+	si = same_dimension(a, b, doing)
+	if a.unit.zero != b.unit.zero { raise "${text(a)} ${doing} ${text(b)}: convert one first, `${text(b)}.to(${a.unit.symbol})`" }
+	si - b.unit.zero
+}
+# a sum shows in the finer unit
+finer(a: Unit, b: Unit): Unit := if b.size < a.size then b else a
++(a: Quantity, b: Quantity): Quantity := Quantity(a.si + summand(a, b, "+"), finer(a.unit, b.unit))
+-(a: Quantity, b: Quantity): Quantity := Quantity(a.si - summand(a, b, "-"), finer(a.unit, b.unit))
+==(a: Quantity, b: Quantity): bool := a.unit.dimension == b.unit.dimension and a.si == b.si
+<(a: Quantity, b: Quantity): bool := a.si < same_dimension(a, b, "<")
+>(a: Quantity, b: Quantity): bool := a.si > same_dimension(a, b, ">")
+<=(a: Quantity, b: Quantity): bool := a.si <= same_dimension(a, b, "<=")
+>=(a: Quantity, b: Quantity): bool := a.si >= same_dimension(a, b, ">=")
+
+# a number times a quantity counts in its unit: 5km, 2.5h, 40°C
+*(n: float, q: Quantity): Quantity := Quantity(n * q.unit.size + q.unit.zero, q.unit)
+*(q: Quantity, n: float): Quantity := n * q
+/(q: Quantity, n: float): Quantity := Quantity(q.si / n, q.unit)
+# a product or quotient of quantities, in the product or quotient of their units: 90km/h, 9.81m/s²
+combined(a: Quantity, b: Quantity, symbol: text, size: float, dimension: int): Quantity := Quantity(0.0, Unit(symbol, symbol, size, dimension, 0.0))
+*(a: Quantity, b: Quantity): Quantity := {
+	one = combined(a, b, "${a.unit.symbol}·${b.unit.symbol}", a.unit.size * b.unit.size, a.unit.dimension + b.unit.dimension)
+	Quantity(a.si * b.si, one.unit)
+}
+/(a: Quantity, b: Quantity): Quantity := {
+	one = combined(a, b, "${a.unit.symbol}/${b.unit.symbol}", a.unit.size / b.unit.size, a.unit.dimension - b.unit.dimension)
+	Quantity(a.si / b.si, one.unit)
+}
+²(q: Quantity): Quantity := Quantity(q.si * q.si, Unit("${q.unit.symbol}²", "square ${q.unit.name}", q.unit.size * q.unit.size, 2 * q.unit.dimension, 0.0))
+³(q: Quantity): Quantity := Quantity(q.si * q.si * q.si, Unit("${q.unit.symbol}³", "cubic ${q.unit.name}", q.unit.size * q.unit.size * q.unit.size, 3 * q.unit.dimension, 0.0))
+
+# the same quantity shown in another unit of its dimension: (2500m).to(km) is 2.5km
+to(q: Quantity, target: Quantity): Quantity := Quantity(same_dimension(target, q, "to"), target.unit)
+# the plain number of the target unit: 90minutes in hours is 1.5
+in(q: Quantity, target: Quantity): float := shown(q.to(target))
+
+# a unit given as text, as a quantity's target: q.to("km/h"), q in "m"
+to(q: Quantity, written: text): Quantity := q.to(unit_named(written))
+in(q: Quantity, written: text): float := q in unit_named(written)
+# time's Duration as a quantity of seconds' dimension
+quantity(d: Duration): Quantity := d.ms * ms
+
+# a unit given as text: a symbol, a long name or its plural, or a quotient of them ("km/h")
+unit_named(written: text): Quantity := {
+	if written.contains("/") {
+		halves = written.split("/")
+		return unit_named(halves[0]) / unit_named(halves[1])
+	}
+	found = UNITS.filter(u => u.unit.symbol == written or u.unit.name == written or u.unit.name + "s" == written)
+	if found is empty { raise "unknown unit: ${written}" }
+	found[0]
+}
+quantity(amount: float, written: text): Quantity := amount * unit_named(trim(written))
+# a quantity written as text, "5 km", "2.5km/h", "-40°F": its number and its unit
+quantity(t: text): Quantity := {
+	written = trim(t)
+	at = 0
+	while at < #written and "0123456789.+-".contains(written[at:at + 1]) { at += 1 }
+	if at == 0 or at == #written { raise "not a quantity: ${t}" }
+	quantity(float(written[0:at]), written[at:])
+}
