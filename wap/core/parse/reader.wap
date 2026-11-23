@@ -25,24 +25,13 @@ HASH_COMMENT_FOLLOWERS = " \t\n!#"
 
 # the notation of a text read from a file: its one item, the list of its items, Empty for none, each node marked with
 # the file (core/stage.wap file_of); a text it cannot read is an Error of why and where, `Error("this bracket is never
-# closed": "(a")`, which a compiler refuses (core/pipeline.wap read_notation) and data may hold, its fact READ_BEFORE
-# the statements read whole before; the blocks after the raw words are read raw (raw.wap)
+# closed": "(a")`, which a compiler refuses (core/pipeline.wap read_notation) and data may hold; the blocks after the raw words are
+# read raw (raw.wap)
 notation(source: text, file: text, raw_words: list<text> = []) as Node := {
 	code = source.codepoints
 	r = Reader{code: code, n: code.length, raw_words: raw_words}
 	read_tokens(r)
-	if r.error == "" then filed(built(r.tokens), file) else with_fact(Error(Key(Text(r.error), Op.Colon, filed(r.failure, file))), READ_BEFORE, filed(built(whole_statements(r.tokens)), file))
-}
-READ_BEFORE = "read before"
-# the tokens before the last separator outside every bracket
-whole_statements(tokens: list<Lexeme>) as list<Lexeme> := {
-	depth = 0
-	whole = 0
-	for at in 1 to #tokens {
-		depth += if tokens#at.kind == LexemeKind.Open then 1 else if tokens#at.kind == LexemeKind.Close then -1 else 0
-		if depth == 0 and tokens#at.kind == LexemeKind.Separator { whole = at - 1 }
-	}
-	tokens[.. whole]
+	if r.error == "" then filed(built(r.tokens), file) else Error(Key(Text(r.error), Op.Colon, filed(r.failure, file)))
 }
 # n and each part of it that has a position, marked with the file it was read from
 filed(n: Node, file: text) as Node := {
@@ -123,28 +112,40 @@ key_token(r: Reader, op: Op) := {
 
 # `// …` and `# …` to the end of the line: the comment of the line's last atom, else of the next atom
 line_comment(r: Reader, opener: int) := {
-	end = r.at
-	while end < r.n and r.code[end] != '\n' { end += 1 }
+	end = line_end(r, r.at)
 	noted(r, COMMENT_MARK + slice_of(r, r.at + opener, end))
 	r.at = end
 	r.blank = yes
 }
+line_end(r: Reader, at: int) as int := {
+	while at < r.n and r.code[at] != '\n' { at += 1 }
+	at
+}
 
 # `/* … */` and `/# … #/`, nested; a comment counts as a blank between items
 block_comment(r: Reader) := {
-	opener = slice_of(r, r.at, r.at + 2)
-	closer = r.code[r.at + 1] + "/"
-	depth = 0
 	start = r.at
-	while r.at < r.n {
-		if slice_of(r, r.at, r.at + 2) == opener { depth += 1; r.at += 2 }
-		else if slice_of(r, r.at, r.at + 2) == closer { depth -= 1; r.at += 2; if depth == 0 { break } }
-		else { if r.code[r.at] == '\n' { r.line += 1; r.line_start = r.at + 1 }; r.at += 1 }
-	}
-	if depth > 0 { r.at = start; failed(r, "this comment is never closed") }
-	pending(r, slice_of(r, start + 2, r.at - 2).trim().split("\n").map(line => COMMENT_MARK + " " + line.trim()).join("\n"))
+	end = block_comment_end(r, start)
+	if end < 0 { return failed(r, "this comment is never closed") }
+	lines_passed(r, start, end)
+	r.at = end
+	pending(r, slice_of(r, start + 2, end - 2).trim().split("\n").map(line => COMMENT_MARK + " " + line.trim()).join("\n"))
 	r.blank = yes
 }
+# where the block comment opened at `at` ends, -1 if it never does
+block_comment_end(r: Reader, at: int) as int := {
+	opener = slice_of(r, at, at + 2)
+	closer = r.code[at + 1] + "/"
+	depth = 0
+	while at < r.n {
+		if slice_of(r, at, at + 2) == opener { depth += 1; at += 2 }
+		else if slice_of(r, at, at + 2) == closer { depth -= 1; at += 2; if depth == 0 { return at } }
+		else { at += 1 }
+	}
+	-1
+}
+# the lines of the code from `start` to `end` counted as passed
+lines_passed(r: Reader, start: int, end: int) := { for at in start upto end { if r.code[at] == '\n' { r.line += 1; r.line_start = at + 1 } } }
 
 noted(r: Reader, comment: text) := {
 	atom = r.line_atom
