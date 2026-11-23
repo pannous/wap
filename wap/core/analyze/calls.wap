@@ -430,7 +430,7 @@ shaped_typed(definition: Signature, argument_types: list, s: TypingState, at: No
 	if (1 to #types).any(place => has_unknowns(types#place) and not takes_any_item(definition.parameters#place)) { return deferred_typed(definition, types, letters, s, at) }
 	for typed in instances_of(key, s) {
 		if same_instance(typed, key, types, s) {
-			# a call of itself before its result is known gives no value; a function giving one refuses below
+			# a call of itself before its result is known gives no value; a function giving one is typed again below
 			typed.called_unknown = typed.called_unknown or not typed.done and typed.result == ø
 			return typed
 		}
@@ -442,13 +442,24 @@ shaped_typed(definition: Signature, argument_types: list, s: TypingState, at: No
 	typed.result = if names_bare_kind(written) or typed.jumps then ø else written
 	typed.unknown_result = "a function that calls itself and gives a value needs its full result type: write `${declared_name(name)}(…): ${full_type_hint(declared_type(name))} := …`"
 	instance_added(typed, s)
+	body_typed(typed, definition, name, parameters, body, letters, written, s)
+	# its calls of itself took no result: typed once more, each such call taking the result its other arms give
+	if typed.called_unknown and valued(typed.result) and not typed.jumps {
+		typed.called_unknown = no
+		body_typed(typed, definition, name, parameters, body, letters, written, s)
+	}
+	typed.done = yes
+	typed
+}; _ => refused(define_of(definition, s), A_DEFINE) }
+# an instance's parameters and body typed, its result the written one, else what the body gives
+body_typed(typed: TypedFunction, definition: Signature, name: Node, parameters: Node, body: Node, letters: list<Binding>, written: Node?, s: TypingState) := {
 	frame = TypeFrame()
-	frame.present = if s.found_in.has(key) then s.found_in[key] else []
+	frame.present = if s.found_in.has(definition.key) then s.found_in[definition.key] else []
 	frame.result = typed.result
 	frame.letters = letters
 	frame.function = declared_name(name)
-	typed_parameters = (1 to #types).map(at => parameter_typed(items_of(parameters)#at, types#at, frame))
-	frame.variables += captured_by(define_of(definition, s), types)
+	typed_parameters = (1 to #typed.arguments).map(at => parameter_typed(items_of(parameters)#at, typed.arguments#at, frame))
+	frame.variables += captured_by(define_of(definition, s), typed.arguments)
 	typed_body = typed_form(body, s, frame, typed.result)
 	given = result_given(typed_body, frame, name, s)
 	# a written result stays the result, `show(x: any): text := raise(…)`; one that writes none and never returns jumps
@@ -457,10 +468,7 @@ shaped_typed(definition: Signature, argument_types: list, s: TypingState, at: No
 	typed.result = typed.result ?? (if given != ø and given != EMPTY_SYMBOL and base_of_optional(written) != ø then optional_type(given) else given)
 	typed.define = refitted(Define(signed_name(typed, s), with_items(parameters, typed_parameters), typed_body), define_of(definition, s))
 	typed.late = frame.late
-	if typed.called_unknown and valued(typed.result) and not typed.jumps { refused(name, typed.unknown_result) }
-	typed.done = yes
-	typed
-}; _ => refused(define_of(definition, s), A_DEFINE) }
+}
 # a call typed by the function it calls: of its result, or jumping when that never returns
 result_of(n: Node, chosen: TypedFunction) as Node := if chosen.jumps then jumping(n) else if chosen.result == ø and not chosen.done then with_fact(n, RESULT_UNKNOWN, Text(chosen.unknown_result)) else with_type_of(n, chosen.result)
 # A parameter is of its written type, its letters bound, whatever an argument gives: `f(x: int?)` takes 3 and ø as an
