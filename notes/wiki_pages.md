@@ -139,7 +139,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-diff.md (45 lines): ✓ e7eb7c7 (lib/diff.wap, edits the enum Edit, test/test_diff.wap 4 ✓; split(" ")[1] workaround until wap-reader fixes indexing a call)
 - library-dogfood-apps.md (51 lines):
 - library-fractions.md (39 lines):
-- library-functions.md (28 lines):
+- library-functions.md (28 lines): wap-wiki-lib
 - library-geometry.md (38 lines): ✓ 8e9bd76 (lib/geometry.wap, math.wap trig and round_to, test/test_geometry.wap 5 ✓; round_to without `use math` not yet, with wap-binding)
 - library-graphs.md (40 lines): ✓ 4435869 (lib/graphs.wap, test/test_graphs.wap 10 ✓; the path alone, path_cost)
 - library-intervals.md (36 lines): ✓ cf91cd6 (lib/intervals.wap, test/test_intervals.wap 5 ✓; Instants not yet)
@@ -154,7 +154,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-reference.md (36 lines):
 - library-regex.md (107 lines):
 - library-slugs.md (36 lines): ✓ 45356f7 (lib/slugs.wap, test/test_slugs.wap 8 ✓; lib/text.wap holds upper and words until types has them)
-- library-tables.md (47 lines): wap-wiki-lib
+- library-tables.md (47 lines): ✓ 4aba14d (lib/tables.wap, test/test_tables.wap 8 ✓; named options, enum styles)
 - library-template.md (37 lines): ✓ 26959ef (lib/template.wap, lib/html.wap html_escape, test/test_template.wap 3 ✓; `{items: []}` not yet (card any-values), nested-map sections wait for any-truth-crash)
 - library-time-patterns-durations.md (42 lines):
 - library-unicode.md (33 lines):
