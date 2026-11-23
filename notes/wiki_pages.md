@@ -166,15 +166,15 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - literal.md (34 lines): wap-wiki, asked (literal parameter type, import)
 - macro.md (18 lines): wap-wiki, prose; asked (IF sketch)
 - map.md (119 lines): (released by wap-wiki) tests 63835a0, wiki a1ab2dc; branch wiki-types d849c72 (show, count, first, Python's words) in its landing checks; waits: bare `a: map` (being built)
-- mark.md (23 lines):
-- matching.md (143 lines):
-- math.md (32 lines):
-- member.md (5 lines):
-- meta.md (65 lines):
-- monad.md (32 lines):
-- multi-value.md (96 lines):
-- mutability.md (23 lines):
-- mutable.md (116 lines):
+- mark.md (23 lines): wap-wiki, prose; asked (wasp, pragma, identities)
+- matching.md (143 lines): wap-wiki, tests test_matching_wanted.wap the forms still to build; asked (bare heads, untyped fields, add a to b)
+- math.md (32 lines): wap-wiki, prose; asked (unfinished sentence)
+- member.md (5 lines): ✓ wap-wiki, prose
+- meta.md (65 lines): wap-wiki, tests test_meta_wanted.wap the forms still to build; asked (C++ snippet, wasp fences)
+- monad.md (32 lines): wap-wiki, prose; asked (questions section)
+- multi-value.md (96 lines): wap-wiki, tests test_multi_value_wanted.wap the forms still to build; asked (wasm internals, D12 line)
+- mutability.md (23 lines): wap-wiki, tests test_mutability_wanted.wap the forms still to build; asked (x.upper! does nothing, C-like sketch)
+- mutable.md (116 lines): wap-wiki, tests test_mutable_page.wap green, test_mutable_wanted.wap the forms still to build; asked (uppercase, mutating spellings, TODO comments)
 - node.md (81 lines):
 - Normalization.md (153 lines):
 - notes.md (48 lines):
