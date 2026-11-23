@@ -13,6 +13,14 @@ static void* c_function(const char* name) { return native_function("c", name); }
 #include "glue.c"
 #include "native/native_call.h"
 #include "native/callbacks.h"
+// whether the executable runs on ARM64, whose C takes a struct of more than 16 bytes by a pointer to a copy (types/c.wap c_struct)
+int32_t on_arm64(void) {
+#if defined(__aarch64__)
+	return 1;
+#else
+	return 0;
+#endif
+}
 
 // the host words of a module the program runs through wasmtime (the native wap's host_words.wap): wasmtime calls this
 // with an import's record, and the program's exported host_word answers it (glue.awk defines PROGRAM_HOST_WORD for a program exporting one)

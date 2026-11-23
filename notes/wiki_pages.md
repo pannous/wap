@@ -229,7 +229,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - significant-whitespace.md (49 lines): wap-wiki, tests test_significant_whitespace_page.wap green, test_significant_whitespace_wanted.wap; asked (border cases, todos)
 - smart-pointer.md (170 lines): moved to notes/smart-pointers.md
 - sound.md (166 lines):
-- space.md (3 lines): wap-wiki, tests test_space_wanted.wap
+- space.md (3 lines): wap-wiki, tests test_space_page.wap green
 - SPECIFICATION.md (285 lines):
 - standalone.md (0 lines):
 - standard-library.md (567 lines):
@@ -260,7 +260,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - unicode.md (18 lines): wap-wiki, tests test_unicode_wanted.wap
 - uniscript.md (471 lines):
 - unit.md (93 lines):
-- unknown.md (6 lines): wap-wiki; asked (unknown constant)
+- unknown.md (6 lines): wap-wiki, tests test_unknown_wanted.wap
 - unsigned.md (14 lines): wap-wiki, tests test_unsigned_wanted.wap
 - use.md (121 lines):
 - value.md (67 lines):
