@@ -1,0 +1,151 @@
+# The standard module graphs (wiki/library-graphs.md): directed or undirected graphs over any node values, weighted
+# (an edge [u, v, weight]) or not ([u, v], weight 1), with breadth- and depth-first orders, the fewest-edges and the
+# cheapest path (Dijkstra, A*), topological order, components and a minimum spanning tree. Every walk is a loop over
+# an explicit queue or stack, so long chains work. Nodes keep the order they first appear in among the edges,
+# neighbours the order of their edges, and every result follows that order.
+
+# an edge as stored: its ends' places among the nodes and its weight
+class Arc { from: int, to: int, weight: float }
+class Graph { directed: bool, nodes: list<any>, places: map<text, int>, arcs: list<list<Arc>>, edges: list<Arc> }
+
+# the graph of a list of edges, [u, v] or [u, v, weight]
+graph_of(edges: list<list<any>>, directed: bool): Graph := {
+	nodes: list<any> = []
+	places: map<text, int> = {}
+	for edge in edges {
+		for node in edge.take(2) {
+			if not places.has(show(node)) {
+				places[show(node)] = #nodes
+				nodes.add(node)
+			}
+		}
+	}
+	stored: list<Arc> = []
+	arcs = nodes.map(node => stored.take(0))
+	for edge in edges {
+		arc = Arc(places[show(edge[0])], places[show(edge[1])], if #edge > 2 then edge[2] as float else 1.0)
+		stored.add(arc)
+		arcs[arc.from].add(arc)
+		if not directed and arc.from != arc.to { arcs[arc.to].add(Arc(arc.to, arc.from, arc.weight)) }
+	}
+	Graph(directed, nodes, places, arcs, stored)
+}
+
+# a node's place among the graph's nodes, refused for a node not in it
+place_of(g: Graph, node: any): int := if g.places.has(show(node)) then g.places[show(node)] else raise "graphs: ${show(node)} is no node of the graph"
+neighbours(g: Graph, node: any): list<any> := g.arcs[place_of(g, node)].map(arc => g.nodes[arc.to])
+
+# the nodes reachable from start, nearest first
+bfs(g: Graph, start: any): list<any> := {
+	seen = g.nodes.map(node => no)
+	queue = [place_of(g, start)]
+	seen[queue[0]] = yes
+	at = 0
+	while at < #queue {
+		for arc in g.arcs[queue[at]] {
+			if not seen[arc.to] {
+				seen[arc.to] = yes
+				queue.add(arc.to)
+			}
+		}
+		at += 1
+	}
+	queue.map(place => g.nodes[place])
+}
+# the nodes reachable from start in depth-first preorder, neighbours tried in their order
+dfs(g: Graph, start: any): list<any> := {
+	seen = g.nodes.map(node => no)
+	order: list<int> = []
+	stack = [place_of(g, start)]
+	while #stack > 0 {
+		place = stack.last
+		stack = stack.take(#stack - 1)
+		if not seen[place] {
+			seen[place] = yes
+			order.add(place)
+			stack = stack + g.arcs[place].map(arc => arc.to).reversed()
+		}
+	}
+	order.map(place => g.nodes[place])
+}
+has_path(g: Graph, from: any, to: any): bool := holds(bfs(g, from), to)
+# TODO (card any-values) `nodes.contains(node)` once contains of an any item stops recursing without end
+holds(nodes: list<any>, node: any): bool := nodes.any(x => x == node)
+
+# the cheapest path from one node to another, ø when there is none: Dijkstra's when the heuristic is 0, A* when it
+# estimates each node's remaining cost (never above the true one)
+cheapest_path(g: Graph, from: any, to: any, heuristic: (any) -> float): list<any>? := {
+	target = place_of(g, to)
+	cost = g.nodes.map(node => -1.0)
+	before = g.nodes.map(node => -1)
+	settled = g.nodes.map(node => no)
+	cost[place_of(g, from)] = 0.0
+	while not settled[target] {
+		open = (0 upto #g.nodes).filter(place => cost[place] >= 0 and not settled[place])
+		if open is empty { return ø }
+		place = open.fold(open[0], (best, p) => if cost[p] + heuristic(g.nodes[p]) < cost[best] + heuristic(g.nodes[best]) then p else best)
+		settled[place] = yes
+		for arc in g.arcs[place] {
+			if cost[arc.to] < 0 or cost[place] + arc.weight < cost[arc.to] {
+				cost[arc.to] = cost[place] + arc.weight
+				before[arc.to] = place
+			}
+		}
+	}
+	path = [target]
+	while before[path.last] >= 0 { path.add(before[path.last]) }
+	path.reversed().map(place => g.nodes[place])
+}
+dijkstra_path(g: Graph, from: any, to: any): list<any>? := cheapest_path(g, from, to, node => 0.0)
+a_star(g: Graph, from: any, to: any, heuristic: (any) -> float): list<any>? := cheapest_path(g, from, to, heuristic)
+# the summed weights along a path, the cheapest edge between each two of its nodes
+path_cost(g: Graph, path: list<any>): float := (1 upto #path).map(i => g.arcs[place_of(g, path[i - 1])].filter(arc => arc.to == place_of(g, path[i])).map(arc => arc.weight).min).sum
+
+# every node after the nodes with an edge to it, the ready ones in node order (Kahn's); a cycle is refused
+topological_sort(g: Graph): list<any> := {
+	incoming = g.nodes.map(node => 0)
+	for arc in g.edges { incoming[arc.to] += 1 }
+	order: list<int> = []
+	ready = (0 upto #g.nodes).filter(place => incoming[place] == 0)
+	while #ready > 0 {
+		place = ready[0]
+		ready = ready.drop(1)
+		order.add(place)
+		for arc in g.arcs[place] {
+			incoming[arc.to] -= 1
+			if incoming[arc.to] == 0 { ready.add(arc.to) }
+		}
+	}
+	if #order < #g.nodes { raise "topological_sort: the graph has a cycle" }
+	order.map(place => g.nodes[place])
+}
+
+# the groups of nodes joined by edges in either direction, each in breadth-first order, ordered by their first node
+connected_components(g: Graph): list<list<any>> := {
+	both = graph_of(g.edges.map(arc => [g.nodes[arc.from], g.nodes[arc.to]]), no)
+	components: list<list<any>> = []
+	for node in g.nodes {
+		if not components.any(component => holds(component, node)) { components.add(bfs(both, node)) }
+	}
+	components
+}
+
+# the edges [u, v, weight] of a minimum spanning forest, by weight, the earlier edge first on a tie (Kruskal's)
+minimum_spanning_tree(g: Graph): list<list<any>> := {
+	group = (0 upto #g.nodes).map(place => place)
+	tree: list<list<any>> = []
+	for arc in g.edges.sorted(by: arc => arc.weight) {
+		a = root_of(group, arc.from)
+		b = root_of(group, arc.to)
+		if a != b {
+			group[a] = b
+			tree.add([g.nodes[arc.from], g.nodes[arc.to], arc.weight])
+		}
+	}
+	tree
+}
+root_of(group: list<int>, place: int): int := {
+	at = place
+	while group[at] != at { at = group[at] }
+	at
+}
