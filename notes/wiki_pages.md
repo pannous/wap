@@ -198,9 +198,9 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - polymorphism.md (79 lines): wap-wiki, tests test_polymorphism_page.wap green, test_polymorphism_wanted.wap the forms still to build; asked (C-style heads, first shadowing)
 - possessive.md (8 lines): wap-wiki, tests test_possessive_page.wap green, test_possessive_wanted.wap; asked ('s, [name:])
 - precedence.md (11 lines): wap-wiki, tests test_precedence_page.wap green; asked (superscript, todo)
-- primitive.md (45 lines):
-- property.md (48 lines):
-- pure.md (34 lines):
+- primitive.md (45 lines): wap-wiki, tests test_primitive_wanted.wap the forms still to build
+- property.md (48 lines): wap-wiki, tests test_property_page.wap green, test_property_wanted.wap; asked (setter sketches)
+- pure.md (34 lines): ✓ wap-wiki, prose (effects of: test_effects_wanted)
 - purity.md (0 lines):
 - Purpose.md (644 lines):
 - questions.md (144 lines):
