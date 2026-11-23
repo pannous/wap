@@ -10,7 +10,6 @@ native_ran() {
 }
 check "a native hello" "$(native_ran hello 'greeting(): int := prim data_address("Hello\n")
 set_word(at: int, word: int) := prim i32.store(at, word)
-fd_write(file: int, pieces: int, count: int, written: int): int := prim fd_write(file, pieces, count, written)
 set_word(0, greeting())
 set_word(4, 6)
 written = fd_write(1, 0, 1, 8)
