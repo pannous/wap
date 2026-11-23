@@ -159,7 +159,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-time-patterns-durations.md (42 lines):
 - library-unicode.md (33 lines):
 - library-uuid.md (31 lines):
-- library-xml.md (28 lines):
+- library-xml.md (28 lines): wap-wiki-lib
 - like.md (59 lines):
 - Lisp.md (19 lines):
 - list.md (279 lines): wap-wiki, tests 7789cd9 + list-spaced, list words 504a102 + a09c988, wiki 8ff17c6; waits: how `(1 2)` prints (user), `{1 2 3}` (wap-reader), the forms being built (`3 times [1]`, `it`, `x -1`)
