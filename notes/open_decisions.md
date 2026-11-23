@@ -18,7 +18,7 @@ An entry goes once decided (its decision then lives in the wiki or notes/debts.m
   emit in function_values.wap.
 - Core: estimate +30 to +50 lines, of which some 10 come back out of the special cases for values of their own type.
 - Pays with it: types.wap:28 (a field's function value called), calls.wap:334 (protocol dispatch), types.wap:412
-  (late reads through a value), emit/function_values.wap:5 (the map-twice trap, likely the same path), and
+  (late reads through a value), and
   native function values (wap-help had to use an enum Action) once native memory has a funcref table.
 - Against: the largest of the four. Each changed call site risks the self-build census, and a call through a
   reference is slower than a direct call (kept where only one function can reach it).

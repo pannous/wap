@@ -18,7 +18,7 @@ Owned elsewhere, not ranked here:
 
 | debt | weight | cost |
 |---|---|---|
-| analyze/function_values.wap:22, each function value its own type; no funcref | highest: blocks a variable holding either of two lambdas, overloads as values, protocol dispatch (calls.wap:334), a field's function called (types.wap:28), the map-twice trap (emit/function_values.wap:5), late reads through a value (types.wap:412), and native function values (wap-help's rows had to use an enum) | large core (funcref + call_ref in the emitter, typing of a value's possible functions); user discussion |
+| analyze/function_values.wap:22, each function value its own type; no funcref | highest: blocks a variable holding either of two lambdas, overloads as values, protocol dispatch (calls.wap:334), a field's function called (types.wap:28), late reads through a value (types.wap:412), and native function values (wap-help's rows had to use an enum) | large core (funcref + call_ref in the emitter, typing of a value's possible functions); user discussion |
 | emit/emitter.wap:22, the emitter learns types by emitting | high: a second typing in the emitter, behind emitter.wap:236 (a second "does it fit") and the native text-match bug (equality picks by layout, a memory text is I32) | large; shrinks the emitter once done; user discussion |
 | emit/lists.wap:70, one list layout per item type | high: list<int> can't stand for list, the list words exist per layout | large, touches the value layout; user discussion |
 
