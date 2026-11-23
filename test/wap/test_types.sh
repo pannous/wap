@@ -33,7 +33,7 @@ section = out
 section = {}
 out["a"] = section
 section["k"] = "v"
-print "${out.keys} ${out["a"] is map}"')" "[a] yes"
+print "${out.keys} ${out["a"] is map}"')" "[\"a\"] yes"
 # a word a blank parts from the map after it is two items, said with the glued call (decision spaced-is-two,
 # wiki/significant-whitespace.md)
 check "a word spaced from a map is two items, with a warning" "$(ran parted 'pair = [1, 2]
