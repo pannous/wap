@@ -87,7 +87,7 @@ page needs no code: – plus why; edge cases parked: name the follow-up card.
 - for.md (70 lines):
 - full-evaluation.md (17 lines):
 - function-pointer.md (22 lines):
-- function.md (179 lines):
+- function.md (179 lines): warp-wiki-b
 - functional.md (5 lines):
 - functor.md (18 lines):
 - gap-filling.md (14 lines):
