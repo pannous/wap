@@ -46,8 +46,8 @@ warp-host-fixer; this file is the inventory.
   list of numbers crossing as its cells (`memcpy(…, source: cells<i32>, …)`), the GPU lists warp's
   extensions/gpu_lists gives (is_gpu_list, gpu_list_cell, gpu_list_place, gpu_list_bytes, gpu_list_room,
   gpu_list_kept), the driver's system_value("program memory"), os's slow, and the names of native_host's other parts
-  (window_pixels, painted_width, paint_timing, value_of, host_window_layer, own_process, on_windows, strdup,
-  handle_pointer). A paint's value given as `any` is read with `is list<any>` and `is map<text, any>`; a picture is a
+  (window_pixels, window.painted_width, window.paint_timing, host_value, host_window_layer, own_process,
+  on_windows). A paint's value given as `any` is read with `is list<any>` and `is map<text, any>`; a picture is a
   `Picture { width, height, pixels }`.
 
 ## Parked
