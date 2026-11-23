@@ -141,7 +141,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-fractions.md (39 lines):
 - library-functions.md (28 lines):
 - library-geometry.md (38 lines): ✓ 8e9bd76 (lib/geometry.wap, math.wap trig and round_to, test/test_geometry.wap 5 ✓; round_to without `use math` not yet, with wap-binding)
-- library-graphs.md (40 lines):
+- library-graphs.md (40 lines): wap-wiki-lib
 - library-intervals.md (36 lines): ✓ cf91cd6 (lib/intervals.wap, test/test_intervals.wap 5 ✓; Instants not yet)
 - library-json-tools.md (33 lines):
 - library-map-helpers.md (36 lines):
