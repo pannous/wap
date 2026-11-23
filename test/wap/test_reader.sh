@@ -52,8 +52,8 @@ format_check 'a=1' 'a = 1'
 format_check $'a{\n  b,c}' $'a{\n\tb, c\n}'
 format_check $'a\n  b\n  c\nd\ne' $'a{\n\tb\n\tc\n}\nd\ne'
 format_check $'a:\n  b\n  c\n\nd\ne' $'a: {\n\tb\n\tc\n}\n\nd\ne'
-format_check $'a\n  b\n    c\nd' $'a{b{c}}\nd'
-format_check $'  a\n    b\n  c' $'a{b}\nc'
+format_check $'a\n  b\n    c\nd' $'a{\n\tb{\n\t\tc\n\t}\n}\nd'
+format_check $'  a\n    b\n  c' $'a{\n\tb\n}\nc'
 # typed declarations and type lists
 format_check 'x:int=3' 'x: int = 3'
 format_check 'xs:list<int>' 'xs: list<int>'
@@ -67,7 +67,7 @@ format_check $'blah a b c # note\ny/* c */=0 // c' $'blah a b c # note\n# c\ny =
 # a glyph run takes the `=`s glued after it: `!==` is one operator, not `!=` then a key
 format_check '1 !== 2' '1 !== 2'
 # a block indented after a key at the line's end is the key's value: a definition's body on the next line
-format_check $'f(x: int): int :=\n\tx + 1' 'f(x: int) as int := {x + 1}'
+format_check $'f(x: int): int :=\n\tx + 1' $'f(x: int) as int := {\n\tx + 1\n}'
 # an operator ending its line continues the phrase onto the lines indented below it
 format_check $'y = 1 +\n\t2 +\n\t3\nz = 4' $'y = 1 + 2 + 3\nz = 4'
 check "a comma at a line's end continues the row, a line without one starts a new row" "$(ran comma_rows 'xs = [
