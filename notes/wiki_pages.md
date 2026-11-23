@@ -22,7 +22,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - Angle.md (33 lines):
 - Applescript.md (58 lines):
 - argument.md (77 lines):
-- array.md (26 lines): wap-wiki
+- array.md (26 lines): wap-wiki, tests landed (test_array_wanted.wap), wiki text waits on the user's answer (int[n], person[], linear, the internal note)
 - as.md (25 lines):
 - aspect.md (2 lines):
 - assignment.md (41 lines):
