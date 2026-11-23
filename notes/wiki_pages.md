@@ -162,10 +162,10 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-xml.md (28 lines):
 - like.md (59 lines):
 - Lisp.md (19 lines):
-- list.md (279 lines): wap-wiki-a
+- list.md (279 lines): wap-wiki-a, tests 7789cd9, wiki 40e84a0; waits: list words in wap/types (wap-lead → wap-reader), the meaning of `(1 2)` (user), card list-page-forms
 - literal.md (34 lines):
 - macro.md (18 lines):
-- map.md (119 lines):
+- map.md (119 lines): wap-wiki-a
 - mark.md (23 lines):
 - matching.md (143 lines):
 - math.md (32 lines):
