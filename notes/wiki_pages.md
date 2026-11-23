@@ -229,7 +229,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - significant-whitespace.md (49 lines): wap-wiki, tests test_significant_whitespace_page.wap green, test_significant_whitespace_wanted.wap; asked (border cases, todos)
 - smart-pointer.md (170 lines): moved to notes/smart-pointers.md
 - sound.md (166 lines):
-- space.md (3 lines): wap-wiki, tests test_space_wanted.wap
+- space.md (3 lines): wap-wiki, tests test_space_page.wap green
 - SPECIFICATION.md (285 lines):
 - standalone.md (0 lines):
 - standard-library.md (567 lines):
@@ -259,24 +259,24 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - typing.md (13 lines): wap-wiki, tests test_typing_wanted.wap
 - unicode.md (18 lines): wap-wiki, tests test_unicode_wanted.wap
 - uniscript.md (471 lines):
-- unit.md (93 lines):
-- unknown.md (6 lines): wap-wiki; asked (unknown constant)
+- unit.md (93 lines): wap-wiki, tests test_unit_page.wap green, test_unit_wanted.wap (rest in test_units.wap)
+- unknown.md (6 lines): wap-wiki, tests test_unknown_wanted.wap
 - unsigned.md (14 lines): wap-wiki, tests test_unsigned_wanted.wap
-- use.md (121 lines):
-- value.md (67 lines):
-- variable.md (85 lines):
+- use.md (121 lines): wap-wiki, tests test_use_page.wap green, test_use_wanted.wap; asked (own function replaces)
+- value.md (67 lines): wap-wiki; asked (internals to notes/value-layout.md)
+- variable.md (85 lines): wap-wiki, tests test_variable_page.wap green, test_variable_wanted.wap; asked (write-through lambdas)
 - variant.md (16 lines): wap-wiki, tests test_variant_page.wap green
-- W0.md (30 lines):
-- warning.md (45 lines):
+- W0.md (30 lines): wap-wiki; asked (hole count, wap types)
+- warning.md (45 lines): wap-wiki, tests test/wap/test_warning_wanted.sh
 - wasm-representation.md (44 lines):
 - wasm.md (563 lines):
-- Wasp.md (11 lines):
-- wat.md (56 lines):
-- wawi.md (20 lines):
-- Whack-a-Mole.md (16 lines):
-- wit.md (18 lines):
-- with.md (20 lines):
-- world.md (27 lines):
-- xml.md (7 lines):
-- zig.md (18 lines):
+- Wasp.md (11 lines): wap-wiki; asked (name musings to notes)
+- wat.md (56 lines): wap-wiki; asked (wasm notes to notes)
+- wawi.md (20 lines): wap-wiki; asked (old web API to notes)
+- Whack-a-Mole.md (16 lines): wap-wiki, essay, no forms
+- wit.md (18 lines): wap-wiki; asked (WIT as wap syntax)
+- with.md (20 lines): wap-wiki; asked (with's form)
+- world.md (27 lines): wap-wiki; asked (network feeds, internals)
+- xml.md (7 lines): wap-wiki, essay, no forms
+- zig.md (18 lines): wap-wiki, essay, no forms
 - dsl.md (new): wap-wiki, tests test_dsl_page.wap green, test_dsl_wanted.wap
