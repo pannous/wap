@@ -14,6 +14,7 @@ static void* c_function(const char* name) { return native_function("c", name); }
 #include "glue.c"
 #include "native/native_call.h"
 #include "native/callbacks.h"
+#include "native/fields.h"
 // whether the executable runs on ARM64, whose C takes a struct of more than 16 bytes by a pointer to a copy (types/c.wap c_struct)
 int32_t on_arm64(void) {
 #if defined(__aarch64__)
