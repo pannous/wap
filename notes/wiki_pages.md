@@ -90,14 +90,14 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - full-evaluation.md (17 lines): wap-wiki, interpret asked
 - function-pointer.md (22 lines): wap-wiki
 - function.md (179 lines): (released by wap-wiki) tests 264f14d, wiki 70f163e (settled edits and not-yet marks done); waits: the types patch (~/Library/Logs/warp/wiki-b/function-types.patch: redo the pipe as `|>` plus `|`, BLANK_BYTES#1 for SPACE_BYTE, drop the round shadowing lines), the forms being built (`it`, `square(n)=n*n`, `g 2 {1}`)
-- functional.md (5 lines):
-- functor.md (18 lines):
-- gap-filling.md (14 lines):
+- functional.md (5 lines): ✓ wap-wiki, prose
+- functor.md (18 lines): wap-wiki, asked
+- gap-filling.md (14 lines): wap-wiki, asked (free variables by name dropped)
 - go.md (0 lines):
 - goals.md (42 lines):
-- good.md (8 lines):
+- good.md (8 lines): ✓ wap-wiki, prose
 - graphics.md (157 lines):
-- group.md (10 lines):
+- group.md (10 lines): wap-wiki, asked (immutable groups clash with list.md)
 - grouping.md (46 lines):
 - guiding-principles.md (13 lines):
 - haskell.md (49 lines):
