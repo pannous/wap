@@ -58,7 +58,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - console.md (11 lines): ✓ wap-wiki, interactive completion, no program form to test
 - const.md (0 lines):
 - constant.md (21 lines): ✓ wap-wiki, tests test_constant_page.wap green, test_constant_wanted.wap var still to build
-- constructor.md (60 lines):
+- constructor.md (60 lines): wap-wiki
 - conversion.md (153 lines):
 - crystal.md (39 lines):
 - danger.md (2 lines):
