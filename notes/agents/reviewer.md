@@ -21,6 +21,9 @@ You have two queues, plans first:
 - A special case for one word, test or sample instead of the general rule.
 - An edge case, even one a wiki page shows (`3 times [1]`, user 11-23): a form no real program would miss goes to
   wap-interviewer with the recommendation to drop it, old and new wiki text included; never a "sound" for it.
+  The edge case is the test of a general mechanism: first write it as a program would (`infix operator times(n: int,
+  xs: list<int>) := …`, an override, its own operator); where that works, it becomes that mechanism's test line,
+  never a new rule or word; where it fails, the mechanism is what to card.
 - Library behaviour inside the language: a rule or compiler file a library asked for with fewer than three libraries
   using it, or a `spec:` line that names a wiki page not showing the form (scripts/compiler-growth.sh checks only that
   the line is there; whether it is true is yours to read).
