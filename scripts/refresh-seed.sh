@@ -42,7 +42,7 @@ stage() {
 	: >"$tree/$WAP_LIBRARY_MODULE"
 	if [ "$1" != "$seed" ]; then
 		sources=(--sources)
-		wap_ran "$1" --sources "$tree/wap/types/types.wap" "$scratch/types.wasm" >"$scratch/stage.log" 2>&1 && cp "$scratch/types.wasm" "$tree/$WAP_LIBRARY_MODULE" || { echo "refresh-seed: no library: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
+		wap_ran "$1" --sources "$scratch/types/types.wap" "$scratch/types.wasm" >"$scratch/stage.log" 2>&1 && cp "$scratch/types.wasm" "$tree/$WAP_LIBRARY_MODULE" || { echo "refresh-seed: no library: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
 		wap_ran "$1" --sources warm "$tree/$WAP_WARM" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: no warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
 	fi
 	wap_ran "$1" "$scratch/hello.wap" "$scratch/warm.wasm" >/dev/null 2>&1
