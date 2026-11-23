@@ -18,9 +18,11 @@ job_slot="$here/../../scripts/job-slot.sh"
 # the outputs of the tests run, each data/wap-tests/<test file>.txt, a script's data/wap-tests/wap/<test file>.txt
 outputs() {
 	for test in "$@"; do
-		if [ "$(cd -P "$(dirname "$test")" && pwd -P)" = "$here" ]; then echo "$results/wap/$(basename "$test").txt"; else echo "$results/$(basename "$test").txt"; fi
+		if in_scripts "$test"; then echo "$results/wap/$(basename "$test").txt"; else echo "$results/$(basename "$test").txt"; fi
 	done
 }
+# a test of test/wap/, however its path is written
+in_scripts() { [ "$(cd -P "$(dirname "$1")" && pwd -P)" = "$here" ]; }
 # the tests' outputs read into one line: checks passed and failed, the tests that failed
 summed() {
 	local passed failed
@@ -32,6 +34,7 @@ summed() {
 # compiled by it and run; a test script run with it, a wap one, test/wap/test_<area>.wap, compiled by it and given the
 # wap binary, it, the script's folder in the tree's data/ and the tree as arguments
 one_run() {
+	in_scripts "$1" && case $1 in *.wap) set -- "$here/$(basename "$1")" "$2" ;; esac
 	case $1 in
 		"$here"/*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/script.wasm" 2>&1 && $wap "$stage/script.wasm" "$wap" "$compiler" "$stage" "$tree" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
 		*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/test.wasm" 2>&1 && $wap "$stage/test.wasm" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
