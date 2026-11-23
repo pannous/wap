@@ -32,8 +32,8 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - beauty.md (28 lines):
 - bignum.md (5 lines):
 - binding.md (15 lines):
-- block.md (43 lines): wap-wiki
-- bool.md (33 lines):
+- block.md (43 lines): ✓ wap-wiki, tests test_block_page.wap green, test_block_wanted.wap the forms still to build; wiki 3744c49
+- bool.md (33 lines): wap-wiki
 - broadcast.md (2 lines):
 - broadcasting.md (68 lines):
 - broken.md (0 lines):
