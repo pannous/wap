@@ -36,7 +36,9 @@ ENUM_WORD = "enum"
 text_type(m: WasmModule) as int := added_type(m, array_type(field_type(I8, MUTABLE)))
 # the wasm type of a text's value: a reference to its bytes, null where it is missing; or the address of its bytes in
 # the memory
-text_layout(m: WasmModule) as list<int> := if m.values_in_memory then I32 else nullable(text_type(m))
+text_layout(m: WasmModule) as list<int> := memory_layout(m, "text") ?? nullable(text_type(m))
+# the layout of a type word's values in the memory, ø where they are GC values
+memory_layout(m: WasmModule, word: text) as list<int>? := if m.memory == ø then ø else m.memory!.layouts.get(word)
 
 # the code of a literal, or ø for a node that is none
 literal(n: Node, m: WasmModule) as Code? := match n {
@@ -57,12 +59,12 @@ constant(n: Node) as Code? := match n {
 # records (core/stage.wap record_named)
 # a shape, `Record`, laid out as the type it narrows (core/analyze/shapes.wap); a list or a class's instance in the
 # memory its address
-layout_of(type_name: Node, m: WasmModule, records: Records) as list<int>? := if m.values_in_memory and type_word(type_name) == LIST_TYPE then I32 else match type_name {
+layout_of(type_name: Node, m: WasmModule, records: Records) as list<int>? := memory_layout(m, type_word(type_name)) ?? match type_name {
 	Symbol(written) => {
 		type = fact_of(type_name, NARROWS) ?? type_name
 		name = text(type)
 		record = record_named(records, type)
-		if WORD_LAYOUTS.has(name) then WORD_LAYOUTS[name] else if name == "text" then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == MAP_TYPE then nullable(map_base(m)) else if name == ENUM_WORD then enum_layout(m) else if record == ø then ø else if m.values_in_memory and cases_of(record!).all(case => case_fields(case) is empty) then I32 else nullable(struct_of(record, m, records))
+		if WORD_LAYOUTS.has(name) then WORD_LAYOUTS[name] else if name == "text" then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == MAP_TYPE then nullable(map_base(m)) else if name == ENUM_WORD then enum_layout(m) else if record == ø then ø else if plain_enums(m) and cases_of(record!).all(case => case_fields(case) is empty) then I32 else nullable(struct_of(record, m, records))
 	}
 	_ => {
 		index = list_index(type_name, m, records) ?? function_value_index(type_name, m, records) ?? signature_value_index(type_name, m, records) ?? map_index(type_name, m, records)
@@ -170,8 +172,10 @@ class_tag(record: Record) as int := text(record_declared(record)).bytes.fold(0, 
 # the GC type every enum's extends: its case's tag, which the instructions of `tagged` read. In the memory (a native
 # build) a case of no fields is its tag alone, an i32, as a class's instance is its address
 enum_base(m: WasmModule) as int := added_type(m, open_type([], struct_type([TAG_FIELD])))
-enum_layout(m: WasmModule) as list<int> := if m.values_in_memory then I32 else nullable(enum_base(m))
-tagged(m: WasmModule) as list<int> := if m.values_in_memory then [] else instruction(STRUCT_GET, [enum_base(m), 0])
+enum_layout(m: WasmModule) as list<int> := memory_layout(m, ENUM_WORD) ?? nullable(enum_base(m))
+# whether an enum's case of no fields is its tag alone
+plain_enums(m: WasmModule) as bool := memory_layout(m, ENUM_WORD) != ø
+tagged(m: WasmModule) as list<int> := if plain_enums(m) then [] else instruction(STRUCT_GET, [enum_base(m), 0])
 # the field `at` of a case's own fields, after its record's, of the value on the stack cast to the case's struct
 case_field_read(cast: int, record: Record, at: int) as list<int> := heap_instruction(REF_CAST_NULL, cast) + instruction(STRUCT_GET, [cast, at + #fields_of(record)])
 field_declared(field: Node) as Node := declared_type(field) ?? refused(field, "a field is written name: type")
@@ -184,12 +188,11 @@ case_struct_of(record: Record, case: Node, m: WasmModule, records: Records) as i
 
 # a text's bytes kept in a passive segment, copied into a new array where the program meets it
 # a text literal as a constant expression, its bytes given one by one, ø for any other node
-fixed_text(n: Node, m: WasmModule) as Code? := match n { Text(t) => if m.values_in_memory then memory_text(t, m) else Code(text_layout(m), t.bytes.flat_map(b => i32_const(b)) + instruction(ARRAY_NEW_FIXED, [text_type(m), #t.bytes])); _ => ø }
+fixed_text(n: Node, m: WasmModule) as Code? := match n { Text(t) => if m.memory != ø then memory_text(t, m) else Code(text_layout(m), t.bytes.flat_map(b => i32_const(b)) + instruction(ARRAY_NEW_FIXED, [text_type(m), #t.bytes])); _ => ø }
 text_literal(t: text, m: WasmModule) as Code := {
-	if m.values_in_memory { return memory_text(t, m) }
+	if m.memory != ø { return memory_text(t, m) }
 	type = text_type(m)
 	Code(nullable(type), i32_const(0) + i32_const(#t.bytes) + instruction(ARRAY_NEW_DATA, [type, added_text(m, t.bytes)]))
 }
-# a text in the module's data, its address: its byte count (4 bytes), its bytes and a zero, as
-# types/memory_texts.wap reads one
-memory_text(t: text, m: WasmModule) as Code := Code(I32, i32_const(data_placed(m, little_endian(#t.bytes, 4) + t.bytes)))
+# a text in the module's data, its address: its bytes as the memory lays a text out
+memory_text(t: text, m: WasmModule) as Code := Code(I32, i32_const(data_placed(m, (m.memory!.text_bytes)(t))))
