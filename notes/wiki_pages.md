@@ -134,7 +134,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-collections.md (47 lines): ✓ c354c23 (lib/collections.wap, test/test_collections.wap 6 ✓ + Counter/LRU red until any-char-equality)
 - library-complex.md (36 lines): ✓ b85dcc3 (lib/complex.wap, test/test_complex.wap 8 ✓; numbers on either side, exp and log in math)
 - library-compress.md (40 lines):
-- library-config-formats.md (67 lines): wap-wiki-lib
+- library-config-formats.md (67 lines): ✓ e28b84c (lib/yaml.wap, lib/toml.wap, test/test_config_formats.wap 15 ✓; YAML anchors and TOML multi-line strings cut)
 - library-csv.md (32 lines): ✓ 95f2e02 (lib/csv.wap, test/test_csv.wap 3 ✓; print of nested texts unquoted, with wap-interviewer)
 - library-diff.md (45 lines): ✓ e7eb7c7 (lib/diff.wap, edits the enum Edit, test/test_diff.wap 4 ✓; split(" ")[1] workaround until wap-reader fixes indexing a call)
 - library-dogfood-apps.md (51 lines):
@@ -144,7 +144,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-graphs.md (40 lines): ✓ 4435869 (lib/graphs.wap, test/test_graphs.wap 10 ✓; the path alone, path_cost)
 - library-intervals.md (36 lines): ✓ cf91cd6 (lib/intervals.wap, test/test_intervals.wap 5 ✓; Instants not yet)
 - library-json-tools.md (33 lines):
-- library-map-helpers.md (36 lines):
+- library-map-helpers.md (36 lines): wap-wiki-lib
 - library-markdown.md (54 lines): ✓ 3b0e579 (lib/markdown.wap, test/test_markdown.wap 10 ✓; CommonMark's corners cut)
 - library-matrix.md (26 lines): ✓ 1845c85 (lib/matrix.wap determinant, inverse, solve; test/test_matrix.wap 3 ✓; the Matrix class of matrix.warp not ported yet)
 - library-money.md (43 lines): ✓ 3c607e3 (lib/money.wap, Rounding an enum, test/test_money.wap 6 ✓)
