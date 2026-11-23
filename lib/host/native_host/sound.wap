@@ -52,39 +52,31 @@ sounds_heard_out() := {
 	finished_closed()
 }
 
-# little-endian 16-bit samples (a list of bytes), the channels interleaved, sounding from now on: 0, else -1 (no SDL3,
-# no audio device here)
-host_sound_played(pcm: list<int>, rate: int, channels: int): int := {
-	if muted() { return 0 }
-	if not audio_started() { return -1 }
+# little-endian 16-bit samples (a list of bytes), the channels interleaved, sounding from now on: no where none can (no
+# SDL3, no audio device here); a quiet run's yes, sounding nothing
+sound_played(pcm: list<int>, rate: int, channels: int): bool := {
+	if muted() { return yes }
+	if not audio_started() { return no }
 	finished_closed()
 	stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, audio_spec(rate, channels), 0, 0)
-	if stream == 0 { return -1 }
+	if stream == 0 { return no }
 	SDL_PutAudioStreamData(stream, pcm)
 	SDL_FlushAudioStream(stream)
 	SDL_ResumeAudioStreamDevice(stream)
 	audio.streams.add(stream)
-	0
+	yes
 }
-# the page's voice clock kept around a task (lib/sound.warp voice_kept): natively the voice is lib/sound.warp's alone
-host_sound_voice_kept(): int := 0
-host_sound_voice_back(voice: int): int := 0
-host_sound_voice_joined(voice: int): int := 0
 # a sound decoded: its rate, its channels and its 16-bit values, the channels interleaved
 class Decoded { rate: int, channels: int, values: list<int> }
-# an audio file sounding from now on, as decoded at its own rate: 0, else -1
-host_sound_file_played(path: text): int := {
-	if muted() { return 0 }
+# an audio file sounding from now on, as decoded at its own rate: no where it is not
+sound_file_played(path: text): bool := {
+	if muted() { return yes }
 	try {
 		decoded = sound_file_decoded(path, 0, 0)
-		host_sound_played([byte for value in decoded.values for byte in little_endian(value, SAMPLE_BYTES)], decoded.rate, decoded.channels)
-	} else -1
+		sound_played([byte for value in decoded.values for byte in little_endian(value, SAMPLE_BYTES)], decoded.rate, decoded.channels)
+	} else no
 }
-# [rate, channels, then the 16-bit values, the channels interleaved]; raises the reason a file is not decoded
-host_sound_file_decoded(path: text, rate: int, channels: int): list<int> := {
-	decoded = sound_file_decoded(path, rate, channels)
-	[decoded.rate, decoded.channels] + decoded.values
-}
+# an audio file decoded at the rate and channel count asked (0: the file's own); raises the reason one is not
 sound_file_decoded(path: text, rate: int, channels: int): Decoded := {
 	decoded = if on_mac() then toolbox_decoded(path, rate, channels) else sdl_decoded(path, rate, channels)
 	if not mp3_named(path) { return decoded }
@@ -302,8 +294,8 @@ resampled_at(values: list<int>, place: float, channels: int, channel: int, last:
 }
 
 # MIDI out (card midi-output-native, decision midi-native): the bytes of one message to the output named (the first
-# for ""), else to wap's own virtual source "wap" that a synth app listens to: 0 sent, MIDI_NO_OUTPUT for no output of
-# that name, MIDI_FAILED, MIDI_UNSUPPORTED where no MIDI is built in yet (Linux: ALSA to come). A quiet run sends
+# for ""), else to wap's own virtual source "wap" that a synth app listens to: Sent, NoOutput for no output of
+# that name, Failed, Unsupported where no MIDI is built in yet (Linux: ALSA to come). A quiet run sends
 # nothing, as it hears nothing. host_midi_ports: the devices' names, one a line, ø where no MIDI is built in
 MIDIClientCreate(name: handle, notify: handle, context: handle, client: out): i64 from 'CoreMIDI'
 MIDIOutputPortCreate(client: u32, name: handle, port: out): i64 from 'CoreMIDI'
@@ -317,9 +309,7 @@ MIDIPacketListInit(packets: handle): handle from 'CoreMIDI'
 MIDIPacketListAdd(packets: handle, size: i64, packet: handle, time: i64, length: i64, data: bytes): handle from 'CoreMIDI'
 MIDISend(port: u32, destination: u32, packets: handle): i32 from 'CoreMIDI'
 MIDIReceived(source: u32, packets: handle): i32 from 'CoreMIDI'
-MIDI_FAILED := -1
-MIDI_NO_OUTPUT := -2
-MIDI_UNSUPPORTED := -3
+enum MidiSent { Sent, NoOutput, Failed, Unsupported }
 MIDI_PACKETS_BYTES := 1024
 # CoreMIDI's client, its output port and wap's virtual source, made at their first use
 class Midi { client: int = 0, output_port: int = 0, virtual_source: int = 0 }
@@ -345,10 +335,10 @@ output_named(port: text): int := {
 	}
 	0
 }
-host_midi_sent(port: text, message: list<int>): int := {
-	if not on_mac() { return MIDI_UNSUPPORTED }
-	if muted() { return 0 }
-	if not midi_started() { return MIDI_FAILED }
+midi_sent(port: text, message: list<int>): MidiSent := {
+	if not on_mac() { return Unsupported }
+	if muted() { return Sent }
+	if not midi_started() { return Failed }
 	packets = calloc(1, MIDI_PACKETS_BYTES)
 	MIDIPacketListAdd(packets, MIDI_PACKETS_BYTES, MIDIPacketListInit(packets), 0, #message, message)
 	output = output_named(port)
@@ -356,15 +346,15 @@ host_midi_sent(port: text, message: list<int>): int := {
 	free(packets)
 	sent
 }
-midi_packets_sent(port: text, output: int, packets: int): int := {
-	if output != 0 { return if MIDISend(midi.output_port, output, packets) == 0 then 0 else MIDI_FAILED }
-	if port != "" { return MIDI_NO_OUTPUT }
+midi_packets_sent(port: text, output: int, packets: int): MidiSent := {
+	if output != 0 { return if MIDISend(midi.output_port, output, packets) == 0 then Sent else Failed }
+	if port != "" { return NoOutput }
 	if midi.virtual_source == 0 { midi.virtual_source = MIDISourceCreate(midi.client, cf_text("wap")) }
-	if midi.virtual_source == 0 { return MIDI_FAILED }
-	if MIDIReceived(midi.virtual_source, packets) == 0 then 0 else MIDI_FAILED
+	if midi.virtual_source == 0 { return Failed }
+	if MIDIReceived(midi.virtual_source, packets) == 0 then Sent else Failed
 }
 # the inputs' names (inputs: 1) or the outputs', one a line; ø where no MIDI is built in
-host_midi_ports(inputs: int): text? := {
+midi_ports(inputs: int): text? := {
 	if not on_mac() { return ø }
 	names = if inputs == 1 then [endpoint_name(MIDIGetSource(i)) for i in 0 ..< MIDIGetNumberOfSources()] else [endpoint_name(MIDIGetDestination(i)) for i in 0 ..< MIDIGetNumberOfDestinations()]
 	names.join("\n")
