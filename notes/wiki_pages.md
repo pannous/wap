@@ -170,9 +170,9 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - matching.md (143 lines): wap-wiki, tests test_matching_wanted.wap the forms still to build; asked (bare heads, untyped fields, add a to b)
 - math.md (32 lines): wap-wiki, prose; asked (unfinished sentence)
 - member.md (5 lines): ✓ wap-wiki, prose
-- meta.md (65 lines):
-- monad.md (32 lines):
-- multi-value.md (96 lines):
+- meta.md (65 lines): wap-wiki, tests test_meta_wanted.wap the forms still to build; asked (C++ snippet, wasp fences)
+- monad.md (32 lines): wap-wiki, prose; asked (questions section)
+- multi-value.md (96 lines): wap-wiki, tests test_multi_value_wanted.wap the forms still to build; asked (wasm internals, D12 line)
 - mutability.md (23 lines):
 - mutable.md (116 lines):
 - node.md (81 lines):
