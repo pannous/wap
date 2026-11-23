@@ -1,0 +1,96 @@
+# The types module's words for the world around a program (AGENTS.md "Layers"): its files, its command line, its
+# environment and the wall clock, in plain wap over WASI's calls (host.wap).
+
+use "host.wap"
+
+# the text of the file at a path, relative to the current folder or from the root (/…)
+read(path: text): text := {
+	file = opened(path, 0, READ_AND_SEEK, "cannot read ")
+	fd_seek(file, 0, FROM_END, MOVED_AT)
+	size = memory_word(MOVED_AT)
+	fd_seek(file, 0, FROM_START, MOVED_AT)
+	at = scratch(size)
+	got = bytes_read(file, at, size)
+	fd_close(file)
+	memory_text(at, got)
+}
+# whether a file or folder is at the path; "" names none (python's os.path.exists)
+exists(path: text): bool := {
+	if path == "" { return no }
+	file = opened_at(path, 0, 0) ?? return no
+	fd_close(file)
+	yes
+}
+# the names in the folder at a path, as the host lists them, its own `.` and `..` left out; read again from the entry a
+# read cut off
+list_files(folder: text): list<text> := {
+	listed = opened(folder, FOLDER_FLAG, READ_ENTRIES, "cannot list ")
+	names = []
+	cookie = 0
+	entries = scratch(ENTRIES_READ)
+	while yes {
+		fd_readdir(listed, entries, ENTRIES_READ, cookie, MOVED_AT)
+		end = entries + memory_word(MOVED_AT)
+		at = entries
+		while at + ENTRY_HEADER <= end {
+			length = memory_word(at + NAME_LENGTH_AT)
+			if at + ENTRY_HEADER + length > end { break }
+			name = memory_text(at + ENTRY_HEADER, length)
+			if name != "." and name != ".." { names += [name] }
+			cookie = memory_word(at)
+			at += ENTRY_HEADER + length
+		}
+		if end < entries + ENTRIES_READ {
+			fd_close(listed)
+			return names
+		}
+	}
+	names
+}
+# the command line: the program's file as it was named, then its arguments. WASI's args_sizes_get puts the count at 0
+# and the bytes' size at 4, args_get each one's address into scratch and their zero-ended bytes after them
+arguments(): list<text> := {
+	args_sizes_get(0, 4)
+	count = memory_word(0)
+	addresses = scratch(4 * count + memory_word(4))
+	args_get(addresses, addresses + 4 * count)
+	(0 upto count).map(at => zero_ended(memory_word(addresses + 4 * at)))
+}
+# the run's environment, each `NAME=value` entry zero-ended, as WASI's environ_get writes them after their addresses
+wasi_environment(): text := {
+	environ_sizes_get(0, 4)
+	addresses = 4 * memory_word(0)
+	size = memory_word(4)
+	at = scratch(addresses + size)
+	environ_get(at, at + addresses)
+	memory_text(at + addresses, size)
+}
+# an environment variable as the run started with it, ø when unset: `started_env("HOME")`
+started_env(name: text): text? := {
+	entry = name + "="
+	for line in wasi_environment().split(text_made(1)) { if line.starts_with(entry) { return line[#entry ..] } }
+	ø
+}
+# milliseconds since 1970 by the wall clock: WASI's clock_time_get puts the nanoseconds at 0, as two words
+wall_clock_ms(): int := {
+	clock_time_get(WALL_CLOCK, NANOS_PER_MILLI, 0)
+	(memory_word(0) + memory_word(4) * WORD_RANGE) ÷ NANOS_PER_MILLI
+}
+# the arguments after the program's file: `warp prog.wasm a b` gives ["a", "b"]
+args := arguments().drop(1)
+# the running program: its file, as the command line names it, and that file's folder
+class Program { file: text; folder: text }
+program := Program(arguments()#1, folder_of(arguments()#1))
+# a file's folder, "." for a file named without one: "core/stage.wap" is in "core"
+folder_of(file: text): text := {
+	parts = file.split("/")
+	if #parts == 1 then "." else parts[.. #parts - 1].join("/")
+}
+# bytes written to the file at a path, made anew or emptied first: what a compiler writes its module with
+write_bytes(path: text, bytes: list<int>) := {
+	file = opened(path, CREATED_OR_EMPTIED, WRITE_RIGHT, "write: cannot open ")
+	write(bytes_text(bytes), file, no)
+	fd_close(file)
+	# TODO (card void-function-result) the return goes once a function without a written result type gives nothing
+	return
+}
