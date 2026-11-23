@@ -11,6 +11,8 @@ enum { OPEN_CREATE = 1, OPEN_DIRECTORY = 2, OPEN_EXCLUSIVE = 4, OPEN_TRUNCATE = 
 enum { RIGHT_READ = 1 << 1, RIGHT_WRITE = 1 << 6 };
 enum { SEEK_FROM_START = 0, SEEK_FROM_HERE = 1 };
 enum { WASI_FAILED = 29 }; // EIO
+// a clock subscription of poll_oneoff: its timeout in nanoseconds at 24, relative; the event it gives, its bytes
+enum { TIMEOUT_AT = 24, EVENT_BYTES = 32, NANOS_PER_SECOND = 1000000000 };
 
 struct w2c_wasi__snapshot__preview1 {
 	w2c_program* program;
@@ -92,6 +94,28 @@ uint32_t w2c_wasi__snapshot__preview1_args_get(struct w2c_wasi__snapshot__previe
 		memcpy(at(wasi, buffer), wasi->argv[i], length);
 		buffer += length;
 	}
+	return 0;
+}
+// the clock's time in nanoseconds (WASI's realtime clock 0 and monotonic clock 1 are POSIX's own numbers)
+uint32_t w2c_wasi__snapshot__preview1_clock_time_get(struct w2c_wasi__snapshot__preview1* wasi, uint32_t clock, uint64_t precision, uint32_t time) {
+	(void)precision;
+	struct timespec now;
+	if (clock_gettime(clock == 0 ? CLOCK_REALTIME : CLOCK_MONOTONIC, &now) != 0) return WASI_FAILED;
+	store64(wasi, time, (uint64_t)now.tv_sec * NANOS_PER_SECOND + (uint64_t)now.tv_nsec);
+	return 0;
+}
+uint32_t w2c_wasi__snapshot__preview1_random_get(struct w2c_wasi__snapshot__preview1* wasi, uint32_t buffer, uint32_t length) {
+	arc4random_buf(at(wasi, buffer), length);
+	return 0;
+}
+// a sleep: the first subscription's relative timeout slept, its event given back (the types module's sleep_ms)
+uint32_t w2c_wasi__snapshot__preview1_poll_oneoff(struct w2c_wasi__snapshot__preview1* wasi, uint32_t subscriptions, uint32_t events, uint32_t count, uint32_t given) {
+	uint64_t timeout;
+	memcpy(&timeout, at(wasi, subscriptions + TIMEOUT_AT), sizeof timeout);
+	struct timespec pause = {(time_t)(timeout / NANOS_PER_SECOND), (long)(timeout % NANOS_PER_SECOND)};
+	nanosleep(&pause, NULL);
+	memset(at(wasi, events), 0, EVENT_BYTES);
+	store32(wasi, given, count > 0);
 	return 0;
 }
 void w2c_wasi__snapshot__preview1_proc_exit(struct w2c_wasi__snapshot__preview1* wasi, uint32_t code) {
