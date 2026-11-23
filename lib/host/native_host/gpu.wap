@@ -190,6 +190,7 @@ wgpuInstanceCreateSurface(instance: handle, descriptor: handle): handle from 'wg
 wgpuAdapterRequestDevice(adapter: handle, descriptor: handle, info: bytes<40>): i64 from 'wgpu_native'
 wgpuAdapterHasFeature(adapter: handle, feature: i32): i32 from 'wgpu_native'
 wgpuDeviceGetQueue(device: handle): handle from 'wgpu_native'
+# (its answer says whether the queue is empty, no status: polling only drives the callbacks and frees)
 wgpuDevicePoll(device: handle, wait: i32, index: handle): i32 from 'wgpu_native'
 wgpuDevicePushErrorScope(device: handle, filter: i32): ø from 'wgpu_native'
 wgpuDevicePopErrorScope(device: handle, info: bytes<40>): i64 from 'wgpu_native'
@@ -1421,7 +1422,9 @@ buffer_mapped(buffer: int, size: int): int := {
 		failed("reading back: " + gpu.answer_message)
 		return 0
 	}
-	wgpuBufferGetConstMappedRange(buffer, 0, size)
+	mapped = wgpuBufferGetConstMappedRange(buffer, 0, size)
+	if mapped == 0 { failed("reading back: the mapped buffer gave no memory") }
+	mapped
 }
 
 # host_shader_painted(shader, width, height, values, pixels): the shader painted on the GPU, its pixels RGBA, a byte
@@ -1558,21 +1561,15 @@ presented(encoder: int, drawing: Drawing, viewport: list<float>): bool := {
 	texture = field_pointer(current, 8)
 	texture_view = wgpuTextureCreateView(texture, 0)
 	drew = drawn_into(encoder, texture_view, drawing, viewport)
-	if not drew {
-		submitted(encoder)
-		wgpuTextureViewRelease(texture_view)
-		wgpuTextureRelease(texture)
-		free(current)
-		return no
-	}
 	submitted(encoder)
-	wgpuSurfacePresent(gpu.surface)
+	shown = drew and wgpuSurfacePresent(gpu.surface) == SUCCESS
 	# wgpu frees what a frame released (its image, staging buffers) only when the device is polled: once a frame, not waiting
-	wgpuDevicePoll(gpu.device, 0, 0)
+	if drew { wgpuDevicePoll(gpu.device, 0, 0) }
 	wgpuTextureViewRelease(texture_view)
 	wgpuTextureRelease(texture)
 	free(current)
-	yes
+	if drew and not shown { return failed("the window's surface did not present the frame") }
+	shown
 }
 # how many times the painting fits in the drawable, the smaller of the two sides
 surface_scale(width: int, height: int): float := min(gpu.surface_width / width, gpu.surface_height / height) as float
@@ -1849,37 +1846,37 @@ field_names(given: list<text>): list<text> := {
 	kept
 }
 # a texture of this format; 0 where the device refuses it (the failure is cleared)
-texture_probed(width: int, height: int, format: int): int := {
+# a texture a pass draws into and a later pass reads, of this format; 0 and the device's reason in gpu.failure where it
+# refuses the format
+texture_checked(width: int, height: int, format: int): int := {
 	wgpuDevicePushErrorScope(gpu.device, ERROR_FILTER_VALIDATION)
 	made = texture_made(width, height, TEXTURE_RENDER_ATTACHMENT + TEXTURE_BINDING, format)
 	if scope_clean() and made != 0 { return made }
 	if made != 0 { wgpuTextureRelease(made) }
-	gpu.failure = ""
 	0
 }
+# whether the device renders into this format: a field's format is the first of field_formats() it does
+format_renders(format: int): bool := {
+	probe = texture_checked(1, 1, format)
+	if probe != 0 { wgpuTextureRelease(probe) }
+	probe != 0
+}
+# a format a field may be, its name, and whether it samples linearly (an rgba32float one where the device took
+# float32-filterable)
+class FieldFormat { format: int, name: text, filters: bool }
+field_formats(): list<FieldFormat> := [FieldFormat(FORMAT_RGBA16_FLOAT, "rgba16float", yes), FieldFormat(FORMAT_RGBA32_FLOAT, "rgba32float", gpu.float_filter_offered), FieldFormat(FORMAT_RGBA8, "rgba8unorm", yes)]
 fields_format_chosen(): bool := {
 	if gpu.fields_format != 0 { return yes }
 	if not device_ready() { return no }
-	probe = texture_probed(1, 1, FORMAT_RGBA16_FLOAT)
-	if probe != 0 {
-		wgpuTextureRelease(probe)
-		gpu.fields_format = FORMAT_RGBA16_FLOAT
-		gpu.fields_filterable = yes
-		gpu.fields_format_name = "rgba16float"
-		return yes
+	for kind in field_formats() {
+		if kind.format == FORMAT_RGBA8 or format_renders(kind.format) {
+			gpu.fields_format = kind.format
+			gpu.fields_filterable = kind.filters
+			gpu.fields_format_name = kind.name
+			return yes
+		}
 	}
-	probe = texture_probed(1, 1, FORMAT_RGBA32_FLOAT)
-	if probe != 0 {
-		wgpuTextureRelease(probe)
-		gpu.fields_format = FORMAT_RGBA32_FLOAT
-		gpu.fields_filterable = gpu.float_filter_offered
-		gpu.fields_format_name = "rgba32float"
-		return yes
-	}
-	gpu.fields_format = FORMAT_RGBA8
-	gpu.fields_filterable = yes
-	gpu.fields_format_name = "rgba8unorm"
-	yes
+	no
 }
 # the fields' sampler: linear where their format filters, clamped at the edge
 field_sampler_made(): int := sampler_made(Sampler("field_sampler", if gpu.fields_filterable then FILTER_LINEAR else FILTER_NEAREST, ADDRESS_CLAMP))
@@ -2039,21 +2036,20 @@ host_gpu_fields(width: int, height: int, given: list<text>): int := {
 		if set.width == width and set.height == height and set.label == label { return i + 1 }
 	}
 	if not fields_format_chosen() { raise gpu.failure }
-	fields = []
+	fields: list<FluidField> = []
 	for name in names {
-		front = texture_probed(width, height, gpu.fields_format)
-		back = texture_probed(width, height, gpu.fields_format)
-		if front == 0 or back == 0 {
-			if front != 0 { wgpuTextureRelease(front) }
-			if back != 0 { wgpuTextureRelease(back) }
-			raise "gpu_fields: this GPU cannot render " + gpu.fields_format_name
-		}
-		fields.add(FluidField(name, front, back))
+		fields.add(FluidField(name, field_texture(width, height), field_texture(width, height)))
 	}
 	set = FieldSet(width, height, label, fields)
 	fields_cleared(set)
 	gpu.field_sets.add(set)
 	#gpu.field_sets
+}
+# a field's texture, else raises the device's reason
+field_texture(width: int, height: int): int := {
+	texture = texture_checked(width, height, gpu.fields_format)
+	if texture == 0 { raise "gpu_fields: this GPU cannot render " + gpu.fields_format_name + ": " + gpu.failure }
+	texture
 }
 # -1 where `name` names no field: the library word raises that, so a program can catch it
 host_gpu_pass_recorded(shader: text, id: int, name: text, given: any): int := {
