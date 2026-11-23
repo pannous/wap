@@ -29,7 +29,7 @@ https://github.com/pannous/wap
   <!-- DONE (card move-sugar, b330a36) move types/sugar to sugar/  -->
 - wap/core and wap/kernel are semi-frozen: every change there goes to warp-interviewer first. A new feature goes
   into wap/extensions/ (first case: the native binary).
-- Standing OK (user 2026-11-23): a core, kernel or sugar bug fix of at most 3 net lines, or any pure shrink, that adds
+- Standing OK: a core, kernel or sugar bug fix of at most 3 net lines, or any pure shrink, that adds
   no form and makes the compiler do what the wiki or a test already says, lands after wap-reviewer's "sound" without a
   user question; its card notes "standing OK small fix". Anything bigger, or a new form, goes to the user.
 - A library feature starts as idiomatic wap (functions, classes, enums, block parameters, operator overloads). A
@@ -192,8 +192,9 @@ this file and your role file beat the handover.
   compiler built once for a state of wap/ is shared (data/wap-tests/wap1-<hash>/): never rebuild it "to be sure".
 - Kill only your own processes, by PID, never pkill/killall by pattern. Every run that might paint gets `--no-window`.
 - The wiki is the specification: a rewrite of what a wiki page says (a rule, an example's result, a dropped or new
-  form; not typos, links or layout) goes to warp-interviewer first, with the old and the new text; the Interviewer
-  approves it. A worker's wiki-only change otherwise lands as usual.
+  form; not typos, links or layout) goes to the user via warp-interviewer first, with the old and the new text; the user
+  approves it. A worker's wiki-only change otherwise lands as usual. 
+  The wiki specification shows an ideal state In simple English without any history or internals (NO *not yet*, planned, decision, ...!!)
 - Tests are spec only when backed: a test file's header names its source (a wiki page or a decision key); add cases
   only for forms a wiki page or decision shows. Tests are deduped without losing a distinct assertion.
 - GitHub API quota is shared: never poll `todo list` or `gh` in a loop.
