@@ -209,3 +209,11 @@ check "a library word takes an any holding its type" "$(ran use_any 'use ini
 a: any = parse_ini("top = 1")
 print to_ini(a)')" "top = 1"
 exit $((failures > 0))
+# a module's alias lines name its words other ways, in the module and in the files using it (wiki/alias.md)
+printf '%s\n' 'sine(x: int) := x * 2' 'alias sin => sine' 'alias magnitude <= mag' 'magnitude(x: int) := x + 1' 'twice_sin(x: int) := sin(x) * 2' >"$stage/trig.wap"
+check "a module's alias reads in the module and the file using it" "$(ran use_alias 'use "trig.wap"
+print(sin(3))
+print(mag(3))
+print(twice_sin(1))')" "6
+4
+4"
