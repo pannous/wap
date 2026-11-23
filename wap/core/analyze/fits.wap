@@ -43,6 +43,8 @@ joined_type(a: Node?, b: Node?, s: TypingState) as Node? := {
 	if same_type(a, b) { return a }
 	if a == EMPTY_SYMBOL { return optional_type(b) }
 	if b == EMPTY_SYMBOL { return optional_type(a) }
+	joined = functions_joined(a, b, s) ?? functions_joined(b, a, s)
+	if joined != ø { return joined }
 	shared = shape_base(a) ?? return wider(a, b, s)
 	if not same_type(shared, shape_base(b) ?? return wider(a, b, s)) { return wider(a, b, s) }
 	# two shapes of one type join as that type, `Define` and `Fn?` as a Node?
@@ -77,13 +79,15 @@ field_checked(given: Node, field: Node, value: Node, s: TypingState) as Node := 
 # list<int> is; checked, an any's value where another type is, raising there when it holds another; ø when it cannot.
 # The conversions a choice of overloads asks for, the static ones, never check: an any argument, or a Node where a
 # shape is wanted, is chosen for at run time (core/analyze/dispatch.wap).
-enum Conversion { Same, Boxed, Widened, Read, Wrapped, Narrowed, Settled, Checked }
+enum Conversion { Same, Boxed, Widened, Read, Wrapped, Narrowed, Settled, Checked, Adapted }
 STATIC_CONVERSIONS = [Conversion.Same, Conversion.Boxed, Conversion.Widened, Conversion.Read, Conversion.Wrapped]
 # the primitive that widens an int to a float
 WIDENING = "f64.convert_i64_s"
 conversion(given: Node?, wanted: Node?, s: TypingState) as Conversion? := {
 	if given == ø or wanted == ø { return ø }
 	if same_type(given, wanted) or bare_fit(given, wanted, s.records) { return Conversion.Same }
+	# a function value of its own type where a function type is wanted, or an unknown holding function values
+	if function_value_parts(given) != ø and (s.members.has(text(wanted)) or adapted_name(given, wanted, s) != ø) { return Conversion.Adapted }
 	# a shape's value is a value of the type it narrows: a Record where a Node is
 	narrows = narrowed_type(given)
 	if narrows != ø and conversion(narrows, wanted, s) == Conversion.Same { return Conversion.Same }
@@ -111,7 +115,7 @@ converted(n: Node, wanted: Node, s: TypingState, at: Node, place: text) as Node 
 	if jumps(n) { return n }
 	given = value_type(n) ?? refused(at, "this gives no value, ${place} ${type_text(wanted)}")
 	# a function value converts by its function, typed for the wanted function type
-	way = conversion(given, wanted, s) ?? return as_function_type(n, wanted, s) ?? refused(at, "this gives ${type_text(given)}, ${place} ${type_text(wanted)}")
+	way = conversion(given, wanted, s) ?? refused(at, "this gives ${type_text(given)}, ${place} ${type_text(wanted)}")
 	if way == Conversion.Settled { settles(given, wanted, s) }
 	if way == Conversion.Narrowed { return narrowed_call(n, wanted, at, s) }
 	if way == Conversion.Checked then with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [n]), n), wanted) else repacked(n, way, wanted, s)
@@ -123,6 +127,7 @@ repacked(n: Node, way: Conversion, wanted: Node, s: TypingState) as Node := matc
 	Conversion.Boxed => boxed(boxing_noted(n, wanted, s), wanted)
 	Conversion.Wrapped => if value_type(n) == EMPTY_SYMBOL then with_type_of(n, wanted) else boxed(n, wanted)
 	Conversion.Widened => with_type_of(placed_like(Prim(symbol(WIDENING), [n]), n), wanted)
+	Conversion.Adapted => function_converted(n, wanted, s)
 	_ => n
 }
 # a list or a map put into an any, its type kept for the dispatches that choose among generic definitions by it
