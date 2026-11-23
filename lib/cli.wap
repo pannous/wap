@@ -6,21 +6,25 @@
 use map
 use text
 
-# the help text's option column is this wide, its text starting two columns later
+# the help text's lines are indented this much, its option column is this wide and its text starts after both
+HELP_INDENT := "  "
 OPTION_COLUMN := 22
+# --no-name sets the flag name to no
+NEGATION := "no-"
 
 # one option of a spec, its keys read
 class Option {
-	name: text, short: text, kind: text, default: any, has_default: bool, required: bool, many: bool,
+	name: text, short: text?, kind: text, default: any, has_default: bool, required: bool, many: bool,
 	positional: bool, choices: list<any>, help: text
 }
 options_of(spec: list<T>): list<Option> := data_list(spec).map(entry => option_of(as_data_map(entry)))
 option_of(m: map<text, any>): Option := {
 	choices: list<any> = []
 	if m.has("choices") { choices = as_data_list(m["choices"]) }
-	Option(entry_text(m, "name"), entry_text(m, "short"), entry_text(m, "kind", "text"), m.get("default"), m.has("default"), is_set(m, "required"), is_set(m, "many"), is_set(m, "positional"), choices, entry_text(m, "help"))
+	Option(entry_text(m, "name"), given_text(m, "short"), entry_text(m, "kind", "text"), m.get("default"), m.has("default"), is_set(m, "required"), is_set(m, "many"), is_set(m, "positional"), choices, entry_text(m, "help"))
 }
-entry_text(m: map<text, any>, key: text, fallback: text = ""): text := if m.has(key) then "${m[key]}" else fallback
+given_text(m: map<text, any>, key: text): text? := if m.has(key) then "${m[key]}" else ø
+entry_text(m: map<text, any>, key: text, fallback: text = ""): text := given_text(m, key) ?? fallback
 is_set(m: map<text, any>, key: text): bool := m.has(key) and m[key] == yes
 is_flag(o: Option): bool := o.kind == "flag"
 # the option as the user writes it: --name, or the bare name of a positional
@@ -51,9 +55,10 @@ short_option(options: list<Option>, letter: text): Option? := {
 # a value text as the option's kind wants it, one of its choices when it has them
 value_of(o: Option, t: text): any := {
 	value = converted(o, t)
-	if #o.choices > 0 and not o.choices.any(choice => choice == value) { raise "cli: ${written(o)} is one of ${o.choices.map(choice => "${choice}").join(", ")}, not ${t}" }
+	if #o.choices > 0 and not o.choices.any(choice => choice == value) { raise "cli: ${written(o)} is one of ${choices_text(o, ", ")}, not ${t}" }
 	value
 }
+choices_text(o: Option, separator: text): text := o.choices.map(choice => "${choice}").join(separator)
 converted(o: Option, t: text): any := {
 	if o.kind == "int" {
 		digits = if t.starts_with("-") then t[1:] else t
@@ -78,13 +83,12 @@ set_value(r: Reading, o: Option, value: any) := {
 }
 listed(value: any): list<any> := [value]
 
-parse_args(spec: list<T>, argv: list<text>): map<text, any> := {
+parse_args(spec: list<T>, argv: list<text>): map<text, any> := parsed(options_of(spec), argv, no).values
+# the values read, and with stop the arguments from the first positional on (a command and its own)
+class Parsed { values: map<text, any>, rest: list<text> }
+# the arguments read against the options; with stop the options end at the first positional
+parsed(options: list<Option>, argv: list<text>, stop: bool): Parsed := {
 	rest: list<text> = []
-	parsed(options_of(spec), argv, no, rest)
-}
-# the arguments read against the options; with stop the options end at the first positional, which with all after
-# it goes into rest (for a command)
-parsed(options: list<Option>, argv: list<text>, stop: bool, rest: list<text>): map<text, any> := {
 	result: map<text, any> = {help: no}
 	for o in options { result[o.name] = start_value(o) }
 	r = Reading(argv, 0, result, [], [])
@@ -101,7 +105,7 @@ parsed(options: list<Option>, argv: list<text>, stop: bool, rest: list<text>): m
 			options_ended = yes
 		} else if a == "--help" or a == "-h" {
 			result["help"] = yes
-			return result
+			return Parsed(result, rest)
 		} else if a.starts_with("--") {
 			long_read(r, options, a[2:])
 		} else {
@@ -112,25 +116,25 @@ parsed(options: list<Option>, argv: list<text>, stop: bool, rest: list<text>): m
 	for o in options {
 		if o.required and not r.given.contains(o.name) { raise "cli: missing required ${written(o)}" }
 	}
-	result
+	Parsed(result, rest)
 }
 # --name, --name=value, --name value, --no-name
 long_read(r: Reading, options: list<Option>, body: text) := {
-	equals = find(body, "=") - 1
-	name = if equals >= 0 then body[0:equals] else body
+	pair = split_once(body, "=")
+	name = if pair is ø then body else pair[0]
 	o = long_option(options, name)
-	if o == ø and name.starts_with("no-") {
-		negated = long_option(options, name[3:])
+	if o == ø and name.starts_with(NEGATION) {
+		negated = long_option(options, name[#NEGATION:])
 		if negated == ø or not is_flag(negated) { raise "cli: unknown option --${name}" }
-		if equals >= 0 { raise "cli: --${name} takes no value" }
+		if pair != ø { raise "cli: --${name} takes no value" }
 		set_value(r, negated, no)
 	} else if o == ø {
 		raise "cli: unknown option --${name}"
 	} else if is_flag(o) {
-		if equals >= 0 { raise "cli: --${name} takes no value" }
+		if pair != ø { raise "cli: --${name} takes no value" }
 		set_value(r, o, yes)
 	} else {
-		value = if equals >= 0 then body[equals + 1:] else next_value(r, "--${name}")
+		value = if pair != ø then pair[1] else next_value(r, "--${name}")
 		set_value(r, o, value_of(o, value))
 	}
 }
@@ -177,11 +181,11 @@ positionals_placed(r: Reading, options: list<Option>) := {
 
 # an option's column, its text from the next column on (on the line below when the option is wider)
 help_line(part: text, words: text): text := {
-	if words == "" { return "  " + part }
-	padded = if #part < OPTION_COLUMN then part + " " * (OPTION_COLUMN - #part) else part + "\n" + " " * (OPTION_COLUMN + 2)
-	"  " + padded + words
+	if words == "" { return HELP_INDENT + part }
+	padded = if #part < OPTION_COLUMN then part + " " * (OPTION_COLUMN - #part) else part + "\n" + " " * (OPTION_COLUMN + #HELP_INDENT)
+	HELP_INDENT + padded + words
 }
-metavar(o: Option): text := if #o.choices > 0 then "{" + o.choices.map(choice => "${choice}").join(",") + "}" else upper(o.name)
+metavar(o: Option): text := if #o.choices > 0 then "{" + choices_text(o, ",") + "}" else upper(o.name)
 # an option as the usage line shows it
 usage_part(o: Option): text := {
 	if o.positional {
@@ -194,8 +198,8 @@ usage_part(o: Option): text := {
 value_part(o: Option): text := if is_flag(o) then "" else " " + metavar(o)
 # an option as its help line shows it, and its text
 option_part(o: Option): text := {
-	short = if o.short != "" then "-${o.short}, " else ""
-	negated = if is_flag(o) then ", --no-${o.name}" else ""
+	short = if o.short != ø then "-${o.short}, " else ""
+	negated = if is_flag(o) then ", --${NEGATION}${o.name}" else ""
 	short + "--${o.name}" + value_part(o) + negated
 }
 option_words(o: Option): text := {
@@ -204,13 +208,14 @@ option_words(o: Option): text := {
 	[o.help, shown_default, required].filter(words => words != "").join(" ")
 }
 cli_help(program: text, spec: list<T>): text := help_of(program, options_of(spec))
-help_of(program: text, options: list<Option>): text := {
-	usage = ["usage: ${program} [-h]"] + options.map(usage_part)
+# the help: the usage line, ended by usage_end, the sections, then the positionals and the options
+help_of(program: text, options: list<Option>, usage_end: list<text> = [], sections: list<text> = []): text := {
+	usage = ["usage: ${program} [-h]"] + options.map(usage_part) + usage_end
 	positionals = options.filter(o => o.positional)
 	listed_positionals: list<text> = []
 	if #positionals > 0 { listed_positionals = ["", "positional arguments:"] + positionals.map(o => help_line(o.name, o.help)) }
 	named = ["", "options:", help_line("-h, --help", "show this help")] + options.filter(o => not o.positional).map(o => help_line(option_part(o), option_words(o)))
-	([usage.join(" ")] + listed_positionals + named).join("\n")
+	([usage.join(" ")] + sections + listed_positionals + named).join("\n")
 }
 
 # --- commands, git style: `prog [global options] command [its options]`; commands maps each name to its spec, or to
@@ -227,15 +232,16 @@ command_names(commands: map<text, any>): list<text> := keys(commands)
 
 parse_commands(globals: list<T>, commands: map<text, V>, argv: list<text>): map<text, any> := {
 	table = data_map(commands)
-	rest: list<text> = []
-	result = parsed(options_of(globals), argv, yes, rest)
+	globally = parsed(options_of(globals), argv, yes)
+	result = globally.values
+	rest = globally.rest
 	result["command"] = ø
 	if result["help"] == yes { return result }
 	names = command_names(table).join(", ")
 	if rest is empty { raise "cli: missing command (${names})" }
 	name = rest[0]
 	if not table.has(name) { raise "cli: unknown command ${name} (${names})" }
-	own = parsed(command_options(table[name]), rest.drop(1), no, [])
+	own = parsed(command_options(table[name]), rest.drop(1), no).values
 	merged = merge(result, own)
 	merged["command"] = name
 	merged
@@ -243,10 +249,9 @@ parse_commands(globals: list<T>, commands: map<text, V>, argv: list<text>): map<
 # the help of a program with commands: its globals, then each command with its line
 cli_commands_help(program: text, globals: list<T>, commands: map<text, V>): text := {
 	table = data_map(commands)
-	top = help_of(program, options_of(globals)).split("\n")
-	names = "{" + command_names(table).join(",") + "}"
+	names = "{" + command_names(table).join(",") + "} ..."
 	listed_commands = ["", "commands:"] + command_names(table).map(name => help_line(name, command_words(table[name])))
-	([top[0] + " ${names} ..."] + listed_commands + top.drop(1)).join("\n")
+	help_of(program, options_of(globals), [names], listed_commands)
 }
 # the help of one command: `prog add -h`
 cli_command_text(program: text, commands: map<text, V>, name: text): text := help_of("${program} ${name}", command_options(data_map(commands)[name]))
