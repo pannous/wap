@@ -136,7 +136,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-compress.md (40 lines):
 - library-config-formats.md (67 lines):
 - library-csv.md (32 lines): ✓ 95f2e02 (lib/csv.wap, test/test_csv.wap 3 ✓; print of nested texts unquoted, with wap-interviewer)
-- library-diff.md (45 lines): wap-wiki-lib
+- library-diff.md (45 lines): ✓ e7eb7c7 (lib/diff.wap, edits the enum Edit, test/test_diff.wap 4 ✓; split(" ")[1] workaround until wap-reader fixes indexing a call)
 - library-dogfood-apps.md (51 lines):
 - library-fractions.md (39 lines):
 - library-functions.md (28 lines):
