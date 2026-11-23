@@ -128,8 +128,8 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - kotlin.md (18 lines): ✓ wap-wiki, tests test_kotlin_page.wap green, test_kotlin_wanted.wap ⋁ ∧ still to build
 - lambda.md (43 lines): ✓ wap-wiki, tests test_lambda_page.wap green, test_lambda_wanted.wap the forms still to build; words lambda-words (sin…log into types, sorted by a comparator); wiki 9963682, 8a952d3
 - laws.md (76 lines): wap-wiki, tests test_laws_wanted.wap the forms still to build; asked (warp internals, `=>` as implication)
-- LEB128.md (3 lines):
-- length.md (2 lines):
+- LEB128.md (3 lines): wap-wiki, a link; asked (int28/int60 links)
+- length.md (2 lines): ✓ wap-wiki, tests test_length_page.wap green
 - library-cli.md (232 lines): ✓ 9f35dd1 (lib/cli.wap replacing cli.warp, test/test_cli.wap 14 ✓)
 - library-collections.md (47 lines): ✓ c354c23 (lib/collections.wap, test/test_collections.wap 6 ✓ + Counter/LRU red until any-char-equality)
 - library-complex.md (36 lines): ✓ b85dcc3 (lib/complex.wap, test/test_complex.wap 8 ✓; numbers on either side, exp and log in math)
@@ -160,11 +160,11 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-unicode.md (33 lines): ✓ 3f56050 (lib/unicode.wap and unicode_data.wap from scripts/gen-unicode-tables.py; test/test_unicode.wap 10 ✓, test_unicode_normalization.wap 22 ✓)
 - library-uuid.md (31 lines): ✓ wap-wiki-lib, tests test_uuid.wap green (branch uuid-page eb7622e); wiki 093ab38
 - library-xml.md (28 lines): ✓ c48b119 (lib/xml.wap, test/test_xml.wap 8 ✓; elements a class, namespaces cut)
-- like.md (59 lines):
-- Lisp.md (19 lines):
+- like.md (59 lines): wap-wiki, tests test_like_wanted.wap the forms still to build
+- Lisp.md (19 lines): wap-wiki, prose; asked (wasp, lists as maps)
 - list.md (279 lines): ✓ wap-wiki, tests on main (test_lists_page.wap green, test_lists_wanted.wap the forms still to build); wiki f74e364, 25f83ea, 6aa530a
-- literal.md (34 lines):
-- macro.md (18 lines):
+- literal.md (34 lines): wap-wiki, asked (literal parameter type, import)
+- macro.md (18 lines): wap-wiki, prose; asked (IF sketch)
 - map.md (119 lines): (released by wap-wiki) tests 63835a0, wiki a1ab2dc; branch wiki-types d849c72 (show, count, first, Python's words) in its landing checks; waits: bare `a: map` (being built)
 - mark.md (23 lines):
 - matching.md (143 lines):
