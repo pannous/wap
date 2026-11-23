@@ -225,8 +225,8 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - shell.md (24 lines): wap-wiki, symbolic mode: asked (planned)
 - sigil.md (41 lines): wap-wiki, tests test_sigil_page.wap green, test_sigil_wanted.wap; asked (untyped broadcasting, Angel, wasp)
 - signal.md (134 lines): wap-wiki, tests test_signal_wanted.wap the forms still to build (lib events: test_events.wap); asked (sketch, todos, wasp fences)
-- signature.md (35 lines):
-- significant-whitespace.md (49 lines):
+- signature.md (35 lines): wap-wiki, tests test_signature_wanted.wap; asked (… and :: headers, number wrong value)
+- significant-whitespace.md (49 lines): wap-wiki, tests test_significant_whitespace_page.wap green, test_significant_whitespace_wanted.wap; asked (border cases, todos)
 - smart-pointer.md (170 lines):
 - sound.md (166 lines):
 - space.md (3 lines):
