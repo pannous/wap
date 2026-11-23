@@ -1,0 +1,157 @@
+# The standard module encoding (wiki/library-reference.md "Encodings"), in plain wap: texts or byte lists written in
+# base64 (RFC 4648), base32 and base32hex (RFC 4648 sections 6 and 7), hex, base58 (the Bitcoin alphabet), ascii85
+# (Adobe/btoa) and z85 (ZeroMQ RFC 32): `base64_encode("foo")` is "Zm9v", `base32_encode("foo")` "MZXW6===". Each
+# X_decode gives the text the bytes spell as UTF-8, X_decode_bytes the bytes; a character outside the alphabet raises,
+# naming its place. base64, base32 and hex regroup the bytes' bits into digits of 6, 5 or 4 bits; base58 changes the
+# radix of the whole number; ascii85 and z85 write each 4 bytes as 5 digits of base 85.
+use text
+
+BASE64_DIGITS := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+BASE32_DIGITS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+BASE32HEX_DIGITS := "0123456789ABCDEFGHIJKLMNOPQRSTUV"
+BASE58_DIGITS := "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+Z85_DIGITS := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#"
+BYTE_WIDTH := 8
+PAD := "="
+# the first ascii85 digit, !, and the digit for four zero bytes
+ASCII85_FIRST := 33
+ASCII85_ZEROS := "z"
+ASCII85_ZERO_GROUP := "!!!!!"
+BASE85 := 85
+BASE85_GROUP := 5
+BYTES_PER_GROUP := 4
+
+# the values regrouped from one width of bits to another, most significant first; a final part of a digit is filled
+# with zero bits when `filled`, else it must be shorter than one value of the input (it is the padding of the last byte)
+regrouped(values: list<int>, from_width: int, to_width: int, filled: bool): list<int> := {
+	out: list<int> = []
+	n = 0
+	bits = 0
+	for v in values {
+		n = (n << from_width) + v
+		bits += from_width
+		while bits >= to_width {
+			bits -= to_width
+			out.add(n >> bits)
+			n = n % (1 << bits)
+		}
+	}
+	if filled and bits > 0 { out.add(n << (to_width - bits)) }
+	if not filled and bits >= from_width { raise "a final digit spells no whole byte" }
+	out
+}
+# the bytes written as digits of an alphabet, each of `width` bits, padded with = to whole blocks of `block` digits
+digits_written(bytes: list<int>, alphabet: text, width: int, block: int): text := {
+	written = regrouped(bytes, BYTE_WIDTH, width, yes).map(v => "${alphabet.codepoints[v]}").join("")
+	written + PAD * ((block - #written % block) % block)
+}
+# the place of each digit in the alphabet, blanks and = skipped; any other character raises, naming its place
+digit_values(t: text, alphabet: text, name: text): list<int> := {
+	values: list<int> = []
+	characters = t.codepoints
+	for i in 0 upto #characters {
+		c = characters[i]
+		if not is_blank_byte(ord(c)) and c != '=' {
+			place = find(alphabet, "${c}")
+			if place == 0 { raise "${name}: ${c} at ${i + 1} is no ${name} digit" }
+			values.add(place - 1)
+		}
+	}
+	values
+}
+digits_read(t: text, alphabet: text, width: int, name: text): list<int> := regrouped(digit_values(t, alphabet, name), width, BYTE_WIDTH, no)
+
+base64_encode(bytes: list<int>): text := digits_written(bytes, BASE64_DIGITS, 6, 4)
+base64_decode_bytes(t: text): list<int> := digits_read(t, BASE64_DIGITS, 6, "base64")
+base32_encode(bytes: list<int>): text := digits_written(bytes, BASE32_DIGITS, 5, 8)
+base32_decode_bytes(t: text): list<int> := digits_read(upper(t), BASE32_DIGITS, 5, "base32")
+base32hex_encode(bytes: list<int>): text := digits_written(bytes, BASE32HEX_DIGITS, 5, 8)
+base32hex_decode_bytes(t: text): list<int> := digits_read(upper(t), BASE32HEX_DIGITS, 5, "base32hex")
+hex_encode(bytes: list<int>): text := digits_written(bytes, HEX_DIGITS, 4, 1)
+hex_decode_bytes(t: text): list<int> := digits_read(lower(t), HEX_DIGITS, 4, "hex")
+
+# digits of one radix as digits of another, most significant first, the number they spell unchanged
+rebased(digits: list<int>, from: int, to: int): list<int> := {
+	# least significant first while it grows
+	out: list<int> = []
+	for d in digits {
+		carry = d
+		for j in 0 upto #out {
+			carry += out[j] * from
+			out[j] = carry % to
+			carry = carry ÷ to
+		}
+		while carry > 0 {
+			out.add(carry % to)
+			carry = carry ÷ to
+		}
+	}
+	out.reverse
+}
+# the count of leading zeros, which base58 writes one for one as its zero digit
+leading_zero_count(values: list<int>): int := {
+	k = 0
+	while k < #values and values[k] == 0 { k += 1 }
+	k
+}
+base58_encode(bytes: list<int>): text := "${BASE58_DIGITS.codepoints[0]}" * leading_zero_count(bytes) + rebased(bytes, 256, 58).map(v => "${BASE58_DIGITS.codepoints[v]}").join("")
+base58_decode_bytes(t: text): list<int> := {
+	values = digit_values(t, BASE58_DIGITS, "base58")
+	(0 upto leading_zero_count(values)).map(i => 0) + rebased(values, 58, 256)
+}
+
+# four bytes as five base-85 digits and back
+base85_group(bytes: list<int>): list<int> := {
+	n = bytes.fold(0, (sum, b) => sum * 256 + b)
+	(0 upto BASE85_GROUP).map(j => (n ÷ (BASE85 ^ (BASE85_GROUP - 1 - j))) % BASE85)
+}
+group_bytes(digits: list<int>, name: text): list<int> := {
+	n = digits.fold(0, (sum, d) => sum * BASE85 + d)
+	if n >> 32 > 0 { raise "${name}: a group is past 2^32" }
+	(0 upto BYTES_PER_GROUP).map(j => (n >> (24 - 8 * j)) % 256)
+}
+# the bytes in groups of four, the last one filled with zeros; and how many of its bytes are real
+groups_of(values: list<int>, size: int, filler: int): list<list<int>> := (0 upto (#values + size - 1) ÷ size).map(g => (0 upto size).map(j => if g * size + j < #values then values[g * size + j] else filler))
+
+# ascii85 writes a final group of k bytes as k + 1 digits and four zero bytes as z; decoding drops a <~ … ~> pair
+ascii85_encode(bytes: list<int>): text := {
+	groups = groups_of(bytes, BYTES_PER_GROUP, 0)
+	last_size = #bytes - (#groups - 1) * BYTES_PER_GROUP
+	parts = groups.map(group => base85_group(group).map(d => text(char(ASCII85_FIRST + d))).join(""))
+	pieces = (0 upto #parts).map(i => if i == #parts - 1 then parts[i][0 : last_size + 1] else parts[i])
+	pieces.map(piece => if piece == ASCII85_ZERO_GROUP then ASCII85_ZEROS else piece).join("")
+}
+ascii85_decode_bytes(t: text): list<int> := {
+	inner = trim(t).replace("<~", "").replace("~>", "").replace(ASCII85_ZEROS, ASCII85_ZERO_GROUP)
+	digits = inner.codepoints.filter(c => not is_blank_byte(ord(c))).map(c => ord(c) - ASCII85_FIRST)
+	if digits.any(d => d < 0 or d >= BASE85) { raise "ascii85: a character is no ascii85 digit" }
+	if #digits % BASE85_GROUP == 1 { raise "ascii85: a final group of one digit" }
+	missing = (BASE85_GROUP - #digits % BASE85_GROUP) % BASE85_GROUP
+	all = groups_of(digits, BASE85_GROUP, BASE85 - 1).flat_map(group => group_bytes(group, "ascii85"))
+	all.take(#all - missing)
+}
+# z85: the bytes a multiple of 4, the text of 5
+z85_encode(bytes: list<int>): text := {
+	if #bytes % BYTES_PER_GROUP != 0 { raise "z85: ${#bytes} bytes are no multiple of 4" }
+	groups_of(bytes, BYTES_PER_GROUP, 0).flat_map(base85_group).map(v => "${Z85_DIGITS.codepoints[v]}").join("")
+}
+z85_decode_bytes(t: text): list<int> := {
+	if #t % BASE85_GROUP != 0 { raise "z85: ${#t} characters are no multiple of 5" }
+	groups_of(digit_values(t, Z85_DIGITS, "z85"), BASE85_GROUP, 0).flat_map(group => group_bytes(group, "z85"))
+}
+
+# each encoding of a text's UTF-8 bytes, and the text its decoded bytes spell
+base64_encode(t: text): text := base64_encode(t.bytes)
+base32_encode(t: text): text := base32_encode(t.bytes)
+base32hex_encode(t: text): text := base32hex_encode(t.bytes)
+hex_encode(t: text): text := hex_encode(t.bytes)
+base58_encode(t: text): text := base58_encode(t.bytes)
+ascii85_encode(t: text): text := ascii85_encode(t.bytes)
+z85_encode(t: text): text := z85_encode(t.bytes)
+base64_decode(t: text): text := from_utf8(base64_decode_bytes(t))
+base32_decode(t: text): text := from_utf8(base32_decode_bytes(t))
+base32hex_decode(t: text): text := from_utf8(base32hex_decode_bytes(t))
+hex_decode(t: text): text := from_utf8(hex_decode_bytes(t))
+base58_decode(t: text): text := from_utf8(base58_decode_bytes(t))
+ascii85_decode(t: text): text := from_utf8(ascii85_decode_bytes(t))
+z85_decode(t: text): text := from_utf8(z85_decode_bytes(t))
