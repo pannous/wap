@@ -26,6 +26,13 @@ show the user: the case against and why no library or hook does it (ask the bran
   matcher retries with the glued block split into head and block (class, enum, trait, match). Option: write only
   `class Point {…}` in the wiki (0 core). Recommend: the matcher retry. wap-reviewer: sound and general; nit: try every rule glued first, then unglued
   (not per rule), still about +6. wap-reader adjusts it tonight.
+- module-alias-preload b739f052 (wap-reader), +13 core (core/language, parse/operator_table, parse/operators,
+  pipeline): a file's `alias sin => sine` beats the preload's sin and reaches only that file and the files that use
+  it. The user already decided the meaning (the alias wins, scoped); the OK asked is for the core lines. Careful
+  checks green. Recommend: OK.
+- wap-build e7ebfcb7 (wap-emitter), +12 in extensions/native (driver 9, commands 3): `wap build app.wap` makes a
+  native executable `app`; a .wap output name is refused so the source is never overwritten. The user OK'd about
+  5 lines via wap-lead; it came to 12 (9 without the refusal). Recommend: OK, with the refusal.
 
 ## To present (keep or change, at 10:00)
 
