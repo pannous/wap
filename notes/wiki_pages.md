@@ -102,22 +102,22 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - guiding-principles.md (13 lines): ✓ wap-wiki, prose
 - haskell.md (49 lines): ✓ wap-wiki, prose (it as the last result: test_it_wanted)
 - hex.md (11 lines): wap-wiki
-- Home.md (47 lines):
+- Home.md (47 lines): wap-wiki
 - html.md (159 lines):
 - hyperreals.md (980 lines):
-- ideas.md (15 lines):
+- ideas.md (15 lines): ✓ wap-wiki, prose
 - immutable.md (0 lines):
 - import.md (8 lines): wap-wiki, asked
 - in.md (17 lines): wap-wiki
 - include.md (10 lines): wap-wiki, asked
 - indexing.md (45 lines): wap-wiki
-- inspiration.md (10 lines):
+- inspiration.md (10 lines): ✓ wap-wiki, prose
 - int.md (26 lines): wap-wiki, asked (warp internals)
-- int28.md (4 lines):
+- int28.md (4 lines): wap-wiki, internals: asked
 - int60.md (0 lines):
-- integer.md (2 lines):
+- integer.md (2 lines): ✓ wap-wiki, a link
 - inventions.md (258 lines):
-- it.md (21 lines):
+- it.md (21 lines): wap-wiki
 - iteration.md (72 lines):
 - iterator.md (0 lines):
 - json.md (26 lines): ✓ (lib/json.wap replacing json.warp, test/test_json.wap 8 ✓ + the one-char line red, test_json_class red: class reflection)
