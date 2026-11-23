@@ -212,18 +212,18 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - real.md (0 lines):
 - reference.md (69 lines): wap-wiki, tests test_reference_page.wap green, test_reference_wanted.wap; asked (TODO section, inout)
 - reflection.md (127 lines): wap-wiki, tests test_reflection_wanted.wap the forms still to build (params/fields/methods/signature in test_keyword_wanted)
-- repl.md (1 lines):
-- required.md (1 lines):
-- result.md (19 lines):
-- return.md (41 lines):
-- runtime.md (23 lines):
-- rust.md (74 lines):
-- scheme.md (31 lines):
-- script.md (84 lines):
-- serialization.md (5 lines):
-- serialize.md (1 lines):
-- shell.md (24 lines):
-- sigil.md (41 lines):
+- repl.md (1 lines): ✓ wap-wiki, prose
+- required.md (1 lines): ✓ wap-wiki, prose
+- result.md (19 lines): wap-wiki, `result` red in test_keyword_wanted; asked (planned marks, todos)
+- return.md (41 lines): wap-wiki, tests test_return_page.wap green, test_return_wanted.wap; asked (C-style and colon result forms)
+- runtime.md (23 lines): wap-wiki, tests test_runtime_page.wap green, test_runtime_wanted.wap; asked (internals to notes)
+- rust.md (74 lines): wap-wiki, a critique; asked (wasp, tone)
+- scheme.md (31 lines): wap-wiki, sketches: asked to hide
+- script.md (84 lines): wap-wiki, tests test_script_wanted.wap the forms still to build (use script fails: file_lines twice, to wap-wiki-lib)
+- serialization.md (5 lines): wap-wiki, prose; asked (wasp, todo)
+- serialize.md (1 lines): wap-wiki, prose; asked (wasp)
+- shell.md (24 lines): wap-wiki, symbolic mode: asked (planned)
+- sigil.md (41 lines): wap-wiki, tests test_sigil_page.wap green, test_sigil_wanted.wap; asked (untyped broadcasting, Angel, wasp)
 - signal.md (134 lines):
 - signature.md (35 lines):
 - significant-whitespace.md (49 lines):
