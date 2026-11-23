@@ -151,7 +151,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-numeric.md (36 lines): ✓ 0fefa6f (lib/numeric.wap, lib/matrix.wap solve, test/test_numeric.wap 5 ✓; intro "highest power first" → constant first, with wap-interviewer)
 - library-path.md (46 lines): ✓ 5e0b30d (lib/path.wap, test/test_path.wap 7 ✓)
 - library-primes.md (26 lines): ✓ 6b5ca30 (lib/math.wap primes words, test/test_primes.wap 3 ✓; without `use` not yet, with wap-binding)
-- library-reference.md (36 lines):
+- library-reference.md (36 lines): wap-wiki-lib
 - library-regex.md (107 lines): ✓ 8253c4c (lib/regex.wap, test/test_regex.wap 13 ✓; test_regex_infix red; use by path until the root-first module search)
 - library-slugs.md (36 lines): ✓ 45356f7 (lib/slugs.wap, test/test_slugs.wap 8 ✓; lib/text.wap holds upper and words until types has them)
 - library-tables.md (47 lines): ✓ 4aba14d (lib/tables.wap, test/test_tables.wap 8 ✓; named options, enum styles)
