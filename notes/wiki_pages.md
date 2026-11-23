@@ -205,7 +205,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - Purpose.md (644 lines):
 - questions.md (144 lines):
 - quote.md (3 lines):
-- random.md (23 lines): wap-wiki-lib (with standard-library.md's random section)
+- random.md (23 lines): ✓ feea51f (lib/random.wap, test/test_random.wap 10 ✓; die reading; secure random_bytes not yet, card host-random)
 - range.md (23 lines):
 - rant.md (15 lines):
 - README.md (0 lines):
