@@ -49,7 +49,7 @@ groups.
 - **data**: a data parameter takes its argument as written, a name or a brace block unevaluated (dsl.md, user-approved).
   It serves 6 rules: markup ×2, sound, signals ×2, storage's declaration.
 - **place**: a parameter that names the caller's variable or field, so a phrase can write it. It serves english ×5.
-  A block argument already writes the caller's names (decision block-writes-caller), which may be the mechanism.
+  A block argument already writes the caller's names, which may be the mechanism.
 - **operator modifier**: a word before an infix operator (`possibly >`). It serves uncertain ×2. Recommendation:
   keep the methods and drop the spelling, as an edge case.
 - **result type**: the expected type as a value, for agent ×4. Variants told apart by result type exist
