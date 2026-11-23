@@ -85,6 +85,7 @@ wap/
       operator_table.wap      the operator table as the operator stage reads it
       tokens.wap              a phrase's tokens as the operator stage reads them: what each touches
       keys.wap                what a key the reader built becomes: the colon block, the choice, an infix call, an assignment
+      raw.wap                 a raw parameter's block taken verbatim: the words a file declares raw, the block read to its brace
 
     rules/                    the rule engine
       patterns.wap            a rule's pattern declared and compiled to a Matcher: holes, typed holes, rests, guards
@@ -143,6 +144,7 @@ wap/
     lists.wap                 list words over function values: map, filter, contains …
     maps.wap                  map words: a key's value, set, has, remove; text keys found by their hash
     texts.wap                 text words over a text's UTF-8 bytes
+    characters.wap            a character's kind (digit, letter, hex) and a text's case
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
     host.wap                  the host machinery system.wap's words use, hidden from programs
