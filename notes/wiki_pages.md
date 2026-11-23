@@ -22,10 +22,10 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - Angle.md (33 lines):
 - Applescript.md (58 lines):
 - argument.md (77 lines):
-- array.md (26 lines):
-- as.md (25 lines):
+- array.md (26 lines): ✓ wap-wiki, tests test_array_wanted.wap (int[n] still to build); wiki cd63118
+- as.md (25 lines): wap-wiki
 - aspect.md (2 lines):
-- assignment.md (41 lines):
+- assignment.md (41 lines): wap-wiki
 - async.md (167 lines):
 - Bad.md (69 lines):
 - be.md (0 lines):
@@ -33,7 +33,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - bignum.md (5 lines):
 - binding.md (15 lines):
 - block.md (43 lines): ✓ wap-wiki, tests test_block_page.wap green, test_block_wanted.wap the forms still to build; wiki 3744c49
-- bool.md (33 lines): wap-wiki
+- bool.md (33 lines): ✓ wap-wiki, tests test_bool_page.wap green; words bool-words (even, odd, a list's has); wiki df1b9b8
 - broadcast.md (2 lines):
 - broadcasting.md (68 lines):
 - broken.md (0 lines):
@@ -44,7 +44,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - call.md (42 lines):
 - cargo.md (44 lines):
 - caveats.md (3 lines):
-- char.md (63 lines):
+- char.md (63 lines): wap-wiki, tests landed (test_char_page.wap, test_char_wanted.wap), wiki text waits on the user's answer (byte_size, quotes, count … of, graphemes)
 - character.md (0 lines):
 - charged.md (225 lines): ✓ wap-wiki, tests test_charged_page.wap green, test_charged_wanted.wap the forms still to build; wiki 736ab68, 8a952d3, 466b567, a6c9112
 - cheats.md (10 lines):
@@ -120,7 +120,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - it.md (21 lines):
 - iteration.md (72 lines):
 - iterator.md (0 lines):
-- json.md (26 lines):
+- json.md (26 lines): ✓ (lib/json.wap replacing json.warp, test/test_json.wap 8 ✓ + the one-char line red, test_json_class red: class reflection)
 - Julia.md (59 lines):
 - key.md (37 lines):
 - keyword.md (308 lines):
