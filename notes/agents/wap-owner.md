@@ -211,7 +211,7 @@ Anyone may edit any wap file on a branch; the owner of the file's stage reviews 
 language is (notes/backbone.md "Stage languages"). Breadth stops until milestone 2: wap gets only what its own
 source uses, and every landing names the functions of wap it turned green (scripts/wap-census.warp). Tests
 (test/wap/) and `# DEBT:` comments are append-only, open to all. A bug of the old compiler that blocks wap
-goes to wap-native as a repro; work around it or go on meanwhile. A new file belongs to the stage of its folder.
+goes to wap-emitter as a repro; work around it or go on meanwhile. A new file belongs to the stage of its folder.
 
 wap compiles itself; its work comes from notes/backbone.md "Architecture changes, in order" and the
 open milestone-2 points (user 2026-11-20); anything else is a `# DEBT:` comment at its code.
@@ -225,8 +225,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 | lead: the queue, the contracts, the self-build | wap-lead | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp, compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap, kernel/surface.wap; the test/wap/ scripts no other row names |
 | front: read, operators, rules, lowering | wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap, extensions/packed.wap, extensions/warm.wap |
 | types: declare, bind, type | wap-binding | core/analyze/, core/paths.wap |
-| back: emitter, runtime | wap-emitter | core/emit/, extensions/wasm/, extensions/c/; test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
-| native: the wap command, programs built to executables | wap-native | extensions/native/; test/wap/test_native.sh |
+| back: emitter, runtime, native | wap-emitter | core/emit/, extensions/wasm/, extensions/c/, extensions/native/; test/wap/test_native.sh, test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
 | simplification: wap smaller by its Node count (Meta excluded) | wap-simplifier | any file, by review of its stage owner |
 
 Questions for the user go to wap-interviewer, never to the user.
