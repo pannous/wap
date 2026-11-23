@@ -41,4 +41,19 @@ print(text(crc32(0, [97, 0, 98])))")" "367556721"
 # a function of the program reads a value of the library before any C call gave it one (warp-interviewer 2026-11-22)
 check "a function reads the library's value of the C calls' out-pointers" "$(ran library_value 'f() := c_outs
 print(text(f()))')" "0"
+# wiki/c.md's examples: sqlite3 through its module, a number that is no handle refused, qsort calling back a lambda
+check "sqlite3 runs a query: a row, its int and its text" "$(ran sqlite_page 'use sqlite3
+db = sqlite3_open(":memory:")
+stmt = sqlite3_prepare_v2(db, "select 1+2, '"'"'wap'"'"'", -1)
+print(text(sqlite3_step(stmt)) + " " + text(sqlite3_column_int(stmt, 0)) + " " + sqlite3_column_text(stmt, 1))
+sqlite3_finalize(stmt); sqlite3_close(db)')" "100 3 wap"
+check "a number that is no handle of this run is an error" "$(ran no_handle 'use sqlite3
+sqlite3_step(42)' 2>&1 | grep -c 'no handle of this run')" "1"
+check "qsort calls back a lambda through c_callback" "$(ran qsort_page 'use c
+use callbacks
+qsort(base: handle, count: i64, size: i64, compare: handle): void from '"'"'c'"'"'
+m = calloc(4, 8)
+set_field_i64(m, 0, 3); set_field_i64(m, 8, 1); set_field_i64(m, 16, 4); set_field_i64(m, 24, 2)
+qsort(m, 4, 8, c_callback((a, b) => field_i64(a, 0) - field_i64(b, 0), ["handle", "handle"]))
+print(text([0, 1, 2, 3].map(i => field_i64(m, 8 * i))))')" "[1, 2, 3, 4]"
 exit $((failures > 0))
