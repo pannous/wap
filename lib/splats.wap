@@ -1,0 +1,103 @@
+# The standard module splats: Gaussian splats as a capture keeps them, in the .splat file web viewers read
+# (antimatter15/splat): a record of 32 bytes each splat, its position and its scale (three little-endian f32 each),
+# its color and opacity (red, green, blue, alpha: a byte each) and its rotation, the unit quaternion [w, x, y, z] a
+# byte each component (q · 128 + 128). splats("tree.splat") is the list of its Splats, save(splats, file) writes one
+use bits
+use color
+use math
+use geometry
+
+SPLAT_RECORD_BYTES := 32
+F32_BYTES := 4
+# where a record's parts start: position, scale, color, opacity, rotation
+SCALE_AT := 12
+COLOR_AT := 24
+OPACITY_AT := 27
+ROTATION_AT := 28
+BYTE_RANGE := 255.0
+QUATERNION_SCALE := 128.0
+QUATERNION_ZERO := 128
+# a splat's numbers on the GPU: four floats each
+SPLAT_FLOATS := 4
+
+class Splat { position: list<float>, scale: list<float>, rotation: list<float>, color: Color, opacity: float }
+
+# the splats of a .splat file, in its order (a capture puts the biggest, most opaque ones first)
+splats(path: text): list<Splat> := splats_of(read_bytes(path))
+save(splats: list<Splat>, file: text) := write_bytes(file, splats.flat_map(splat_bytes))
+
+splats_of(bytes: list<int>): list<Splat> := [splat_at(bytes, SPLAT_RECORD_BYTES * i) for i in 0 .. #bytes /! SPLAT_RECORD_BYTES]
+splat_at(bytes: list<int>, at: int): Splat := Splat(record_floats(bytes, at), record_floats(bytes, at + SCALE_AT), record_rotation(bytes, at), rgb(bytes[at + COLOR_AT], bytes[at + COLOR_AT + 1], bytes[at + COLOR_AT + 2]), bytes[at + OPACITY_AT] / BYTE_RANGE)
+# three f32s from `at`
+record_floats(bytes: list<int>, at: int): list<float> := [f32_at(bytes, at + F32_BYTES * k) for k in 0 .. 3]
+# the rotation's quaternion, made a unit one again after its bytes rounded it
+record_rotation(bytes: list<int>, at: int): list<float> := {
+	q = [(bytes[at + ROTATION_AT + k] - QUATERNION_ZERO) / QUATERNION_SCALE for k in 0 .. 4]
+	vec_scale(q, 1 / vec_norm(q))
+}
+
+# the six upper-triangle numbers of Σ = R S² Rᵀ, row-major c00 c01 c02 c11 c12 c22. R is the rotation matrix of the
+# unit quaternion [w, x, y, z], S the scales along the Gaussian's own axes
+covariance_terms(rotation: list<float>, scale: list<float>): list<float> := {
+	w = rotation[0]
+	x = rotation[1]
+	y = rotation[2]
+	z = rotation[3]
+	r = [[1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+		[2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+		[2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]]
+	squared = scale.map(s => s * s)
+	term = (i: int, j: int) => (0 .. 3).map(k => r[i][k] * r[j][k] * squared[k]).sum()
+	[term(0, 0), term(0, 1), term(0, 2), term(1, 1), term(1, 2), term(2, 2)]
+}
+
+# each splat's depth, (position − eye) · forward
+depths_of(scene: list<Splat>, eye: list<float>, forward: list<float>): list<float> := scene.map(splat => vec_dot(vec_sub(splat.position, eye), forward))
+# the indices of the depths at least nearest, the nearest first
+order_by_depth(depths: list<float>, nearest: float): list<int> := (0 .. #depths).filter(i => depths[i] >= nearest).sort(by: i => depths[i])
+
+# the indices of the splats in centres (xyz and opacity each, a SplatFrame's) whose depth is at least nearest, the
+# nearest first: a stable 16-bit counting sort (antimatter15/splat runSort), so equal bins keep the lower index first,
+# as a stable sort would except where two different depths share a bin. Its depths quantized as runSort does,
+# trunc(depth · DEPTH_STEPS), then spread over the DEPTH_LEVELS + 1 bins between the nearest and the farthest kept
+DEPTH_STEPS := 4096.0
+DEPTH_LEVELS := 65535
+view_order(centres: list<float32>, eye: list<float>, forward: list<float>, nearest: float): list<int> := {
+	if #centres % SPLAT_FLOATS != 0 { raise "view_order: a centre is four floats" }
+	depths = (0 .. #centres /! SPLAT_FLOATS).map(i => vec_dot(vec_sub(centres[SPLAT_FLOATS * i .. SPLAT_FLOATS * i + 3].map(x => float(x)), eye), forward))
+	kept = (0 .. #depths).filter(i => depths[i] >= nearest)
+	if #kept == 0 { return [] }
+	steps = kept.map(i => trunc(depths[i] * DEPTH_STEPS))
+	low = steps.min
+	span = steps.max - low
+	scale = if span > 0 then DEPTH_LEVELS / span else 0.0
+	bins = steps.map(step => clamp(trunc((step - low) * scale), 0, DEPTH_LEVELS))
+	counts = [0 for bin in 0 .. DEPTH_LEVELS + 1]
+	for bin in bins { counts[bin] += 1 }
+	starts = [0 for bin in 0 .. DEPTH_LEVELS + 1]
+	for bin in 1 .. DEPTH_LEVELS + 1 { starts[bin] = starts[bin - 1] + counts[bin - 1] }
+	order = [0 for i in 0 .. #kept]
+	for k in 0 .. #kept {
+		order[starts[bins[k]]] = kept[k]
+		starts[bins[k]] += 1
+	}
+	order
+}
+
+# a .splat file laid out as the GPU reads it, without a Splat per record: centres xyz and opacity, then the six
+# covariance numbers (shapes, then the first two of shades) and the color's 24 bits
+class SplatFrame { count: int, centres: list<float32>, shapes: list<float32>, shades: list<float32> }
+splat_frame(path: text): SplatFrame := splat_frame_of(read_bytes(path))
+splat_frame_of(bytes: list<int>): SplatFrame := {
+	records = (0 .. #bytes /! SPLAT_RECORD_BYTES).map(i => SPLAT_RECORD_BYTES * i)
+	terms = records.map(at => covariance_terms(record_rotation(bytes, at), record_floats(bytes, at + SCALE_AT)))
+	centres = records.flat_map(at => record_floats(bytes, at) + [bytes[at + OPACITY_AT] / BYTE_RANGE])
+	shapes = terms.flat_map(c => c[0 .. 4])
+	shades = (0 .. #records).flat_map(i => [terms[i][4], terms[i][5], float(rgb_number(bytes, records[i] + COLOR_AT)), 0.0])
+	SplatFrame(#records, narrowed(centres), narrowed(shapes), narrowed(shades))
+}
+narrowed(xs: list<float>): list<float32> := xs.map(x => float32(x))
+rgb_number(bytes: list<int>, at: int): int := (bytes[at] << 16) + (bytes[at + 1] << 8) + bytes[at + 2]
+
+splat_bytes(s: Splat): list<int> := (s.position + s.scale).flat_map(x => float_bytes(x, 32, "little")) + channels(s.color).map(c => round(c * BYTE_RANGE)) + [round(s.opacity * BYTE_RANGE)] + s.rotation.map(quaternion_byte)
+quaternion_byte(q: float): int := clamp(round(q * QUATERNION_SCALE + QUATERNION_ZERO), 0, 255)
