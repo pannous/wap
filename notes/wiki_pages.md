@@ -162,10 +162,10 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-xml.md (28 lines):
 - like.md (59 lines):
 - Lisp.md (19 lines):
-- list.md (279 lines): (released by wap-wiki) tests 7789cd9, wiki 4b7316a; its list words land with map.md's branch wiki-types; waits: `xs.index(x)` (after the template-parameters fix), the forms being built (`(1 2)`, `it`, `x -1`, spread, `3 times`, `person{…}`)
+- list.md (279 lines): wap-wiki, tests 7789cd9, wiki 4b7316a; its list words land with map.md's branch wiki-types; waits: `xs.index(x)` (after the template-parameters fix), the forms being built (`(1 2)`, `it`, `x -1`, spread, `3 times`, `person{…}`)
 - literal.md (34 lines):
 - macro.md (18 lines):
-- map.md (119 lines): wap-wiki, tests 63835a0, wiki a1ab2dc; branch wiki-types d849c72 (show, count, first, Python's words) in its landing checks; waits: bare `a: map` (being built)
+- map.md (119 lines): (released by wap-wiki) tests 63835a0, wiki a1ab2dc; branch wiki-types d849c72 (show, count, first, Python's words) in its landing checks; waits: bare `a: map` (being built)
 - mark.md (23 lines):
 - matching.md (143 lines):
 - math.md (32 lines):
