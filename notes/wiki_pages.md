@@ -50,8 +50,8 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - cheats.md (10 lines): wap-wiki, private links, asked to hide
 - choices.md (47 lines): wap-wiki
 - class.md (55 lines): wap-wiki
-- cli.md (112 lines):
-- closure.md (88 lines):
+- cli.md (112 lines): wap-wiki, asked which command the page specifies
+- closure.md (88 lines): wap-wiki
 - code.md (17 lines):
 - comments.md (17 lines):
 - complex.md (4 lines):
