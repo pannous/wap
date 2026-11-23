@@ -1,0 +1,101 @@
+# The standard module tables (wiki/library-tables.md): texts measured as a terminal shows them, and rows written as
+# aligned tables. display_width counts each code point 2 when it is East Asian Wide or Fullwidth (CJK, kana, Hangul,
+# fullwidth forms) or an emoji, 0 when it is a combining mark, a zero-width or a control character, else 1; the ranges
+# are a pragmatic subset of Unicode's East Asian Width and emoji data. table_text(rows) writes rows (lists, or maps
+# whose keys are the headers, in the order first seen) in a style, plain, box or markdown; a column of numbers aligns
+# right unless align says otherwise.
+
+enum TableStyle { plain, box, markdown }
+enum Align { left, right, center }
+
+# the code point ranges, ascending, that take two columns and none
+wide_ranges: list<list<int>> = [[4352, 4447], [8986, 8987], [9001, 9002], [9193, 9196], [9200, 9200], [9203, 9203], [9725, 9726], [9748, 9749], [9800, 9811], [9855, 9855], [9875, 9875], [9889, 9889], [9898, 9899], [9917, 9918], [9924, 9925], [9934, 9934], [9940, 9940], [9962, 9962], [9970, 9971], [9973, 9973], [9978, 9978], [9981, 9981], [9989, 9989], [9994, 9995], [10024, 10024], [10060, 10060], [10062, 10062], [10067, 10069], [10071, 10071], [10133, 10135], [10160, 10160], [10175, 10175], [11035, 11036], [11088, 11088], [11093, 11093], [11904, 12350], [12353, 13311], [13312, 19903], [19968, 40959], [40960, 42191], [43360, 43391], [44032, 55203], [63744, 64255], [65040, 65049], [65072, 65103], [65280, 65376], [65504, 65510], [126980, 126980], [127183, 127183], [127374, 127374], [127377, 127386], [127462, 127487], [127488, 127743], [127744, 128591], [128640, 128767], [128992, 129003], [129292, 129535], [129648, 129791], [131072, 196605], [196608, 262141]]
+zero_ranges: list<list<int>> = [[0, 31], [127, 159], [768, 879], [1155, 1161], [1425, 1469], [1471, 1471], [1473, 1474], [1476, 1477], [1479, 1479], [1552, 1562], [1611, 1631], [1648, 1648], [1750, 1756], [1759, 1764], [1767, 1768], [1770, 1773], [2304, 2306], [2364, 2364], [2369, 2376], [2381, 2381], [3633, 3633], [3636, 3642], [3655, 3662], [4448, 4607], [6832, 6911], [7616, 7679], [8203, 8207], [8232, 8238], [8288, 8292], [8400, 8447], [65024, 65039], [65056, 65071], [65279, 65279], [917504, 917631], [917760, 917999]]
+ELLIPSIS := "…"
+
+# whether n lies in one of the ascending ranges
+in_ranges(n: int, ranges: list<list<int>>): bool := {
+	at = ranges.index_where(range => n <= range[1])
+	at > 0 and n >= ranges[at - 1][0]
+}
+# the columns one code point takes
+char_width(c: char): int := if in_ranges(ord(c), zero_ranges) then 0 else if in_ranges(ord(c), wide_ranges) then 2 else 1
+display_width(t: text): int := t.codepoints.map(char_width).sum
+# t cut to at most width columns, ending in … when cut; a wide character never splits
+truncate_display(t: text, width: int): text := {
+	if display_width(t) <= width { return t }
+	kept = ""
+	used = 0
+	for c in t.codepoints {
+		if used + char_width(c) > width - 1 { return kept + ELLIPSIS }
+		kept += text(c)
+		used += char_width(c)
+	}
+	kept + ELLIPSIS
+}
+# t padded with spaces to width columns, a center's extra space on the right
+pad_display(t: text, width: int, align: Align): text := {
+	gap = max(0, width - display_width(t))
+	match align {
+		left => t + " " * gap
+		right => " " * gap + t
+		center => " " * (gap ÷ 2) + t + " " * (gap - gap ÷ 2)
+	}
+}
+pad_display(t: text, width: int): text := pad_display(t, width, left)
+
+# a table style's frame: the borders of a line (left, between, right), of the rules above, under the headers and
+# below (none where empty), and the rules' fill
+class Frame { line: list<text>, top: list<text>, rule: list<text>, bottom: list<text>, fill: text }
+frame_of(style: TableStyle): Frame := match style {
+	plain => Frame(["", "  ", ""], [], ["", "  ", ""], [], "-")
+	box => Frame(["│ ", " │ ", " │"], ["┌─", "─┬─", "─┐"], ["├─", "─┼─", "─┤"], ["└─", "─┴─", "─┘"], "─")
+	markdown => Frame(["| ", " | ", " |"], [], ["| ", " | ", " |"], [], "-")
+}
+
+trailing_spaces_dropped(t: text): text := {
+	end = #t
+	while end > 0 and t[end - 1:end] == " " { end -= 1 }
+	t[0:end]
+}
+is_number(x: any): bool := x is int or x is float
+cell_text(x: any): text := if x == ø then "" else "${x}".replace("\r\n", " ").replace("\n", " ")
+# a markdown rule cell, its colons saying the alignment
+markdown_rule(width: int, align: Align): text := match align {
+	left => ":" + "-" * (width - 1)
+	right => "-" * (width - 1) + ":"
+	center => ":" + "-" * (width - 2) + ":"
+}
+
+# rows of values written as a table, under the headers when there are any
+table_text(rows: list<list<any>>, headers: list<text> = [], style: TableStyle = plain, align: Align? = ø): text := {
+	size = ([#headers] + rows.map(row => #row)).max
+	cells = rows.map(row => (0 upto size).map(i => if i < #row then cell_text(row[i]) else ""))
+	escape = (t: text) => if style == markdown then t.replace("|", "\\|") else t
+	head = (0 upto size).map(i => escape(if i < #headers then headers[i] else ""))
+	body = cells.map(row => row.map(escape))
+	aligns = (0 upto size).map(i => align ?? (if rows.all(row => i >= #row or row[i] == ø or is_number(row[i])) and rows.any(row => i < #row and is_number(row[i])) then right else left))
+	# markdown's rule needs three columns for its colons
+	narrowest = if style == markdown then 3 else 1
+	widths = (0 upto size).map(i => max(narrowest, ([head[i]] + body.map(row => row[i])).map(display_width).max))
+	frame = frame_of(style)
+	written = (parts: list<text>, ends: list<text>) => ends[0] + parts.join(ends[1]) + ends[2]
+	line = (row: list<text>) => written((0 upto size).map(i => pad_display(row[i], widths[i], aligns[i])), frame.line)
+	rule = (ends: list<text>) => written(widths.map(w => frame.fill * w), ends)
+	lines: list<text> = []
+	if frame.top != [] { lines.add(rule(frame.top)) }
+	if #headers > 0 or style == markdown {
+		under_head = if style == markdown then written((0 upto size).map(i => markdown_rule(widths[i], aligns[i])), frame.rule) else rule(frame.rule)
+		lines = lines + [line(head), under_head]
+	}
+	lines = lines + body.map(line)
+	if frame.bottom != [] { lines.add(rule(frame.bottom)) }
+	(if style == plain then lines.map(trailing_spaces_dropped) else lines).join("\n")
+}
+# rows of maps, the headers the given keys, else every key in the order first seen
+table_text(rows: list<map<text, any>>, headers: list<text> = [], style: TableStyle = plain, align: Align? = ø): text := {
+	seen: list<text> = []
+	for row in rows { for key in row.keys() { if not seen.contains(key) { seen.add(key) } } }
+	columns = if headers is empty then seen else headers
+	table_text(rows.map(row => columns.map(key => if row.has(key) then row[key] else ø)), headers: columns, style: style, align: align)
+}
