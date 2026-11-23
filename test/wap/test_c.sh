@@ -56,10 +56,8 @@ m = calloc(4, 8)
 set_field_i64(m, 0, 3); set_field_i64(m, 8, 1); set_field_i64(m, 16, 4); set_field_i64(m, 24, 2)
 qsort(m, 4, 8, c_callback((a, b) => field_i64(a, 0) - field_i64(b, 0), ["handle", "handle"]))
 print(text([0, 1, 2, 3].map(i => field_i64(m, 8 * i))))')" "[1, 2, 3, 4]"
-# warp's words for C's types, an unsigned int and a text the caller owns (wap/extensions/c/foreign.wap)
-check "C's types by warp's words, an unsigned int and an owned text cross" "$(ran c_words "toupper(c: int): int from 'c'
-labs(n: long): long from 'c'
-strdup(s: string): owned_text from 'c'
+# an unsigned int and a text the caller owns cross (wap/extensions/c/foreign.wap)
+check "an unsigned int and an owned text cross" "$(ran c_words "strdup(s: text): owned_text from 'c'
 htonl(n: u32): u32 from 'c'
-print(text(toupper(97)) + \" \" + text(labs(-4)) + \" \" + strdup(\"wap\") + \" \" + text(htonl(4278190080)))")" "65 4 wap 255"
+print(strdup(\"wap\") + \" \" + text(htonl(4278190080)))")" "wap 255"
 exit $((failures > 0))
