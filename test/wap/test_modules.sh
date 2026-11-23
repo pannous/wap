@@ -217,3 +217,7 @@ print(mag(3))
 print(twice_sin(1))')" "6
 4
 4"
+# an alias of a rule's word starts that rule's phrase too (wiki/alias.md, wiki/declaration.md)
+check "an alias of a rule's word starts its phrase" "$(ran alias_rule 'alias fun => def
+fun halved(n: float) { n / 2 }
+print halved(3.0)')" "1.5"
