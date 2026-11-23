@@ -1,0 +1,105 @@
+# Function instances in the typing stage (core/analyze/calls.wap): a function typed once for each tuple of argument
+# types it is called with, its parameters first, then its body, each instance a Define of its own; what a call of it
+# gives, and a definition's parts as typing reads them.
+
+use folder
+use "../errors.wap"
+use "../stage.wap"
+use "../bindings.wap"
+use "../type_notation.wap"
+use "../../kernel/forms.wap"
+
+# A function typed for these argument types, its written types' shapes known first, so it types alike however it is
+# reached: from a block, a call, or alone
+# It ends alone when wap refuses it: refused once, and each caller is refused naming it
+function_typed(definition: Signature, argument_types: list, s: TypingState, at: Node) as TypedFunction := {
+	key = definition.key
+	name = called_name(definition, s)
+	if s.refusals.any(each => each.key == key) { refused(at, "this calls ${name}, which wap refuses") }
+	try shaped_typed(shaped_once(definition, s), argument_types, s, at) catch e {
+		s.refusals += [Refusal(key, e.message)]
+		refused(at, "this calls ${name}, which wap refuses")
+	}
+}
+# A function typed for these argument types, once per tuple: its parameters, then its body, its result the written
+# one, which the body's type fits, or else the body's type. A call inside its own body finds it typed but without a result unless one is written.
+# what a function's body and returns give back, all of one type
+result_given(body: Node, frame: TypeFrame, name: Node, s: TypingState) as Node? := {
+	# a written result is the result, which each returned value fits: `return x` of an int in a function giving int?;
+	# else the body's and the returns' types joined as an if's arms are, `return ø` beside a Node a Node?, never any
+	finishing = (if jumps(body) then [] else [value_type(body)]) + frame.returns
+	joined = joined_all(finishing, s)
+	result = frame.result ?? (if joined == ANY_SYMBOL then finishing#1 else joined)
+	# `return ø` in a function that gives nothing back is a bare return
+	for returned in frame.returns { if not (returned == result or result == ø and returned == EMPTY_SYMBOL or conversion(returned, result, s) in STATIC_CONVERSIONS) { refused(name, "this function gives back values of different types") } }
+	result
+}
+A_DEFINE = "a function's definition is a Define"
+shaped_typed(definition: Signature, argument_types: list, s: TypingState, at: Node) as TypedFunction := match define_of(definition, s) { Define(name, parameters, body) => {
+	key = definition.key
+	letters = letters_bound(definition, argument_types, s) ?? []
+	settled_by(letters, s)
+	types = (1 to #argument_types).map(place => parameter_type(definition.parameters#place, type_substituted(argument_types#place ?? refused(at, "an argument reached typing without its type"), letters), letters, s.records))
+	if (1 to #types).any(place => has_unknowns(types#place) and not takes_any_item(definition.parameters#place)) { return deferred_typed(definition, types, letters, s, at) }
+	for typed in instances_of(key, s) {
+		if same_instance(typed, key, types, s) {
+			# a call of itself before its result is known gives no value; a function giving one refuses below
+			typed.called_unknown = typed.called_unknown or not typed.done and typed.result == ø
+			return typed
+		}
+	}
+	typed = TypedFunction(definition, types)
+	written = substituted(declared_type(name), letters)
+	# a bare `list` (or `list?`) written takes the body's own type, as a bare list parameter takes its argument's
+	typed.jumps = written == symbol(NEVER_RESULT)
+	typed.result = if names_bare_kind(written) or typed.jumps then ø else written
+	typed.unknown_result = "a function that calls itself and gives a value needs its full result type: write `${declared_name(name)}(…): ${full_type_hint(declared_type(name))} := …`"
+	instance_added(typed, s)
+	frame = TypeFrame()
+	frame.present = if s.found_in.has(key) then s.found_in[key] else []
+	frame.result = typed.result
+	frame.letters = letters
+	frame.function = declared_name(name)
+	typed_parameters = (1 to #types).map(at => parameter_typed(items_of(parameters)#at, types#at, frame))
+	frame.variables += captured_by(define_of(definition, s), types)
+	typed_body = typed_form(body, s, frame, typed.result)
+	given = result_given(typed_body, frame, name, s)
+	# a written result stays the result, `show(x: any): text := raise(…)`; one that writes none and never returns jumps
+	typed.jumps = typed.jumps or written == ø and jumps(typed_body) and frame.returns is empty
+	if written != ø and not typed.jumps { typed_body = converted(typed_body, written, s, body, FUNCTION_GIVES) }
+	typed.result = typed.result ?? (if given != ø and given != EMPTY_SYMBOL and base_of_optional(written) != ø then optional_type(given) else given)
+	typed.define = refitted(Define(signed_name(typed, s), with_items(parameters, typed_parameters), typed_body), define_of(definition, s))
+	typed.late = frame.late
+	if typed.called_unknown and valued(typed.result) and not typed.jumps { refused(name, typed.unknown_result) }
+	typed.done = yes
+	typed
+}; _ => refused(define_of(definition, s), A_DEFINE) }
+# a call typed by the function it calls: of its result, or jumping when that never returns
+result_of(n: Node, chosen: TypedFunction) as Node := if chosen.jumps then jumping(n) else if chosen.result == ø and not chosen.done then with_fact(n, RESULT_UNKNOWN, Text(chosen.unknown_result)) else with_type_of(n, chosen.result)
+# A parameter is of its written type, its letters bound, whatever an argument gives: `f(x: int?)` takes 3 and ø as an
+# int?; none written, or one that takes its argument's own type, it is of the argument's type
+parameter_type(written: Node?, given: Node, letters: list<Binding>, records: Records) as Node := if written == ø or takes_own_type(written, records) then given else type_substituted(written, letters)
+# whether a parameter of this written type is typed anew for each type given: a bare `list`, `enum` or `function`,
+# which take any list, enum or function value, a function type, whose function values each type it, and a protocol
+takes_own_type(written: Node, records: Records) as bool := written is symbol and BARE_KINDS.contains(text(written)) or function_parts(written) != ø or protocol_named(records, written) != ø
+parameter_typed(parameter: Node, type: Node, frame: TypeFrame) as Node := {
+	frame.variables += [Binding(place_key(declared_name(parameter)), type)]
+	with_name_fact(parameter, TYPE, type)
+}
+# a typed function's name with its signature, `(int, text) -> int`: its argument types and its result, `()` for no
+# parameters or no value known, `never` for one that never returns, as a built-in writes it, which the emitter lays out
+signed_name(typed: TypedFunction, s: TypingState) as Node := {
+	result = if typed.jumps then symbol(NEVER_RESULT) else typed.result ?? Empty
+	with_name_fact(written_name(define_of(typed.function, s)), SIGNATURE, function_type_of(typed.arguments, result))
+}
+
+# the parts of a Define, its parameters as a list of none or more
+written_name(definition: Define) as Node := match definition { Define(name, parameters, body) => name }
+parameters_in(definition: Define) as list := match definition { Define(name, parameters, body) => items_of(parameters) }
+# a definition's record as the typing stage holds it, its written types read once
+function_of(definition: Define) as Signature := match definition { Define(name, parameters, body) => signature_from(declared_name(name), items_of(parameters), declared_type(name)) }
+# whether a definition's parameters all have their types, none a generic letter or a function type, whose function
+# values each type it anew: typed even when nothing calls it
+all_typed(definition: Signature, records: Records) as bool := definition.parameters.all(type => once_typed(type, records))
+# a written type that types its parameter once for every call: none missing, no generic letter, none typed anew
+once_typed(type: Node?, records: Records) as bool := type != ø and not has_letters(type, records) and not takes_own_type(type, records)
