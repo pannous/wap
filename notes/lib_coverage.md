@@ -1,6 +1,7 @@
 # Library coverage under wap
 
 Each lib/ module run as `use <module>` plus a print, by the installed wap (`--seconds 60`), main 3818e62, 2026-11-22.
+scripts/coverage.sh measures it hourly now (cron), with the samples, into data/wap-tests/coverage.txt and the wap Vitals page.
 16 of 121 modules pass: bits case_table case_tables csv exact_values host_io html_entities ini integers intervals
 letter_ranges ordering ui uncertain unicode_data events.
 

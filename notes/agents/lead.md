@@ -14,6 +14,8 @@ read that file, notes/backbone.md and wap/compiler.wap at start.
 - Batch: several requests for one stage go to its owner together. Owners sit idle most of the time; never wake one for
   a status question, git and the board say the state.
 
+- One page at a time (user 2026-11-23: "don't implement too many features at once"): one wiki worker on one page, finished (wiki, tests, its approved forms built) before the next page opens; the approved forms are built one after another, never in parallel. Hold the next form until the current one has landed.
+
 ## Keeping it beautiful
 - You decide where a file belongs and who owns it (the Owners table is yours to edit); a file without a row is an error.
 - A contract change between two stages (a stage's output language) is yours: the two owners agree, you write it in

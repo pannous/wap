@@ -1,6 +1,6 @@
 # Wiki-driven development (user 2026-11-23)
 
-One wap/wiki page at a time per worker. Claim a page by writing your session name after it, commit and push this file
+One page at a time (user 2026-11-23: "don't implement too many features at once"): one wiki worker on one page, finished (wiki, tests, its approved forms built) before the next page opens; the approved forms are built one after another, never in parallel. Claim a page by writing your session name after it, commit and push this file
 before you start (a rejected push means someone else claimed: pull and pick another). When done: ✓ plus the commit;
 page needs no code: – plus why; edge cases parked: name the follow-up card.
 Wiki workers change lib/, samples/, test/ and the wiki; a need in wap/ (core, types, sugar, extensions) goes as one
@@ -72,7 +72,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - elvis.md (5 lines):
 - enum.md (91 lines):
 - equality.md (62 lines):
-- Error.md (176 lines):
+- Error.md (176 lines): wap-wiki (from wiki-b): tests d2b56ad (try/catch/raise/throw, ??, or); not yet sent: error values (`error "x"`, failed, r.message, `!`), bare `try X`, default and its aliases, finally, `on error of f`, `effects of`, assert … else, a catchable ÷ 0; spec question for wap-interviewer: `10/0` is ∞ (float /), the page uses it as the raised example: rewrite with `10 ÷ 0`?
 - evaluation.md (21 lines):
 - examples.md (90 lines):
 - Exception.md (37 lines):
@@ -89,7 +89,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - for.md (70 lines):
 - full-evaluation.md (17 lines):
 - function-pointer.md (22 lines):
-- function.md (179 lines): warp-wiki-b
+- function.md (179 lines): wap-wiki (from wiki-b): tests 632486d (branch wiki-b, land 264f14d), wiki 47bea94; waits: 22 gaps + a types patch (bits, pipe, words, round_to: ~/Library/Logs/warp/wiki-b/function-types.patch) with wap-lead (→ wap-reader, wap-binding), card should-argument (user)
 - functional.md (5 lines):
 - functor.md (18 lines):
 - gap-filling.md (14 lines):
@@ -162,10 +162,10 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-xml.md (28 lines):
 - like.md (59 lines):
 - Lisp.md (19 lines):
-- list.md (279 lines): wap-wiki-a
+- list.md (279 lines): wap-wiki, tests 7789cd9, wiki 1b0112f; waits: the types patch (/Volumes/Worktrees/wiki-a/data/wiki-list-types.patch, its checks pending_lists_page.wap) with wap-reader (`index` capture), the page's reader forms (wap-reader costing)
 - literal.md (34 lines):
 - macro.md (18 lines):
-- map.md (119 lines):
+- map.md (119 lines): wap-wiki, tests 63835a0; waits: count/first as map words (static rule, wap-interviewer OK pending), show(map) in the types patch, bare `map` (wap-binding)
 - mark.md (23 lines):
 - matching.md (143 lines):
 - math.md (32 lines):
