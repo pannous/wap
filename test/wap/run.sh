@@ -30,10 +30,10 @@ summed() {
 }
 # one test given the compiler under test (one_run <test> <module or "">): a test program, test/test_<area>.wap,
 # compiled by it and run; a test script run with it, a wap one, test/wap/test_<area>.wap, compiled by it and given the
-# wap binary and it as arguments
+# wap binary, it, the script's folder in the tree's data/ and the tree as arguments
 one_run() {
 	case $1 in
-		"$here"/*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/script.wasm" 2>&1 && $wap "$stage/script.wasm" "$wap" "$compiler" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
+		"$here"/*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/script.wasm" 2>&1 && $wap "$stage/script.wasm" "$wap" "$compiler" "$stage" "$tree" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
 		*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/test.wasm" 2>&1 && $wap "$stage/test.wasm" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
 		*) bash "$1" ${2:+--compiler "$2"} ;;
 	esac
