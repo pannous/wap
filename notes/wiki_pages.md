@@ -120,7 +120,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - it.md (21 lines):
 - iteration.md (72 lines):
 - iterator.md (0 lines):
-- json.md (26 lines):
+- json.md (26 lines): ✓ (lib/json.wap replacing json.warp, test/test_json.wap 8 ✓ + the one-char line red, test_json_class red: class reflection)
 - Julia.md (59 lines):
 - key.md (37 lines):
 - keyword.md (308 lines):
