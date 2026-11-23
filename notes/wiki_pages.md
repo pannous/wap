@@ -34,8 +34,8 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - binding.md (15 lines): wap-wiki, waits on the wording answer (block names, superscripts)
 - block.md (43 lines): ✓ wap-wiki, tests test_block_page.wap green, test_block_wanted.wap the forms still to build; wiki 3744c49
 - bool.md (33 lines): ✓ wap-wiki, tests test_bool_page.wap green; words bool-words (even, odd, a list's has); wiki df1b9b8
-- broadcast.md (2 lines):
-- broadcasting.md (68 lines):
+- broadcast.md (2 lines): ✓ wap-wiki, a link to broadcasting.md
+- broadcasting.md (68 lines): wap-wiki
 - broken.md (0 lines):
 - broken2.md (0 lines):
 - bugs.md (29 lines):
