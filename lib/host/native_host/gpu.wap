@@ -892,7 +892,10 @@ atlas_refused(file: int, head: int, why: text): int := {
 }
 # the storage buffer kept for the array's name (kept_buffer) and its bytes: a baked atlas, a GPU list copied in one
 # write, else a list of numbers
-stored_array(name: text, value: any, usage: int): StoredBuffer? := {
+stored_array(array: Named): StoredBuffer? := {
+	name = array.name
+	value = array.value
+	usage = BUFFER_STORAGE
 	if value is text {
 		pixels = atlas_pixels(value)
 		if pixels == 0 { return ø }
@@ -1014,7 +1017,7 @@ drawing_made(written: text, values: map<text, any>, width: int, height: int): Dr
 	}
 	samplers = SAMPLERS.filter(sampler => names(body, sampler.name) and not declares(body, sampler.name))
 	code = body + (if own_vertex_stage(shader) != "" then "" else FULL_IMAGE_VERTICES)
-	if #layout.declarations > 0 { code += "\nstruct WapValues { " + layout.declarations.join(", ") + " }\n@group(0) @binding(" + VALUES_BINDING + ") var<uniform> " + VALUES_NAME + ": WapValues;" }
+	code += values_declared(layout)
 	for i in 0 .. #read_arrays { code += storage_declared(STORAGE_BINDING + i, read_arrays[i], read_type(read_arrays[i], fields)) }
 	if drawing.reads_previous { code += PREVIOUS_FRAME }
 	for i in 0 .. #read_pictures { code += "\n@group(0) @binding(" + (PICTURE_BINDING + i) + ") var " + PICTURE_PREFIX + read_pictures[i].name + ": texture_2d<f32>;" }
@@ -1043,7 +1046,7 @@ drawing_made(written: text, values: map<text, any>, width: int, height: int): Dr
 	for j in 0 .. #samplers { entries.add(Binding(SAMPLER_BINDING + j, sampler: sampler_made(samplers[j]))) }
 	stored = {}
 	for array in layout.arrays {
-		made = stored_array(array.name, array.value, BUFFER_STORAGE)
+		made = stored_array(array)
 		if made == ø {
 			drawing_released(drawing)
 			return ø
@@ -1164,6 +1167,8 @@ holes_renamed(shader: text, candidates: list<text>, prefix: text): Renamed := {
 	}
 	Renamed(body, read)
 }
+# the values' uniform struct, as the shader reads it; none where they hold no number
+values_declared(layout: Layout): text := if #layout.declarations == 0 then "" else "\nstruct WapValues { " + layout.declarations.join(", ") + " }\n@group(0) @binding(" + VALUES_BINDING + ") var<uniform> " + VALUES_NAME + ": WapValues;"
 storage_declared(binding: int, name: text, type: text): text := "\n@group(0) @binding(" + binding + ") var<storage, read> " + STORAGE_PREFIX + name + ": " + type + ";"
 read_type(name: text, fields: list<Field>): text := {
 	found = fields.filter(field => field.name == name)
@@ -1281,7 +1286,8 @@ depth_attachment(view: int): int := {
 	set_field_i32(attachment, 24, f32_bits(1.0))
 	attachment
 }
-drawn_into(encoder: int, view: int, drawing: Drawing, viewport: list<float>): bool := {
+# a render pass drawing into the view, cleared first (pass_freed lets it go)
+render_pass(view: int): int := {
 	attachment = struct_of(COLOR_ATTACHMENT)
 	set_field_pointer(attachment, 8, view)
 	set_field_i32(attachment, 16, DEPTH_SLICE_UNDEFINED)
@@ -1290,11 +1296,16 @@ drawn_into(encoder: int, view: int, drawing: Drawing, viewport: list<float>): bo
 	descriptor = struct_of(RENDER_PASS)
 	set_field_i64(descriptor, 24, 1)
 	set_field_pointer(descriptor, 32, attachment)
-	if drawing.compute != "" and not compute_dispatched(encoder, drawing) {
-		free(attachment)
-		free(descriptor)
-		return no
-	}
+	descriptor
+}
+# a render pass and its color attachment let go
+pass_freed(descriptor: int) := {
+	free(field_pointer(descriptor, 32))
+	free(descriptor)
+}
+drawn_into(encoder: int, view: int, drawing: Drawing, viewport: list<float>): bool := {
+	if drawing.compute != "" and not compute_dispatched(encoder, drawing) { return no }
+	descriptor = render_pass(view)
 	depth_view = 0
 	depth_words = 0
 	if drawing.depth {
@@ -1315,18 +1326,11 @@ drawn_into(encoder: int, view: int, drawing: Drawing, viewport: list<float>): bo
 	} else if drawing.instances > 0 { wgpuRenderPassEncoderDraw(pass, drawing.corners, drawing.instances, 0, 0) }
 	wgpuRenderPassEncoderEnd(pass)
 	wgpuRenderPassEncoderRelease(pass)
-	if depth_view != 0 and not pyramid_reduced(encoder, depth_view, drawing.width, drawing.height) {
-		wgpuTextureViewRelease(depth_view)
-		if depth_words != 0 { free(depth_words) }
-		free(attachment)
-		free(descriptor)
-		return no
-	}
+	reduced = depth_view == 0 or pyramid_reduced(encoder, depth_view, drawing.width, drawing.height)
 	if depth_view != 0 { wgpuTextureViewRelease(depth_view) }
 	if depth_words != 0 { free(depth_words) }
-	free(attachment)
-	free(descriptor)
-	yes
+	pass_freed(descriptor)
+	reduced
 }
 submitted(encoder: int) := {
 	commands = wgpuCommandEncoderFinish(encoder, 0)
@@ -1563,32 +1567,33 @@ shown_kept(picture: int, layer: int, width: int, height: int) := {
 # the window's layer for a painting of width × height, the window opened by the first; 0 where none shows it
 painting_layer(width: int, height: int): int := if device_ready() then host_window_layer(width, height) else 0
 
+# what a failed painting in the window says it was
+WINDOW_PAINT := "paint into the window"
 # host_shader_shown(shader, width, height, values): the shader shown in the window: 1, 0 with no window open (the
 # driver paints its PNG), -1 failed, why on standard error. It draws into an image of the painting's size first (kept
 # for the next frame by a shader reading its previous one), then shown scaled
 host_shader_shown(shader: text, width: int, height: int, values: any): int := {
 	layer = painting_layer(width, height)
 	if layer == 0 { return 0 }
-	# shaded at the window's own pixels, not scaled up from the painting's size: crisp on a Retina display
-	sides = if surface_ready(layer) then shade_fitted(width, height) else [width, height]
+	sides = window_sides(layer, width, height)
 	t0 = wall_clock_ms()
 	shading_scale = sides[0] / width
 	drawing = drawing_of(shader, values, sides[0], sides[1])
 	shading_scale = 1.0
 	t1 = wall_clock_ms()
-	if drawing == ø { return said_failed("paint into the window") }
+	if drawing == ø { return said_failed(WINDOW_PAINT) }
 	encoder = wgpuDeviceCreateCommandEncoder(device, 0)
 	image = image_drawn(encoder, drawing, sides[0], sides[1])
 	if image == 0 {
 		drawing_released(drawing)
 		wgpuCommandEncoderRelease(encoder)
-		return said_failed("paint into the window")
+		return said_failed(WINDOW_PAINT)
 	}
 	shown = picture_presented(encoder, image, layer, sides[0], sides[1])
 	image_done(drawing, image)
 	drawing_released(drawing)
 	paint_frame_noted(t1 - t0, wall_clock_ms() - t1)
-	if shown then 1 else said_failed("paint into the window")
+	if shown then 1 else said_failed(WINDOW_PAINT)
 }
 # host_pixels_shown(pixels, width, height): pixels (RGBA, a byte each, row by row, the driver's) shown in the
 # window: 1, 0 with no window open, -1 failed
@@ -1599,7 +1604,7 @@ host_pixels_shown(pixels: int, width: int, height: int): int := {
 	pixels_written(picture, pixels, width, height)
 	shown = picture_presented(wgpuDeviceCreateCommandEncoder(device, 0), picture, layer, width, height)
 	wgpuTextureRelease(picture)
-	if shown then 1 else said_failed("paint into the window")
+	if shown then 1 else said_failed(WINDOW_PAINT)
 }
 # the last painting shown again, at the window's size now, as the window comes into sight or changes size
 shown_again() := {
@@ -1813,17 +1818,7 @@ field_names(given: list<text>): list<text> := {
 # a texture of this format; 0 where the device refuses it (the failure is cleared)
 texture_probed(width: int, height: int, format: int): int := {
 	wgpuDevicePushErrorScope(device, ERROR_FILTER_VALIDATION)
-	descriptor = struct_of(TEXTURE_DESCRIPTOR)
-	set_field_i64(descriptor, 24, TEXTURE_RENDER_ATTACHMENT + TEXTURE_BINDING)
-	set_field_i32(descriptor, 32, TEXTURE_2D)
-	set_field_i32(descriptor, 36, width)
-	set_field_i32(descriptor, 40, height)
-	set_field_i32(descriptor, 44, 1)
-	set_field_i32(descriptor, 48, format)
-	set_field_i32(descriptor, 52, 1)
-	set_field_i32(descriptor, 56, 1)
-	made = wgpuDeviceCreateTexture(device, descriptor)
-	free(descriptor)
+	made = texture_made(width, height, TEXTURE_RENDER_ATTACHMENT + TEXTURE_BINDING, format)
 	if scope_clean() and made != 0 { return made }
 	if made != 0 { wgpuTextureRelease(made) }
 	gpu_failure = ""
@@ -1889,14 +1884,7 @@ pass_pipeline(code: text, format: int): int := {
 }
 # a fullscreen draw into the view, or only a clear where there is no pipeline yet
 color_pass(encoder: int, view: int, pipeline: int, bindings: int) := {
-	attachment = struct_of(COLOR_ATTACHMENT)
-	set_field_pointer(attachment, 8, view)
-	set_field_i32(attachment, 16, DEPTH_SLICE_UNDEFINED)
-	set_field_i32(attachment, 32, LOAD_CLEAR)
-	set_field_i32(attachment, 36, STORE_STORE)
-	descriptor = struct_of(RENDER_PASS)
-	set_field_i64(descriptor, 24, 1)
-	set_field_pointer(descriptor, 32, attachment)
+	descriptor = render_pass(view)
 	recorded = wgpuCommandEncoderBeginRenderPass(encoder, descriptor)
 	if pipeline != 0 {
 		wgpuRenderPassEncoderSetPipeline(recorded, pipeline)
@@ -1905,8 +1893,7 @@ color_pass(encoder: int, view: int, pipeline: int, bindings: int) := {
 	}
 	wgpuRenderPassEncoderEnd(recorded)
 	wgpuRenderPassEncoderRelease(recorded)
-	free(attachment)
-	free(descriptor)
+	pass_freed(descriptor)
 }
 passes_begun(): int := {
 	if pass_encoder == 0 { pass_encoder = wgpuDeviceCreateCommandEncoder(device, 0) }
@@ -1960,9 +1947,7 @@ pass_drawn(shader: text, given: any, width: int, height: int, reads: list<FluidF
 	# (a list it reads is a storage array, bound after the fields as paint binds its own)
 	renaming = arrays_renamed(shader, layout.arrays.map(array => array.name))
 	read_arrays = layout.arrays.filter(array => array.name in renaming.read)
-	decl = ""
-	if #layout.declarations > 0 { decl = "\nstruct WapValues { " + layout.declarations.join(", ") + " }\n@group(0) @binding(" + VALUES_BINDING + ") var<uniform> " + VALUES_NAME + ": WapValues;" }
-	code = pass_code(renaming.body, decl, reads)
+	code = pass_code(renaming.body, values_declared(layout), reads)
 	first_array = (if fields_filterable and #reads > 0 then 2 else 1) + #reads
 	for i in 0 .. #read_arrays { code += storage_declared(first_array + i, read_arrays[i].name, read_type(read_arrays[i].name, [])) }
 	pipeline = pass_pipeline(code, format)
@@ -1985,7 +1970,7 @@ pass_drawn(shader: text, given: any, width: int, height: int, reads: list<FluidF
 		binding += 1
 	}
 	for array in read_arrays {
-		made = stored_array(array.name, array.value, BUFFER_STORAGE)
+		made = stored_array(array)
 		if made == ø { return no }
 		entries.add(Binding(binding, made.buffer, made.bytes))
 		binding += 1
@@ -2060,6 +2045,9 @@ shade_image(shader: text, set: FieldSet, given: any, width: int, height: int): i
 	}
 	image
 }
+# the pixels a painting of width × height is shaded at in the window: the window's own where its surface is ready,
+# not scaled up from the painting's size, so a Retina display shows it crisp
+window_sides(layer: int, width: int, height: int): list<int> := if surface_ready(layer) then shade_fitted(width, height) else [width, height]
 # the drawable's largest same-aspect image of at least width × height, so a Retina surface is shaded one pixel
 # for one pixel. The window's point size stays width × height, which is the pointer's coordinate system
 shade_fitted(width: int, height: int): list<int> := {
@@ -2081,55 +2069,28 @@ fitted_timed(scale: float) := {
 }
 host_gpu_show(shader: text, id: int, given: any): int := {
 	set = fields_set(id)
-	layer = painting_layer(set.width, set.height)
-	upload = pass_ms
-	pass_ms = 0
-	if layer == 0 {
-		started = wall_clock_ms()
-		passes_finished()
-		frame_closed()
-		paint_frame_noted(upload, wall_clock_ms() - started)
-		return 0
-	}
-	started = wall_clock_ms()
-	image = shade_image(shader, set, given, set.width, set.height)
-	if image == 0 {
-		passes_finished()
-		raise gpu_failure
-	}
-	encoder = pass_encoder
-	pass_encoder = 0
-	shown = picture_presented(encoder, image, layer, set.width, set.height)
-	passes_released()
-	wgpuTextureRelease(image)
-	frame_closed()
-	paint_frame_noted(upload, wall_clock_ms() - started)
-	if not shown { raise gpu_failure }
-	1
+	fields_shown(shader, set, given, set.width, set.height, no)
 }
 host_gpu_show_sized(shader: text, id: int, width: int, height: int, given: any): int := {
 	if width < 1 or height < 1 { raise "gpu_show needs a positive width and height" }
-	set = fields_set(id)
+	fields_shown(shader, fields_set(id), given, width, height, yes)
+}
+# the fields' shading pass shown in the window as a painting of width × height, after the passes already encoded: 1,
+# 0 with no window open. fitted: shaded at the window's own pixels (shade_fitted)
+fields_shown(shader: text, set: FieldSet, given: any, width: int, height: int, fitted: bool): int := {
 	layer = painting_layer(width, height)
 	upload = pass_ms
 	pass_ms = 0
+	started = wall_clock_ms()
 	if layer == 0 {
-		started = wall_clock_ms()
 		passes_finished()
 		frame_closed()
 		paint_frame_noted(upload, wall_clock_ms() - started)
 		return 0
 	}
-	shade_w = width
-	shade_h = height
-	if surface_ready(layer) {
-		fitted = shade_fitted(width, height)
-		shade_w = fitted[0]
-		shade_h = fitted[1]
-	}
-	started = wall_clock_ms()
-	shading_scale = shade_w / width
-	image = shade_image(shader, set, given, shade_w, shade_h)
+	shaded = if fitted then window_sides(layer, width, height) else [width, height]
+	shading_scale = shaded[0] / width
+	image = shade_image(shader, set, given, shaded[0], shaded[1])
 	shading_scale = 1.0
 	if image == 0 {
 		passes_finished()
@@ -2137,7 +2098,7 @@ host_gpu_show_sized(shader: text, id: int, width: int, height: int, given: any):
 	}
 	encoder = pass_encoder
 	pass_encoder = 0
-	shown = picture_presented(encoder, image, layer, shade_w, shade_h)
+	shown = picture_presented(encoder, image, layer, shaded[0], shaded[1])
 	passes_released()
 	wgpuTextureRelease(image)
 	frame_closed()
