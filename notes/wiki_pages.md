@@ -239,7 +239,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - style-guide.md (21 lines):
 - swift-is-the-better-rust.md (83 lines):
 - swift.md (4 lines):
-- switch.md (89 lines):
+- switch.md (89 lines): wap-wiki-lib
 - symbol.md (67 lines):
 - symbolism.md (275 lines):
 - syntax.md (56 lines):
