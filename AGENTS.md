@@ -194,7 +194,7 @@ this file and your role file beat the handover.
 - The wiki is the specification: a rewrite of what a wiki page says (a rule, an example's result, a dropped or new
   form; not typos, links or layout) goes to the user via warp-interviewer first, with the old and the new text; the user
   approves it. A worker's wiki-only change otherwise lands as usual. 
-  The wiki specification shows an ideal state In simple English without any history or internals (NO *not yet*, planned, decision, ...!!)
+- The wiki specification shows an ideal state in simple English for users without any history or internals (NO *not yet*, planned, cards, commits, dates, decision, ...!! )
 - Tests are spec only when backed: a test file's header names its source (a wiki page or a decision key); add cases
   only for forms a wiki page or decision shows. Tests are deduped without losing a distinct assertion.
 - GitHub API quota is shared: never poll `todo list` or `gh` in a loop.
