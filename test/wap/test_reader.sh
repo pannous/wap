@@ -95,4 +95,6 @@ format_check $'# first\nx = 1 # one\n\n\n// second\ny = 2\n# last' $'# first\nx 
 format_check $'f(a) := {\n\ty = a\n\tif y > 2 {\n\t\tprint y\n\t}\n}' $'f(a) := {\n\ty = a\n\tif y > 2 {\n\t\tprint y\n\t}\n}'
 format_check $'/* a\n   b */\nx = 1' $'# a\n# b\nx = 1'
 format_check 'if a { print y }' 'if a {print y}'
+# a raw word's block is written back as it was written (wiki/dsl.md)
+format_check $'sql(command: raw) := command\nsql {select *  from t /* all } */}' $'sql(command: raw) := command\nsql {select *  from t /* all } */}'
 exit $((failures > 0))
