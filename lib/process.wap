@@ -1,9 +1,9 @@
 # The standard module process: a program started by its argument vector, without a shell, natively. run(["ls", "-l"])
 # waits for it and gives its exit status, what it printed and what it said on stderr; folder: names the folder it
 # starts in, seconds: a cap after which it and the processes it started are stopped and run raises, merged: yes puts
-# what it says on stderr into its out, in the order said, as sh's 2>&1. A failing program is no error, its status says
-# so; one killed by a signal has 128 + the signal, as sh gives it. Started by posix_spawnp, its outputs written to
-# temporary files, which run reads back.
+# what it says on stderr into its out, in the order said, as sh's 2>&1, input: a text it reads as its standard input,
+# else it reads the program's. A failing program is no error, its status says so; one killed by a signal has 128 + the
+# signal, as sh gives it. Started by posix_spawnp, its input and outputs temporary files, which run writes and reads.
 use file
 
 # posix_spawn's opaque objects: room for either kind on every libc
@@ -48,17 +48,21 @@ field_pointer(struct: handle, offset: i64): handle from 'c'
 class Ran { status: int, out: text, err: text }
 
 
-run(words: list<text>, folder: text = ".", seconds: int? = ø, merged: bool = no): Ran := {
+run(words: list<text>, folder: text = ".", seconds: int? = ø, merged: bool = no, input: text? = ø): Ran := {
 	if words is empty { raise "run: no program named" }
 	out = temp_file()
 	err = temp_file()
+	given = temp_file()
+	write(given, input ?? "")
 	out_file = fopen(out, "w")
 	err_file = fopen(err, "w")
+	given_file = fopen(given, "r")
 	actions = malloc(SPAWN_OBJECT_BYTES)
 	attributes = malloc(SPAWN_OBJECT_BYTES)
 	child_slot = malloc(INT_BYTES)
 	status = malloc(INT_BYTES)
 	posix_spawn_file_actions_init(actions)
+	if input != ø { posix_spawn_file_actions_adddup2(actions, fileno(given_file), 0) }
 	posix_spawn_file_actions_adddup2(actions, fileno(out_file), 1)
 	posix_spawn_file_actions_adddup2(actions, fileno(if merged then out_file else err_file), 2)
 	posix_spawn_file_actions_addchdir_np(actions, home_expanded(folder))
@@ -66,15 +70,13 @@ run(words: list<text>, folder: text = ".", seconds: int? = ø, merged: bool = no
 	posix_spawnattr_setflags(attributes, POSIX_SPAWN_SETPGROUP)
 	posix_spawnattr_setpgroup(attributes, 0)
 	started = posix_spawnp(child_slot, words[0], actions, attributes, words, field_pointer(_NSGetEnviron(), 0)) == 0
-	fclose(out_file)
-	fclose(err_file)
+	for file in [out_file, err_file, given_file] { fclose(file) }
 	posix_spawn_file_actions_destroy(actions)
 	posix_spawnattr_destroy(attributes)
 	stopped = started and not waited(field_i32(child_slot, 0), status, seconds)
 	answer = Ran(exit_status(field_i32(status, 0)), without_line_ends(read(out)), without_line_ends(read(err)))
 	for pointer in [actions, attributes, child_slot, status] { free(pointer) }
-	delete_file(out)
-	delete_file(err)
+	for path in [out, err, given] { delete_file(path) }
 	if not started { raise "run: cannot start ${words[0]}" }
 	if stopped { raise "run: ${words.join(" ")} stopped after ${seconds ?? 0} seconds" }
 	answer
