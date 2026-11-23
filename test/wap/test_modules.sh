@@ -120,6 +120,7 @@ say(text(twice(21)))')" "loaded
 # a module exports each function under its header line (wiki/wasm-representation.md "Export names"), so a host calls
 # one overload by that name
 called_export() {
+	command -v wasmtime >/dev/null || { echo "no wasmtime on PATH, the host these lines call exports with"; return; }
 	printf '%s\n' "$2" >"$stage/$1.wap"
 	$wap "$compiler" "$stage/$1.wap" "$stage/$1.wasm" 2>&1 && wasmtime run -W gc=y,function-references=y,exceptions=y --invoke "$3" "$stage/$1.wasm" "${@:4}" 2>/dev/null
 }
