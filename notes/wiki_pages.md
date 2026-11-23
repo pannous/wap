@@ -151,12 +151,12 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-numeric.md (36 lines): ✓ 0fefa6f (lib/numeric.wap, lib/matrix.wap solve, test/test_numeric.wap 5 ✓; intro "highest power first" → constant first, with wap-interviewer)
 - library-path.md (46 lines): ✓ 5e0b30d (lib/path.wap, test/test_path.wap 7 ✓)
 - library-primes.md (26 lines): ✓ 6b5ca30 (lib/math.wap primes words, test/test_primes.wap 3 ✓; without `use` not yet, with wap-binding)
-- library-reference.md (36 lines):
+- library-reference.md (36 lines): wap-wiki-lib
 - library-regex.md (107 lines): ✓ 8253c4c (lib/regex.wap, test/test_regex.wap 13 ✓; test_regex_infix red; use by path until the root-first module search)
 - library-slugs.md (36 lines): ✓ 45356f7 (lib/slugs.wap, test/test_slugs.wap 8 ✓; lib/text.wap holds upper and words until types has them)
 - library-tables.md (47 lines): ✓ 4aba14d (lib/tables.wap, test/test_tables.wap 8 ✓; named options, enum styles)
 - library-template.md (37 lines): ✓ 26959ef (lib/template.wap, lib/html.wap html_escape, test/test_template.wap 3 ✓; `{items: []}` not yet (card any-values), nested-map sections wait for any-truth-crash)
-- library-time-patterns-durations.md (42 lines): wap-wiki-lib
+- library-time-patterns-durations.md (42 lines): ✓ e837aee (lib/time.wap replacing time.warp, test/test_time_patterns.wap 12 ✓; UTC only, no zones)
 - library-unicode.md (33 lines): ✓ 3f56050 (lib/unicode.wap and unicode_data.wap from scripts/gen-unicode-tables.py; test/test_unicode.wap 10 ✓, test_unicode_normalization.wap 22 ✓)
 - library-uuid.md (31 lines):
 - library-xml.md (28 lines): ✓ c48b119 (lib/xml.wap, test/test_xml.wap 8 ✓; elements a class, namespaces cut)
