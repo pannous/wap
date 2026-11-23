@@ -8,16 +8,17 @@
 # first occurrence. An invalid expression raises, naming the field.
 use time
 
-class Macro { name: text, expression: text }
-CRON_MACROS := [Macro("@yearly", "0 0 1 1 *"), Macro("@annually", "0 0 1 1 *"), Macro("@monthly", "0 0 1 * *"),
-	Macro("@weekly", "0 0 * * 0"), Macro("@daily", "0 0 * * *"), Macro("@midnight", "0 0 * * *"), Macro("@hourly", "0 * * * *")]
-# each field: its name, its least and greatest number, its names (months, days) counted from its least
-class Field { name: text, low: int, high: int, names: list<text> = [] }
+YEARLY := "0 0 1 1 *"
+DAILY := "0 0 * * *"
+CRON_MACROS := {"@yearly": YEARLY, "@annually": YEARLY, "@monthly": "0 0 1 * *", "@weekly": "0 0 * * 0", "@daily": DAILY,
+	"@midnight": DAILY, "@hourly": "0 * * * *"}
+# each field: its name, its least and greatest number, its names (months, days) counted from its least, other words for
+# its numbers
+class Field { name: text, low: int, high: int, names: list<text> = [], aliases: map<text, int> = {} }
 MONTHS := Field("month", 1, 12, ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])
-WEEKDAYS := Field("day of week", 0, 7, ["sun", "mon", "tue", "wed", "thu", "fri", "sat"])
-CRON_FIELDS := [Field("minute", 0, 59), Field("hour", 0, 23), Field("day of month", 1, 31), MONTHS, WEEKDAYS]
 # day of week 7 is Sunday, 0
-SUNDAY := 7
+WEEKDAYS := Field("day of week", 0, 6, ["sun", "mon", "tue", "wed", "thu", "fri", "sat"], {"7": 0})
+CRON_FIELDS := [Field("minute", 0, 59), Field("hour", 0, 23), Field("day of month", 1, 31), MONTHS, WEEKDAYS]
 EXPRESSION_FIELDS := 5
 WALL_PATTERN := "yyyy-MM-dd HH:mm"
 MINUTE_SECONDS := 60
@@ -33,12 +34,13 @@ class Cron { minutes: list<int>, hours: list<int>, days: list<int>, months: list
 cron_number(t: text, field: Field): int := {
 	named = field.names.index_of(lower(t))
 	if named > 0 { return field.low + named - 1 }
+	if field.aliases.has(t) { return field.aliases[t] }
 	if not is_digits(t) { raise "cron: ${t} is no ${field.name}" }
 	n = int(t)
 	if n < field.low or n > field.high { raise "cron: ${t} is out of the ${field.name}'s ${field.low}-${field.high}" }
 	n
 }
-# the values one field allows, ascending, day of week 7 as 0
+# the values one field allows, ascending
 cron_values(t: text, field: Field): list<int> := {
 	allowed: list<int> = []
 	for item in t.split(",") {
@@ -47,7 +49,7 @@ cron_values(t: text, field: Field): list<int> := {
 		step = if #parts == 2 then int_step(parts[1], field) else 1
 		span = parts[0]
 		low = field.low
-		high = if field.name == WEEKDAYS.name then SUNDAY - 1 else field.high
+		high = field.high
 		if span != "*" {
 			ends = span.split("-")
 			if #ends > 2 or ends[0] == "" { raise "cron: ${item} is no range of the ${field.name}" }
@@ -56,7 +58,7 @@ cron_values(t: text, field: Field): list<int> := {
 			high = cron_number(ends.last, field)
 			if high < low { raise "cron: ${item} runs backwards in the ${field.name}" }
 		}
-		for v in (low to high).filter(v => (v - low) % step == 0) { allowed.add(if v == SUNDAY then 0 else v) }
+		allowed += (low to high).filter(v => (v - low) % step == 0)
 	}
 	(field.low to field.high).filter(v => v in allowed)
 }
@@ -74,8 +76,7 @@ cron_parse(expression: text): Cron := {
 }
 macro_expanded(written: text): text := {
 	if not written.starts_with("@") { return written }
-	for macro in CRON_MACROS { if macro.name == lower(written) { return macro.expression } }
-	raise "cron: unknown macro ${written}"
+	CRON_MACROS.get(lower(written)) ?? raise("cron: unknown macro ${written}")
 }
 
 # a time as seconds since 1970: an Instant, milliseconds, or a UTC text "yyyy-MM-dd HH:mm"
