@@ -9,7 +9,7 @@ f(ms: int): int := ms * 2
 a = go f(200)
 print(await a)' 2>&1)" "400"
 check "a task runs while the program goes on, finishing before it ends" "$(ran go_block 'use tasks
-hi() := { sleep(1000 ms); print("hi") }
+hi() := { sleep(1000ms); print("hi") }
 go {
   hi()
 }
