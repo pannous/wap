@@ -68,4 +68,9 @@ first40(s: bytes<40>): i64 from '$stage/libs40.dylib'
 made40(): handle from '$stage/libs40.dylib'
 m = made40()
 print(text(sum40(m)) + \" \" + text(first40(m)))")" "14 1"
+# a function that gives nothing is a C callback too, answering 0 (wiki/c.md: an Objective-C delegate)
+check "a function that gives nothing is called back through c_callback" "$(ran resultless_callback 'use callbacks
+hits: list<int> = []
+noted(a: int, b: int) := { if a > 0 { hits.add(a) } }
+print(text(c_callback(noted, ["i64", "i64"]) > 0))')" "yes"
 exit $((failures > 0))
