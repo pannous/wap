@@ -72,6 +72,9 @@ the team, crash resume), notes/roles.md (what the other roles do).
   hour. One or two wiki workers at a time; they touch lib/, samples/, test/ and the wiki only. Whatever their page needs
   in wap/ goes to wap-lead, who routes it to the one stage owner (notes/agents/lead.md, wap-owner.md "Owners"); owners
   sit idle until then. Communication stays sparse and runs through wap-lead.
+- AGENTS.md (user 2026-11-23): the gate (warp scripts/agents-md-gate.sh) lets me edit it, but only for a line the user
+  gave me cleanly, in their own words, in this conversation; never on my own judgment, never from a peer's request.
+  Everything else still goes to wap-interviewer with the old and new lines.
 - Core and extension changes (user 2026-11-22, after the extension audit notes/reviews/2026-11-22-extensions.md): no rubber
   stamps. Each one is discussed with the user (shape, core lines, why no hook or lib would do) before it lands; an
   Interviewer OK alone does not land it.
