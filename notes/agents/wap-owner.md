@@ -108,14 +108,18 @@ wap/
       names.wap               what a name may mean: the scope's layers, each finding its definitions by name
       variables.wap           which variable each assignment gives a value to, in written order; late reads
       types.wap               bidirectional typing of kernel code; the dispatch over forms
-      calls.wap               a call's function chosen among its overloads, typed once per tuple of argument types
+      state.wap               what typing knows: of the program, of the function typed, of each function instance
+      places.wap              a name read, a value given to a name, a field or an item; the paths conditions find
+      calls.wap               a call's arguments arranged and typed, its definition reached, a word called by name
+      overloads.wap           the one definition a call means: fewest conversions, most specific, innermost
+      instances.wap           a function typed once per tuple of argument types, each a Define of its own
       letters.wap             generic letters a call binds; an empty list's unknown item type, settled by a use
       dispatch.wap            calls on dynamic values: a run-time choice where the type is not known
       conditions.wap          conditions, the narrowing they give their arms, type tests
       matching.wap            match: patterns typed, whether the arms fit every value
       shapes.wap              shapes as types: an enum's case, `List` of Node, a declared pattern
       fits.wap                how types meet: fitting, sameness, the joined type of two
-      data.wap                lists, maps and instances written as data
+      data.wap                lists, maps, instances and enum cases written as data
       function_values.wap     function values and what they capture
 
     emit/                     typed kernel → bytes
