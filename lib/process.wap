@@ -3,7 +3,9 @@
 # starts in, seconds: a cap after which it and the processes it started are stopped and run raises, merged: yes puts
 # what it says on stderr into its out, in the order said, as sh's 2>&1, input: a text it reads as its standard input,
 # else it reads the program's. A failing program is no error, its status says so; one killed by a signal has 128 + the
-# signal, as sh gives it. Started by posix_spawnp, its input and outputs temporary files, which run writes and reads.
+# signal, as sh gives it. start(words) runs one beside the program: exited(child) is ø till it ends, then its Ran,
+# waited(child) waits for that, stop(child) kills it and the programs it started; start's captured: no shares the
+# program's outputs with it. Started by posix_spawnp, its input and outputs temporary files, which run writes and reads.
 use file
 
 # posix_spawn's opaque objects: room for either kind on every libc
@@ -16,7 +18,7 @@ SIGKILL := 9
 # posix_spawnattr's flag for a process group of its own, and waitpid's for not waiting
 POSIX_SPAWN_SETPGROUP := 2
 WNOHANG := 1
-# how often a capped program is looked at
+# how often a running program is looked at
 POLL_MS := 10
 MS_PER_SECOND := 1000
 # the bytes of a pid and of a wait status
@@ -48,55 +50,77 @@ field_pointer(struct: handle, offset: i64): handle from 'c'
 class Ran { status: int, out: text, err: text }
 
 
-run(words: list<text>, folder: text = ".", seconds: int? = ø, merged: bool = no, input: text? = ø): Ran := {
+# a program started and not yet waited for: its words, its pid, the slot its wait status goes to, the files its outputs
+# go to ("" for one it shares with the program starting it) and the one its input comes from
+class Child { words: list<text>, pid: int, status: int, out: text, err: text, given: text }
+
+# `run(["ls", "-l"])`: the program started, waited for, its Ran
+run(words: list<text>, folder: text = ".", seconds: int? = ø, merged: bool = no, input: text? = ø): Ran := waited(start(words, folder: folder, merged: merged, input: input), seconds: seconds)
+# the started program waited for, its Ran; seconds: the cap after which it and the programs it started are stopped and
+# waited raises
+waited(child: Child, seconds: int? = ø): Ran := {
+	deadline = wall_clock_ms() + (seconds ?? 0) * MS_PER_SECOND
+	answer = exited(child)
+	while answer is ø {
+		if seconds != ø and wall_clock_ms() > deadline {
+			stop(child)
+			while exited(child) is ø { sleep_ms(POLL_MS) }
+			raise "run: ${child.words.join(" ")} stopped after ${seconds ?? 0} seconds"
+		}
+		sleep_ms(POLL_MS)
+		answer = exited(child)
+	}
+	answer!
+}
+# `server = start(["python3", "-m", "http.server"])`: the program started, running beside this one till exited gives its
+# Ran; captured: no shares this program's outputs with it
+start(words: list<text>, folder: text = ".", merged: bool = no, input: text? = ø, captured: bool = yes): Child := {
 	if words is empty { raise "run: no program named" }
-	out = temp_file()
-	err = temp_file()
+	out = if captured then temp_file() else ""
+	err = if captured then temp_file() else ""
 	given = temp_file()
 	write(given, input ?? "")
-	out_file = fopen(out, "w")
-	err_file = fopen(err, "w")
-	given_file = fopen(given, "r")
 	actions = malloc(SPAWN_OBJECT_BYTES)
 	attributes = malloc(SPAWN_OBJECT_BYTES)
 	child_slot = malloc(INT_BYTES)
-	status = malloc(INT_BYTES)
 	posix_spawn_file_actions_init(actions)
+	given_file = fopen(given, "r")
 	if input != ø { posix_spawn_file_actions_adddup2(actions, fileno(given_file), 0) }
-	posix_spawn_file_actions_adddup2(actions, fileno(out_file), 1)
-	posix_spawn_file_actions_adddup2(actions, fileno(if merged then out_file else err_file), 2)
+	out_file = fopen(if captured then out else given, if captured then "w" else "r")
+	err_file = fopen(if captured then err else given, if captured then "w" else "r")
+	if captured {
+		posix_spawn_file_actions_adddup2(actions, fileno(out_file), 1)
+		posix_spawn_file_actions_adddup2(actions, fileno(if merged then out_file else err_file), 2)
+	}
 	posix_spawn_file_actions_addchdir_np(actions, home_expanded(folder))
 	posix_spawnattr_init(attributes)
 	posix_spawnattr_setflags(attributes, POSIX_SPAWN_SETPGROUP)
 	posix_spawnattr_setpgroup(attributes, 0)
 	started = posix_spawnp(child_slot, words[0], actions, attributes, words, field_pointer(_NSGetEnviron(), 0)) == 0
-	for file in [out_file, err_file, given_file] { fclose(file) }
+	for file in [given_file, out_file, err_file] { fclose(file) }
 	posix_spawn_file_actions_destroy(actions)
 	posix_spawnattr_destroy(attributes)
-	stopped = started and not waited(field_i32(child_slot, 0), status, seconds)
-	answer = Ran(exit_status(field_i32(status, 0)), without_line_ends(read(out)), without_line_ends(read(err)))
-	for pointer in [actions, attributes, child_slot, status] { free(pointer) }
-	for path in [out, err, given] { delete_file(path) }
-	if not started { raise "run: cannot start ${words[0]}" }
-	if stopped { raise "run: ${words.join(" ")} stopped after ${seconds ?? 0} seconds" }
+	child = Child(words, field_i32(child_slot, 0), malloc(INT_BYTES), out, err, given)
+	for pointer in [actions, attributes, child_slot] { free(pointer) }
+	if not started {
+		removed(child)
+		raise "run: cannot start ${words[0]}"
+	}
+	child
+}
+# the program's Ran once it has ended, its files then removed; ø while it runs
+exited(child: Child): Ran? := {
+	if waitpid(child.pid, child.status, WNOHANG) == 0 { return ø }
+	answer = Ran(exit_status(field_i32(child.status, 0)), output_of(child.out), output_of(child.err))
+	removed(child)
 	answer
 }
-# the child waited for, its wait status at status; past the cap it and its group are killed: no then
-waited(child: int, status: int, seconds: int?): bool := {
-	if seconds is ø {
-		waitpid(child, status, 0)
-		return yes
-	}
-	deadline = wall_clock_ms() + (seconds ?? 0) * MS_PER_SECOND
-	while waitpid(child, status, WNOHANG) == 0 {
-		if wall_clock_ms() > deadline {
-			kill(-child, SIGKILL)
-			waitpid(child, status, 0)
-			return no
-		}
-		sleep_ms(POLL_MS)
-	}
-	yes
+# the program and every program it started killed; exited then gives its Ran
+stop(child: Child) := { kill(-child.pid, SIGKILL) }
+output_of(path: text): text := if path == "" then "" else without_line_ends(read(path))
+removed(child: Child) := {
+	free(child.status)
+	for path in [child.out, child.err, child.given] { if path != "" { delete_file(path) } }
 }
 exit_status(waited: int): int := {
 	signal = waited % SIGNAL_BITS
