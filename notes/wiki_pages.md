@@ -127,7 +127,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - kind.md (31 lines): wap-wiki, C++ internals: asked to hide
 - kotlin.md (18 lines): ✓ wap-wiki, tests test_kotlin_page.wap green, test_kotlin_wanted.wap ⋁ ∧ still to build
 - lambda.md (43 lines): ✓ wap-wiki, tests test_lambda_page.wap green, test_lambda_wanted.wap the forms still to build; words lambda-words (sin…log into types, sorted by a comparator); wiki 9963682, 8a952d3
-- laws.md (76 lines):
+- laws.md (76 lines): wap-wiki, tests test_laws_wanted.wap the forms still to build; asked (warp internals, `=>` as implication)
 - LEB128.md (3 lines):
 - length.md (2 lines):
 - library-cli.md (232 lines): ✓ 9f35dd1 (lib/cli.wap replacing cli.warp, test/test_cli.wap 14 ✓)
