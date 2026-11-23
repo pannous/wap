@@ -157,7 +157,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-tables.md (47 lines): ✓ 4aba14d (lib/tables.wap, test/test_tables.wap 8 ✓; named options, enum styles)
 - library-template.md (37 lines): ✓ 26959ef (lib/template.wap, lib/html.wap html_escape, test/test_template.wap 3 ✓; `{items: []}` not yet (card any-values), nested-map sections wait for any-truth-crash)
 - library-time-patterns-durations.md (42 lines):
-- library-unicode.md (33 lines):
+- library-unicode.md (33 lines): wap-wiki-lib
 - library-uuid.md (31 lines):
 - library-xml.md (28 lines): ✓ c48b119 (lib/xml.wap, test/test_xml.wap 8 ✓; elements a class, namespaces cut)
 - like.md (59 lines):
