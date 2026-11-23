@@ -58,6 +58,8 @@ check "wap test runs the areas' tests" "$(cd "$stage/tested" && "$native_wap" te
 exit 3"
 # an argument that names no program file is code, run as a program is (core/native/warp.warp is_warp_file)
 check "wap runs code given in place of a file" "$("$native_wap" '1+1' 2>&1)" "2"
+# code given runs without a TMPDIR too, as under cron: its files go to the user's temporary folder
+check "wap runs code given in place of a file without a TMPDIR" "$(env -u TMPDIR "$native_wap" '1+1' 2>&1)" "2"
 check "a program file stays after its run" "$(cd "$stage" && "$native_wap" hello.wap >/dev/null && ls hello.wap)" "hello.wap"
 # `wap` alone, the console: each line a module of its own, linked to the earlier lines' kept instances, so a definition
 # stays for the lines after it and an effect happens once
