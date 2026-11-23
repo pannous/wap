@@ -134,7 +134,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-collections.md (47 lines): ✓ c354c23 (lib/collections.wap, test/test_collections.wap 6 ✓ + Counter/LRU red until any-char-equality)
 - library-complex.md (36 lines): ✓ b85dcc3 (lib/complex.wap, test/test_complex.wap 8 ✓; numbers on either side, exp and log in math)
 - library-compress.md (40 lines):
-- library-config-formats.md (67 lines):
+- library-config-formats.md (67 lines): wap-wiki-lib
 - library-csv.md (32 lines): ✓ 95f2e02 (lib/csv.wap, test/test_csv.wap 3 ✓; print of nested texts unquoted, with wap-interviewer)
 - library-diff.md (45 lines): ✓ e7eb7c7 (lib/diff.wap, edits the enum Edit, test/test_diff.wap 4 ✓; split(" ")[1] workaround until wap-reader fixes indexing a call)
 - library-dogfood-apps.md (51 lines):
@@ -152,7 +152,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-path.md (46 lines): ✓ 5e0b30d (lib/path.wap, test/test_path.wap 7 ✓)
 - library-primes.md (26 lines): ✓ 6b5ca30 (lib/math.wap primes words, test/test_primes.wap 3 ✓; without `use` not yet, with wap-binding)
 - library-reference.md (36 lines):
-- library-regex.md (107 lines): wap-wiki-lib
+- library-regex.md (107 lines): ✓ 8253c4c (lib/regex.wap, test/test_regex.wap 13 ✓; test_regex_infix red; use by path until the root-first module search)
 - library-slugs.md (36 lines): ✓ 45356f7 (lib/slugs.wap, test/test_slugs.wap 8 ✓; lib/text.wap holds upper and words until types has them)
 - library-tables.md (47 lines): ✓ 4aba14d (lib/tables.wap, test/test_tables.wap 8 ✓; named options, enum styles)
 - library-template.md (37 lines): ✓ 26959ef (lib/template.wap, lib/html.wap html_escape, test/test_template.wap 3 ✓; `{items: []}` not yet (card any-values), nested-map sections wait for any-truth-crash)
