@@ -1,0 +1,234 @@
+# The standard module yaml (wiki/library-config-formats.md): the YAML people write for configuration, read into maps
+# and lists and written back. parse_yaml(t) reads one document, parse_yaml_all(t) every document between --- lines.
+# Read: block maps and sequences (also `- key: value` items), one-line [flow] and {flow}, plain, 'single' and "double"
+# quoted scalars, | literal and > folded blocks, # comments, and the core schema: null and ~ for ø, true and false,
+# ints and floats; any other scalar is text. A key twice is refused, naming its line. to_yaml(m) writes block style,
+# quoting a text only where it would read as something else.
+use text
+use toml
+
+# --- reading
+
+# a line of the source: its indentation, its text without indentation and comment, and the line as written
+class Row { indent: int, content: text, raw: text, number: int }
+# the rows being read and the place reached
+class Reading { rows: list<Row>, at: int }
+
+leading_spaces(line: text): int := {
+	count = 0
+	while line[count:count + 1] == " " { count += 1 }
+	count
+}
+# a comment starts at a # after a blank, or at the line's start
+yaml_comment_cut(line: text): text := without_comment(" " + line, " #")[1:]
+row_of(line: text, number: int): Row := Row(leading_spaces(line), trim(yaml_comment_cut(line)), line, number)
+
+refused_row(row: Row, why: text): any := raise "yaml line ${row.number}: ${why}"
+
+current(r: Reading): Row := r.rows[r.at]
+# whether a row with content follows, blank rows passed
+has_row(r: Reading): bool := {
+	while r.at < #r.rows and current(r).content == "" { r.at += 1 }
+	r.at < #r.rows
+}
+continues_at(r: Reading, indent: int): bool := has_row(r) and current(r).indent == indent
+is_item(content: text): bool := content == "-" or content.starts_with("- ")
+# where the colon of a `key: value` row stands, -1 for a row that is no entry
+colon_of(content: text): int := if content.starts_with("[") or content.starts_with("{") then -1 else place_outside_quotes(content + " ", ": ", 0)
+
+parse_yaml(source: text): any := {
+	documents = parse_yaml_all(source)
+	if #documents > 1 { raise "parse_yaml: ${#documents} documents, parse_yaml_all reads them all" }
+	if documents is empty then ø else documents[0]
+}
+parse_yaml_all(source: text): list<any> := {
+	documents: list<any> = []
+	rows: list<Row> = []
+	lines = source.replace("\r\n", "\n").split("\n")
+	for i in 0 upto #lines {
+		line = lines[i]
+		if line == "---" or line.starts_with("--- ") or line == "..." {
+			if has_content(rows) { documents.add(document_of(rows)) }
+			rows = []
+		} else {
+			rows.add(row_of(line, i + 1))
+		}
+	}
+	if has_content(rows) { documents.add(document_of(rows)) }
+	documents
+}
+has_content(rows: list<Row>): bool := rows.any(row => row.content != "")
+document_of(rows: list<Row>): any := {
+	r = Reading(rows, 0)
+	value = if has_row(r) then block_value(r, current(r).indent) else ø
+	if has_row(r) { refused_row(current(r), "${current(r).content} is outside the document's indentation") }
+	value
+}
+
+# the map, sequence or scalar starting at the current row, indented by indent
+block_value(r: Reading, indent: int): any := {
+	row = current(r)
+	if is_item(row.content) then sequence_of(r, indent)
+	else if colon_of(row.content) >= 0 then mapping_of(r, indent)
+	else scalar_row(r)
+}
+scalar_row(r: Reading): any := {
+	row = current(r)
+	r.at += 1
+	scalar_of(row.content)
+}
+mapping_of(r: Reading, indent: int): map<text, any> := {
+	m: map<text, any> = {}
+	while continues_at(r, indent) and not is_item(current(r).content) {
+		row = current(r)
+		colon = colon_of(row.content)
+		if colon < 0 { refused_row(row, "${row.content} is no key: value") }
+		key = "${scalar_of(trim(row.content[0:colon]))}"
+		if m.has(key) { refused_row(row, "the key ${key} twice") }
+		r.at += 1
+		m[key] = entry_value(r, trim(row.content[colon + 1:]), indent)
+	}
+	m
+}
+# what follows a key's colon: a block scalar, a value on the line, or the rows indented below (a sequence may stand at
+# the key's own indentation)
+entry_value(r: Reading, rest: text, indent: int): any := {
+	if rest == "|" or rest == ">" { return block_scalar(r, indent, rest) }
+	if rest != "" { return scalar_of(rest) }
+	if not has_row(r) { return ø }
+	below = current(r)
+	if below.indent > indent or (below.indent == indent and is_item(below.content)) then block_value(r, below.indent) else ø
+}
+sequence_of(r: Reading, indent: int): list<any> := {
+	items: list<any> = []
+	while continues_at(r, indent) and is_item(current(r).content) {
+		row = current(r)
+		rest = trim(row.content[1:])
+		if rest == "" {
+			r.at += 1
+			items.add(value_below(r, indent))
+		} else {
+			# the item's own content read as a row of its own, indented where it starts: `- name: a` begins a map
+			inner = indent + #row.content - #rest
+			r.rows[r.at] = Row(inner, rest, row.raw, row.number)
+			items.add(block_value(r, inner))
+		}
+	}
+	items
+}
+# the value on the rows indented deeper than indent, ø for none
+value_below(r: Reading, indent: int): any := if has_row(r) and current(r).indent > indent then block_value(r, current(r).indent) else ø
+# a | block keeps its line breaks, a > block folds lines into spaces, blank lines into breaks; both end in one break
+block_scalar(r: Reading, indent: int, style: text): text := {
+	lines: list<text> = []
+	if not has_row(r) or current(r).indent <= indent { return "" }
+	inner = current(r).indent
+	while r.at < #r.rows and (trim(current(r).raw) == "" or leading_spaces(current(r).raw) >= inner) {
+		lines.add(current(r).raw[inner:])
+		r.at += 1
+	}
+	while #lines > 0 and trim(lines.last) == "" { lines = lines.take(#lines - 1) }
+	(if style == "|" then lines.join("\n") else folded(lines)) + "\n"
+}
+folded(lines: list<text>): text := lines.fold("", (out, line) => if line == "" then out + "\n" else if out == "" or out.ends_with("\n") then out + line else out + " " + line)
+
+# a scalar or flow collection written on one line
+scalar_of(t: text): any := {
+	s = Scan(t, 0)
+	value = flow_value(s, ",]}")
+	skip_blanks(s)
+	if s.at < #t { raise "yaml: ${rest_of(s)} after ${t}" }
+	value
+}
+# the value at the scan; a plain scalar ends at one of ends (in flow at a comma or bracket, outside it at the line's end)
+flow_value(s: Scan, ends: text): any := {
+	skip_blanks(s)
+	c = next_of(s)
+	if c == "\"" then double_quoted_at(s)
+	else if c == "'" then single_quoted_at(s)
+	else if c == "[" then flow_list(s)
+	else if c == "{" then flow_map(s)
+	else plain_at(s, ends)
+}
+# a 'single-quoted' scalar, '' standing for one quote
+single_quoted_at(s: Scan): text := {
+	closing = s.at + 1
+	while closing < #s.source and not (s.source[closing:closing + 1] == "'" and s.source[closing + 1:closing + 2] != "'") {
+		closing += if s.source[closing:closing + 2] == "''" then 2 else 1
+	}
+	inside = s.source[s.at + 1:closing]
+	s.at = closing + 1
+	inside.replace("''", "'")
+}
+plain_at(s: Scan, ends: text): any := {
+	start = s.at
+	while s.at < #s.source and not ends.contains(next_of(s)) { s.at += 1 }
+	plain_value(trim(s.source[start:s.at]))
+}
+flow_list(s: Scan): list<any> := {
+	items: list<any> = []
+	s.at += 1
+	while more_items(s, "]") { items.add(flow_value(s, ",]")) }
+	items
+}
+flow_map(s: Scan): map<text, any> := {
+	m: map<text, any> = {}
+	s.at += 1
+	while more_items(s, "}") {
+		key = "${flow_value(s, ":,}")}"
+		skip_blanks(s)
+		if next_of(s) == ":" {
+			s.at += 1
+			m[key] = flow_value(s, ",}")
+		} else {
+			m[key] = ø
+		}
+	}
+	m
+}
+# the core schema: null, bool, int, float, else the text itself
+NULLS := ["", "~", "null", "Null", "NULL"]
+TRUES := ["true", "True", "TRUE"]
+FALSES := ["false", "False", "FALSE"]
+plain_value(t: text): any := {
+	number = spelled_number(t)
+	if NULLS.contains(t) then ø
+	else if TRUES.contains(t) then yes
+	else if FALSES.contains(t) then no
+	else if number != ø and not t.contains("_") then number
+	else t
+}
+
+# --- writing
+
+to_yaml(value: any): text := if is_table(value) then map_block(value, "") else if is_list(value) then list_block(value, "") else scalar_text(value) + "\n"
+# whether a value is written on rows of its own: a map or list with something in it
+is_nested(value: any): bool := (is_table(value) or is_list(value)) and show(value) != "{}" and show(value) != "[]"
+block_text(value: any, indent: text): text := if is_table(value) then map_block(value, indent) else list_block(value, indent)
+map_block(m: map<text, V>, indent: text): text := m.keys().map(key => entry_text("${scalar_text(key)}:", m[key], indent)).join("")
+list_block(xs: list<T>, indent: text): text := xs.map(x => item_text(x, indent)).join("")
+entry_text(head: text, value: any, indent: text): text := if is_nested(value) then "${indent}${head}\n" + block_text(value, indent + "  ") else "${indent}${head} ${scalar_text(value)}\n"
+# a list item, a map or list in it starting on the item's own row
+item_text(value: any, indent: text): text := {
+	if not is_nested(value) { return "${indent}- ${scalar_text(value)}\n" }
+	inner = block_text(value, indent + "  ")
+	"${indent}- " + inner[#indent + 2:]
+}
+# characters that make a text read as something else at its start, or anywhere
+SPECIAL_STARTS := "-?:,[]{}#&*!|>'\"%@` "
+SPECIAL_PARTS := [": ", " #", "\n", "\t"]
+scalar_text(value: any): text := {
+	if value is text then text_scalar("${value}")
+	else if value is int then "${value}"
+	else if value is float then float_text(value)
+	else if value == ø then "null"
+	else if is_table(value) then "{}"
+	else if is_list(value) then "[]"
+	# TODO (branch front-bugs) the bool test in its natural place: today `is bool` holds for every value
+	else if value == yes then "true"
+	else "false"
+}
+text_scalar(t: text): text := {
+	plain = t != "" and not SPECIAL_STARTS.contains(t[0:1]) and not t.ends_with(" ") and not SPECIAL_PARTS.any(part => t.contains(part))
+	if plain and plain_value(t) is text then t else double_quoted(t)
+}
