@@ -19,9 +19,8 @@ WNOHANG := 1
 # how often a capped program is looked at
 POLL_MS := 10
 MS_PER_SECOND := 1000
-# the bytes of a C pointer and of a wait status
-POINTER_BYTES := 8
-STATUS_BYTES := 4
+# the bytes of a pid and of a wait status
+INT_BYTES := 4
 
 malloc(size: i64): handle from 'c'
 free(pointer: handle): ø from 'c'
@@ -36,17 +35,18 @@ posix_spawnattr_init(attributes: handle): i32 from 'c'
 posix_spawnattr_setflags(attributes: handle, flags: i32): i32 from 'c'
 posix_spawnattr_setpgroup(attributes: handle, group: i32): i32 from 'c'
 posix_spawnattr_destroy(attributes: handle): i32 from 'c'
-posix_spawnp(child: out, file: text, actions: handle, attributes: handle, words: texts, environment: handle): handle from 'c'
+posix_spawnp(child: handle, file: text, actions: handle, attributes: handle, words: texts, environment: handle): i32 from 'c'
 waitpid(child: i32, status: handle, options: i32): i32 from 'c'
 kill(child: i32, signal: i32): i32 from 'c'
 # DEBT: macOS's way to C's environ; glibc has only the variable, which no C call gives
 _NSGetEnviron(): handle from 'c'
+# a field of a C struct by its offset: an int, a pointer as a handle
+field_i32(struct: handle, offset: i64): i32 from 'c'
+field_pointer(struct: handle, offset: i64): handle from 'c'
 
 # a program's exit status, what it printed and what it said on stderr, each without its trailing line ends
 class Ran { status: int, out: text, err: text }
 
-# the little-endian int of size bytes C wrote at a pointer
-int_at(pointer: int, size: int): int := c_copied(pointer, size).bytes.reverse().fold(0, (n, b) => n * 256 + b)
 
 run(words: list<text>, folder: text = ".", seconds: int? = ø, merged: bool = no): Ran := {
 	if words is empty { raise "run: no program named" }
@@ -56,7 +56,8 @@ run(words: list<text>, folder: text = ".", seconds: int? = ø, merged: bool = no
 	err_file = fopen(err, "w")
 	actions = malloc(SPAWN_OBJECT_BYTES)
 	attributes = malloc(SPAWN_OBJECT_BYTES)
-	status = malloc(STATUS_BYTES)
+	child_slot = malloc(INT_BYTES)
+	status = malloc(INT_BYTES)
 	posix_spawn_file_actions_init(actions)
 	posix_spawn_file_actions_adddup2(actions, fileno(out_file), 1)
 	posix_spawn_file_actions_adddup2(actions, fileno(if merged then out_file else err_file), 2)
@@ -64,17 +65,17 @@ run(words: list<text>, folder: text = ".", seconds: int? = ø, merged: bool = no
 	posix_spawnattr_init(attributes)
 	posix_spawnattr_setflags(attributes, POSIX_SPAWN_SETPGROUP)
 	posix_spawnattr_setpgroup(attributes, 0)
-	child = try posix_spawnp(words[0], actions, attributes, words, int_at(_NSGetEnviron(), POINTER_BYTES)) catch e { 0 }
+	started = posix_spawnp(child_slot, words[0], actions, attributes, words, field_pointer(_NSGetEnviron(), 0)) == 0
 	fclose(out_file)
 	fclose(err_file)
 	posix_spawn_file_actions_destroy(actions)
 	posix_spawnattr_destroy(attributes)
-	stopped = child != 0 and not waited(child, status, seconds)
-	answer = Ran(exit_status(int_at(status, STATUS_BYTES)), without_line_ends(read(out)), without_line_ends(read(err)))
-	for pointer in [actions, attributes, status] { free(pointer) }
+	stopped = started and not waited(field_i32(child_slot, 0), status, seconds)
+	answer = Ran(exit_status(field_i32(status, 0)), without_line_ends(read(out)), without_line_ends(read(err)))
+	for pointer in [actions, attributes, child_slot, status] { free(pointer) }
 	delete_file(out)
 	delete_file(err)
-	if child == 0 { raise "run: cannot start ${words[0]}" }
+	if not started { raise "run: cannot start ${words[0]}" }
 	if stopped { raise "run: ${words.join(" ")} stopped after ${seconds ?? 0} seconds" }
 	answer
 }
