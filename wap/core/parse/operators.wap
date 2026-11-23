@@ -47,20 +47,25 @@ operated_form(language: Language, n: Node) as Node := match n {
 	List(items, Bracket.None, Separator.None) => phrase_read(language, glued_tokens(language, items))
 	# an operator's declaration is no phrase of operators, only its items are read: `suffix operator ³ := …` declares ³,
 # never applies it
-	List(items, Bracket.None, Separator.Space) => if colon_led(language, items) then operated(language, colon_block(items)) else if declaration_words(language, items) is empty then phrase_read(language, tokens_of(language, items)) else List(items.map(item => operated(language, item)), Bracket.None, Separator.Space)
+	List(items, Bracket.None, Separator.Space) => colon_block(language, items) ?? (if declaration_words(language, items) is empty then phrase_read(language, tokens_of(language, items)) else List(items.map(item => operated(language, item)), Bracket.None, Separator.Space))
 	List(items, bracket, Separator.Space) => in_brackets(phrase_read(language, tokens_of(language, items)), bracket)
 	List(items, bracket, separator) => List(items.map(item => operated(language, item)), bracket, separator)
-	Key(left, Op.Colon, right) => if rule_led(language, phrase_items(left)) then operated(language, with_block(phrase_items(left), right)) else chosen(operated(language, left), operated(language, right))
+	Key(left, Op.Colon, right) => colon_read(language, left, right)
 	Key(left, Op.None, right) => Key(operated(language, left), Op.None, operated(language, right))
 	Key(left, op, right) => key_read(language, n, left, op as text, right)
 	Symbol(spelling) => word_read(language, n, spelling)
 	_ => n
 }
 
-# a phrase led by a rule's word takes what follows its colon as its block: `for n in xs: print n`, `if c: f()` (wiki/for.md)
-rule_led(language: Language, items: list) as bool := #items > 1 and language.phrase_words.leading.has(spelling_written(items#1))
-colon_led(language: Language, items: list) as bool := rule_led(language, items) and match items.last { Key(last, Op.Colon, body) => not is_hole_word(last); _ => no }
-colon_block(items: list) as Node := match items.last { Key(last, Op.Colon, body) => with_block(items[.. #items - 1] + [last], body); _ => List(items, Bracket.None, Separator.Space) }
+# a phrase led by the word of a rule taking a block takes what follows its colon as that block: `for n in xs: print n`,
+# `if c: f()` (wiki/for.md)
+rule_led(language: Language, items: list) as bool := #items > 1 and leads_block(language, spelling_written(items#1))
+leads_block(language: Language, word: text) as bool := language.phrase_words.leading.has(word) and language.phrase_words.leading[word]
+colon_read(language: Language, left: Node, right: Node) as Node := {
+	read = chosen(operated(language, left), operated(language, right))
+	if read is Key and rule_led(language, phrase_items(left)) then operated(language, with_block(phrase_items(left), right)) else read
+}
+colon_block(language: Language, items: list) as Node? := match items.last { Key(last, Op.Colon, body) => if rule_led(language, items) and not is_hole_word(last) then operated(language, with_block(items[.. #items - 1] + [last], body)) else ø; _ => ø }
 with_block(items: list, body: Node) as Node := List(items + [if is_block(body) then body else List([body], Bracket.Curly, Separator.None)], Bracket.None, Separator.Space)
 
 # `c ? a : b`: the reader keys `c ? a` with b; the colon closes the choice left open at the key's end, (Call ? c a b),
@@ -156,8 +161,7 @@ tokens_read(language: Language, tokens: list) as Node := {
 			prefix = if operand_after(language, next) != ø then reading_as(language, token.item, Fixity.Prefix) else ø
 			if prefix == ø and called_after_infix(language, token, next, after, pending, tokens[.. i - 1]) {
 				last = i + 1
-				takes_block = language.phrase_words.leading[spelling_written(token.item)] == yes
-				while last < #tokens and (takes_block or not is_block(tokens#(last + 1).item)) { last = last + 1 }
+				while last < #tokens and (leads_block(language, spelling_written(token.item)) or not is_block(tokens#(last + 1).item)) { last = last + 1 }
 				operands.add(tokens_read(language, tokens[i - 1 .. last]))
 				expecting_operand = no
 				i = last
