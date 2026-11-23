@@ -56,7 +56,7 @@ library="$(dirname "$(sed -n '1s/.*(\(.*\))$/\1/p' <<<"$version")")/lib"
 [ -d "$library" ] || { echo "coverage.sh: no library beside the installed wap's compiler ($library)" >&2; exit 2; }
 modules=$(find "$library" -maxdepth 1 \( -name '*.warp' -o -name '*.wap' \) | grep -vE "/($SHOWING_MODULES)\.wa?rp$" |
 	xargs grep -LE "$SHOWING_CODE" | sort)
-samples=$(find -L "$tree/samples" -name '*.warp' | grep -vE "/samples/($SHOWING_FOLDERS)/" |
+samples=$(find -L "$tree/samples" \( -name '*.warp' -o -name '*.wap' \) | grep -vE "/samples/($SHOWING_FOLDERS)/" |
 	xargs grep -LE "$SHOWING_CODE" | sort)
 lines=$({
 	xargs -P "$RUNS_AT_ONCE" -I{} bash -c 'module_covered "$1"' _ {} <<<"$modules"
