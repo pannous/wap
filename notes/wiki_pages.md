@@ -118,18 +118,18 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - integer.md (2 lines): ✓ wap-wiki, a link
 - inventions.md (258 lines):
 - it.md (21 lines): wap-wiki
-- iteration.md (72 lines):
+- iteration.md (72 lines): ✓ wap-wiki, tests test_iteration_wanted.wap the forms still to build
 - iterator.md (0 lines):
 - json.md (26 lines): ✓ (lib/json.wap replacing json.warp, test/test_json.wap 8 ✓ + the one-char line red, test_json_class red: class reflection)
-- Julia.md (59 lines):
+- Julia.md (59 lines): wap-wiki
 - key.md (37 lines): wap-wiki, asked (bare names, top-level colon)
-- keyword.md (308 lines):
+- keyword.md (308 lines): wap-wiki, tests test_keyword_page.wap green, test_keyword_wanted.wap the forms still to build; asked (doubtful forms, 1/0)
 - kind.md (31 lines): wap-wiki, C++ internals: asked to hide
 - kotlin.md (18 lines): ✓ wap-wiki, tests test_kotlin_page.wap green, test_kotlin_wanted.wap ⋁ ∧ still to build
 - lambda.md (43 lines): ✓ wap-wiki, tests test_lambda_page.wap green, test_lambda_wanted.wap the forms still to build; words lambda-words (sin…log into types, sorted by a comparator); wiki 9963682, 8a952d3
-- laws.md (76 lines):
-- LEB128.md (3 lines):
-- length.md (2 lines):
+- laws.md (76 lines): wap-wiki, tests test_laws_wanted.wap the forms still to build; asked (warp internals, `=>` as implication)
+- LEB128.md (3 lines): wap-wiki, a link; asked (int28/int60 links)
+- length.md (2 lines): ✓ wap-wiki, tests test_length_page.wap green
 - library-cli.md (232 lines): ✓ 9f35dd1 (lib/cli.wap replacing cli.warp, test/test_cli.wap 14 ✓)
 - library-collections.md (47 lines): ✓ c354c23 (lib/collections.wap, test/test_collections.wap 6 ✓ + Counter/LRU red until any-char-equality)
 - library-complex.md (36 lines): ✓ b85dcc3 (lib/complex.wap, test/test_complex.wap 8 ✓; numbers on either side, exp and log in math)
@@ -160,26 +160,26 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-unicode.md (33 lines): ✓ 3f56050 (lib/unicode.wap and unicode_data.wap from scripts/gen-unicode-tables.py; test/test_unicode.wap 10 ✓, test_unicode_normalization.wap 22 ✓)
 - library-uuid.md (31 lines): ✓ wap-wiki-lib, tests test_uuid.wap green (branch uuid-page eb7622e); wiki 093ab38
 - library-xml.md (28 lines): ✓ c48b119 (lib/xml.wap, test/test_xml.wap 8 ✓; elements a class, namespaces cut)
-- like.md (59 lines):
-- Lisp.md (19 lines):
+- like.md (59 lines): wap-wiki, tests test_like_wanted.wap the forms still to build
+- Lisp.md (19 lines): wap-wiki, prose; asked (wasp, lists as maps)
 - list.md (279 lines): ✓ wap-wiki, tests on main (test_lists_page.wap green, test_lists_wanted.wap the forms still to build); wiki f74e364, 25f83ea, 6aa530a
-- literal.md (34 lines):
-- macro.md (18 lines):
+- literal.md (34 lines): wap-wiki, asked (literal parameter type, import)
+- macro.md (18 lines): wap-wiki, prose; asked (IF sketch)
 - map.md (119 lines): (released by wap-wiki) tests 63835a0, wiki a1ab2dc; branch wiki-types d849c72 (show, count, first, Python's words) in its landing checks; waits: bare `a: map` (being built)
-- mark.md (23 lines):
-- matching.md (143 lines):
-- math.md (32 lines):
-- member.md (5 lines):
-- meta.md (65 lines):
-- monad.md (32 lines):
-- multi-value.md (96 lines):
-- mutability.md (23 lines):
-- mutable.md (116 lines):
-- node.md (81 lines):
-- Normalization.md (153 lines):
-- notes.md (48 lines):
-- null.md (100 lines):
-- number.md (119 lines):
+- mark.md (23 lines): wap-wiki, prose; asked (wasp, pragma, identities)
+- matching.md (143 lines): wap-wiki, tests test_matching_wanted.wap the forms still to build; asked (bare heads, untyped fields, add a to b)
+- math.md (32 lines): wap-wiki, prose; asked (unfinished sentence)
+- member.md (5 lines): ✓ wap-wiki, prose
+- meta.md (65 lines): wap-wiki, tests test_meta_wanted.wap the forms still to build; asked (C++ snippet, wasp fences)
+- monad.md (32 lines): wap-wiki, prose; asked (questions section)
+- multi-value.md (96 lines): wap-wiki, tests test_multi_value_wanted.wap the forms still to build; asked (wasm internals, D12 line)
+- mutability.md (23 lines): wap-wiki, tests test_mutability_wanted.wap the forms still to build; asked (x.upper! does nothing, C-like sketch)
+- mutable.md (116 lines): wap-wiki, tests test_mutable_page.wap green, test_mutable_wanted.wap the forms still to build; asked (uppercase, mutating spellings, TODO comments)
+- node.md (81 lines): wap-wiki, tests test_node_wanted.wap the forms still to build; asked (internal Node sketches)
+- Normalization.md (153 lines): wap-wiki, tests test_normalization_page.wap green; asked (Rust Style internals, canonical clashes)
+- notes.md (48 lines): wap-wiki, internal notes: asked to hide
+- null.md (100 lines): wap-wiki, tests test_null_page.wap green, test_null_wanted.wap the forms still to build; asked (required/maybe words, Person.null, todos)
+- number.md (119 lines): wap-wiki, tests test_number_page.wap green, test_number_wanted.wap the forms still to build (exact decimals, big ints, glyphs)
 - object.md (3 lines):
 - operator.md (223 lines):
 - optional.md (95 lines):
