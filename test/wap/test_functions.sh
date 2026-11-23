@@ -24,6 +24,9 @@ check "a program statement wap refuses still lets the functions beside it be typ
 worse(x: int) as int := bad(x) + 1
 also(x: int) as text := 3
 print(text(worse(21)))' | grep -o 'line [0-9]*:\|calls [a-z]*' | tr '\n' ' ')" "line 1: line 2: calls bad line 3: line 4: calls worse "
+check "a library function wap refuses for the user's types: the user's line says the first reason" "$(ran library_root 'class Ship { size: int }
+ships = [Ship(2), Ship(1)]
+print(ships.sorted())' | grep 'library_root.wap line 3' | grep -o 'no < takes (Ship, Ship)')" "no < takes (Ship, Ship)"
 # a module names its functions (wiki/wasm-representation.md: names by wasm convention), so a host's backtrace shows them
 check "a crash's backtrace names the function it happened in" "$(ran crash 'class P { n: int }
 g(x: int) as P? := if x > 0 then P(x) else ø
