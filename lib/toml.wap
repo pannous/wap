@@ -1,0 +1,210 @@
+# The standard module toml (wiki/library-config-formats.md): TOML text read into maps and lists, and written back.
+# parse_toml(t) gives a map: [tables] and [[arrays of tables]] by their dotted names, bare, quoted and dotted keys,
+# "basic" (with backslash escapes) and 'literal' strings, integers (1_000), floats, true and false, arrays (also over
+# several lines) and inline tables; a date or time stays the text it is written as. A key twice is refused, naming
+# its line. to_toml(m) writes a map's plain values first, then each map as a [table] and each list of maps as
+# [[tables]]; a whole float keeps its .0 so that it reads back a float.
+use text
+
+# --- reading
+
+# a value's text being read and the place reached
+class Scan { source: text, at: int }
+rest_of(s: Scan): text := s.source[s.at:]
+skip_blanks(s: Scan) := {
+	while s.at < #s.source and " \t\n\r".contains(s.source[s.at:s.at + 1]) { s.at += 1 }
+}
+# where a token ends: at a comma, a closing bracket or brace, a blank, or the end
+TOKEN_ENDS := ",]} \t\n"
+
+refused_line(number: int, why: text): any := raise "toml line ${number}: ${why}"
+
+# the keys of a dotted key, each unquoted
+keys_of(t: text): list<text> := split_outside_quotes(trim(t), ".").map(key => unquoted_key(trim(key)))
+unquoted_key(key: text): text := if key.starts_with("\"") then unescaped(key[1:#key - 1]) else if key.starts_with("'") then key[1:#key - 1] else key
+
+# the map at the keys below m, made where missing; a list of tables gives its last table
+table_at(m: map<text, any>, keys: list<text>): map<text, any> := keys.fold(m, (table, key) => {
+	if not table.has(key) {
+		fresh: map<text, any> = {}
+		table[key] = fresh
+	}
+	inner_table(table[key])
+})
+inner_table(value: any): map<text, any> := if value is list then last_table(as_list(value)) else as_table(value)
+last_table(tables: list<any>): map<text, any> := as_table(tables.last)
+# TODO `value as map<text, any>` and `value as list<any>` once front-bugs is on main; a value narrowed by `is map` or
+# `is list` fits no map<text, any> or list<any> parameter, so these take it as any
+as_table(value: any): map<text, any> := {
+	table: map<text, any> = value
+	table
+}
+as_list(value: any): list<any> := {
+	xs: list<any> = value
+	xs
+}
+# the list of tables at the keys below m, made where missing
+tables_at(m: map<text, any>, keys: list<text>): list<any> := {
+	parent = table_at(m, keys.take(#keys - 1))
+	if not parent.has(keys.last) {
+		fresh: list<any> = []
+		parent[keys.last] = fresh
+	}
+	as_list(parent[keys.last])
+}
+
+# how many brackets and braces are open after the text, quotes skipped
+open_brackets(t: text): int := {
+	count = 0
+	for opening in ["[", "{"] {
+		count += split_outside_quotes(t, opening).count - 1
+	}
+	for closing in ["]", "}"] {
+		count -= split_outside_quotes(t, closing).count - 1
+	}
+	count
+}
+
+parse_toml(source: text): map<text, any> := {
+	root: map<text, any> = {}
+	current = root
+	lines = source.replace("\r\n", "\n").split("\n")
+	i = 0
+	while i < #lines {
+		number = i + 1
+		line = trim(without_comment(lines[i], "#"))
+		i += 1
+		if line == "" { }
+		else if line.starts_with("[[") {
+			table: map<text, any> = {}
+			tables_at(root, keys_of(line[2:#line - 2])).add(table)
+			current = table
+		} else if line.starts_with("[") {
+			current = table_at(root, keys_of(line[1:#line - 1]))
+		} else {
+			equals = place_outside_quotes(line, "=", 0)
+			if equals < 0 { refused_line(number, "no = in ${line}") }
+			written = line[equals + 1:]
+			while open_brackets(written) > 0 and i < #lines {
+				written += "\n" + without_comment(lines[i], "#")
+				i += 1
+			}
+			keys = keys_of(line[0:equals])
+			table = table_at(current, keys.take(#keys - 1))
+			if table.has(keys.last) { refused_line(number, "the key ${keys.join(".")} twice") }
+			s = Scan(trim(written), 0)
+			table[keys.last] = value_of(s)
+			if trim(rest_of(s)) != "" { refused_line(number, "${trim(rest_of(s))} after the value") }
+		}
+	}
+	root
+}
+
+# the value at the scan, the scan after it
+value_of(s: Scan): any := {
+	skip_blanks(s)
+	c = s.source[s.at:s.at + 1]
+	if c == "\"" then string_of(s, "\"")
+	else if c == "'" then string_of(s, "'")
+	else if c == "[" then array_of(s)
+	else if c == "{" then inline_table_of(s)
+	else token_value(s)
+}
+# a "basic" string with its escapes read, or a 'literal' one as written
+string_of(s: Scan, quote: text): text := {
+	closing = if quote == "\"" then quoted_end(s.source, s.at + 1) else find(s.source[s.at + 1:], quote) + s.at
+	inside = s.source[s.at + 1:closing]
+	s.at = closing + 1
+	if quote == "\"" then unescaped(inside) else inside
+}
+# where a "basic" string's closing quote stands, a backslash escaping the character after it
+quoted_end(t: text, from: int): int := {
+	at = from
+	while at < #t and t[at:at + 1] != "\"" { at += if t[at:at + 1] == "\\" then 2 else 1 }
+	at
+}
+array_of(s: Scan): list<any> := {
+	items: list<any> = []
+	s.at += 1
+	skip_blanks(s)
+	while s.source[s.at:s.at + 1] != "]" {
+		items.add(value_of(s))
+		skip_blanks(s)
+		if s.source[s.at:s.at + 1] == "," { s.at += 1 }
+		skip_blanks(s)
+		if s.at >= #s.source { raise "toml: an array is not closed" }
+	}
+	s.at += 1
+	items
+}
+inline_table_of(s: Scan): map<text, any> := {
+	table: map<text, any> = {}
+	s.at += 1
+	skip_blanks(s)
+	while s.source[s.at:s.at + 1] != "}" {
+		equals = place_outside_quotes(s.source, "=", s.at)
+		if equals < 0 { raise "toml: an inline table entry without =" }
+		keys = keys_of(s.source[s.at:equals])
+		s.at = equals + 1
+		table_at(table, keys.take(#keys - 1))[keys.last] = value_of(s)
+		skip_blanks(s)
+		if s.source[s.at:s.at + 1] == "," { s.at += 1 }
+		skip_blanks(s)
+		if s.at >= #s.source { raise "toml: an inline table is not closed" }
+	}
+	s.at += 1
+	table
+}
+# true, false, a number, or a date or time kept as its text
+token_value(s: Scan): any := {
+	start = s.at
+	while s.at < #s.source and not TOKEN_ENDS.contains(s.source[s.at:s.at + 1]) { s.at += 1 }
+	token = s.source[start:s.at]
+	# a date and a time may be parted by one space
+	if is_date(token) and s.source[s.at:s.at + 1] == " " and "0123456789".contains(s.source[s.at + 1:s.at + 2]) {
+		s.at += 1
+		while s.at < #s.source and not TOKEN_ENDS.contains(s.source[s.at:s.at + 1]) { s.at += 1 }
+		return s.source[start:s.at]
+	}
+	number = spelled_number(token)
+	if token == "true" then yes
+	else if token == "false" then no
+	else if number != ø then number
+	else if is_date(token) or token.contains(":") then token
+	else raise "toml: ${token} is no value"
+}
+is_date(token: text): bool := #token >= 10 and token[4:5] == "-" and token[7:8] == "-"
+
+# --- writing
+
+# TODO `value is map` and `value is list` in place once the open `a: map` form lands (wap-binding): today they narrow
+# to a bare map or list that no map<text, V> or list<T> parameter takes
+is_table(value: any): bool := value is map
+is_list(value: any): bool := value is list
+is_tables(value: any): bool := is_list(value) and holds_tables(value)
+holds_tables(xs: list<T>): bool := #xs > 0 and xs.all(is_table)
+key_text(key: text): text := if key != "" and key.codepoints.all(c => (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' or c == '-') then key else double_quoted(key)
+# TODO (branch front-bugs) the bool test in its natural place: today `is bool` holds for every value
+value_text(value: any): text := {
+	if value is text then double_quoted("${value}")
+	else if value is int then "${value}"
+	else if value is float then float_text(value)
+	else if is_list(value) then list_text(value)
+	else if is_table(value) then inline_text(value)
+	else if value == yes then "true"
+	else "false"
+}
+float_text(x: float): text := if "${x}".contains(".") or "${x}".contains("e") then "${x}" else "${x}.0"
+list_text(xs: list<T>): text := "[" + xs.map(value_text).join(", ") + "]"
+inline_text(m: map<text, V>): text := "{" + m.keys().map(key => "${key_text(key)} = ${value_text(m[key])}").join(", ") + "}"
+
+to_toml(m: map<text, V>): text := table_text(m, "")
+# a table's plain values, then its tables and lists of tables under their dotted names
+table_text(m: map<text, V>, prefix: text): text := {
+	plain = m.keys().filter(key => not is_section(m[key])).map(key => "${key_text(key)} = ${value_text(m[key])}\n").join("")
+	nested = m.keys().filter(key => is_section(m[key])).map(key => section_text(m[key], prefix + key_text(key))).join("")
+	plain + nested
+}
+is_section(value: any): bool := is_table(value) or is_tables(value)
+section_text(value: any, name: text): text := if is_table(value) then "\n[${name}]\n" + table_text(value, name + ".") else array_sections(value, name)
+array_sections(tables: list<T>, name: text): text := tables.map(table => "\n[[${name}]]\n" + table_text(table, name + ".")).join("")
