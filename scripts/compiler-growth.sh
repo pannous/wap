@@ -18,11 +18,12 @@ cd "$tree" || exit 2
 range="$base...$tip"
 
 # a rule is new when its head (the pattern before =>) is added and no removed rule had that head: a rewritten
-# template, a moved or reworded rule is no growth
+# template, a moved or reworded rule is no growth. A rule is a declaration, `rule <pattern> => <template>` at the line's
+# start; a variable named rule, `rule = Rule(…)`, is none
 new_rules=$(git diff --unified=0 "$range" -- "${RULE_SOURCES[@]}" | awk '
 	/^\+\+\+ / { file = substr($0, 7); next }
-	/^[+-][[:space:]]*rule[[:space:]]/ {
-		sign = substr($0, 1, 1); line = substr($0, 2); sub(/^[[:space:]]*/, "", line)
+	/^[+-]rule[[:space:]]+[^=:[:space:]].*=>/ {
+		sign = substr($0, 1, 1); line = substr($0, 2)
 		head = line; sub(/[[:space:]]*=>.*/, "", head)
 		if (sign == "-") removed[head] = 1; else { added[head] = file ": " line; order[++count] = head }
 	}
