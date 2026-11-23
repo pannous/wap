@@ -114,7 +114,7 @@ The languages, each a set of Node shapes:
   `function_value` (its own type). The emitter makes such a value a funcref with a captures struct and calls it by
   call_ref (card signature-function-values).
 - **emit** reads the typed kernel's `type` and `binding` facts and decides nothing about them: it may choose its code
-  by them, but computes no type (test_guardrails.sh emit-infers-type).
+  by them, but computes no type (test_guardrails.wap emit-infers-type).
 
 **Facts live in Meta, never in the shape.** Positions (line, column), the rule or stage that built a node, a name's
 binding, a type, the overload, a tail call, `@gpu`: each is a named fact in the node's metadata, read and written
@@ -206,7 +206,7 @@ checked) and a line here when its language changed. The lead reviews it against 
       **met:** wap resolves names only against wap/types and the files a program uses, no `use` leaves
       wap/, and test_self.sh's "the compiler wap makes of itself compiles a program that runs" runs it from a folder
       holding only types/ and kernel/;
-   7. no boxed `any` is left in wap's own source: the boxed-any allowlist of test/wap/test_guardrails.sh is empty.
+   7. no boxed `any` is left in wap's own source: the boxed-any allowlist of test/wap/test_guardrails.wap is empty.
       **met:** test/wap/guardrails_allowed.txt has no boxed-any line.
    Until then nothing lands that turns no function of wap green, unless it fixes a wrong value.
 

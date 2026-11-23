@@ -20,7 +20,7 @@ then read this file and the Owners row with your name.
   and output language (notes/backbone.md "Stage languages"). Keep that knowledge in the files themselves: the first
   comment line says the file's one job and its languages, so a successor can take over from the code alone.
 - **Every change to your files passes you.** Anyone may edit them on a branch; you review before the handoff,
-  against the principles and the guardrails (test/wap/test_guardrails.sh), and say yes, no, or how.
+  against the principles and the guardrails (test/wap/test_guardrails.wap), and say yes, no, or how.
   A small change (about 10 lines: a call site, a comment, a parameter order) lands without waiting; its handoff
   names you, and you review it afterwards and fix forward. A new function, a signature change or anything larger
   waits for your yes (user 2026-11-19).
@@ -218,7 +218,7 @@ wap compiles itself; its work comes from notes/backbone.md "Architecture changes
 open milestone-2 points (user 2026-11-20); anything else is a `# DEBT:` comment at its code.
 
 Trim before handoff (user 2026-11-18): before handing a branch off, try deleting each of its edits, one at a time, after
-the change is done; every edit whose removal keeps test/wap/run.sh and test/wap/test_guardrails.sh green goes. Only
+the change is done; every edit whose removal keeps test/wap/run.sh and test/wap/test_guardrails.wap green goes. Only
 deletions, nothing rewritten; the handoff names what was trimmed.
 
 | stage | owner | files (under wap/) |
@@ -226,7 +226,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 | lead: the queue, the contracts, the self-build | wap-lead | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp, compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap, kernel/surface.wap; the test/wap/ scripts no other row names |
 | front: read, operators, rules, lowering | wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap, extensions/packed.wap, extensions/warm.wap |
 | types: declare, bind, type | wap-binding | core/analyze/, core/paths.wap |
-| back: emitter, runtime, native | wap-emitter | core/emit/, extensions/wasm/, extensions/c/, extensions/native/; test/wap/test_native.sh, test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
+| back: emitter, runtime, native | wap-emitter | core/emit/, extensions/wasm/, extensions/c/, extensions/native/; test/wap/test_native.sh, test/wap/test_guardrails.wap, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
 | simplification: wap smaller by its Node count (Meta excluded) | wap-simplifier | any file, by review of its stage owner |
 
 Questions for the user go to wap-interviewer, never to the user.
