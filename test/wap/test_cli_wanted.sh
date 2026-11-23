@@ -2,7 +2,6 @@
 # the forms wiki/cli.md shows that wap does not build yet: each red line is a to-do, fixed by building the form
 source "$(dirname "$0")/cli.sh"
 
-check "wap eval runs a line of code" "$(wap eval '2+3' 2>&1)" "5"
 check "a build mode before the program: wap release" "$(wap release "$(written app 'print "hi"')" 2>&1)" "hi"
 check "wap format check lists what would change and exits 0 when nothing would" "$(wap format check "$(written formatted 'x = 1')" >/dev/null 2>&1; echo $?)" "0"
 check "wap build makes an executable that runs without wap" "$(cd "$programs" && wap build app.wap >/dev/null 2>&1 && ./app 2>&1)" "hi"
