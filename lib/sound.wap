@@ -2,6 +2,7 @@
 # as values, the synth's settings, waves and their envelope, effects and buses, melodies and Tidal's mini-notation,
 # sounds played and saved, samples, MIDI and a spectrum. Frequencies and durations are numbers (Hz, seconds) or
 # quantities (440Hz, 0.5s, 250ms). Under tests and --mute nothing sounds.
+use bits
 use math
 use random
 use units
@@ -564,3 +565,207 @@ written_steps(written: text): bool := {
 	words is not empty and words.all(word => word == REST_WORD or note_word(word[0:step_end(word, 0, STEP_MARKS)]))
 }
 note_word(word: text): bool := word != "" and is_note_name(capitalized(word))
+
+# A WAV file: RIFF, its fmt chunk and its data chunk of 16-bit little-endian samples
+PCM_FORMAT := 1
+BITS_PER_SAMPLE := 16
+SAMPLE_BYTES := 2
+WAV_HEADER_BYTES := 36
+SAMPLE_RANGE := 65536
+QUIETEST_SAMPLE := -32768
+wav_bytes(speakers: list<int>, rate: int, channels: int): list<int> := {
+	data = pcm_bytes(speakers)
+	block = SAMPLE_BYTES * channels
+	format = [[PCM_FORMAT, 2], [channels, 2], [rate, 4], [rate * block, 4], [block, 2], [BITS_PER_SAMPLE, 2]].flat_map(field => little_endian(field[0], field[1]))
+	"RIFF".bytes + little_endian(WAV_HEADER_BYTES + #data, 4) + "WAVEfmt ".bytes + little_endian(#format, 4) + format + "data".bytes + little_endian(#data, 4) + data
+}
+pcm_bytes(speakers: list<int>): list<int> := speakers.flat_map(sample => little_endian(pcm_sample(sample), SAMPLE_BYTES))
+# a sample crossing as amplitude + 32768, as the 16 bits of the signed amplitude
+pcm_sample(sample: int): int := (clamp(sample - SAMPLE_OFFSET, QUIETEST_SAMPLE, LOUDEST_SAMPLE) + SAMPLE_RANGE) % SAMPLE_RANGE
+
+# A Standard MIDI File of notes [start, pitch, length, velocity], start and length in seconds: written and read here,
+# the same on every host: format 0, one track, 480 ticks a quarter note at 120 beats a minute
+class MidiFile { notes: list<list<any>> }
+MIDI_TICKS_PER_QUARTER := 480
+MIDI_MICROSECONDS_PER_QUARTER := 500000
+MICROSECONDS := 1000000.0
+MIDI_NOTE_ON := 144
+MIDI_NOTE_OFF := 128
+MIDI_META := 255
+MIDI_TEMPO := 81
+MIDI_TRACK_END := 47
+MIDI_SYSTEM_EXCLUSIVE := [240, 247]
+# the kinds of message with one data byte, not two: program change and channel pressure
+MIDI_ONE_BYTE_KINDS := [192, 208]
+MIDI_KEYS := 128
+MIDI_CHANNELS := 16
+MIDI_SEVEN_BITS := 128
+MIDI_HEADER_BYTES := 14
+# no MIDI file is timed in SMPTE frames, only in ticks a quarter note
+MIDI_SMPTE := 32768
+# a note's start or end at a tick, its message's bytes; an end goes before a start at the same tick
+class MidiEvent { tick: int, starts: bool, bytes: list<int> }
+# a note's message read: its tick, whether it starts the note, its channel, key and velocity
+class MidiMessage { tick: int, starts: bool, channel: int, key: int, velocity: int }
+class MidiTempo { tick: int, microseconds: int }
+# a note read, in milliseconds
+class MidiHeld { start: int, key: int, length: int, velocity: int }
+# a delay or a length as MIDI writes it, its value and the byte after it
+class MidiLength { value: int, after: int }
+
+save(tune: MidiFile, path: text) := write_bytes(path, midi_bytes(tune.notes))
+midi_file(path: text): MidiFile := MidiFile(midi_notes(read_bytes(path)))
+midi_ticks(seconds: float): int := round(max(0.0, seconds) * float(MIDI_TICKS_PER_QUARTER) * MICROSECONDS / float(MIDI_MICROSECONDS_PER_QUARTER))
+seconds_of(time: float): float := time
+seconds_of(q: Quantity): float := q.si
+# a delay as MIDI writes it: seven bits a byte, all but the last marked by their high bit
+midi_variable_length(n: int): list<int> := {
+	groups = [n % MIDI_SEVEN_BITS]
+	rest = n ÷ MIDI_SEVEN_BITS
+	while rest > 0 {
+		groups = [rest % MIDI_SEVEN_BITS + MIDI_SEVEN_BITS] + groups
+		rest = rest ÷ MIDI_SEVEN_BITS
+	}
+	groups
+}
+midi_chunk(kind: text, body: list<int>): list<int> := kind.bytes + big_endian(#body, 4) + body
+midi_events(note: list<any>): list<MidiEvent> := {
+	key = midi(note[1])
+	if key < 0 or key >= MIDI_KEYS { raise "MIDI keys are 0 to 127, got ${key}" }
+	on = midi_ticks(seconds_of(note[0]))
+	off = max(on, midi_ticks(seconds_of(note[0]) + seconds_of(note[2])))
+	[MidiEvent(on, yes, [MIDI_NOTE_ON, key, clamp(int(note[3]), 1, MIDI_KEYS - 1)]), MidiEvent(off, no, [MIDI_NOTE_OFF, key, 0])]
+}
+# the bytes of a Standard MIDI File of the notes
+midi_bytes(notes: list<list<any>>): list<int> := {
+	events = notes.flat_map(note => midi_events(note)).sorted(by: event => event.tick * 2 + (if event.starts then 1 else 0))
+	track = [0, MIDI_META, MIDI_TEMPO, 3] + big_endian(MIDI_MICROSECONDS_PER_QUARTER, 3)
+	now = 0
+	for event in events {
+		track += midi_variable_length(event.tick - now) + event.bytes
+		now = event.tick
+	}
+	track += [0, MIDI_META, MIDI_TRACK_END, 0]
+	midi_chunk("MThd", big_endian(0, 2) + big_endian(1, 2) + big_endian(MIDI_TICKS_PER_QUARTER, 2)) + midi_chunk("MTrk", track)
+}
+midi_length_at(bytes: list<int>, at: int): MidiLength := {
+	value = 0
+	next = at
+	while bytes[next] >= MIDI_SEVEN_BITS {
+		value = value * MIDI_SEVEN_BITS + bytes[next] % MIDI_SEVEN_BITS
+		next += 1
+	}
+	MidiLength(value * MIDI_SEVEN_BITS + bytes[next], next + 1)
+}
+# the notes of a Standard MIDI File's bytes, [start, frequency, length, velocity] in seconds to the millisecond, by their
+# start and then their key; every track's, timed by the file's tempo changes
+midi_notes(bytes: list<int>): list<list<any>> := {
+	if #bytes < MIDI_HEADER_BYTES or bytes[0:4] != "MThd".bytes { raise "not a MIDI file (it does not start with MThd)" }
+	division = from_big_endian(bytes[12:14])
+	if division >= MIDI_SMPTE { raise "MIDI files timed in SMPTE frames are not supported, only ticks per quarter note" }
+	tempi = [MidiTempo(0, MIDI_MICROSECONDS_PER_QUARTER)]
+	messages: list<MidiMessage> = []
+	at = 8 + from_big_endian(bytes[4:8])
+	for track in 0 upto from_big_endian(bytes[10:12]) {
+		end = at + 8 + from_big_endian(bytes[at + 4:at + 8])
+		at = if bytes[at:at + 4] == "MTrk".bytes then at + 8 else end
+		tick = 0
+		status = 0
+		while at < end {
+			delay = midi_length_at(bytes, at)
+			tick += delay.value
+			at = delay.after
+			if bytes[at] >= MIDI_SEVEN_BITS {
+				status = bytes[at]
+				at += 1
+			}
+			if status == MIDI_META {
+				size = midi_length_at(bytes, at + 1)
+				if bytes[at] == MIDI_TEMPO and size.value == 3 { tempi.add(MidiTempo(tick, from_big_endian(bytes[size.after:size.after + 3]))) }
+				at = size.after + size.value
+			} else if status in MIDI_SYSTEM_EXCLUSIVE {
+				size = midi_length_at(bytes, at)
+				at = size.after + size.value
+			} else {
+				kind = status - status % MIDI_CHANNELS
+				one_byte = kind in MIDI_ONE_BYTE_KINDS
+				velocity = if one_byte then 0 else bytes[at + 1]
+				if kind == MIDI_NOTE_ON or kind == MIDI_NOTE_OFF { messages.add(MidiMessage(tick, kind == MIDI_NOTE_ON and velocity > 0, status % MIDI_CHANNELS, bytes[at], velocity)) }
+				at += if one_byte then 1 else 2
+			}
+		}
+		at = end
+	}
+	sounding: list<MidiMessage> = []
+	held: list<MidiHeld> = []
+	for message in messages {
+		if message.starts {
+			sounding.add(message)
+		} else {
+			started = sounding.filter(m => m.channel == message.channel and m.key == message.key)
+			if started is not empty {
+				first = started[0]
+				sounding = sounding.filter(m => m != first)
+				start = midi_milliseconds(first.tick, tempi, division)
+				held.add(MidiHeld(start, first.key, midi_milliseconds(message.tick, tempi, division) - start, first.velocity))
+			}
+		}
+	}
+	held.sorted(by: note => note.start * MIDI_KEYS + note.key).map(note => written_note(note))
+}
+written_note(note: MidiHeld): list<any> := {
+	row: list<any> = [float(note.start) / 1000.0, midi_hertz(note.key), float(note.length) / 1000.0, note.velocity]
+	row
+}
+# the milliseconds at a tick of a file whose tempo changes at the tempi's ticks
+midi_milliseconds(tick: int, tempi: list<MidiTempo>, division: int): int := {
+	seconds = 0.0
+	from = 0
+	tempo = MIDI_MICROSECONDS_PER_QUARTER
+	for change in tempi {
+		if change.tick >= tick { break }
+		seconds += float((change.tick - from) * tempo) / MICROSECONDS / float(division)
+		from = change.tick
+		tempo = change.microseconds
+	}
+	round((seconds + float((tick - from) * tempo) / MICROSECONDS / float(division)) * 1000.0)
+}
+
+# How loud each frequency band sounds at a moment of the samples: the bands spaced evenly in pitch from band_low to
+# band_high Hz, each level from 0 to 1 (a full-scale sine is 1); the window Hann-weighted, each band measured by
+# Goertzel's recurrence
+global band_low = 60.0
+global band_high = 5000.0
+# the samples a spectrum looks at: 512 at 22050 Hz are 23 ms, bands 43 Hz apart are still told apart
+SPECTRUM_WINDOW := 512
+# the band whose middle frequency is nearest in pitch
+nearest_band(frequency: float, bands: int): int := round(log(frequency / band_low) / log(band_high / band_low) * float(bands - 1))
+spectrum(samples: list<int>, seconds: float, bands: int): list<float> :=
+	band_levels(spectrum_window(samples, seconds).map(sample => float(sample - SAMPLE_OFFSET)), bands)
+# the samples at that moment a spectrum looks at
+spectrum_window(samples: list<int>, seconds: float): list<int> := {
+	start = clamp(round(samples_in(seconds)), 0, #samples)
+	samples[start:clamp(start + SPECTRUM_WINDOW, 0, #samples)]
+}
+# the levels of the bands in amplitudes around 0, all 0 for fewer than 2; Hann-weighted, so a tone between two bands
+# does not leak into the far ones
+band_levels(amplitudes: list<float>, bands: int): list<float> := {
+	if #amplitudes < 2 { return spread(0.0, bands) }
+	last = float(#amplitudes - 1)
+	weighted = (0 upto #amplitudes).map(at => amplitudes[at] * (0.5 - 0.5 * cos(2.0 * pi * float(at) / last)))
+	(0 upto bands).map(band => band_level(weighted, band_frequency(band, bands)))
+}
+band_frequency(band: int, bands: int): float := band_low * (band_high / band_low) ^ (float(band) / float(max(bands, 2) - 1))
+# how loud the frequency sounds: one term of the discrete Fourier transform by Goertzel's recurrence
+band_level(weighted: list<float>, frequency: float): float := {
+	coefficient = 2.0 * cos(2.0 * pi * frequency / float(sample_rate))
+	recent = 0.0
+	before = 0.0
+	for x in weighted {
+		next = x + coefficient * recent - before
+		before = recent
+		recent = next
+	}
+	power = max(recent * recent + before * before - coefficient * recent * before, 0.0)
+	4.0 * sqrt(power) / float(#weighted) / float(LOUDEST_SAMPLE)
+}
