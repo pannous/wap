@@ -116,6 +116,10 @@ class TypingState {
 	# by them (core/analyze/dispatch.wap)
 	boxed: list<Node> = []
 	dispatches: list<Dispatch> = []
+	# the own types of the function values that meet where one type holds them, by the unknown holding them until a
+	# call or a written type settles it to a signature, and the instance each then takes (core/analyze/function_values.wap)
+	members: map<text, list<Node>> = {}
+	adaptations: map<text, Node> = {}
 	retypings: list<text> = []
 	fixed: list<text> = []
 }
@@ -177,11 +181,14 @@ typed_program(program: Block, library: Library, rules: KindRules, signatures: li
 # bound when typing first reaches it (core/analyze/calls.wap reached)
 # A variable given a value of another type holds the type both meet in from its first value on, so typing starts over
 # with it known, once for each round of such variables
-typed_among(program: Block, library: list, rules: KindRules, library_scope: Scope, signatures: list<Signature>, retyped: list<Binding> = [], retypings: list<text> = []) as Block := {
+typed_among(program: Block, library: list, rules: KindRules, library_scope: Scope, signatures: list<Signature>, before: TypingState = TypingState()) as Block := {
 	s = TypingState()
-	# copies, which this round grows
-	s.retyped = retyped.drop(0)
-	s.retypings = retypings.drop(0)
+	# what the round before learnt of the variables it retyped, copies this round grows: their types, the hints, and
+	# the unknowns holding function values they joined in
+	s.retyped = before.retyped.drop(0)
+	s.retypings = before.retypings.drop(0)
+	s.unknowns = before.unknowns
+	s.members = before.members
 	s.kind_rules = rules
 	s.library_scope = library_scope
 	s.ids = definers_of(program)
@@ -191,8 +198,8 @@ typed_among(program: Block, library: list, rules: KindRules, library_scope: Scop
 	definitions_held(defines, s)
 	records_added(library, s)
 	values = library_values(library).map(value => typed_form(value, s, TypeFrame(), ø))
-	typed = try typed_form(program, s, TypeFrame(), ø) catch e { if #s.retyped == #retyped then refused_all(s, [e.message]) else Block([]) }
-	if #s.retyped > #retyped { return typed_among(program, library, rules, library_scope, signatures, s.retyped, s.retypings) }
+	typed = try typed_form(program, s, TypeFrame(), ø) catch e { if #s.retyped == #before.retyped then refused_all(s, [e.message]) else Block([]) }
+	if #s.retyped > #before.retyped { return typed_among(program, library, rules, library_scope, signatures, s) }
 	if s.refusals { refused_all(s, []) }
 	for retyping in s.retypings { hint(retyping) }
 	statements = values + statements_in(typed)
@@ -447,7 +454,7 @@ name_typed(n: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
 	if names_function(n) {
 		case = expected_case(n, expected, s)
 		if case != ø { return case_call_typed(case, case, [], s, f) }
-		return if names_constant(n, expected, s) then call_typed(n, n, [], s, f, expected) else function_named_typed(n)
+		return if names_constant(n, expected, s) then call_typed(n, n, [], s, f, expected) else function_named_typed(n, expected, s)
 	}
 	type = variable_type(n, s, f) ?? read_before_given(n, s, f)
 	if is_bound(n, DefinitionKind.Global) and f.function != ø and place_key(defined_at(n)) in s.unset { f.late = f.late + [n] }

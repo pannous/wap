@@ -54,7 +54,8 @@ value_call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: Type
 	offered = word_call_offered(n, called, arguments, s, f, expected)
 	if offered != ø { return offered }
 	typed_called = typed_form(called, s, f, ø)
-	type = value_type(typed_called)
+	type = settled_type(value_type(typed_called) ?? refused(called, "this gives no value to call"), s)
+	if s.members.has(text(type)) { return members_called(n, typed_called, arguments, type, s, f) }
 	through = function_parts(type)
 	if through != ø { return typed_call_through(n, typed_called, arguments, through, s, f) }
 	parts = function_value_parts(type) ?? refused(called, "${called}: ${type_text(type)} is no function to call")
@@ -89,13 +90,68 @@ typed_call_through(n: Node, called: Node, arguments: list, parts: FunctionType, 
 # parameters, giving the type's result, the value then of that type (core/stage.wap FUNCTION_VALUE); ø when its
 # function takes or gives others
 as_function_type(value: Node, wanted: Node, s: TypingState) as Node? := {
-	parts = function_parts(wanted) ?? return ø
 	own = value_type(value) ?? return ø
+	adapted = adapted_name(own, wanted, s) ?? return ø
+	with_fact(with_fact(with_type_of(value, wanted), FUNCTION_VALUE, own), ADAPTED, adapted)
+}
+# the name of the instance a function value of its own type takes for a function type, ø when it takes or gives others
+adapted_name(own: Node, wanted: Node, s: TypingState) as Node? := {
+	parts = function_parts(wanted) ?? return ø
 	typed = value_function_typed(parts.parameters, own, s) ?? return ø
 	way = conversion(typed.result, parts.result, s)
 	if not way in STATIC_CONVERSIONS { return ø }
 	adapting = if way == Conversion.Same and same_types(typed.arguments[#typed.arguments - #parts.parameters ..], parts.parameters) then typed else shape_taking(typed, parts, s)
-	with_fact(with_fact(with_type_of(value, wanted), FUNCTION_VALUE, own), ADAPTED, declared_name(signed_name(adapting, s)))
+	declared_name(signed_name(adapting, s))
+}
+# Function values that meet where one type holds them, `[x => x + 1, x => x * 2]` or the arms of an if: their own types
+# held by an unknown until a call through it or a written type settles it to a signature, each value then taking its
+# instance for that signature; two of their own types join as such an unknown, which takes in each further one
+functions_joined(a: Node, b: Node, s: TypingState) as Node? := {
+	if function_value_parts(b) == ø { return ø }
+	if function_value_parts(a) != ø { return member_added(member_added(unknown_type(s), a, s), b, s) }
+	if s.members.has(text(a)) then member_added(a, b, s) else ø
+}
+member_added(unknown: Node, own: Node, s: TypingState) as Node := {
+	held = if s.members.has(text(unknown)) then s.members[text(unknown)] else []
+	if not held.any(type => same_type(type, own)) { s.members[text(unknown)] = held + [own] }
+	unknown
+}
+# a function value where an unknown holding such values is wanted: of the unknown, its own type kept, till it settles
+# (member_settled); converted at once where it has settled
+joined_member(n: Node, wanted: Node, s: TypingState) as Node := {
+	own = value_type(n)
+	if function_value_parts(own) == ø or not s.members.has(text(wanted)) { return n }
+	settled = settled_type(wanted, s)
+	if settled != wanted then as_function_type(n, settled, s) ?? n else with_fact(with_type_of(n, wanted), FUNCTION_VALUE, own!)
+}
+# An unknown holding function values settled to a type: each value's instance for a signature, any holding them as
+# they are, any other type refused
+members_settled(key: text, type: Node, s: TypingState) := {
+	if not s.members.has(key) or type == ANY_SYMBOL { return }
+	if function_parts(type) == ø { raise "function values met here as one value, which is then given ${type_text(type)}" }
+	for own in s.members[key] {
+		adapted = adapted_name(own, type, s)
+		if adapted == ø { raise "a function value of ${type_text(own)} is called as ${type_text(type)}, which it does not take" }
+		s.adaptations[adaptation_key(own, type)] = adapted!
+	}
+}
+adaptation_key(own: Node, type: Node) as text := "${type_text(own)} as ${type_text(type)}"
+# a function value an unknown held, as the unknown settled: of the signature, naming its instance for it; of its own
+# type where the unknown holds any
+member_settled(n: Node, s: TypingState) as Node := {
+	own = fact_of(n, FUNCTION_VALUE) ?? return n
+	if fact_of(n, ADAPTED) != ø { return n }
+	key = adaptation_key(own, value_type(n) ?? return n)
+	if s.adaptations.has(key) then with_fact(n, ADAPTED, s.adaptations[key]) else with_type_of(n, own)
+}
+# A call of a value an unknown holding function values types, `fs[0](3)`: the unknown settled to the signature of the
+# arguments' types and the result the values give for them, then called through it
+members_called(n: Node, called: Node, arguments: list, unknown: Node, s: TypingState, f: TypeFrame) as Node := {
+	given = arguments.map(argument => marked_typed(typed_form(argument, s, f, ø)))
+	types = given.map(argument => value_of(argument, "to pass"))
+	results = s.members[text(unknown)].map(own => (value_function_typed(types, own, s) ?? refused(n, "a function value of ${type_text(own)} takes no (${types_text(types)})")).result)
+	settled_by([Binding(text(unknown), function_type_of(types, joined_all(results, s) ?? refused(n, "this function value's result is not known here: write its result type")))], s)
+	typed_call_through(n, called, given, function_parts(settled_type(unknown, s))!, s, f)
 }
 # A function taking shapes where one taking their types is wanted, `pair_name(pair: Pair)` where `(Node) -> text` is, or
 # giving a value the type's result holds converted, `x => 1` where `(any) -> any` is: a function the typing stage
@@ -130,10 +186,17 @@ written_function_type(type: Node?, s: TypingState) as Node? := {
 	function_type_of(types, result)
 }
 # A function's name as a value, `apply(inc, 2)`: of a type of its own like a function value's, capturing nothing, so a
-# call of the value is a call of that function; a name of several functions is one only for a written function type
-function_named_typed(n: Node) as Node := {
-	if fact_of(n, CANDIDATES) != ø { refused(n, "several functions have this name; a value of one of them comes with written function types, not yet") }
-	with_type_of(n, function_value_type(place_key(defined_at(n)), []))
+# call of the value is a call of that function; a name of several functions is the one the function type expected
+# takes, `g: (int) -> text = quoted`
+function_named_typed(n: Node, expected: Node?, s: TypingState) as Node := {
+	named = if fact_of(n, CANDIDATES) == ø then n else overload_meant(n, expected, s)
+	with_type_of(named, function_value_type(place_key(defined_at(named)), []))
+}
+# the one of a name's definitions that takes the parameters of the function type expected and gives its result
+overload_meant(n: Node, expected: Node?, s: TypingState) as Node := {
+	parts = function_parts(expected) ?? refused(n, "several functions have this name: write the function type wanted, `f: (int) -> text = ${n}`")
+	chosen = chosen_definition(n, n, scoped_definitions(n, s), parts.parameters.map(type => with_type_of(placed_like(symbol(PARAMETER_WORD), n), type)), parts.result, s)
+	with_fact(with_binding(placed_like(symbol(text(n)), n), DefinitionKind.Function), DEFINED_AT, declared_name(written_name(define_of(chosen, s))))
 }
 # whether what a call calls is a value, a name holding one or any other code giving one, `make(1)(2)`, rather than a
 # function's name
