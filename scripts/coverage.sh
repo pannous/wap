@@ -12,11 +12,12 @@ RUN_SECONDS=60
 RUN_MEMORY_GB=4
 RUNS_AT_ONCE=4
 COVERED_MARK=covered
-# wap has no headless mode yet: a sample that opens a window or plays sound never runs here (user 2026-11-23: no run
-# shows a window), by its folder, by a module it takes in or by its use of the window; nor does such a module
+# no run shows a window or plays sound (user 2026-11-23: skip them): a sample never runs here by its folder, by a module
+# it takes in, by its use of the window or by its painting; nor does such a module. `scripts/coverage.sh --runnable`
+# prints the files that do run, one path per line (modules, then samples), for every other runner of samples
 SHOWING_FOLDERS='graphics|gpu|sound'
 SHOWING_MODULES='raylib|SDL2|SDL3|draw|pga_draw|graphics|shown_frames|meshlets|forest|image|keys|sound|midi|webview|gpu'
-SHOWING_CODE="^[[:space:]]*(import|use)[[:space:]]+($SHOWING_MODULES)\\b|\\bwindow\\."
+SHOWING_CODE="^[[:space:]]*(import|use)[[:space:]]+($SHOWING_MODULES)\\b|\\bwindow\\.|\\bpaint\\("
 tree="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 wap=$(command -v wap) || { echo "coverage.sh: no native wap on PATH: scripts/refresh-seed.sh installs it" >&2; exit 2; }
 out="$tree/data/wap-tests/coverage.txt"
@@ -58,6 +59,7 @@ modules=$(find "$library" -maxdepth 1 \( -name '*.warp' -o -name '*.wap' \) | gr
 	xargs grep -LE "$SHOWING_CODE" | sort)
 samples=$(find -L "$tree/samples" \( -name '*.warp' -o -name '*.wap' \) | grep -vE "/samples/($SHOWING_FOLDERS)/" |
 	xargs grep -LE "$SHOWING_CODE" | sort)
+[ "${1:-}" = --runnable ] && { printf '%s\n%s\n' "$modules" "$samples"; exit 0; }
 lines=$({
 	xargs -P "$RUNS_AT_ONCE" -I{} bash -c 'module_covered "$1"' _ {} <<<"$modules"
 	xargs -P "$RUNS_AT_ONCE" -I{} bash -c 'covered sample "$1"' _ {} <<<"$samples"
