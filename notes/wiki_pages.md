@@ -148,7 +148,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-markdown.md (54 lines):
 - library-matrix.md (26 lines):
 - library-money.md (43 lines):
-- library-numeric.md (36 lines):
+- library-numeric.md (36 lines): wap-wiki-lib
 - library-path.md (46 lines):
 - library-primes.md (26 lines): ✓ 6b5ca30 (lib/math.wap primes words, test/test_primes.wap 3 ✓; without `use` not yet, with wap-binding)
 - library-reference.md (36 lines):
