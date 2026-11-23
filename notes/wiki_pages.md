@@ -131,8 +131,8 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - LEB128.md (3 lines):
 - length.md (2 lines):
 - library-cli.md (232 lines):
-- library-collections.md (47 lines):
-- library-complex.md (36 lines):
+- library-collections.md (47 lines): ✓ c354c23 (lib/collections.wap, test/test_collections.wap 6 ✓ + Counter/LRU red until any-char-equality)
+- library-complex.md (36 lines): wap-wiki-lib
 - library-compress.md (40 lines):
 - library-config-formats.md (67 lines):
 - library-csv.md (32 lines): ✓ 95f2e02 (lib/csv.wap, test/test_csv.wap 3 ✓; print of nested texts unquoted, with wap-interviewer)
@@ -159,7 +159,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-time-patterns-durations.md (42 lines):
 - library-unicode.md (33 lines):
 - library-uuid.md (31 lines):
-- library-xml.md (28 lines): wap-wiki-lib
+- library-xml.md (28 lines): ✓ c48b119 (lib/xml.wap, test/test_xml.wap 8 ✓; elements a class, namespaces cut)
 - like.md (59 lines):
 - Lisp.md (19 lines):
 - list.md (279 lines): wap-wiki, tests 7789cd9 + list-spaced, list words 504a102 + a09c988, wiki 8ff17c6; waits: how `(1 2)` prints (user), `{1 2 3}` (wap-reader), the forms being built (`3 times [1]`, `it`, `x -1`)

@@ -98,7 +98,9 @@ f(xs: list<int>): list<int> := {
 }
 print(text(f([1, 2])))')" "[1, 2]"
 format_check 'if c
-	print "a"' 'if c {print "a"}'
+	print "a"' 'if c {
+	print "a"
+}'
 format_check 'r = 2..' 'r = 2 ..'
 format_check 'q = ..3' 'q = .. 3'
 format_check 'x = ø' 'x = ø'
