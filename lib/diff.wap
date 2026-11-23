@@ -1,0 +1,110 @@
+# The standard module diff (wiki/library-diff.md): diffs of lists and texts by a longest common subsequence
+# (deletions before insertions where both are possible), git's unified diff of two texts and its patch applied back,
+# and a similarity ratio. A text's lines are split at "\n", the empty text has none.
+
+# one step of a diff: an item both sides keep, one only the first has, one only the second has
+enum Edit { Keep(item: any), Delete(item: any), Insert(item: any) }
+
+# the lines of kept text around each change in a unified diff
+CONTEXT := 3
+
+# the edits that turn the list a into the list b
+diff(a: list<T>, b: list<T>): list<Edit> := {
+	# longest[i][j]: the longest common subsequence of a from i on and b from j on
+	longest = (0 to #a).map(i => (0 to #b).map(j => 0))
+	for i in (0 upto #a).map(k => #a - 1 - k) {
+		for j in (0 upto #b).map(k => #b - 1 - k) {
+			longest[i][j] = if a[i] == b[j] then longest[i + 1][j + 1] + 1 else max(longest[i + 1][j], longest[i][j + 1])
+		}
+	}
+	edits: list<Edit> = []
+	i = 0
+	j = 0
+	while i < #a or j < #b {
+		if i < #a and j < #b and a[i] == b[j] {
+			edits.add(Keep(a[i]))
+			i += 1
+			j += 1
+		} else if i < #a and (j == #b or longest[i + 1][j] >= longest[i][j + 1]) {
+			edits.add(Delete(a[i]))
+			i += 1
+		} else {
+			edits.add(Insert(b[j]))
+			j += 1
+		}
+	}
+	edits
+}
+
+# an edit's line in a unified diff: its mark, then its item
+mark(edit: Edit): text := match edit { Keep(item) => " "; Delete(item) => "-"; Insert(item) => "+" }
+edit_line(edit: Edit): text := match edit { Keep(item) => " " + text(item); Delete(item) => "-" + text(item); Insert(item) => "+" + text(item) }
+# whether an edit has a line on the old side, on the new side
+in_old(edit: Edit): bool := mark(edit) != "+"
+in_new(edit: Edit): bool := mark(edit) != "-"
+
+# a text's lines, the empty text none
+text_lines(t: text): list<text> := if t == "" then [] else t.split("\n")
+# the edits between the lines of two texts
+line_diff(a: text, b: text): list<Edit> := diff(text_lines(a), text_lines(b))
+# how many of the edits before each place have a line on one side
+lines_before(edits: list<Edit>, on_side: (Edit) -> bool): list<int> := (0 to #edits).map(k => edits.take(k).filter(on_side).count)
+# a hunk's header: where its lines start on each side and how many it has; an empty range starts at the line before it
+range_text(before: int, count: int): text := "${before + (if count == 0 then 0 else 1)},${count}"
+
+# git's unified diff of two texts: "--- a" and "+++ b", then hunks "@@ -start,count +start,count @@" of " " kept, "-"
+# deleted and "+" inserted lines with context lines around each change; changes closer than twice the context share a
+# hunk. Equal texts give ""
+unified_diff(old: text, new: text, context: int = CONTEXT): text := {
+	edits = line_diff(old, new)
+	changes = (0 upto #edits).filter(k => mark(edits[k]) != " ")
+	if changes is empty { return "" }
+	# the hunks as [first, last] places of their changes
+	hunks = changes.drop(1).fold([[changes[0], changes[0]]], (found, k) => if k - found.last[1] - 1 > 2 * context then found + [[k, k]] else found.take(#found - 1) + [[found.last[0], k]])
+	old_before = lines_before(edits, in_old)
+	new_before = lines_before(edits, in_new)
+	out = ["--- a", "+++ b"]
+	for hunk in hunks {
+		from = max(0, hunk[0] - context)
+		part = edits[from:min(#edits, hunk[1] + context + 1)]
+		out.add("@@ -${range_text(old_before[from], part.filter(in_old).count)} +${range_text(new_before[from], part.filter(in_new).count)} @@")
+		out = out + part.map(edit_line)
+	}
+	out.join("\n") + "\n"
+}
+
+# the text with a unified diff applied: each hunk's kept and deleted lines must be the text's lines where its header
+# says, else it is refused, naming the hunk and the line
+patched(t: text, patch: text): text := {
+	old = text_lines(t)
+	lines = text_lines(if patch.ends_with("\n") then patch[0:#patch - 1] else patch)
+	out: list<text> = []
+	at = 0
+	number = 0
+	header = ""
+	for line in lines {
+		if line.starts_with("@@") {
+			number += 1
+			header = line
+			# TODO (card method-call-index) back to `line.split(" ")[1]` once the reader indexes a method call's result (with wap-reader)
+			ranges = line.split(" ")
+			old_range = ranges[1][1:].split(",")
+			start = if int(old_range[1]) == 0 then int(old_range[0]) else int(old_range[0]) - 1
+			if start < at or start > #old { raise "patched: hunk ${number} (${header}) starts outside the text" }
+			out = out + old[at:start]
+			at = start
+		} else if line.starts_with("+") and not line.starts_with("+++") { out.add(line[1:]) }
+		else if line.starts_with(" ") or (line.starts_with("-") and not line.starts_with("---")) {
+			content = line[1:]
+			if at >= #old or old[at] != content { raise "patched: hunk ${number} (${header}) does not match line ${at + 1}: expected ${show(content)}, found ${if at >= #old then "the end" else show(old[at])}" }
+			if line.starts_with(" ") { out.add(content) }
+			at += 1
+		}
+	}
+	(out + old[at:#old]).join("\n")
+}
+
+# how alike two texts are, by their characters, from 0 to 1: twice the kept items over both lengths, 1 for two empty
+similarity(a: text, b: text): float := similarity(a.codepoints.map(c => "" + c), b.codepoints.map(c => "" + c))
+# how alike two lists are, the same way
+similarity(a: list<T>, b: list<T>): float := if #a + #b == 0 then 1.0 else 2.0 * diff(a, b).filter(edit => mark(edit) == " ").count / (#a + #b)

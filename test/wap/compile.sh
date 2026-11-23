@@ -20,6 +20,7 @@ seed="$(dirname "$(readlink -f "$wap")")/wap-seed/wap.wasm"
 # the warm state a compiler embeds (wap/compiler.wap WARM_STATE): written from the sources by the compiler before it,
 # beside each build's own copy first, so a script sharing the tree never embeds half of one
 warm_state="$tree/$WAP_WARM"
+library_module="$tree/$WAP_LIBRARY_MODULE"
 warm_written() {
 	$wap "$1" --sources warm "$warm_state.$$" 2>&1 && mv "$warm_state.$$" "$warm_state"
 }
@@ -33,11 +34,13 @@ folder_built() {
 	local building=$1.$$ built=$1.$$/wap0.wasm n
 	mkdir -p "$building" && wap_beside_copied "$tree" "$building" || return 1
 	[ -f "$warm_state" ] || : >"$warm_state"
+	[ -f "$library_module" ] || : >"$library_module"
 	$wap "$seed" "$source_compiler" "$built" 2>&1 || return 1
-	# the library compiled once beside the compiler, which programs then read (extensions/wasm/library.wap), by wap0,
-	# which is this tree's source as each next one is, from the sources (wap0 embeds whatever warm state the tree had):
-	# before the warm states, so each holds the library a compile reads
+	# the library compiled once, which each compiler built next holds (extensions/wasm/library.wap), by wap0, which is
+	# this tree's source as each next one is, from the sources (wap0 holds whatever library and warm state the tree had):
+	# beside the compiler, where the warm states read it, and in the tree, where each build takes it
 	$wap "$built" --sources "$building/types/types.wap" "$building/types.wasm" 2>&1 || return 1
+	cp "$building/types.wasm" "$library_module.$$" && mv "$library_module.$$" "$library_module" || return 1
 	for ((n = 1; n <= $2; n++)); do
 		warm_written "$built" || return 1
 		$wap "$built" --sources "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
@@ -71,7 +74,9 @@ tree_wap_built() {
 	[ -x "$folder/wap" ] || { native_wap_built "$folder.$$" >/dev/null || return 1; [ -x "$folder/wap" ] && rm -rf "$folder.$$" || mv "$folder.$$" "$folder"; }
 	echo "$folder/wap"
 }
-if command -v wasm2c >/dev/null; then wap=$(tree_wap_built) || exit 1; else echo "no wasm2c: the installed wap runs the modules, not this tree's" >&2; fi
+# and the programs are compiled by the copy of the compiler beside it, as a user's are, so the library it writes goes
+# beside that copy, never into the tree
+if command -v wasm2c >/dev/null; then wap=$(tree_wap_built) && compiler="$(dirname "$wap")/wap-seed/wap.wasm" || exit 1; else echo "no wasm2c: the installed wap runs the modules, not this tree's" >&2; fi
 # each test script its own folder in the tree's data/ (never the system's temporary folder)
 stage="$data/$$"
 mkdir -p "$stage" || exit 1

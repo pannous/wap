@@ -10,12 +10,13 @@ use "../type_notation.wap"
 
 # the instructions that compare two values of a type on the stack, giving yes or no
 type_equality(type: Node, p: Program) as list<int> := {
-	if base_of_optional(type) != ø { return parts_compared(p, "optional_equal ${type}", known_layout(type, p.m, p.records), optionals_compared(type, p)) }
+	by_parts = (kind, compared) => parts_compared(p, "${kind} ${type}", known_layout(type, p), compared)
+	if base_of_optional(type) != ø { return by_parts("optional_equal", optionals_compared(type, p)) }
 	if item_type(type) != ø { return parts_compared(p, "list_equal ${type}", list_layout(type, p), lists_compared(type, p)) }
 	record = record_named(p.records, type)
 	if text(type) == ENUM_WORD or record != ø and cases_of(record) is not empty { return if plain_enums(p.m) then equality(I32, p) else parts_compared(p, "tag_equal", nullable(enum_base(p.m)), cases_compared(p)) }
-	if record != ø { return parts_compared(p, "record_equal ${place_key(record_declared(record!))}", known_layout(type, p.m, p.records), records_compared(record, p)) }
-	equality(known_layout(type, p.m, p.records), p)
+	if record != ø { return parts_compared(p, "record_equal ${place_key(record_declared(record!))}", known_layout(type, p), records_compared(record, p)) }
+	equality(known_layout(type, p), p)
 }
 # the instructions that compare two values of a wasm type: an int, float, yes/no or character, a text, an `any`; any
 # other reference, a function value, only to itself
@@ -39,35 +40,38 @@ parts_compared(p: Program, key: text, layout: list<int>, compared: function) as 
 	bodied(p.m, index, made.locals, made.code + i32_const(1))
 	instruction(CALL, [index])
 }
+# what a read of locals 0 and 1 gives, compared: no unless equal
+pair_compared(read: function, compare: list<int>) as list<int> := read(0) + read(1) + compare + NO_UNLESS_YES
 
 # Two cases: one tag and, for a case with fields, equal fields. Tags count the cases of every enum, so one helper
 # serves them all. Its locals: 0 and 1 the cases.
-cases_compared(p: Program) as function := () => Compared([], tag_in(0, p) + tag_in(1, p) + I32_EQ + NO_UNLESS_YES + p.records.items.flat_map(record => cases_of(record).filter(case => case_fields(case) is not empty).flat_map(case => fields_compared(record, case, p))))
+cases_compared(p: Program) as function := () => Compared([], pair_compared(local => tag_in(local, p), I32_EQ) + p.records.items.flat_map(record => cases_of(record).filter(case => case_fields(case) is not empty).flat_map(case => fields_compared(record, case, p))))
 tag_in(local: int, p: Program) as list<int> := local_get(local) + tagged(p.m)
 # When both cases are this one, each of its fields of the two compared by the field's equality
 fields_compared(record: Record, case: Node, p: Program) as list<int> := {
 	cast = case_struct_of(record, case, p.m, p.records)
 	field = (local, at) => local_get(local) + case_field_read(cast, record, at)
 	fields = case_fields(case)
-	compared = (1 to #fields).flat_map(at => field(0, at) + field(1, at) + type_equality(field_declared(fields#at), p) + NO_UNLESS_YES)
+	compared = (1 to #fields).flat_map(at => pair_compared(local => field(local, at), type_equality(field_declared(fields#at), p)))
 	tag_in(0, p) + i32_const(declared_tag(case, p)) + I32_EQ + if_block(compared)
 }
 # Two instances of a class: each field equal. Its locals: 0 and 1 the instances.
 records_compared(record: Record, p: Program) as function := () => {
 	at = [struct_of(record, p.m, p.records)]
-	Compared([], (1 to #fields_of(record)).flat_map(field => (0 to 1).flat_map(local => local_get(local) + instruction(STRUCT_GET, at + [field])) + type_equality(field_declared(fields_of(record)#field), p) + NO_UNLESS_YES))
+	# field 0 the class's tag: two classes of one shape share a struct type
+	Compared([], (0 to #fields_of(record)).flat_map(field => pair_compared(local => local_get(local) + instruction(STRUCT_GET, at + [field]), if field == 0 then I32_EQ else type_equality(field_declared(fields_of(record)#field), p))))
 }
 # Two lists: one count and equal items in order. Its locals: 0 and 1 the lists, 2 a count.
 lists_compared(type: Node, p: Program) as function := () => {
 	item = local => items_in(type, local, p) + local_get(2) + instruction(ARRAY_GET, [items_array(type, p)])
-	Compared([I32], count_in(type, 0, p) + count_in(type, 1, p) + I32_EQ + NO_UNLESS_YES + counted(2, count_in(type, 0, p), item(0) + item(1) + type_equality(list_item(type), p) + NO_UNLESS_YES))
+	Compared([I32], pair_compared(local => count_in(type, local, p), I32_EQ) + counted(2, count_in(type, 0, p), pair_compared(item, type_equality(list_item(type), p))))
 }
 # Two optionals: both ø, or both there and their values equal. Its locals: 0 and 1 the optionals.
 optionals_compared(type: Node, p: Program) as function := () => {
 	base = base_of_optional(type) ?? refused(type, "this is no optional type")
 	boxed = text(base) in BOXED_WORDS
 	held = local => local_get(local) + (if boxed then instruction(STRUCT_GET, [box_index(p.m, text(base)), 0]) else [])
-	Compared([], missing_compared() + held(0) + held(1) + type_equality(base, p) + NO_UNLESS_YES)
+	Compared([], missing_compared() + pair_compared(held, type_equality(base, p)))
 }
 
 # when either of locals 0 and 1 is ø: yes when both are, else no
@@ -77,10 +81,9 @@ missing_compared() as list<int> := local_get(0) + REF_IS_NULL + if_block(local_g
 # count.
 text_equality_function(p: Program) as int := {
 	type = text_type(p.m)
-	no_unless_equal = I32_EQ + NO_UNLESS_YES
 	byte = local => local_get(local) + local_get(3) + instruction(ARRAY_GET_U, [type])
-	lengths = local_get(0) + ARRAY_LEN + instruction(LOCAL_TEE, [2]) + local_get(1) + ARRAY_LEN + no_unless_equal
-	bytes = counted(3, local_get(2), byte(0) + byte(1) + no_unless_equal)
+	lengths = local_get(0) + ARRAY_LEN + instruction(LOCAL_TEE, [2]) + local_get(1) + ARRAY_LEN + I32_EQ + NO_UNLESS_YES
+	bytes = counted(3, local_get(2), pair_compared(byte, I32_EQ))
 	added_function(p.m, [nullable(type), nullable(type)], [I32], [I32, I32], lengths + bytes + i32_const(1))
 }
 # The helper of equality of two values of `any` or `number`: two ø are equal; two plain values of one type in their

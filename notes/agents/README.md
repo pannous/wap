@@ -1,19 +1,22 @@
 # Starting the warp agent team
 
+The role files come from warp; the fleet runs from this repo with wap-<role> names. A path or script a role file names that wap lacks lives in the warp repo, /Users/me/dev/angles/warp; adapting the rest
+is card fleet-wap-names.
+
 The rules live in notes/roles.md; this folder holds the startup prompts, one per role, so a fresh day starts the same
 way.
 
 ## Start
-1. Supervisor: `notes/agents/start.sh supervisor` (tmux warp-supervisor). It must run in that tmux session:
+1. Supervisor: `notes/agents/start.sh supervisor` (tmux wap-supervisor). It must run in that tmux session:
    ~/dev/bin/urgent-card-watch delivers new urgent cards only there. After a crash, resume the old one into the same
    tmux name: `FORCE_SPAWN=1 CLAUDE_RESUME=<session id> ~/dev/bin/claude-remote.sh supervisor <repo> "<RESUME prompt>"`.
    A supervisor opened by hand in a terminal misses the urgent cards.
 2. The supervisor runs `notes/agents/start.sh`. It spawns the long-running services as Remote Control sessions in
    detached tmux and prints each claude.ai/code URL:
-   - warp-integrator (merge, full suite, push to main)
-   - warp-interviewer (the only one who asks you decision questions; talk to it when you have a minute)
-   - warp-fixer (small to-dos from the board `todo list`, ignored "next"/"soon" tests)
-   - warp-reviewer (reads core/extensions plans before the user's OK, and merges after landing)
+   - wap-integrator (merge, full suite, push to main)
+   - wap-interviewer (the only one who asks you decision questions; talk to it when you have a minute)
+   - wap-fixer (small to-dos from the board `todo list`, ignored "next"/"soon" tests)
+   - wap-reviewer (reads core/extensions plans before the user's OK, and merges after landing)
 3. At most TWO feature workers at a time (a fleet of eight stalls on the usage limit). Workers are spawned per task by the supervisor with `notes/agents/start.sh worker <name> "<task>"`.
 
 Spawned sessions get generated names (warp-6c …). Find them with ListAgents: the tmux column shows the role

@@ -36,12 +36,14 @@ bodies and the program's new ones. Bodies stay compiled once; only the small dis
 program extends keeps the library's dispatcher. Open: whether some cases need run-time dispatch (values whose type is
 known only at run time), and how much of today's semi-typed code exists only for this.
 
-## Where it stands (2026-11-21)
+## Where it stands
 
-Step 2: the library compiles once into types/types.wasm beside its source (extensions/wasm/library.wap), stamped
-with its source files and their hash; a program reads its export names plus the source it keeps. Functions that load
-or store linear memory, and the values and functions around them, stay source: a program's C call reads the
-program's memory. A stale module is said on stderr and the source is read: a stopgap. The goal is that the installed
-compiler never reads library source outside debug mode, so next a stale types.wasm gets rebuilt, not read around.
+The library compiles once into types.wasm, which each compiler holds in its own bytes (compiler.wap LIBRARY, the
+build writes wap/types.wasm before it builds); a program reads its export names, never library source, and a program
+calling it imports its one linear memory. The compiler writes the library once beside itself as types-<hash>.wasm, and
+a module links it by that path; the native wap looks up a module by one rule (that path, or beside its importer) and
+says a missing one. So a program never links another compiler's library, at a price: a compiled module names its
+compiler's folder, so moving or deleting that folder (or copying the module to another machine) breaks modules compiled
+earlier, which then have to be compiled again.
 Generic words: one body per overload plus one general fallback for run-time dispatch (user), after the non-generic
 words.

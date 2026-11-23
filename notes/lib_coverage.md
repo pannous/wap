@@ -1,6 +1,7 @@
 # Library coverage under wap
 
 Each lib/ module run as `use <module>` plus a print, by the installed wap (`--seconds 60`), main 3818e62, 2026-11-22.
+scripts/coverage.sh measures it hourly (cron), with the samples, into data/wap-tests/coverage.txt and the wap Vitals page.
 16 of 121 modules pass: bits case_table case_tables csv exact_values host_io html_entities ini integers intervals
 letter_ranges ordering ui uncertain unicode_data events.
 
@@ -45,15 +46,9 @@ blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** 
 
 | Modules blocked | Where | Root cause | State |
 |---|---|---|---|
-| 10: crypto encoding html list template text url uuid version xml | list.warp | parameters typed `any` where a list is meant: count(any) is a float, so `0 to count(xs) - n` is no range | fixed (batch 1): list passes; the other nine now stop at text.warp:17 (compiler, below) |
-| 2: fast_math machine_math | machine_math.warp:30, :53 | `% 2` of a whole float | fixed (batch 2): both pass |
-| 1: PHP | PHP.warp:3 | words typed `any` | fixed (batch 3): typed, passes |
 | 5: cli i18n map toml yaml | each module | trees of mixed maps and lists read back out of an any, `st["kinds"][k]`, `keys(messages)`: needs the cast below | compiler |
-| 1: callbacks | callbacks.warp:14, :62 | untyped global lists grown by `+=` | fixed (batch 2): typed, grown by .add; now stops at a compiler cause (below) |
 | 1: functions | functions.warp:36 | throttle's closure reassigns a name it captured, `last = [at, f(x)]` | compiler: a closure can't assign a captured local |
 | 1: unit_names | unit_names.warp:101 | units as mixed `[amount, dimension]` lists of exact fractions (10^-3) | open: wants a class and exact numbers |
-| 1: unicode | unicode.warp:42, :61, :93 | untyped tables and lists (int keys read as text) | fixed (batch 2): typed; now stops at a compiler cause (below) |
-| 1: path | path.warp:100 | `ord` of a one-letter text: `s#j` of a text is a text | fixed (batch 2): compares the letters; passes |
-| 1: fractions | fractions.warp:26 | `is rational`: wap has no exact rational type | compiler (moved there) |
+| 1: fractions | fractions.warp:26 | `is rational`: wap has no exact rational type | compiler |
 | 1: time | time.warp:24 | clock_time_get lives in wap/types/host.wap, which a library module can't `use` by name | compiler/layout |
 | 1: regex | lib/regex.warp, lib/crates/regex.warp | the crate spec in lib/crates/ is found as a second module regex | layout: the module search should skip crates/, or the spec be renamed |

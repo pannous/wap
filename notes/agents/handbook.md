@@ -22,7 +22,7 @@ differ and holds every rule; this file holds only the procedures behind them.
   next to an untracked file of the same content is a rename. Complete it to the conventions (a new sample gets its
   shebang and chmod +x), fix what it breaks, run it, commit it as the user's change ("(user)") in a commit of its own;
   their `git status` must end clean. Commented TODOs are wishes: one that can't be done at once becomes a card.
-  Intent unclear, or a test's meaning changes → warp-interviewer.
+  Intent unclear, or a test's meaning changes → wap-interviewer.
 - Copy tips from `git rev-parse` output of the same step, never type them. `git add` refuses `*_local*` files and an
   `&&`-chained commit silently doesn't happen: check `git show --stat HEAD` after committing.
 
@@ -89,7 +89,7 @@ differ and holds every rule; this file holds only the procedures behind them.
   (`todo add … --topic <key>`, `todo sub <key> <card>…`). Status lives on the board, not the note; leftovers become new
   sub-cards; a new plan note gets its topic card in the same commit. A recurring chore: `todo repeat <card> <days>`.
 - A Soon/Later card that is clearly dead (fixed on main, duplicate, a bug of the old Rust compiler) is archived with a
-  one-line note; unsure → warp-interviewer.
+  one-line note; unsure → wap-interviewer.
 - Every card has a meaningful key: rename a poor one at once (`todo key <card> <short-name>`) and use it in branch
   names and messages. Board mechanics: `todo --help`.
 - A branch's card comment names the branch, its tip, ahead/behind main, whether it merges cleanly, its state in one
@@ -112,7 +112,7 @@ differ and holds every rule; this file holds only the procedures behind them.
   and stays fenced ```` ```warp planned ```` with a one-line `*Planned:* …` sentence above and the card in Later; its
   worker drops `planned` when the feature lands. scripts/llm/docs_check.py runs every warp fence except those marked
   `compiles` or `planned`. A doc example failing only on a renamed or reserved word (`double`, `fun`) is a doc fix:
-  rename it. Docs and code that disagree on meaning go to warp-interviewer.
+  rename it. Docs and code that disagree on meaning go to wap-interviewer.
 - Wiki (`wiki/` in the main checkout, its own repo pannous/warp.wiki, branch master only: `git push origin
   HEAD:master`): commit only your pages by name, never `-a`; a refused pull is someone else's work. Write a branch's
   doc changes only with its landing.

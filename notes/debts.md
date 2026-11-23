@@ -18,7 +18,7 @@ Owned elsewhere, not ranked here:
 
 | debt | weight | cost |
 |---|---|---|
-| analyze/function_values.wap:22, each function value its own type; no funcref | highest: blocks a variable holding either of two lambdas, overloads as values, protocol dispatch (calls.wap:334), a field's function called (types.wap:28), the map-twice trap (emit/function_values.wap:5), late reads through a value (types.wap:412), and native function values (wap-help's rows had to use an enum) | large core (funcref + call_ref in the emitter, typing of a value's possible functions); user discussion |
+| analyze/function_values.wap:22, each function value its own type; no funcref | highest: blocks a variable holding either of two lambdas, overloads as values, protocol dispatch (calls.wap:334), a field's function called (types.wap:28), late reads through a value (types.wap:412), and native function values | large core (funcref + call_ref in the emitter, typing of a value's possible functions); user discussion |
 | emit/emitter.wap:22, the emitter learns types by emitting | high: a second typing in the emitter, behind emitter.wap:236 (a second "does it fit") and the native text-match bug (equality picks by layout, a memory text is I32) | large; shrinks the emitter once done; user discussion |
 | emit/lists.wap:70, one list layout per item type | high: list<int> can't stand for list, the list words exist per layout | large, touches the value layout; user discussion |
 
@@ -32,7 +32,7 @@ Owned elsewhere, not ranked here:
 | analyze/data.wap:53, a local named like a method hides it (`source` for `map`) | medium: a name lookup bends | small typing change, then one rename back |
 | analyze/scope.wap:196, bare field names only for the Block's own classes | medium | binding sees library Records |
 | sugar/conditions.wap:42, rule templates bind names where they fire (no hygiene) | medium: a local can hide a library word a rule writes | template names bound in the rule's file |
-| sugar/records.wap:15 and rules/templates.wap:27, a template's output is not the shape its text parses to (as/`:` two rules; DERIVED on every word) | medium: met again by the operator `as` form (general-overload-mechanism) | templates built from their forms |
+| sugar/records.wap:15 and rules/templates.wap:27, a template's output is not the shape its text parses to (as/`:` two rules; DERIVED on every word) | medium: the operator `as` form needs it too (general-overload-mechanism) | templates built from their forms |
 | rules/templates.wap:134, True()/False()/Empty() named beside types/nodes.wap | low | templates see declared Records |
 | rules/stages.wap:235, a rewrite that loops forever hangs | medium: a hang, not a refusal | a step bound with a named refusal, small |
 | analyze/types.wap:23, boxed any in the compiler's own source | medium: milestone 2 | the guardrail list shrinks entry by entry |

@@ -22,4 +22,6 @@ print "out"' 2>/dev/null)" "hint: write a + b
 out"
 # throw, fail and panic are other names of raise (wiki/keyword.md)
 check "throw is another name of raise" "$(ran thrown 'throw "bad"' 2>&1)" "bad"
+# a text that spells a number joined with an int gets its hint once a run, however often a loop joins one (wiki/string.md)
+check "the hint on a text spelling a number comes once a run" "$(ran digits_hinted 'for i in 1 to 3 { print("1" + i) }' 2>/dev/null | grep -c '^hint: ')" "1"
 exit $((failures > 0))

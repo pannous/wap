@@ -35,7 +35,7 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	if called is symbol and text(called) == TYPE_TEST_WORD and fact_of(called, BINDING) == ø { return type_test_typed(n, arguments, s, f) }
 	if rest_named(n) != ø { refused(n, "a list's items spread, `...xs`, stand only in a list, `[...xs, 4]`") }
 	if holds_value(called) { return value_call_typed(n, called, arguments, s, f, expected) }
-	scopes = candidate_scopes(called).map(scope => scope.map(definer => definition_at(definer, s)))
+	scopes = scoped_definitions(called, s)
 	candidates = scopes.flat_map(scope => scope)
 	placed = if arguments.any(is_named) then arranged_arguments(n, called, arguments, candidates, s) else arguments
 	by_count = candidates.filter(definition => takes_count(definition, #placed, s))
@@ -138,7 +138,7 @@ part_typed(n: Node, typed: Node, key: Node, s: TypingState, f: TypeFrame, expect
 	if named is empty { refused(n, "nothing defines ${key}, neither as a function nor as a field of ${value_type(typed) ?? "none"}") }
 	# a call of a function only a module this file does not use defines: name that module
 	if fact_of(n, WRITTEN_CALL) != ø { refused(n, "${key} is defined in ${named#1.module}, which this file does not use: add use \"${named#1.module}\"") }
-	chosen = function_typed(chosen_definition(n, word, [named], [typed], expected, s), [value_type(typed)], s, n)
+	chosen = function_typed(chosen_definition(n, word, word_scopes(text(word), s), [typed], expected, s), [value_type(typed)], s, n)
 	called_reads(chosen, n, s, f)
 	result_of(refitted(Call(calling(refitted(symbol(text(key)), n), chosen, s), [typed]), n), chosen)
 }
@@ -202,7 +202,7 @@ calling(called: Node, chosen: TypedFunction, s: TypingState) as Node := with_fac
 # field by field (core/analyze/data.wap instance_from_map); ø for any other call
 made_from_map(n: Node, called: Node, candidates: list<Signature>, given: list, s: TypingState) as Node? := {
 	record = record_named(s.records, called)
-	if record == ø or #given != 1 or key_type(value_type(given#1)) == ø or candidates.any(definition => takes(definition, given, s, (argument, wanted) -> fits(argument, wanted, s))) { return ø }
+	if record == ø or #given != 1 or key_type(value_type(given#1)) == ø or candidates.any(definition => takes_fitting(definition, given, s)) { return ø }
 	instance_from_map(n, record, given#1, s)
 }
 # A type's own words travel with it: the definitions of a called name that the module of an argument's record declares
@@ -218,6 +218,8 @@ candidate_scopes(called: Node) as list := if fact_of(called, DEFINED_AT) != ø t
 	List(scopes, bracket, separator) => scopes.map(scope => match scope { List(items, inner, between) => items; _ => refused(scope, "a name's candidates are a list of definitions") })
 	_ => [[defined_at(called)]]
 }
+# the definitions a called name may mean, scope by scope, innermost first
+scoped_definitions(called: Node, s: TypingState) as list := candidate_scopes(called).map(scope => scope.map(definer => definition_at(definer, s)))
 # the definition a defining name means: its own, or, for the name of a function typed already (a call typed again),
 # the definition that typed function came from, so typing a typed form again changes nothing
 definition_at(definer: Node, s: TypingState) as Signature := definition_keyed(place_key(definer), s) ?? definition_keyed(typed_from(place_key(definer), s), s) ?? refused(definer, "the typing stage found no definition here")
@@ -239,7 +241,7 @@ chosen_definition(n: Node, called: Node, scopes: list, given: list, expected: No
 	types = given.map(argument => value_of(argument, "to pass"))
 	dispatcher = dispatching(called, candidates, types, s)
 	if dispatcher != ø { return dispatcher }
-	fitting = candidates.filter(definition => takes(definition, given, s, (argument, wanted) -> fits(argument, wanted, s)) and not reads_all_nodes(definition, given, s))
+	fitting = candidates.filter(definition => takes_fitting(definition, given, s) and not reads_all_nodes(definition, given, s))
 	exact = fitting.filter(definition => takes(definition, given, s, (argument, wanted) -> fits_exactly(argument, wanted, s)))
 	if #fitting > 1 { fitting = if exact then exact else fewest_conversions(fitting, given, s) }
 	if #fitting > 1 { fitting = most_specific(fitting, s) }
@@ -274,6 +276,8 @@ takes(definition: Signature, given: list, s: TypingState, fit: function) as bool
 	letters = letters_bound(definition, given.map(value_type), s)
 	letters != ø and (1 to #given).all(at => argument_taken(given#at, parameters#at, letters, s, fit))
 }
+# whether a definition takes these arguments, each one fitting its parameter by fits
+takes_fitting(definition: Signature, given: list, s: TypingState) as bool := takes(definition, given, s, (argument, wanted) -> fits(argument, wanted, s))
 argument_taken(argument: Node, parameter: Node, letters: list<Binding>, s: TypingState, fit: function) as bool := function_parts(type_given(parameter)) != ø or conforms(value_type(argument), type_given(parameter), s) or fit(with_letters(argument, letters), substituted(type_given(parameter), letters))
 # an argument of the type its letters' binding gives it, `xs` of a list<α1> the call settles as a list<int>
 with_letters(argument: Node, letters: list<Binding>) as Node := {
