@@ -16,6 +16,13 @@ show the user: the case against and why no library or hook does it (ask the bran
 - valueless-argument 3e46a738, about +5 core: an argument, name or result that gives no value gives ø; a function
   giving nothing, used as a C callback, answers 0.
 - is-equal 3b44e172, +3 core (analyze/names.wap): `x is y` with two variables compares their values (wiki/equality.md).
+- map-pair-loop b4af8ab8 (wap-reader), +7 core (rules/stages, parse/operators, parse/keys), +266 nodes:
+  `for key, value in scores { … }` walks a map's keys with their values (wiki/inventions.md "Typed iteration").
+  Plain wap can't parse the two-name head. Recommend: yes. Reviewer verdict: asked 2026-11-24.
+- glued-block-head 342e6405 (wap-reader), +6 core (rules/matcher.wap): `class Point{x: int}` with the brace glued
+  declares the class, as wiki/pattern-matching.md and type.md write it. General: when a list's parts don't fit, the
+  matcher retries with the glued block split into head and block (class, enum, trait, match). Option: write only
+  `class Point {…}` in the wiki (0 core). Recommend: the matcher retry. Reviewer verdict: asked 2026-11-24.
 
 ## To present (keep or change, at 10:00)
 
