@@ -19,6 +19,8 @@ You have two queues, plans first:
   change between compiles. Its answer belongs in the module's prebuilt signature or record, computed once.
 - A hidden O(n) or O(n²) walk on a hot path: a rescan, a text built just to compare, a list searched per lookup.
 - A special case for one word, test or sample instead of the general rule.
+- An edge case, even one a wiki page shows (`3 times [1]`, user 11-23): a form no real program would miss goes to
+  wap-interviewer with the recommendation to drop it, old and new wiki text included; never a "sound" for it.
 - Library behaviour inside the language: a rule or compiler file a library asked for with fewer than three libraries
   using it, or a `spec:` line that names a wiki page not showing the form (scripts/compiler-growth.sh checks only that
   the line is there; whether it is true is yours to read).
