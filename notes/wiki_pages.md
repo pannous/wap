@@ -31,23 +31,23 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - be.md (0 lines):
 - beauty.md (28 lines): ✓ wap-wiki, prose, no forms to test
 - bignum.md (5 lines): ✓ wap-wiki, prose, no forms to test
-- binding.md (15 lines): wap-wiki, waits on the wording answer (block names, superscripts)
+- binding.md (15 lines): ✓ wap-wiki, tests test_binding_page.wap green
 - block.md (43 lines): ✓ wap-wiki, tests test_block_page.wap green, test_block_wanted.wap the forms still to build; wiki 3744c49
 - bool.md (33 lines): ✓ wap-wiki, tests test_bool_page.wap green; words bool-words (even, odd, a list's has); wiki df1b9b8
 - broadcast.md (2 lines): ✓ wap-wiki, a link to broadcasting.md
 - broadcasting.md (68 lines): wap-wiki
 - broken.md (0 lines):
 - broken2.md (0 lines):
-- bugs.md (29 lines):
-- byte.md (11 lines):
-- c.md (28 lines):
-- call.md (42 lines):
-- cargo.md (44 lines):
-- caveats.md (3 lines):
+- bugs.md (29 lines): wap-wiki, internal notes, asked to hide
+- byte.md (11 lines): wap-wiki, byte_size of a list asked
+- c.md (28 lines): wap-wiki, C handles and callbacks sent to wap-native (native binary only)
+- call.md (42 lines): wap-wiki
+- cargo.md (44 lines): wap-wiki, crates need the native binary: sent to wap-native
+- caveats.md (3 lines): ✓ wap-wiki, tests test_caveats_page.wap green, test_caveats_wanted.wap ++ still to build
 - char.md (63 lines): wap-wiki, tests landed (test_char_page.wap, test_char_wanted.wap), wiki text waits on the user's answer (byte_size, quotes, count … of, graphemes)
 - character.md (0 lines):
 - charged.md (225 lines): ✓ wap-wiki, tests test_charged_page.wap green, test_charged_wanted.wap the forms still to build; wiki 736ab68, 8a952d3, 466b567, a6c9112
-- cheats.md (10 lines):
+- cheats.md (10 lines): wap-wiki, private links, asked to hide
 - choices.md (47 lines):
 - class.md (55 lines):
 - cli.md (112 lines):
