@@ -212,11 +212,11 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - real.md (0 lines):
 - reference.md (69 lines): wap-wiki, tests test_reference_page.wap green, test_reference_wanted.wap; asked (TODO section, inout)
 - reflection.md (127 lines): wap-wiki, tests test_reflection_wanted.wap the forms still to build (params/fields/methods/signature in test_keyword_wanted)
-- repl.md (1 lines):
-- required.md (1 lines):
-- result.md (19 lines):
-- return.md (41 lines):
-- runtime.md (23 lines):
+- repl.md (1 lines): ✓ wap-wiki, prose
+- required.md (1 lines): ✓ wap-wiki, prose
+- result.md (19 lines): wap-wiki, `result` red in test_keyword_wanted; asked (planned marks, todos)
+- return.md (41 lines): wap-wiki, tests test_return_page.wap green, test_return_wanted.wap; asked (C-style and colon result forms)
+- runtime.md (23 lines): wap-wiki, tests test_runtime_page.wap green, test_runtime_wanted.wap; asked (internals to notes)
 - rust.md (74 lines):
 - scheme.md (31 lines):
 - script.md (84 lines):
