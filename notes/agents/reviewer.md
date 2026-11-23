@@ -81,7 +81,7 @@ Your queue is the merges new on main (see above); the card named in the merge me
      to pass. Say what and why in two lines; the Integrator leaves the card out of the push and the worker fixes
      it. Anything else is an improvement, never a veto.
 3. Bigger structural findings (code in the wrong concept's file, repeated patterns across files, a better general
-   mechanism) go on the board with `todo add "…" --topic restructuring`; they never block.
+   mechanism) go on the board with `todo add "…"` under the nearest topic `todo topics` lists; they never block.
 - Express cards (crash fixes): review after they land; a finding becomes an improvement for the worker or a card.
 - Questions about meaning go to the Interviewer, never block on them: improvement or card meanwhile.
 - No messages to the user, only feedback for the agents: improvements go to
