@@ -158,7 +158,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-template.md (37 lines): ✓ 26959ef (lib/template.wap, lib/html.wap html_escape, test/test_template.wap 3 ✓; `{items: []}` not yet (card any-values), nested-map sections wait for any-truth-crash)
 - library-time-patterns-durations.md (42 lines): ✓ e837aee (lib/time.wap replacing time.warp, test/test_time_patterns.wap 12 ✓; UTC only, no zones)
 - library-unicode.md (33 lines): ✓ 3f56050 (lib/unicode.wap and unicode_data.wap from scripts/gen-unicode-tables.py; test/test_unicode.wap 10 ✓, test_unicode_normalization.wap 22 ✓)
-- library-uuid.md (31 lines):
+- library-uuid.md (31 lines): ✓ wap-wiki-lib, tests test_uuid.wap green (branch uuid-page eb7622e); wiki 093ab38
 - library-xml.md (28 lines): ✓ c48b119 (lib/xml.wap, test/test_xml.wap 8 ✓; elements a class, namespaces cut)
 - like.md (59 lines):
 - Lisp.md (19 lines):
