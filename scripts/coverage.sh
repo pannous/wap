@@ -17,6 +17,8 @@ wap=$(command -v wap) || { echo "coverage.sh: no native wap on PATH: scripts/ref
 out="$tree/data/wap-tests/coverage.txt"
 work="$tree/data/coverage"
 
+# a file as its line names it: from the checkout, or from the folder of the installed wap's library
+shown() { local file=${1#"$tree/"}; echo "${file#"$(dirname "$library")/"}"; }
 # one file run, its line printed: <kind> <file> [<program>] runs <program> (the file itself when none is given) from the
 # file's folder; it counts when it exits well and, given <expected>, its last line says that
 covered() {
@@ -24,9 +26,9 @@ covered() {
 	said=$(cd "$(dirname "$file")" && "$tree/scripts/job-slot.sh" "$wap" --seconds "$RUN_SECONDS" --memory-gb "$RUN_MEMORY_GB" "$program" 2>&1 </dev/null)
 	status=$?
 	if [ $status -eq 0 ] && { [ -z "$expected" ] || [ "$(tail -n 1 <<<"$said")" = "$expected" ]; }; then
-		echo "✓ $kind ${file#"$tree/"}"
+		echo "✓ $kind $(shown "$file")"
 	else
-		echo "✗ $kind ${file#"$tree/"}: $(grep -v '^job-slot.sh: ' <<<"$said" | tail -n 1 | cut -c1-200)"
+		echo "✗ $kind $(shown "$file"): $(grep -v '^job-slot.sh: ' <<<"$said" | tail -n 1 | cut -c1-200)"
 	fi
 }
 # a library module's use: a program of its own in the work folder, which prints COVERED_MARK once the module is in
@@ -37,13 +39,17 @@ module_covered() {
 	printf 'use %s\nprint "%s"\n' "$name" "$COVERED_MARK" >"$program"
 	covered lib "$module" "$program" "$COVERED_MARK"
 }
-export -f covered module_covered
-export tree wap work RUN_SECONDS RUN_MEMORY_GB COVERED_MARK
+export -f shown covered module_covered
+export tree wap work library RUN_SECONDS RUN_MEMORY_GB COVERED_MARK
 
 mkdir -p "$work" "$(dirname "$out")" || exit 1
-commit=$("$wap" version | sed -n 's/^wap.wasm of \([0-9a-f]*\) .*/\1/p')
+version=$("$wap" version)
+commit=$(sed -n 's/^wap.wasm of \([0-9a-f]*\) .*/\1/p' <<<"$version")
 [ -n "$commit" ] || { echo "coverage.sh: wap version names no commit the installed wap was built of" >&2; exit 2; }
-modules=$(find "$tree/lib" -maxdepth 1 \( -name '*.warp' -o -name '*.wap' \) | sort)
+# the modules a `use` finds: the library beside the installed wap's compiler, not this checkout's lib/
+library="$(dirname "$(sed -n '1s/.*(\(.*\))$/\1/p' <<<"$version")")/lib"
+[ -d "$library" ] || { echo "coverage.sh: no library beside the installed wap's compiler ($library)" >&2; exit 2; }
+modules=$(find "$library" -maxdepth 1 \( -name '*.warp' -o -name '*.wap' \) | sort)
 samples=$(find -L "$tree/samples" -name '*.warp' | sort)
 lines=$({
 	xargs -P "$RUNS_AT_ONCE" -I{} bash -c 'module_covered "$1"' _ {} <<<"$modules"
