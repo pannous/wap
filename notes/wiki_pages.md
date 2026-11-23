@@ -247,7 +247,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - text.md (1 lines): wap-wiki, no forms
 - thread.md (49 lines): wap-wiki, tests test_thread_wanted.wap
 - time.md (51 lines): wap-wiki, tests test_time_wanted.wap; asked (date minus date)
-- Todo.md (232 lines): wap-wiki; asked (to notes)
+- Todo.md (232 lines): moved to notes/wasp-todo.md
 - trade-off.md (10 lines): wap-wiki, essay, no forms
 - trait.md (155 lines): wap-wiki, tests test_trait_page.wap green, test_trait_wanted.wap; asked (wrong values, table)
 - tree.md (3 lines): wap-wiki, no forms
@@ -279,3 +279,4 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - world.md (27 lines):
 - xml.md (7 lines):
 - zig.md (18 lines):
+- dsl.md (new): wap-wiki, tests test_dsl_page.wap green, test_dsl_wanted.wap
