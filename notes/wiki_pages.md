@@ -248,11 +248,11 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - thread.md (49 lines): wap-wiki, tests test_thread_wanted.wap
 - time.md (51 lines): wap-wiki, tests test_time_wanted.wap; asked (date minus date)
 - Todo.md (232 lines):
-- trade-off.md (10 lines):
-- trait.md (155 lines):
-- tree.md (3 lines):
-- truthiness.md (63 lines):
-- try.md (38 lines):
+- trade-off.md (10 lines): wap-wiki, essay, no forms
+- trait.md (155 lines): wap-wiki, tests test_trait_page.wap green, test_trait_wanted.wap; asked (wrong values, table)
+- tree.md (3 lines): wap-wiki, no forms
+- truthiness.md (63 lines): wap-wiki, tests test_truthiness_page.wap green; asked (== across types, =!=)
+- try.md (38 lines): wap-wiki, tests test_try_wanted.wap (failed in test_keyword_wanted)
 - tuple.md (19 lines):
 - type-inference.md (12 lines):
 - type.md (331 lines):
