@@ -11,14 +11,16 @@ INTEGRATION_TREES=(/Volumes/Worktrees/integrate /Volumes/Worktrees/wap-land)
 source "$(dirname "$0")/lib/platform.sh"
 source "$(dirname "$0")/lib/slots.sh"
 [ $# -gt 0 ] || { echo "usage: job-slot.sh <command…>" >&2; exit 2; }
-# a runaway command, past the memory or time cap, is killed and named (scripts/guarded.sh)
-guarded="$(dirname "$0")/guarded.sh"
-command -v lockf >/dev/null || exec nice -n 19 "$guarded" "$@"
+# a runaway command, past the memory or time cap, is killed and named (scripts/guarded.wap), which wap's own run cap
+# leaves running as long as its command does
+GUARD_SECONDS=31536000
+guarded=(wap --seconds "$GUARD_SECONDS" "$(dirname "$0")/guarded.wap")
+command -v lockf >/dev/null || exec nice -n 19 "${guarded[@]}" "$@"
 slots=$(job_slots)
 for tree in "${INTEGRATION_TREES[@]}"; do [[ " $PWD/ $*/" == *" $tree/"* ]] && { slots=$((slots + 1)); break; }; done
 waited=
 while :; do
-	slot_tried "$slot_store/job-slots" "$slots" nice -n 19 "$guarded" "$@"
+	slot_tried "$slot_store/job-slots" "$slots" nice -n 19 "${guarded[@]}" "$@"
 	status=$?
 	[ $slot_held = no ] || exit $status
 	[ -n "$waited" ] || { echo "job-slot.sh: all $(job_slots) job slots taken, waiting" >&2; waited=1; }

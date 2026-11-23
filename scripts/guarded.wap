@@ -1,0 +1,97 @@
+# wap scripts/guarded.wap [--memory-gb <n>] [--seconds <n>] <command…>: the command run, its output and exit status its
+# own, unless it runs away: its processes together past the memory cap, or one of them, which waits on none of the
+# others, past the time cap, every one of them is killed, and stderr names the cap and the culprit's command line (the
+# input it was given). The time cap is a process's own, so a script of many short runs (test_self.sh) may take longer.
+# macOS enforces no memory rlimit (`ulimit -v` and `-d` are refused), so the command's process tree is sampled. Every
+# job slot runs its command through it (scripts/job-slot.sh): on 2026-11-22 one runaway wap reached 90 GB on this 32 GB
+# Mac and the out-of-memory killer took the terminal down with it
+# TODO (card shell-to-wap-scripts) `use process` once the seed's library holds start
+use "../lib/process.wap"
+use list
+use math
+
+# a wap test, compile or census peaks under 2 GB
+MEMORY_CAP_GB := 12
+# one process's: the longest, wap1 compiling wap's compiler, takes about two minutes
+TIME_CAP_SECONDS := 1800
+SAMPLE_MS := 1000
+POLL_MS := 50
+# timeout(1)'s: a wasm program exits below 126, so not 137, as if killed by SIGKILL
+RUNAWAY_STATUS := 124
+USAGE_STATUS := 2
+KB_PER_GB := 1048576
+SECONDS_PER_DAY := 86400
+
+# a process as ps shows it: its parent, its resident kilobytes, its age in seconds and its command line
+class Process { pid: int, parent: int, kilobytes: int, seconds: int, line: text }
+# the tree under a process: its resident kilobytes in all, its pids, its largest process and its oldest one of those that
+# wait on none of the others
+class Tree { kilobytes: int, pids: list<int>, largest: Process, oldest: Process }
+
+# ps's elapsed time, [[days-]hours:]minutes:seconds, in seconds
+seconds_of(elapsed: text): int := {
+	parts = elapsed.split("-")
+	days = if #parts == 2 then int(parts[0]) else 0
+	clock = parts.last.split(":").map(part => int(part))
+	clock.fold(0, (sum, part) => sum * 60 + part) + days * SECONDS_PER_DAY
+}
+# a line of `ps -o pid=,ppid=,rss=,etime=,command=`
+process_of(line: text): Process := {
+	fields = line.trim().split(" ").filter(field => field != "")
+	Process(int(fields[0]), int(fields[1]), int(fields[2]), seconds_of(fields[3]), fields.drop(4).join(" "))
+}
+# every process of the machine
+processes(): list<Process> := run(["ps", "-A", "-o", "pid=,ppid=,rss=,etime=,command="]).out.split("\n").filter(line => line.trim() != "").map(process_of)
+# the processes under root, root among them, ø when root has gone
+tree_of(root: int): Tree? := {
+	all = processes()
+	inside = all.filter(p => p.pid == root)
+	if inside is empty { return ø }
+	grown = yes
+	while grown {
+		pids = inside.map(p => p.pid)
+		added = all.filter(p => p.parent in pids and not (p.pid in pids))
+		grown = added is not empty
+		inside = inside + added
+	}
+	parents = inside.filter(p => p.pid != root).map(p => p.parent)
+	waiting_on_none = inside.filter(p => not (p.pid in parents))
+	Tree(inside.map(p => p.kilobytes).sum, inside.map(p => p.pid), inside.max_by(p => p.kilobytes), waiting_on_none.max_by(p => p.seconds))
+}
+# why a tree is a runaway, ø when it is none
+runaway_of(tree: Tree, memory_gb: int, seconds: int): text? := {
+	if tree.oldest.seconds > seconds { return "ran a process past the cap of ${seconds} s: ${tree.oldest.line}" }
+	if tree.kilobytes > memory_gb * KB_PER_GB { return "took ${round(tree.kilobytes / KB_PER_GB, 1)} GB, past the cap of ${memory_gb} GB. Its largest process: ${tree.largest.line}" }
+	ø
+}
+
+memory_gb = MEMORY_CAP_GB
+seconds = TIME_CAP_SECONDS
+words = args
+while #words >= 2 and words[0] in ["--memory-gb", "--seconds"] {
+	if words[0] == "--memory-gb" then memory_gb = int(words[1]) else seconds = int(words[1])
+	words = words.drop(2)
+}
+if words is empty {
+	eprint("usage: wap scripts/guarded.wap [--memory-gb <n>] [--seconds <n>] <command…>")
+	exit(USAGE_STATUS)
+}
+command = start(words, captured: no)
+sampled_at = wall_clock_ms()
+ended = exited(command)
+while ended is ø {
+	sleep_ms(POLL_MS)
+	ended = exited(command)
+	if ended is ø and wall_clock_ms() - sampled_at >= SAMPLE_MS {
+		sampled_at = wall_clock_ms()
+		tree = tree_of(command.pid)
+		why = if tree is ø then ø else runaway_of(tree!, memory_gb, seconds)
+		if why != ø {
+			run(["kill", "-9"] + tree!.pids.map(pid => text(pid)))
+			eprint("guarded.wap: killed a runaway: it ${why ?? ""}")
+			waited(command)
+			exit(RUNAWAY_STATUS)
+		}
+	}
+}
+exit(ended!.status)
