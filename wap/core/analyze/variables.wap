@@ -44,19 +44,24 @@ definitions_made_by(n: Node, scope: Scope, depth: int) as list<Definition> := ma
 	_ => []
 }
 # The variable an assignment makes: a new one for `let x = …` and for a name its function sees no variable of;
-# none for `global x = …`, the program's, or for a variable its function has. A name that is a variable of the
+# none for `global x = …`, the program's, for a variable its function has, or for one its file declared `global x`. A name that is a variable of the
 # program or of a function around, defined before it, reads two ways, so the assignment is refused naming both; one
 # defined only later is no variable yet, so the assignment makes its own.
 assigned_variables(set: Node, place: Node, scope: Scope, depth: int) as list<Definition> := {
-	if not place is symbol or (is_kind_word(fact_of(set, ASSIGNS), DefinitionKind.Global) and depth != PROGRAM_DEPTH) { return [] }
+	declared = declares_global(set)
+	if not place is symbol or (declared and depth != PROGRAM_DEPTH) { return [] }
 	name = text(place)
 	if not is_kind_word(fact_of(set, ASSIGNS), DefinitionKind.Local) {
 		if seen_in_function(name, scope, depth) { return [] }
 		outer = outer_variable(name, scope, depth)
+		# a variable the program declared `global x` is written by a plain `x = …` in any function of its file
+		if outer != ø and has_fact(outer.definer, ASSIGNS) and file_of(outer.definer) == file_of(place) { return [] }
 		if outer != ø and written_before(outer.definer, place) { refused(place, "this could change the ${outer.kind} ${name} (line ${line_of(outer.definer)}:${column_of(outer.definer)}) or make a new variable here: write `let ${name} = …` for a new one" + global_reading(outer, name)) }
 	}
-	[Definition(name, local_kind(depth), place, depth)]
+	[Definition(name, local_kind(depth), if declared then with_fact(place, ASSIGNS, fact_of(set, ASSIGNS)!) else place, depth)]
 }
+# whether an assignment says `global x = …`
+declares_global(set: Node) as bool := is_kind_word(fact_of(set, ASSIGNS), DefinitionKind.Global)
 # whether code was written before other code of its file, ø positions counting as before
 written_before(earlier: Node, later: Node) as bool := {
 	a = position_of(earlier) ?? return yes
@@ -82,9 +87,13 @@ seen_in_function(name: text, scope: Scope, depth: int) as bool := named_in(scope
 late_reads_checked(program: Node) as Node := {
 	changes = global_changes(program, no)
 	match program {
-		Block(statements) => for statement in statements {
-			function = function_defined_by(statement)
-			if function != ø { late_reads_of(function, line_of(statement) ?? refused(statement, "a definition has its line"), [], changes) }
+		Block(statements) => {
+			# a variable the program declared `global x` its functions read as it is when called
+			declared = statements.flat_map(statement => match statement { Set(place, value) => if declares_global(statement) then [text(declared_name(place))] else []; _ => [] })
+			for statement in statements {
+				function = function_defined_by(statement)
+				if function != ø { late_reads_of(function, line_of(statement) ?? refused(statement, "a definition has its line"), declared, changes) }
+			}
 		}
 		_ => ø
 	}
