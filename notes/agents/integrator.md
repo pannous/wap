@@ -76,6 +76,8 @@ skipped the question is refused and goes to wap-interviewer; there is no FYI pat
   change where it now lives); logic touched on both sides goes to `todo move <card> Now` + `todo note`. Never "take
   ours/theirs" blindly.
 - Every landing gets a try line to wap-interviewer: `/Users/me/dev/bin/warp <full path>`.
+- The three-uses rule (AGENTS.md Layers): `scripts/compiler-growth.sh <tree>` on every landing; a red one goes back
+  to its worker, never landed with the line added by you.
 - Speed and reds (both read from the merge message): gate tier 1 refuses a change over +20% slower to compile hello,
   `use units; 1` or `use storage` than main's compiler, measured again before it counts as red (the Mac may just have
   been busy), unless the message has a `speed-ok: <card>` line (a slowdown
