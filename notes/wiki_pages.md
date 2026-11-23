@@ -32,7 +32,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - beauty.md (28 lines):
 - bignum.md (5 lines):
 - binding.md (15 lines):
-- block.md (43 lines):
+- block.md (43 lines): wap-wiki
 - bool.md (33 lines):
 - broadcast.md (2 lines):
 - broadcasting.md (68 lines):
@@ -46,7 +46,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - caveats.md (3 lines):
 - char.md (63 lines):
 - character.md (0 lines):
-- charged.md (225 lines): wap-wiki
+- charged.md (225 lines): ✓ wap-wiki, tests test_charged_page.wap green, test_charged_wanted.wap the forms still to build; wiki 736ab68, 8a952d3, 466b567, a6c9112
 - cheats.md (10 lines):
 - choices.md (47 lines):
 - class.md (55 lines):
@@ -126,7 +126,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - keyword.md (308 lines):
 - kind.md (31 lines):
 - kotlin.md (18 lines):
-- lambda.md (43 lines): wap-wiki
+- lambda.md (43 lines): ✓ wap-wiki, tests test_lambda_page.wap green, test_lambda_wanted.wap the forms still to build; words lambda-words (sin…log into types, sorted by a comparator); wiki 9963682, 8a952d3
 - laws.md (76 lines):
 - LEB128.md (3 lines):
 - length.md (2 lines):
