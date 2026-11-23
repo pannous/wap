@@ -145,7 +145,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-intervals.md (36 lines): ✓ cf91cd6 (lib/intervals.wap, test/test_intervals.wap 5 ✓; Instants not yet)
 - library-json-tools.md (33 lines):
 - library-map-helpers.md (36 lines):
-- library-markdown.md (54 lines): wap-wiki-lib
+- library-markdown.md (54 lines): ✓ 3b0e579 (lib/markdown.wap, test/test_markdown.wap 10 ✓; CommonMark's corners cut)
 - library-matrix.md (26 lines): ✓ 1845c85 (lib/matrix.wap determinant, inverse, solve; test/test_matrix.wap 3 ✓; the Matrix class of matrix.warp not ported yet)
 - library-money.md (43 lines): ✓ 3c607e3 (lib/money.wap, Rounding an enum, test/test_money.wap 6 ✓)
 - library-numeric.md (36 lines): ✓ 0fefa6f (lib/numeric.wap, lib/matrix.wap solve, test/test_numeric.wap 5 ✓; intro "highest power first" → constant first, with wap-interviewer)
