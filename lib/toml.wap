@@ -5,6 +5,7 @@
 # its line. to_toml(m) writes a map's plain values first, then each map as a [table] and each list of maps as
 # [[tables]]; a whole float keeps its .0 so that it reads back a float.
 use text
+use map
 
 # --- reading
 
@@ -25,18 +26,9 @@ table_at(m: map<text, any>, keys: list<text>): map<text, any> := keys.fold(m, (t
 	}
 	inner_table(table[key])
 })
-inner_table(value: any): map<text, any> := if value is list then last_table(as_list(value)) else as_table(value)
-last_table(tables: list<any>): map<text, any> := as_table(tables.last)
-# TODO `value as map<text, any>` and `value as list<any>` once front-bugs is on main; a value narrowed by `is map` or
-# `is list` fits no map<text, any> or list<any> parameter, so these take it as any
-as_table(value: any): map<text, any> := {
-	table: map<text, any> = value
-	table
-}
-as_list(value: any): list<any> := {
-	xs: list<any> = value
-	xs
-}
+inner_table(value: any): map<text, any> := if is_list(value) then last_table(value as list<any>) else value as map<text, any>
+# TODO (sent to wap-lead) inline in inner_table once two `as` in one expression no longer clash
+last_table(tables: list<any>): map<text, any> := tables.last as map<text, any>
 # the list of tables at the keys below m, made where missing
 tables_at(m: map<text, any>, keys: list<text>): list<any> := {
 	parent = table_at(m, keys.take(#keys - 1))
@@ -44,7 +36,7 @@ tables_at(m: map<text, any>, keys: list<text>): list<any> := {
 		fresh: list<any> = []
 		parent[keys.last] = fresh
 	}
-	as_list(parent[keys.last])
+	parent[keys.last] as list<any>
 }
 
 # how many brackets and braces are open after the text, quotes skipped
@@ -151,22 +143,16 @@ is_date(token: text): bool := #token >= 10 and token[4:5] == "-" and token[7:8] 
 
 # --- writing
 
-# TODO `value is map` and `value is list` in place once the open `a: map` form lands (wap-binding): today they narrow
-# to a bare map or list that no map<text, V> or list<T> parameter takes
-is_table(value: any): bool := value is map
-is_list(value: any): bool := value is list
 is_tables(value: any): bool := is_list(value) and holds_tables(value)
-holds_tables(xs: list<T>): bool := #xs > 0 and xs.all(x => is_table(x))
+holds_tables(xs: list<T>): bool := #xs > 0 and xs.all(x => is_map(x))
 key_text(key: text): text := if key != "" and key.codepoints.all(c => (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' or c == '-') then key else double_quoted(key)
-# TODO (branch front-bugs) the bool test in its natural place: today `is bool` holds for every value
 value_text(value: any): text := {
 	if value is text then double_quoted("${value}")
-	else if value is int then "${value}"
+	else if value is bool then (if value == yes then "true" else "false")
 	else if value is float then float_text(value)
 	else if is_list(value) then list_text(value)
-	else if is_table(value) then inline_text(value)
-	else if value == yes then "true"
-	else "false"
+	else if is_map(value) then inline_text(value)
+	else "${value}"
 }
 float_text(x: float): text := if "${x}".contains(".") or "${x}".contains("e") then "${x}" else "${x}.0"
 list_text(xs: list<T>): text := "[" + xs.map(x => value_text(x)).join(", ") + "]"
@@ -179,8 +165,8 @@ table_text(m: map<text, V>, prefix: text): text := {
 	nested = m.keys().filter(key => is_section(m[key])).map(key => section_text(m[key], prefix + key_text(key))).join("")
 	plain + nested
 }
-is_section(value: any): bool := is_table(value) or is_tables(value)
-section_text(value: any, name: text): text := if is_table(value) then "\n[${name}]\n" + table_text(value, name + ".") else array_sections(value, name)
+is_section(value: any): bool := is_map(value) or is_tables(value)
+section_text(value: any, name: text): text := if is_map(value) then "\n[${name}]\n" + table_text(value, name + ".") else array_sections(value, name)
 array_sections(tables: list<T>, name: text): text := tables.map(table => array_section(table, name)).join("")
 # one table of a list (any, as the list's item type need not be a map)
 array_section(table: any, name: text): text := "\n[[${name}]]\n" + table_text(table, name + ".")
