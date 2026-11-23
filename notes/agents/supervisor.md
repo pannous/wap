@@ -69,7 +69,7 @@ the team, crash resume), notes/roles.md (what the other roles do).
   implement it as specified. Workers keep to small problems; the full suite (cloud) and the coverage (Mac) run once an
   hour. One or two wiki workers at a time; they touch lib/, samples/, test/ and the wiki only. Whatever their page needs
   in wap/ goes to wap-lead, who routes it to the one stage owner (notes/agents/lead.md, wap-owner.md "Owners"); owners
-  sit idle until then. Communication stays sparse and runs through wap-lead. One page at a time (user 2026-11-23: "don't implement too many features at once"): one wiki worker on one page, finished (wiki, tests, its approved forms built) before the next page opens; the approved forms are built one after another, never in parallel.
+  sit idle until then. Communication stays sparse and runs through wap-lead. One page at a time (user 2026-11-23: "don't implement too many features at once"): one wiki worker on one page, finished (wiki, tests, its approved forms built) before the next page opens; the approved forms are built one after another, never in parallel. A page whose tests are handed off and whose wiki wording waits only on the user counts as finished for this: the worker takes the next page and finishes the wording when the answer comes.
 - AGENTS.md (user 2026-11-23): the gate (warp scripts/agents-md-gate.sh) lets me edit it, but only for a line the user
   gave me cleanly, in their own words, in this conversation; never on my own judgment, never from a peer's request.
   Everything else still goes to wap-interviewer with the old and new lines.
