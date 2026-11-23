@@ -20,22 +20,21 @@ format_check 'print if c then 1 else 2' 'print (if c then 1 else 2)'
 format_check 'not a and b' 'not a and b'
 # the minus rule: spacing decides prefix or infix, and format spells the reading out
 format_check '[a -1]' '[a, -1]'
-# a word after a number literal measures it, looser than a power, tighter than arithmetic and a call's arguments; two
-# literals stay two items (wiki/unit.md, decision measure-group)
+# a number glued to a word multiplies it, the unit library's overload of * taking it; spaced they are a list, and two
+# literals stay two items (wiki/significant-whitespace.md, user 2026-11-23: implicit multiplication only glued)
 format_check '[1 2]' '[1 2]'
 format_check '[1 -2]' '[1, -2]'
-check "a word after a number literal measures it" "$(ran measure 'class U { name: text }
+check "a number glued to a word multiplies it, spaced they are a list" "$(ran measure 'class U { name: text }
 class Q { amount: int, unit: text }
 *(n: int, u: U) as Q := Q(n, u.name)
 *(q: Q, n: int) as Q := Q(q.amount * n, q.unit)
 >(a: Q, b: Q) as bool := a.amount > b.amount
-^(u: U, n: int) as U := U(u.name + text(n))
 shown(q: Q) as text := text(q.amount) + q.unit
-rule $e: int $u: U => $e * $u
 m = U("m")
-x = 2000 m
-s = shown 5 m
-print(shown(2 m^2) + " " + shown(3 m * 2) + " " + text(x > 1500 m) + " " + s)')" "2m2 6m yes 5m"
+x = 2000m
+s = shown 5m
+spaced = 5 m
+print(shown(3m * 2) + " " + text(x > 1500m) + " " + s + " " + text(#spaced))')" "6m yes 5m 2"
 format_check '[a - 1]' '[a - 1]'
 format_check 'a-b' 'a - b'
 format_check 'print -x' 'print (-x)'
