@@ -160,7 +160,7 @@ page needs no code: – plus why; edge cases parked: name the follow-up card.
 - library-xml.md (28 lines):
 - like.md (59 lines):
 - Lisp.md (19 lines):
-- list.md (279 lines): warp-wiki-a
+- list.md (279 lines): wap-wiki-a
 - literal.md (34 lines):
 - macro.md (18 lines):
 - map.md (119 lines):
