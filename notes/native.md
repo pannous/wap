@@ -45,10 +45,9 @@ warp-host-fixer; this file is the inventory.
   runs). They still need: a guard `{ return }` before a closing assignment (seven functions refused, a typing bug), a
   list of numbers crossing as its cells (`memcpy(…, source: cells<i32>, …)`), the GPU lists warp's
   extensions/gpu_lists gives (is_gpu_list, gpu_list_cell, gpu_list_place, gpu_list_bytes, gpu_list_room,
-  gpu_list_kept), the driver's system_value("program memory"), os's slow, and the names of native_host's other parts
-  (window_pixels, window.painted_width, window.paint_timing, host_value, host_window_layer, own_process,
-  on_windows). A paint's value given as `any` is read with `is list<any>` and `is map<text, any>`; a picture is a
-  `Picture { width, height, pixels }`.
+  gpu_list_kept), the driver's system_value("program memory"), os's slow, and window.wap's `global window` seen by
+  the modules that use it. A paint's value given as `any` is read with `is list<any>` and `is map<text, any>`; a
+  picture is a `Picture { width, height, pixels }`.
 
 ## Parked
 - The emitter's text helpers live in types/ (card text-helpers-out): native texts stays at +9 core lines. The helpers
