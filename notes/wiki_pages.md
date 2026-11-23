@@ -73,10 +73,10 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - enum.md (91 lines): wap-wiki
 - equality.md (62 lines): wap-wiki
 - Error.md (176 lines): (released by wap-wiki) tests d2b56ad, wiki a1ab2dc (÷ example, default/on error of/effects of not yet); waits: error values (`error "x"`, `r!`: draft on branch wiki-errors-2, unbuilt; bare `try X`, `failed` with wap-reader; the catch-type question parked), finally, assert … else, a catchable ÷ 0 (wap-reader)
-- evaluation.md (21 lines):
+- evaluation.md (21 lines): wap-wiki
 - examples.md (90 lines):
 - Exception.md (37 lines):
-- expression.md (1 lines):
+- expression.md (1 lines): ✓ wap-wiki, prose (choices.md tests if as an expression)
 - Extension-hooks.md (233 lines):
 - falsey.md (35 lines):
 - FAQ.md (1 lines):
