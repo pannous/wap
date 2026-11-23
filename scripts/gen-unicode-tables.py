@@ -2,7 +2,7 @@
 """Write lib/unicode_data.wap (the tables of lib/unicode.wap) and test/test_unicode_normalization.wap (a sample of
 NormalizationTest.txt).
 
-Rerun: download UnicodeData.txt, CompositionExclusions.txt, CaseFolding.txt and NormalizationTest.txt of the pinned
+Rerun: download UnicodeData.txt, CompositionExclusions.txt, CaseFolding.txt, SpecialCasing.txt and NormalizationTest.txt of the pinned
 version from https://www.unicode.org/Public/<VERSION>/ucd/ into a directory (data/ucd-<VERSION>/ is ignored), then
     python3 scripts/gen-unicode-tables.py <that directory>
 The raw UCD files are not committed."""
@@ -17,11 +17,13 @@ def lines(name):
         if l: yield l
 first = open(os.path.join(ucd, "NormalizationTest.txt"), encoding="utf-8").readline()
 assert VERSION in first, first
-ccc = {}; decomp = {}
+ccc = {}; decomp = {}; upper = {}; lower = {}
 for l in lines("UnicodeData.txt"):
     f = l.split(";"); cp = int(f[0], 16)
     if f[1].endswith("First>") or f[1].endswith("Last>"): continue  # ranges (Hangul, CJK) have no ccc or mapping
     if int(f[3]): ccc[cp] = int(f[3])
+    if f[12]: upper[cp] = [int(f[12], 16)]
+    if f[13]: lower[cp] = [int(f[13], 16)]
     if f[5]:
         d = f[5].split(); compat = d[0].startswith("<")
         if compat: d = d[1:]
@@ -48,42 +50,59 @@ while i < len(keys):
 decomp_text = ";".join(out)
 excl = sorted(int(l.split()[0], 16) for l in lines("CompositionExclusions.txt"))
 excl_text = " ".join(str(x) for x in excl)
-# case folding C+F: one-to-one ones as runs (start gap, count, stride, delta), many-to-one listed
-single = {}; multi = {}
+# a case mapping as runs of its one-to-one mappings (gap from the last run's last code point, count, stride, delta),
+# then its mappings to several code points (code point, those)
+def mapping_texts(mapping):
+    runs = []
+    for cp in sorted(c for c in mapping if len(mapping[c]) == 1):
+        d = mapping[cp][0] - cp
+        if runs:
+            s, n, stride, delta = runs[-1]
+            if delta == d and (n == 1 and cp - s <= 2 or n > 1 and cp == s + n * stride):
+                if n == 1: runs[-1][2] = cp - s
+                runs[-1][1] += 1; continue
+        runs.append([cp, 1, 1, d])
+    out = []; end = 0
+    for s, n, stride, d in runs: out.append("%d %d %d %d" % (s - end, n, stride, d)); end = s + (n - 1) * stride
+    multi = ";".join("%d %s" % (cp, " ".join(str(x) for x in t)) for cp, t in sorted(mapping.items()) if len(t) > 1)
+    return " ".join(out), multi
+# case folding: CaseFolding.txt's statuses C and F
+folding = {}
 for l in lines("CaseFolding.txt"):
     f = [x.strip() for x in l.split(";")]
-    if f[1] not in ("C", "F"): continue
-    cp = int(f[0], 16); t = [int(x, 16) for x in f[2].split()]
-    if len(t) == 1: single[cp] = t[0]
-    else: multi[cp] = t
-fold = []
-for cp in sorted(single):
-    d = single[cp] - cp
-    if fold:
-        s, n, stride, delta = fold[-1]
-        if delta == d and (n == 1 and cp - s <= 2 or n > 1 and cp == s + n * stride):
-            if n == 1: fold[-1][2] = cp - s
-            fold[-1][1] += 1; continue
-    fold.append([cp, 1, 1, d])
-out = []; end = 0
-for s, n, stride, d in fold: out.append("%d %d %d %d" % (s - end, n, stride, d)); end = s + (n - 1) * stride
-fold_text = " ".join(out)
-multi_text = ";".join("%d %s" % (cp, " ".join(str(x) for x in t)) for cp, t in sorted(multi.items()))
+    if f[1] in ("C", "F"): folding[int(f[0], 16)] = [int(x, 16) for x in f[2].split()]
+# full upper and lower case: UnicodeData.txt's simple mappings, SpecialCasing.txt's unconditional ones over them
+for l in lines("SpecialCasing.txt"):
+    f = [x.strip() for x in l.split(";")]
+    if f[4]: continue  # a condition (language or context)
+    cp = int(f[0], 16)
+    lower[cp] = [int(x, 16) for x in f[1].split()]
+    upper[cp] = [int(x, 16) for x in f[3].split()]
+for mapping in (upper, lower):
+    for cp in [c for c in mapping if mapping[c] == [c]]: del mapping[cp]
+fold_text, multi_text = mapping_texts(folding)
+upper_text, upper_multi_text = mapping_texts(upper)
+lower_text, lower_multi_text = mapping_texts(lower)
 data = '''# Written by scripts/gen-unicode-tables.py (Unicode %s), do not edit: the tables of lib/unicode.wap, texts of
 # decimal numbers it reads when it loads. ccc: runs (gap from the last run's end, length, class). decompositions:
 # entries (gap from the last code point, 1 when compatibility, its code points) split by ;, a run of keys each one
 # code point at one distance written "gap flag *count distance". exclusions: CompositionExclusions.txt. folding: runs
 # (gap from the last run's last code point, count, stride, delta) of CaseFolding.txt's one-to-one C+F mappings, then
-# its F mappings to several code points (code point, those)
+# its F mappings to several code points (code point, those). upper and lower: the full case mappings the same way,
+# UnicodeData.txt's simple ones and SpecialCasing.txt's unconditional ones
 unicode_version := "%s"
 unicode_ccc_text(): text := "%s"
 unicode_decomposition_text(): text := "%s"
 unicode_exclusion_text(): text := "%s"
 unicode_folding_text(): text := "%s"
 unicode_folding_multi_text(): text := "%s"
-''' % (VERSION, VERSION, ccc_text, decomp_text, excl_text, fold_text, multi_text)
+unicode_upper_text(): text := "%s"
+unicode_upper_multi_text(): text := "%s"
+unicode_lower_text(): text := "%s"
+unicode_lower_multi_text(): text := "%s"
+''' % (VERSION, VERSION, ccc_text, decomp_text, excl_text, fold_text, multi_text, upper_text, upper_multi_text, lower_text, lower_multi_text)
 open(os.path.join(root, "lib", "unicode_data.wap"), "w", encoding="utf-8").write(data)
-print("lib/unicode_data.wap", len(data.encode()), "bytes;", len(runs), "ccc runs,", len(decomp), "decompositions,", len(fold), "fold runs,", len(multi), "multi")
+print("lib/unicode_data.wap", len(data.encode()), "bytes;", len(runs), "ccc runs,", len(decomp), "decompositions,", len(folding), "foldings,", len(upper), "upper,", len(lower), "lower")
 
 # --- the sampled test: NormalizationTest.txt's Part 0 whole, every SPARSE-th line of the other parts, the Hangul
 # syllables and the composition exclusions of Part 1 sparser still; eight lines a check
