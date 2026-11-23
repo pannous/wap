@@ -1,0 +1,512 @@
+# The standard module forest: a million trees (or any square of them) on a regular ground, placed from their index,
+# culled by chunk. Nothing is stored per tree: a 1000 by 1000 grid, one tree a cell, its shift and species a mix of
+# the cell. A view keeps the chunks whose boxes meet the frustum and draws only a budget of them, near ones as whole
+# trees and far ones as a few of that chunk's own trees. Near and mid trees can be instanced meshes (meshlets); far
+# ones stay billboards, or baked impostors of the same meshes when that atlas entry is there. It is not Nanite: no
+# cluster hierarchy. A grove keeps one world bound and cone per draw, so a GPU cull can drop clusters
+# (notes/forest.md).
+# A spot is a tree's [x, z, height, species]; a sprite the GPU row of a billboard, [x, z, height, flags], its flags the
+# species, its detail times SPRITE_DETAIL, plus SPRITE_TREE for a tree; a place is meshlets' [x, z, yaw, scale].
+use bits
+use file
+use geometry
+use math
+use meshlets
+
+FOREST_SIDE := 1000
+FOREST_TREES := 1000000
+FOREST_SPACING := 4.0
+FOREST_CHUNK := 25
+FOREST_CHUNKS := 40
+FOREST_FOV := 1.05
+FOREST_NEAR := 0.25
+FOREST_FAR := 340.0
+NEAR_REACH := 56.0
+MID_REACH := 180.0
+TREE_BUDGET := 2400
+FAR_TAKE := 4
+CHUNK_TREES := 625
+CHUNK_SPAN := 100.0
+CROWN := 0.45
+CHUNK_PAD := 3.0
+TREE_TOP := 6.0
+SPRITE_TREE := 32
+SPRITE_DETAIL := 4
+SPECIES := 4
+# the details: whole near trees, whole mid trees, a few far ones
+NEAR_DETAIL := 0
+MID_DETAIL := 1
+FAR_DETAIL := 2
+# the sample's billboards use this same scale: a mesh's error is in tree heights, so a draw's scale brings it to metres
+FOREST_TREE_SCALE := 1.6
+FOREST_PIXEL_ERROR := 1.0
+MESH_TRIANGLE_BUDGET := 150000
+MESH_TREE_CAP := 64
+FINE_HEROES := 12
+# the most trees one far chunk gives when the picture is tall enough to tell them apart
+FOREST_HORIZON := 80
+FULL_TURN := 6.283185307179586
+# the mix of a cell: two primes, an offset and the modulus
+MIX_X := 374761393
+MIX_Y := 668265263
+MIX_OFFSET := 1442695041
+MIX_MODULUS := 2147483647
+# a tree's shift inside its cell, as a share of the cell, and its height: the least and a step for each of 13
+JITTER := 0.6
+LEAST_HEIGHT := 2.4
+HEIGHT_STEP := 0.22
+HEIGHT_STEPS := 13
+# how a front tree's crown sorts: its height times this is the metres at which it is about 40 px; nearer than the
+# limit over each factor puts it in an earlier slot
+CROWN_REACH := 24.6
+CROWN_FACTORS := [3.0, 2.5, 2.0, 1.6, 1.3, 1.0, 0.8]
+# what a horizon spends on whole near chunks: two fifths of its budget
+WHOLE_PARTS := 2
+BUDGET_PARTS := 5
+# how far apart a far chunk's trees look on the picture, in pixels per metre of reach
+SPACING_SPREAD := 3.2
+
+class Glance { x: float, y: float, z: float, yaw: float, pitch: float, fov: float, aspect: float, near: float, far: float }
+class Canopy { total: int, candidate: int, submitted: int, scenery: int, nearest: int, sprites: list<list<float>>, eye: list<float>, right: list<float>, up: list<float>, forward: list<float> }
+# sprites are the billboards still drawn; draws and spans one cluster each, far to near: its place, and its first
+# triangle, triangle count, kind and level. tables are its levels' lists (grove_tables), made on the grove's first
+# frame and kept for the frames after, so a frame makes no new GPU lists (a GPU list's memory is never given back)
+class Grove { sprites: list<list<float>>, draws: list<list<float>>, spans: list<list<float>>, meshed: int, kept: int, culled: int, triangles: int, bounds: list<list<float>>, cones: list<list<float>>, tables: list<list<list<float>>> = [] }
+# a chunk the view meets: its column and row, its distance from the eye, and whether its box is wholly inside
+class Chunk { x: int, z: int, reach: float, whole: bool }
+
+# --- the trees
+forest_mix(ix: int, iy: int): int := abs((ix * MIX_X + iy * MIX_Y + MIX_OFFSET) % MIX_MODULUS)
+
+tree_place(index: int): list<float> := {
+	if index < 0 or index >= FOREST_TREES { raise "forest: a tree index is 0 to ${FOREST_TREES - 1}, not ${index}" }
+	cell_place(index % FOREST_SIDE, index /! FOREST_SIDE)
+}
+cell_place(ix: int, iy: int): list<float> := {
+	mixed = forest_mix(ix, iy)
+	jx = (mixed % 1000) / 1000.0 - 0.5
+	jz = ((mixed /! 1000) % 1000) / 1000.0 - 0.5
+	[(ix + 0.5 + jx * JITTER) * FOREST_SPACING, (iy + 0.5 + jz * JITTER) * FOREST_SPACING, LEAST_HEIGHT + (mixed % HEIGHT_STEPS) * HEIGHT_STEP, float(mixed % SPECIES)]
+}
+placed_at(cx: int, cz: int, local: int): list<float> := cell_place(cx * FOREST_CHUNK + local % FOREST_CHUNK, cz * FOREST_CHUNK + local /! FOREST_CHUNK)
+
+# --- the view
+glance_checked(glance: Glance) := {
+	if glance.fov <= 0.0 or glance.fov >= pi { raise "forest: fov must be between 0 and pi, not ${glance.fov}" }
+	if glance.aspect <= 0.0 { raise "forest: aspect must be positive, not ${glance.aspect}" }
+	if glance.near <= 0.0 or glance.far <= glance.near { raise "forest: far must be past near, not ${glance.far} past ${glance.near}" }
+}
+height_checked(height: float) := { if height <= 0 { raise "forest: picture height must be positive, not ${height}" } }
+
+picture_focal(height: float): float := {
+	height_checked(height)
+	(height / 2.0) / tan(FOREST_FOV / 2.0)
+}
+eye_of(glance: Glance): list<float> := [glance.x, glance.y, glance.z]
+# [forward, right, up]: yaw 0, pitch 0 looks along +z with +y up
+forest_basis(glance: Glance): list<list<float>> := {
+	forward = [sin(glance.yaw) * cos(glance.pitch), sin(glance.pitch), cos(glance.yaw) * cos(glance.pitch)]
+	right = [cos(glance.yaw), 0.0, -sin(glance.yaw)]
+	[forward, right, vec_cross(forward, right)]
+}
+forest_plane(normal: list<float>, point: list<float>): list<float> := normal + [-vec_dot(normal, point)]
+# the view's near, far, left, right, top and bottom planes, inside where n·p + d >= 0
+forest_planes(glance: Glance): list<list<float>> := {
+	axes = forest_basis(glance)
+	forward = axes[0]
+	right = axes[1]
+	up = axes[2]
+	eye = eye_of(glance)
+	half_v = glance.fov / 2.0
+	half_h = atan(tan(half_v) * glance.aspect)
+	edge = (side: list<float>, half: float, sign: float) => vec_add(vec_scale(forward, cos(half)), vec_scale(side, sign * sin(half)))
+	[forest_plane(forward, vec_add(eye, vec_scale(forward, glance.near))),
+		forest_plane(vec_scale(forward, -1.0), vec_add(eye, vec_scale(forward, glance.far))),
+		forest_plane(vec_unit(vec_cross(up, edge(right, half_h, -1.0))), eye),
+		forest_plane(vec_unit(vec_cross(edge(right, half_h, 1.0), up)), eye),
+		forest_plane(vec_unit(vec_cross(right, edge(up, half_v, 1.0))), eye),
+		forest_plane(vec_unit(vec_cross(edge(up, half_v, -1.0), right)), eye)]
+}
+
+# a box is [x0, y0, z0, x1, y1, z1]. Toward yes: the corner farthest along the plane's normal, else the nearest; the box
+# is outside when even that corner is behind the plane
+forest_support(box: list<float>, plane: list<float>, toward: bool): float := vec_dot(plane[0 .. 3], [if (plane[k] >= 0.0) == toward then box[k + 3] else box[k] for k in 0 .. 3]) + plane[3]
+forest_outside(box: list<float>, planes: list<list<float>>): bool := planes.any(plane => forest_support(box, plane, yes) < 0.0)
+forest_inside(box: list<float>, planes: list<list<float>>): bool := planes.all(plane => forest_support(box, plane, no) >= 0.0)
+
+chunk_box(cx: int, cz: int): list<float> := {
+	minx = cx * CHUNK_SPAN - CHUNK_PAD
+	minz = cz * CHUNK_SPAN - CHUNK_PAD
+	[minx, 0.0, minz, minx + CHUNK_SPAN + CHUNK_PAD * 2.0, TREE_TOP, minz + CHUNK_SPAN + CHUNK_PAD * 2.0]
+}
+# how far a value lies outside low .. high, 0 inside
+gap(value: float, low: float, high: float): float := max(low - value, 0.0) + max(value - high, 0.0)
+# how far the eye is from the chunk's column of trees
+chunk_reach(cx: int, cz: int, glance: Glance): float := vec_norm([gap(glance.x, cx * CHUNK_SPAN, (cx + 1) * CHUNK_SPAN), gap(glance.y, 0.0, TREE_TOP), gap(glance.z, cz * CHUNK_SPAN, (cz + 1) * CHUNK_SPAN)])
+
+chunk_seen(cx: int, cz: int, glance: Glance): bool := {
+	if cx < 0 or cz < 0 or cx >= FOREST_CHUNKS or cz >= FOREST_CHUNKS { raise "forest: a chunk is 0 to ${FOREST_CHUNKS - 1}, not ${cx} by ${cz}" }
+	glance_checked(glance)
+	chunk_reach(cx, cz, glance) <= glance.far and not forest_outside(chunk_box(cx, cz), forest_planes(glance))
+}
+tree_box(spot: list<float>): list<float> := {
+	half = spot[2] * CROWN
+	[spot[0] - half, 0.0, spot[1] - half, spot[0] + half, spot[2], spot[1] + half]
+}
+tree_seen(index: int, glance: Glance): bool := {
+	glance_checked(glance)
+	not forest_outside(tree_box(tree_place(index)), forest_planes(glance))
+}
+
+forest_detail(reach: float): int := if reach < NEAR_REACH then NEAR_DETAIL else if reach < MID_REACH then MID_DETAIL else FAR_DETAIL
+
+# --- picking the trees a view draws: each adds sprites to `picked` while room lasts, and gives the room left
+forest_spend(picked: list<list<float>>, spot: list<float>, detail: int, room: int): int := {
+	if room <= 0 { return 0 }
+	picked.add(spot[0 .. 3] + [spot[3] + detail * SPRITE_DETAIL + SPRITE_TREE])
+	room - 1
+}
+# the spots nearest the eye first, spent until the room is gone
+spend_nearest(spots: list<list<float>>, detail: int, room: int, picked: list<list<float>>, ex: float, ez: float): int := spots.sorted(by: spot => (spot[0] - ex) * (spot[0] - ex) + (spot[1] - ez) * (spot[1] - ez)).fold(room, (left, spot) => forest_spend(picked, spot, detail, left))
+chunk_spots(cx: int, cz: int): list<list<float>> := (0 .. CHUNK_TREES).map(local => placed_at(cx, cz, local))
+
+# every tree of a near or mid chunk, closest to the eye first, until the budget
+forest_fill(cx: int, cz: int, detail: int, room: int, picked: list<list<float>>, ex: float, ez: float): int := spend_nearest(chunk_spots(cx, cz), detail, room, picked, ex, ez)
+
+# `take` real trees of a far chunk, spread across its cells
+forest_sample(cx: int, cz: int, room: int, picked: list<list<float>>, take: int = FAR_TAKE): int := {
+	taken = min(take, CHUNK_TREES)
+	if taken < 1 { return room }
+	(0 .. taken).fold(room, (left, k) => forest_spend(picked, placed_at(cx, cz, k * (CHUNK_TREES /! taken)), FAR_DETAIL, left))
+}
+
+# a clipped chunk: every tree that meets the frustum counted, the closest that fit drawn (a far chunk draws `take` of
+# them): [seen, room left]
+forest_clip(cx: int, cz: int, detail: int, room: int, picked: list<list<float>>, planes: list<list<float>>, ex: float, ez: float, take: int = FAR_TAKE): list<int> := {
+	seen = chunk_spots(cx, cz).filter(spot => not forest_outside(tree_box(spot), planes))
+	if detail == FAR_DETAIL { return [#seen, seen[0 .. min(if take < 1 then FAR_TAKE else take, #seen)].fold(room, (left, spot) => forest_spend(picked, spot, FAR_DETAIL, left))] }
+	if room <= 0 { return [#seen, room] }
+	[#seen, spend_nearest(seen, detail, room, picked, ex, ez)]
+}
+
+# the chunks whose boxes meet the view, nearest first
+forest_chunks(glance: Glance, side: int): list<Chunk> := {
+	glance_checked(glance)
+	if side <= 0 or side % FOREST_CHUNK != 0 { raise "forest: a side is a positive multiple of ${FOREST_CHUNK} trees, not ${side}" }
+	planes = forest_planes(glance)
+	met = [Chunk(cx, cz, chunk_reach(cx, cz, glance), forest_inside(chunk_box(cx, cz), planes)) for cz in 0 .. side /! FOREST_CHUNK for cx in 0 .. side /! FOREST_CHUNK]
+	met.filter(chunk => chunk.reach <= glance.far and not forest_outside(chunk_box(chunk.x, chunk.z), planes)).sorted(by: chunk => chunk.reach * 100000.0 + chunk.z * 40.0 + chunk.x)
+}
+
+# the canopy of the picked trees: the scenery sprite first, then the trees far to near
+forest_canopy(side: int, glance: Glance, candidate: int, picked: list<list<float>>): Canopy := {
+	axes = forest_basis(glance)
+	nearest = if #picked == 0 then -1 else sprite_detail(picked[0])
+	Canopy(side * side, candidate, #picked, 1, nearest, [[0.0, 0.0, 0.0, 0.0]] + picked.reverse(), eye_of(glance), axes[1], axes[2], axes[0])
+}
+
+# how many of a far chunk's trees the picture can still tell apart: closer chunks keep more
+horizon_quota(reach: float, screen: float): int := {
+	if reach < 1.0 { return FOREST_HORIZON }
+	spacing = SPACING_SPREAD * reach * FOREST_FOV / screen
+	if spacing <= FOREST_SPACING { return FOREST_HORIZON }
+	clamp(round(CHUNK_SPAN / spacing), FAR_TAKE, FOREST_HORIZON)
+}
+
+# side: trees along each edge of the square; the woods hold side · side of them
+forest_view(glance: Glance, side: int = FOREST_SIDE): Canopy := {
+	chunks = forest_chunks(glance, side)
+	planes = forest_planes(glance)
+	candidate = 0
+	room = TREE_BUDGET
+	picked: list<list<float>> = []
+	for chunk in chunks {
+		detail = forest_detail(chunk.reach)
+		if chunk.whole {
+			candidate += CHUNK_TREES
+			if room > 0 { room = if detail == FAR_DETAIL then forest_sample(chunk.x, chunk.z, room, picked) else forest_fill(chunk.x, chunk.z, detail, room, picked, glance.x, glance.z) }
+		} else {
+			scanned = forest_clip(chunk.x, chunk.z, detail, room, picked, planes, glance.x, glance.z)
+			candidate += scanned[0]
+			room = scanned[1]
+		}
+	}
+	forest_canopy(side, glance, candidate, picked)
+}
+
+# the same woods, the budget split so near chunks stay whole and every farther chunk still sends trees. screen is the
+# picture's height in pixels: it decides how many trees a far chunk is worth
+forest_horizon(glance: Glance, side: int, budget: int, screen: float): Canopy := {
+	if budget < 0 { raise "forest: a horizon budget must not be negative, not ${budget}" }
+	height_checked(screen)
+	chunks = forest_chunks(glance, side)
+	planes = forest_planes(glance)
+	whole_left = budget * WHOLE_PARTS /! BUDGET_PARTS
+	candidate = 0
+	picked: list<list<float>> = []
+	later: list<Chunk> = []
+	for chunk in chunks {
+		detail = forest_detail(chunk.reach)
+		spends = detail != FAR_DETAIL and whole_left > 0
+		if chunk.whole { candidate += CHUNK_TREES } else {
+			scanned = forest_clip(chunk.x, chunk.z, detail, if spends then whole_left else 0, picked, planes, glance.x, glance.z)
+			candidate += scanned[0]
+			if spends { whole_left = scanned[1] }
+		}
+		if spends and chunk.whole { whole_left = forest_fill(chunk.x, chunk.z, detail, whole_left, picked, glance.x, glance.z) }
+		if not spends { later.add(chunk) }
+	}
+	# each later chunk one tree while they last, then its quota's more
+	share = max(budget - #picked, 0)
+	given = [k < share for k in 0 .. #later]
+	left = max(share - #later, 0)
+	for k in 0 .. #later {
+		chunk = later[k]
+		first = if given[k] then 1 else 0
+		extra = clamp(horizon_quota(chunk.reach, screen) - first, 0, left)
+		left -= extra
+		take = first + extra
+		if take >= 1 {
+			if chunk.whole { forest_sample(chunk.x, chunk.z, take, picked, take) } else { forest_clip(chunk.x, chunk.z, FAR_DETAIL, take, picked, planes, glance.x, glance.z, take) }
+		}
+	}
+	forest_canopy(side, glance, candidate, picked)
+}
+
+sprite_flags(sprite: list<float>): int := int(sprite[3])
+sprite_kind(sprite: list<float>): int := sprite_flags(sprite) % SPRITE_DETAIL
+sprite_detail(sprite: list<float>): int := (sprite_flags(sprite) /! SPRITE_DETAIL) % SPRITE_DETAIL
+sprite_tree(sprite: list<float>): bool := sprite_flags(sprite) >= SPRITE_TREE
+
+forest_cell(x: float): int := int(x / FOREST_SPACING)
+forest_yaw(x: float, z: float): float := (forest_mix(forest_cell(x), forest_cell(z)) % 1000) / 1000.0 * FULL_TURN
+grove_distance(eye: list<float>, x: float, y: float, z: float): float := geo_distance(eye, [x, y, z])
+
+# --- groves: near trees as instanced meshes
+# the level whose error is within a pixel, counted from 1; 0 when none is and the tree stays a billboard
+grove_level(kit: TreeMesh, distance: float, cot: float, screen_height: float): int := level_within(kit.levels.map(level => level.mesh.error), distance, cot, screen_height, FOREST_PIXEL_ERROR)
+packed_checked(level: TreeLevel) := { if level.base < 0 { raise "forest: pack the tree meshes before drawing a grove" } }
+kits_checked(kits: list<TreeMesh>) := { if #kits != SPECIES { raise "forest: a grove needs ${SPECIES} tree meshes, not ${kits}" } }
+
+# the clusters a placed tree keeps: [visible, the camera in the tree's own frame, how many it culled]
+grove_seen(level: TreeLevel, planes: list<list<float>>, camera: list<float>, place: list<float>): list<any> := {
+	packed_checked(level)
+	view = local_view(planes, camera, place)
+	visible = visible_clusters(level.mesh.clusters, view[0], view[1])
+	[visible, view[1], #level.mesh.clusters - #visible]
+}
+
+# the rows of a grove's draws, one cluster each, and each draw's metres from the camera, so they sort far to near
+class GroveRows {
+	draws: list<list<float>> = []
+	spans: list<list<float>> = []
+	bounds: list<list<float>> = []
+	cones: list<list<float>> = []
+	distances: list<float> = []
+	added(cluster: Cluster, place: list<float>, level: TreeLevel, kind: int, level_index: int) := {
+		draws.add(place)
+		spans.add([float(level.base + cluster.at), float(#cluster.triangles), float(kind), float(level_index)])
+		bounds.add(placed_bounds(cluster, place))
+		cones.add(placed_cone_row(cluster, place))
+	}
+	# far draws first, so a blend without depth still paints the nearer tree last
+	far_first(): list<list<list<float>>> := {
+		order = (0 .. #draws).sorted(by: i => distances[i]).reverse()
+		[draws, spans, bounds, cones].map(rows => order.map(i => rows[i]))
+	}
+}
+
+# the visible clusters added while the triangle room holds: [kept, triangles, room left]
+grove_emit(visible: list<Cluster>, camera: list<float>, scale: float, place: list<float>, level: TreeLevel, kind: int, level_index: int, room: int, rows: GroveRows): list<int> := {
+	kept = 0
+	triangles = 0
+	left = room
+	for cluster in visible {
+		if #cluster.triangles <= left {
+			rows.added(cluster, place, level, kind, level_index)
+			rows.distances.add(geo_distance(camera, cluster.sphere.center) * scale)
+			left -= #cluster.triangles
+			kept += 1
+			triangles += #cluster.triangles
+		}
+	}
+	[kept, triangles, left]
+}
+
+# whether a tree's visible clusters draw: some triangles, inside the room, or the grove's first tree whatever it costs
+fits(visible: list<Cluster>, room: int, first: bool): bool := triangle_count(visible) > 0 and (triangle_count(visible) <= room or first)
+# the slot a front tree's crown sorts by, bigger crowns first: an int, as raw distances can stay exact roots that do
+# not sort
+crown_slot(reach: float, height: float): int := 2 * #CROWN_FACTORS.filter(factor => reach * factor >= height * CROWN_REACH)
+
+# kits: the four TreeMeshes in species order, already pack_tree_meshes'd. Near and mid trees become clusters until
+# the budget; far trees, and near ones that do not fit, stay sprites. Draws are far to near. front > 0 meshes every
+# sprite inside that many metres, largest crown first. The level is the one whose error is still inside a pixel, and a
+# level that does not fit steps one coarser
+forest_grove(canopy: Canopy, glance: Glance, kits: list<TreeMesh>, screen_height: float, budget: int, cap: int, mesh_far: float = 0.0, front: float = 0.0): Grove := {
+	glance_checked(glance)
+	kits_checked(kits)
+	height_checked(screen_height)
+	if kits.any(kit => #kit.levels == 0) { raise "forest: a grove mesh needs levels" }
+	if budget < 0 or cap < 0 { raise "forest: a grove budget must not be negative, not ${budget} and ${cap}" }
+	planes = forest_planes(glance)
+	eye = canopy.eye
+	cot = 1.0 / tan(glance.fov / 2.0)
+	reach_of = (sprite: list<float>) => grove_distance(eye, sprite[0], sprite[2] * FOREST_TREE_SCALE * 0.5, sprite[1])
+	trees = (0 .. #canopy.sprites).filter(i => sprite_tree(canopy.sprites[i]))
+	# the sprites to mesh, in the order they are tried
+	queue = if front > 0.0 then trees.filter(i => reach_of(canopy.sprites[i]) < front).sorted(by: i => crown_slot(reach_of(canopy.sprites[i]), canopy.sprites[i][2])) else trees.filter(i => sprite_detail(canopy.sprites[i]) < FAR_DETAIL or (mesh_far > 0.0 and reach_of(canopy.sprites[i]) < mesh_far)).reverse()
+	rows = GroveRows()
+	dropped: list<int> = []
+	room = budget
+	heroes = 0
+	kept = 0
+	culled = 0
+	triangles = 0
+	for index in queue {
+		sprite = canopy.sprites[index]
+		kind = sprite_kind(sprite)
+		kit = kits[kind]
+		scale = sprite[2] * FOREST_TREE_SCALE
+		levels_n = #kit.levels
+		level_index = grove_level(kit, max(grove_distance(eye, sprite[0], scale * 0.5, sprite[1]), glance.near) / scale, cot, screen_height)
+		# the nearest meshes stay on the finest level; after them a level the pixel budget still calls fine steps down
+		# one, so coarser levels and the far billboards are reached. A front tree takes the far stride, the last level
+		if mesh_far > 0.0 and level_index == 1 and heroes >= FINE_HEROES and levels_n > 1 { level_index = 2 }
+		if front > 0.0 and levels_n > 1 and level_index > 0 { level_index = levels_n }
+		if #dropped < cap and room > 0 and scale > 0 and level_index > 0 {
+			place = [sprite[0], sprite[1], forest_yaw(sprite[0], sprite[1]), scale]
+			seen = grove_seen(kit.levels[level_index - 1], planes, eye, place)
+			# a front tree that does not fit at full detail still draws, one level coarser, while the budget lasts
+			if front > 0.0 and not fits(seen[0], room, #dropped == 0) and level_index < levels_n {
+				level_index += 1
+				seen = grove_seen(kit.levels[level_index - 1], planes, eye, place)
+			}
+			if fits(seen[0], room, #dropped == 0) {
+				added = grove_emit(seen[0], seen[1], scale, place, kit.levels[level_index - 1], kind, level_index - 1, room, rows)
+				if added[0] > 0 {
+					if level_index == 1 { heroes += 1 }
+					dropped.add(index)
+					culled += seen[2]
+					kept += added[0]
+					triangles += added[1]
+					room = added[2]
+				}
+			}
+		}
+	}
+	sprites = (0 .. #canopy.sprites).filter(i => not dropped.contains(i)).map(i => canopy.sprites[i])
+	ordered = rows.far_first()
+	Grove(sprites, ordered[0], ordered[1], #dropped, kept, culled, triangles, ordered[2], ordered[3])
+}
+
+# every level of each meshed tree, so a GPU pass can pick the level; the grove's own counts stay the CPU choice.
+# [draws, spans, bounds, cones, levels, trees]: a level is its first cluster, count and error; a tree its first level,
+# level count and the local distance chosen_level uses
+grove_lod(grove: Grove, kits: list<TreeMesh>, eye: list<float>): list<list<list<float>>> := {
+	if #grove.tables == 0 { grove.tables = grove_tables(grove, kits) }
+	tables = grove.tables
+	trees = (0 .. #tables[5]).map(i => grove_tree(tables[5][i], tables[6][i], eye))
+	tables[0 .. 5] + [trees]
+}
+# a tree's row: its first level, level count, and its distance from the eye in tree heights
+grove_tree(tree: list<float>, place: list<float>, eye: list<float>): list<float> := [tree[0], tree[1], grove_distance(eye, place[0], place[3] * 0.5, place[1]) / place[3], 0.0]
+# the eye-free part of grove_lod: draws, spans, bounds and cones, then levels, trees (first level, level count) and
+# their places
+grove_tables(grove: Grove, kits: list<TreeMesh>): list<list<list<float>>> := {
+	kits_checked(kits)
+	rows = GroveRows()
+	levels: list<list<float>> = []
+	trees: list<list<float>> = []
+	places: list<list<float>> = []
+	for i in 0 .. #grove.draws {
+		place = grove.draws[i]
+		if not places.contains(place) {
+			places.add(place)
+			kind = int(grove.spans[i][2])
+			kit = kits[kind]
+			trees.add([float(#levels), float(#kit.levels)])
+			for n in 0 .. #kit.levels {
+				level = kit.levels[n]
+				packed_checked(level)
+				levels.add([float(#rows.draws), float(#level.mesh.clusters), level.mesh.error, 0.0])
+				for cluster in level.mesh.clusters { rows.added(cluster, place, level, kind, n) }
+			}
+		}
+	}
+	[rows.draws, rows.spans, rows.bounds, rows.cones, levels, trees, places]
+}
+
+# --- the baked EZ Tree atlas (samples/graphics/ez_trees/atlas.bin): the grove is entry 1, the ash close-up entry 2.
+# atlas.txt names the version, the source hash and each entry's id and size. A missing file or another version is none:
+# the caller builds the atlas itself. The stamp is trusted to match its sources: atlas.py bakes them together and
+# sample-assets.sh ships them in one archive, so a run never reads and hashes the textures
+ATLAS_VERSION := 1
+GROVE_ATLAS := 1
+ASH_ATLAS := 2
+# four full-size leaves plus the bark row
+NEAR_ATLAS := 3
+ATLAS_STAMP := "EZAT"
+ATLAS_MAGIC := [69, 90, 65, 84]
+ATLAS_MOST_ENTRIES := 8
+ATLAS_ENTRY_BYTES := 28
+ATLAS_HEAD_BYTES := 44
+RGBA8 := 1
+# the atlas entry a texture binding reads: its path (file#id#hash), its width and height
+class BakedAtlas { path: text, width: float, height: float }
+baked_atlas(folder: text, id: int): BakedAtlas? := {
+	if not exists(folder + "/atlas.txt") or not exists(folder + "/atlas.bin") { return ø }
+	parts = words(read(folder + "/atlas.txt"))
+	if #parts < 6 or parts[0] != ATLAS_STAMP or int(parts[1]) != ATLAS_VERSION { return ø }
+	entries = (0 .. (#parts - 3) /! 3).map(k => 3 + 3 * k).filter(at => int(parts[at]) == id)
+	if #entries == 0 { return ø }
+	at = entries[0]
+	BakedAtlas(folder + "/atlas.bin#${id}#" + parts[2], float(parts[at + 1]), float(parts[at + 2]))
+}
+# whether atlas.bin holds this RGBA8 entry: a stamp can name an entry the file lacks (an old archive beside a newer
+# stamp), and the caller keeps the procedural crown
+atlas_has(folder: text, id: int): bool := {
+	path = folder + "/atlas.bin"
+	if not exists(path) { return no }
+	bytes = read_bytes(path)
+	if #bytes < ATLAS_HEAD_BYTES or bytes[0 .. 4] != ATLAS_MAGIC or u32_at(bytes, 4) != ATLAS_VERSION { return no }
+	entries = u32_at(bytes, 8)
+	if entries < 1 or entries > ATLAS_MOST_ENTRIES or #bytes < ATLAS_HEAD_BYTES + entries * ATLAS_ENTRY_BYTES { return no }
+	(0 .. entries).map(i => ATLAS_HEAD_BYTES + i * ATLAS_ENTRY_BYTES).any(base => u32_at(bytes, base) == id and u32_at(bytes, base + 12) == RGBA8)
+}
+
+# --- baked impostors of the four EZ species (pine, oak, birch, autumn), a row each: the views around the trunk, each
+# a colour tile then its normal tile. The quad uses the mesh scale (height times FOREST_TREE_SCALE) and this half-width,
+# the trunk at the tree's x z and the base at y = 0, the pivot the mesh draw uses (notes/forest.md)
+IMPOSTOR_ATLAS := 4
+IMPOSTOR_VIEWS := 8
+IMPOSTOR_TILE_W := 216
+IMPOSTOR_TILE_H := 256
+
+# half the width of the finest level, in tree heights; the trunk stays at the origin
+impostor_radius(mesh: TreeMesh): float := {
+	if #mesh.levels == 0 { raise "forest: an impostor radius needs a tree mesh with levels" }
+	radius = mesh.levels[0].vertices.map(vertex => hypotenuse(vertex[0], vertex[2])).max
+	if radius <= 0.0 { raise "forest: a tree mesh has no width" }
+	radius
+}
+# [x, y, width, height] of one tile: normal 0 is the colour, 1 the normal beside it
+impostor_rect(species: int, view: int, normal: int = 0): list<int> := {
+	if species < 0 or species >= SPECIES { raise "forest: an impostor species is 0 to ${SPECIES - 1}, not ${species}" }
+	if view < 0 or view >= IMPOSTOR_VIEWS { raise "forest: an impostor view is 0 to ${IMPOSTOR_VIEWS - 1}, not ${view}" }
+	if normal != 0 and normal != 1 { raise "forest: an impostor tile is colour or normal, not ${normal}" }
+	[(view * 2 + normal) * IMPOSTOR_TILE_W, species * IMPOSTOR_TILE_H, IMPOSTOR_TILE_W, IMPOSTOR_TILE_H]
+}
+# the view facing the camera, in the tree's own yaw, the next one and the blend toward it: [view, next, blend]. Angle 0
+# looks at the tree from its local +z, as the bake does
+impostor_view(yaw: float, camera_x: float, camera_z: float, tree_x: float, tree_z: float): list<float> := {
+	dx = camera_x - tree_x
+	dz = camera_z - tree_z
+	facing = [0.0, 1.0, 0.0]
+	if dx == 0.0 and dz == 0.0 { return facing }
+	angle = atan2(cos(yaw) * dx + sin(yaw) * dz, -sin(yaw) * dx + cos(yaw) * dz)
+	slot = (if angle < 0.0 then angle + FULL_TURN else angle) / FULL_TURN * IMPOSTOR_VIEWS
+	if slot >= IMPOSTOR_VIEWS { return facing }
+	view = max(trunc(slot), 0)
+	[float(view), float((view + 1) % IMPOSTOR_VIEWS), slot - view]
+}
