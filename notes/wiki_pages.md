@@ -266,17 +266,17 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - value.md (67 lines): wap-wiki; asked (internals to notes/value-layout.md)
 - variable.md (85 lines): wap-wiki, tests test_variable_page.wap green, test_variable_wanted.wap; asked (write-through lambdas)
 - variant.md (16 lines): wap-wiki, tests test_variant_page.wap green
-- W0.md (30 lines):
-- warning.md (45 lines):
+- W0.md (30 lines): wap-wiki; asked (hole count, wap types)
+- warning.md (45 lines): wap-wiki, tests test/wap/test_warning_wanted.sh
 - wasm-representation.md (44 lines):
 - wasm.md (563 lines):
-- Wasp.md (11 lines):
-- wat.md (56 lines):
-- wawi.md (20 lines):
-- Whack-a-Mole.md (16 lines):
-- wit.md (18 lines):
-- with.md (20 lines):
-- world.md (27 lines):
-- xml.md (7 lines):
-- zig.md (18 lines):
+- Wasp.md (11 lines): wap-wiki; asked (name musings to notes)
+- wat.md (56 lines): wap-wiki; asked (wasm notes to notes)
+- wawi.md (20 lines): wap-wiki; asked (old web API to notes)
+- Whack-a-Mole.md (16 lines): wap-wiki, essay, no forms
+- wit.md (18 lines): wap-wiki; asked (WIT as wap syntax)
+- with.md (20 lines): wap-wiki; asked (with's form)
+- world.md (27 lines): wap-wiki; asked (network feeds, internals)
+- xml.md (7 lines): wap-wiki, essay, no forms
+- zig.md (18 lines): wap-wiki, essay, no forms
 - dsl.md (new): wap-wiki, tests test_dsl_page.wap green, test_dsl_wanted.wap
