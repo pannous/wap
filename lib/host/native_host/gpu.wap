@@ -174,7 +174,8 @@ BUFFER_BINDING_READ_ONLY := 4
 # a field (wiki graphics.md "Fields and passes"): a compute shader's fixed-length read_write array that no value names,
 # `var<storage, read_write> particles: array<vec4f, 4096>`, zeroed on the first frame and kept across the program's
 # frames; the draw reads it as values.particles (web/playground/host-gpu.js keptFields). Its elements' strides
-FIELD_STRIDES := [["f32", 4], ["i32", 4], ["u32", 4], ["atomic<", 4], ["vec2", 8], ["vec3", 16], ["vec4", 16]]
+class Stride { element: text, bytes: int }
+FIELD_STRIDES := [Stride("f32", 4), Stride("i32", 4), Stride("u32", 4), Stride("atomic<", 4), Stride("vec2", 8), Stride("vec3", 16), Stride("vec4", 16)]
 FIELD_KEY := "field "
 
 # wgpu-native's functions, and C's copies: memcpy of a list's int32 cells, memmove of C memory
@@ -245,7 +246,7 @@ wgpuSurfacePresent(surface: handle): i32 from 'wgpu_native'
 wgpuSurfaceRelease(surface: handle): ø from 'wgpu_native'
 wgpuDeviceCreateSampler(device: handle, descriptor: handle): handle from 'wgpu_native'
 wgpuSamplerRelease(sampler: handle): ø from 'wgpu_native'
-memcpy(into: handle, source: i32s, size: length): handle from 'c'
+memcpy(into: handle, source: cells<i32>, size: length): handle from 'c'
 memmove(into: handle, source: handle, size: i64): handle from 'c'
 fopen(path: text, mode: text): handle from 'c'
 fread(into: handle, size: i64, n: i64, file: handle): i64 from 'c'
@@ -517,7 +518,7 @@ number_list(value: list<any>): text := {
 array_room(layout: Layout): text := if #layout.arrays == MOST_STORAGE_ARRAYS then "is one list too many: paint's values hold at most 12" else ""
 member_laid_out(layout: Layout, name: text, value: any): text := {
 	if name == INDICES_NAME {
-		if not (value is list) or value.any(item => item is list) { return "is a flat list of index numbers" }
+		if not (value is list<any>) or value.any(item => item is list<any>) { return "is a flat list of index numbers" }
 		if #value == 0 { return "is empty" }
 		why = number_list(value)
 		if why != "" { return why }
@@ -525,7 +526,7 @@ member_laid_out(layout: Layout, name: text, value: any): text := {
 		return ""
 	}
 	if name == INDIRECT_NAME {
-		if not (value is list) or value.any(item => item is list) { return "is a flat list of indirect numbers" }
+		if not (value is list<any>) or value.any(item => item is list<any>) { return "is a flat list of indirect numbers" }
 		if #value != 4 and #value != 5 { return "is four numbers, or five for an indexed draw" }
 		why = number_list(value)
 		if why != "" { return why }
@@ -534,12 +535,11 @@ member_laid_out(layout: Layout, name: text, value: any): text := {
 	}
 	if name == WORKGROUPS_NAME {
 		# a count alone is one count, as the page reads it (host-gpu.js [asked].flat())
-		counts = if value is list then value else [value]
-		if counts.any(item => item is list) or #counts < 1 or #counts > 3 { return "is one to three counts" }
+		counts = if value is list<any> then value else [value]
+		if counts.any(item => item is list<any>) or #counts < 1 or #counts > 3 { return "is one to three counts" }
 		groups: list<int> = []
 		for x in counts {
-			if not (x is int) or x < 1 { return "needs positive ints" }
-			groups.add(x)
+			if x is int and x >= 1 { groups.add(x) } else { return "needs positive ints" }
 		}
 		while #groups < 3 { groups.add(1) }
 		layout.workgroups = groups
@@ -558,7 +558,7 @@ member_laid_out(layout: Layout, name: text, value: any): text := {
 		layout.arrays.add(Named(name, value))
 		return ""
 	}
-	if value is list {
+	if value is list<any> {
 		# a GPU list [f32] longer than a vec4f, or one [vec4], is already the storage array's bytes, its tail padded to a
 		# whole vec4f (storage_bytes); a shorter one is a uniform, as a list of as many numbers is
 		if is_gpu_cells(value) and GPU_CELLS[gpu_list_cell(value)] in VEC4F_CELLS and (#value > VECTOR_FLOATS or gpu_list_cell(value) > 0) {
@@ -566,7 +566,7 @@ member_laid_out(layout: Layout, name: text, value: any): text := {
 		}
 		# (any other GPU list read once as a for reads it: it takes no list word)
 		items = if is_gpu_cells(value) then [item for item in value] else value
-		vectors = items.any(item => item is list)
+		vectors = items.any(item => item is list<any>)
 		if vectors or #items > VECTOR_FLOATS {
 			array_walked(name, value, vectors)
 			numbers = if vectors then [if i < #item then float(item[i]) else 0.0 for item in items for i in 0 ..< VECTOR_FLOATS] else [float(x) for x in items]
@@ -617,7 +617,7 @@ padded(numbers: list<float>, alignment: int) := { while #numbers % alignment != 
 # the program's values with the built-in holes its shader reads and it gave none
 values_copied(shader: text, given: any, width: int, height: int): map<text, any> := {
 	values: map<text, any> = {}
-	if given is map { for name in given.keys { values[name] = given[name] } }
+	if given is map<text, any> { for name in given.keys { values[name] = given[name] } }
 	if first_painting_ms == 0 { first_painting_ms = wall_clock_ms() }
 	for hole in BUILTIN_HOLES {
 		if not names(shader, VALUES_NAME + "." + hole) or values.has(hole) { continue }
@@ -804,10 +804,10 @@ program_cells(place: int): int := {
 }
 # a buffer of its own holding the cells (numbers as f32 bits or int32s), bound so: one of several in one command
 # encoder (gpu_pass)
-cells_buffer(cells: list, usage: int): int := cells_written(buffer_of(#cells * 4, usage + BUFFER_COPY_DST), cells)
+cells_buffer(cells: list<int>, usage: int): int := cells_written(buffer_of(#cells * 4, usage + BUFFER_COPY_DST), cells)
 # the buffer kept for this name and use (kept_buffer), the cells written into it
-cells_kept(name: text, cells: list, usage: int): int := cells_written(kept_buffer(name, #cells * 4, usage), cells)
-cells_written(buffer: int, cells: list): int := {
+cells_kept(name: text, cells: list<int>, usage: int): int := cells_written(kept_buffer(name, #cells * 4, usage), cells)
+cells_written(buffer: int, cells: list<int>): int := {
 	size = #cells * 4
 	staged = calloc(1, size)
 	memcpy(staged, cells)
@@ -815,7 +815,7 @@ cells_written(buffer: int, cells: list): int := {
 	free(staged)
 	buffer
 }
-f32_cells(numbers: list): list := [f32_bits(x) for x in numbers]
+f32_cells(numbers: list<float>): list<int> := [f32_bits(x) for x in numbers]
 # EZAT, version 1, format 1: RGBA8 whose payload is zlib (RFC 1950). The path is
 # `file#id#sha256`, and the header's hash must be that sha256.
 ATLAS_MAGIC := 0x54415A45
@@ -829,52 +829,25 @@ hex_byte(b: int): text := HEX_DIGITS[b /! 16] + HEX_DIGITS[b % 16]
 atlas_pixels(spec: text): int := {
 	if spec == atlas_key and atlas_kept != 0 { return atlas_kept }
 	parts = spec.split("#")
-	if count(parts) != 3 { failed("atlas: a baked atlas is file#id#hash"); return 0 }
-	file = fopen(parts[0], "rb")
-	if file == 0 { failed("atlas: no " + parts[0]); return 0 }
+	if #parts != 3 { failed("atlas: a baked atlas is file#id#hash"); return 0 }
+	path = parts[0]
+	file = fopen(path, "rb")
+	if file == 0 { failed("atlas: no " + path); return 0 }
 	head = calloc(1, 4096)
-	if fread(head, 1, ATLAS_HEAD, file) != ATLAS_HEAD or field_u32(head, 0) != ATLAS_MAGIC {
-		free(head)
-		fclose(file)
-		failed("atlas: " + parts[0] + " is not an EZAT atlas")
-		return 0
-	}
-	if field_u32(head, 4) != ATLAS_VERSION {
-		free(head)
-		fclose(file)
-		failed("atlas: " + parts[0] + " is a different version")
-		return 0
-	}
-	digest = ""
-	i = 0
-	while i < 32 { digest = digest + hex_byte(field_u8(head, 12 + i)); i = i + 1 }
-	if digest != parts[2] {
-		free(head)
-		fclose(file)
-		failed("atlas: " + parts[0] + " does not match its source hash")
-		return 0
-	}
+	if fread(head, 1, ATLAS_HEAD, file) != ATLAS_HEAD or field_u32(head, 0) != ATLAS_MAGIC { return atlas_refused(file, head, path + " is not an EZAT atlas") }
+	if field_u32(head, 4) != ATLAS_VERSION { return atlas_refused(file, head, path + " is a different version") }
+	digest = (0 ..< 32).map(i => hex_byte(field_u8(head, 12 + i))).join("")
+	if digest != parts[2] { return atlas_refused(file, head, path + " does not match its source hash") }
 	entries = field_u32(head, 8)
 	room = entries * ATLAS_ENTRY
-	if entries < 1 or entries > 8 {
-		free(head)
-		fclose(file)
-		failed("atlas: " + parts[0] + " has no entries")
-		return 0
-	}
-	if fread(head, 1, room, file) != room {
-		free(head)
-		fclose(file)
-		failed("atlas: " + parts[0] + " ends before its entries")
-		return 0
-	}
-	id = parts[1] as int
+	if entries < 1 or entries > 8 { return atlas_refused(file, head, path + " has no entries") }
+	if fread(head, 1, room, file) != room { return atlas_refused(file, head, path + " ends before its entries") }
+	id = int(parts[1])
 	found = no
 	raw = 0
 	payload_bytes = 0
 	at = 0
-	i = 0
-	while i < entries {
+	for i in 0 ..< entries {
 		base = i * ATLAS_ENTRY
 		if field_u32(head, base) == id {
 			found = field_u32(head, base + 12) == ATLAS_RGBA8
@@ -882,32 +855,27 @@ atlas_pixels(spec: text): int := {
 			payload_bytes = field_u32(head, base + 20)
 			at = field_u32(head, base + 24)
 		}
-		i = i + 1
 	}
 	free(head)
-	if not found or fseek(file, at, 0) != 0 {
-		fclose(file)
-		failed("atlas: " + parts[0] + " has no RGBA8 entry " + parts[1])
-		return 0
-	}
+	if not found or fseek(file, at, 0) != 0 { return atlas_refused(file, 0, path + " has no RGBA8 entry " + parts[1]) }
 	payload = calloc(1, payload_bytes)
 	got = fread(payload, 1, payload_bytes, file)
 	fclose(file)
 	if got != payload_bytes {
 		free(payload)
-		failed("atlas: " + parts[0] + " ends before its payload")
+		failed("atlas: " + path + " ends before its payload")
 		return 0
 	}
 	dest = calloc(1, raw)
-	lenp = calloc(1, 8)
-	set_field_i64(lenp, 0, raw)
-	code = uncompress(dest, lenp, payload, payload_bytes)
+	inflated = calloc(1, 8)
+	set_field_i64(inflated, 0, raw)
+	code = uncompress(dest, inflated, payload, payload_bytes)
 	free(payload)
-	size = field_i64(lenp, 0)
-	free(lenp)
+	size = field_i64(inflated, 0)
+	free(inflated)
 	if code != 0 or size != raw {
 		free(dest)
-		failed("atlas: " + parts[0] + " did not inflate")
+		failed("atlas: " + path + " did not inflate")
 		return 0
 	}
 	if atlas_kept != 0 { free(atlas_kept) }
@@ -915,6 +883,13 @@ atlas_pixels(spec: text): int := {
 	atlas_kept = dest
 	atlas_span = raw
 	dest
+}
+# the atlas file closed, its head let go (0: none), the reason said: 0
+atlas_refused(file: int, head: int, why: text): int := {
+	if head != 0 { free(head) }
+	fclose(file)
+	failed("atlas: " + why)
+	0
 }
 # the storage buffer kept for the array's name (kept_buffer) and its bytes: a baked atlas, a GPU list copied in one
 # write, else a list of numbers
@@ -929,7 +904,7 @@ stored_array(name: text, value: any, usage: int): StoredBuffer? := {
 	}
 	listed = gpu_storage(name, value)
 	if listed != 0 { return StoredBuffer(listed, storage_bytes(value)) }
-	cells = f32_cells(value)
+	cells = f32_cells(value as list<float>)
 	StoredBuffer(cells_kept(name, cells, usage), #cells * 4)
 }
 # a bind group entry: a buffer and its size, a texture view or a sampler at a binding
@@ -1005,7 +980,7 @@ drawing_made(written: text, values: map, width: int, height: int): any := {
 	gpu_failure = ""
 	if not device_ready() { return ø }
 	layout = values_laid_out(values)
-	if layout is bool { return ø }
+	if layout is ø { return ø }
 	indexed = #layout.indices > 0
 	if indexed and own_vertex_stage(shader) == "" {
 		failed("indexed draw needs the shader's own vertex stage")
@@ -1023,17 +998,17 @@ drawing_made(written: text, values: map, width: int, height: int): any := {
 	drawing = Drawing(0, 0, 0, names(shader, PREVIOUS_HOLE), if quads then QUAD_CORNERS else TRIANGLE_CORNERS, if quads or indexed then layout.instances else 1, layout.depth, 0, #layout.indices, width, height, [], layout.compute, layout.workgroups, 0, #layout.indirect, [], 0)
 	body = if drawing.reads_previous then renamed(shader, PREVIOUS_HOLE, PREVIOUS_FUNCTION) else shader
 	fields = compute_fields(layout.compute, values)
-	if fields is bool { return ø }
-	renaming = arrays_renamed(body, layout.arrays.map(array => array[0]) + fields.map(field => field.name))
-	body = renaming[0]
-	read_arrays = renaming[1]
+	if fields is ø { return ø }
+	renaming = arrays_renamed(body, layout.arrays.map(array => array.name) + fields.map(field => field.name))
+	body = renaming.body
+	read_arrays = renaming.read
 	if #read_arrays > MOST_COMPUTE_ARRAYS {
 		failed("a paint binds at most 8 arrays")
 		return ø
 	}
-	picturing = holes_renamed(body, layout.pictures.map(picture => picture[0]), PICTURE_PREFIX)
-	body = picturing[0]
-	read_pictures = layout.pictures.filter(picture => picture[0] in picturing[1])
+	picturing = holes_renamed(body, layout.pictures.map(picture => picture.name), PICTURE_PREFIX)
+	body = picturing.body
+	read_pictures = layout.pictures.filter(picture => picture.name in picturing.read)
 	if TRILINEAR_SAMPLERS.any(name => names(body, name)) {
 		failed("a trilinear sampler needs mipmaps, which a picture among paint's values has none of: sample it bilinear or bilinear_repeat")
 		return ø
@@ -1043,7 +1018,7 @@ drawing_made(written: text, values: map, width: int, height: int): any := {
 	if #layout.declarations > 0 { code += "\nstruct WarpValues { " + layout.declarations.join(", ") + " }\n@group(0) @binding(" + VALUES_BINDING + ") var<uniform> " + VALUES_NAME + ": WarpValues;" }
 	for i in 0 ..< #read_arrays { code += storage_declared(STORAGE_BINDING + i, read_arrays[i], read_type(read_arrays[i], fields)) }
 	if drawing.reads_previous { code += PREVIOUS_FRAME }
-	for i in 0 ..< #read_pictures { code += "\n@group(0) @binding(" + (PICTURE_BINDING + i) + ") var " + PICTURE_PREFIX + read_pictures[i][0] + ": texture_2d<f32>;" }
+	for i in 0 ..< #read_pictures { code += "\n@group(0) @binding(" + (PICTURE_BINDING + i) + ") var " + PICTURE_PREFIX + read_pictures[i].name + ": texture_2d<f32>;" }
 	for j in 0 ..< #samplers { code += "\n@group(0) @binding(" + (SAMPLER_BINDING + j) + ") var " + samplers[j].name + ": sampler;" }
 	drawing.pipeline = pipeline_of(code, FORMAT_RGBA8, drawing.depth, indexed)
 	if drawing.pipeline == 0 { return ø }
@@ -1057,7 +1032,7 @@ drawing_made(written: text, values: map, width: int, height: int): any := {
 		entries.add(Binding(PREVIOUS_FRAME_BINDING, view: drawing.previous))
 	}
 	for i in 0 ..< #read_pictures {
-		texture = picture_texture(read_pictures[i][0], read_pictures[i][1])
+		texture = picture_texture(read_pictures[i].name, read_pictures[i].value)
 		if texture == 0 {
 			drawing_released(drawing)
 			return ø
@@ -1069,7 +1044,7 @@ drawing_made(written: text, values: map, width: int, height: int): any := {
 	for j in 0 ..< #samplers { entries.add(Binding(SAMPLER_BINDING + j, sampler: sampler_made(samplers[j]))) }
 	stored = {}
 	for array in layout.arrays {
-		made = stored_array(array[0], array[1], BUFFER_STORAGE)
+		made = stored_array(array.name, array.value, BUFFER_STORAGE)
 		if made == ø {
 			drawing_released(drawing)
 			return ø
@@ -1150,19 +1125,19 @@ pipeline_layout_of(group: int): int := {
 	layout
 }
 class Field { name: text, type: text, buffer: int, bytes: int }
-# the compute shader's fields, each its kept buffer; no where one holds what a field cannot (said through failed)
-compute_fields(compute: text, values: map): any := {
-	fields = []
+# the compute shader's fields, each its kept buffer; ø where one holds what a field cannot (said through failed)
+compute_fields(compute: text, values: map<text, any>): list<Field>? := {
+	fields: list<Field> = []
 	for array in storage_arrays(compute) {
 		length = field_length(array.type)
 		if not array.writes or length == 0 or values.get(array.name) != ø { continue }
 		element = array.type.split("<")[1 ..].join("<").split(",")[0].trim()
-		strides = FIELD_STRIDES.filter(stride => element.starts_with(stride[0]))
+		strides = FIELD_STRIDES.filter(stride => element.starts_with(stride.element))
 		if #strides == 0 {
 			failed("the field " + array.name + " holds " + element + ": a field's elements are numbers or vectors of them")
-			return no
+			return ø
 		}
-		bytes = strides[0][1] * length
+		bytes = strides[0].bytes * length
 		fields.add(Field(array.name, array.type, kept_buffer(FIELD_KEY + array.name + ": " + array.type, bytes, BUFFER_STORAGE), bytes))
 	}
 	fields
@@ -1170,27 +1145,28 @@ compute_fields(compute: text, values: map): any := {
 # the length of a fixed-length array type, `array<f32, 64>` 64; 0 for one sized at run time
 field_length(type: text): int := {
 	parts = type.split(",")
-	digits = if #parts < 2 then "" else leading(parts.last().trim(), "0123456789")
+	digits = if #parts < 2 then "" else leading(parts[-1].trim(), "0123456789")
 	if digits == "" then 0 else int(digits)
 }
 # how the draw declares an array it reads: a field its own type, an atomic read as its plain number; a value's vec4fs
 # each storage array of these names the shader reads, `values.mesh` its own array warp_values_mesh: [the shader so
 # renamed, the names it reads]
-arrays_renamed(shader: text, candidates: list): list := holes_renamed(shader, candidates, STORAGE_PREFIX)
-# [the shader with each `values.<name>` it reads written <prefix><name>, the names it reads]
-holes_renamed(shader: text, candidates: list, prefix: text): list := {
+arrays_renamed(shader: text, candidates: list<text>): Renamed := holes_renamed(shader, candidates, STORAGE_PREFIX)
+# the shader with each `values.<name>` it reads written <prefix><name>, and the names it reads
+class Renamed { body: text, read: list<text> }
+holes_renamed(shader: text, candidates: list<text>, prefix: text): Renamed := {
 	body = shader
-	read = []
+	read: list<text> = []
 	for name in candidates {
 		hole = VALUES_NAME + "." + name
 		if not names(body, hole) { continue }
 		body = renamed(body, hole, prefix + name)
 		read.add(name)
 	}
-	[body, read]
+	Renamed(body, read)
 }
 storage_declared(binding: int, name: text, type: text): text := "\n@group(0) @binding(" + binding + ") var<storage, read> " + STORAGE_PREFIX + name + ": " + type + ";"
-read_type(name: text, fields: list): text := {
+read_type(name: text, fields: list<Field>): text := {
 	found = fields.filter(field => field.name == name)
 	if #found == 0 then "array<vec4f>" else found[0].type.replace("atomic<u32>", "u32").replace("atomic<i32>", "i32")
 }
@@ -1253,19 +1229,13 @@ compute_dispatched(encoder: int, drawing: Drawing): bool := {
 	yes
 }
 PYRAMID_TILE := 8
+# the tiles a side of so many pixels spans
+tiles(pixels: int): int := (pixels + PYRAMID_TILE - 1) /! PYRAMID_TILE
 pyramid_for(width: int, height: int) := {
-	tiles_x = (width + PYRAMID_TILE - 1) /! PYRAMID_TILE
-	tiles_y = (height + PYRAMID_TILE - 1) /! PYRAMID_TILE
-	n = tiles_x * tiles_y
+	n = tiles(width) * tiles(height)
 	if pyramid_buffer != 0 and pyramid_n == n and pyramid_width == width and pyramid_height == height { return }
 	if pyramid_buffer != 0 { wgpuBufferRelease(pyramid_buffer) }
-	cells = []
-	i = 0
-	while i < n {
-		cells.add(f32_bits(1.0))
-		i = i + 1
-	}
-	pyramid_buffer = cells_buffer(cells, BUFFER_STORAGE)
+	pyramid_buffer = cells_buffer([f32_bits(1.0) for i in 0 ..< n], BUFFER_STORAGE)
 	pyramid_n = n
 	pyramid_width = width
 	pyramid_height = height
@@ -1275,10 +1245,8 @@ pyramid_code(tiles_x: int, tiles_y: int, width: int, height: int): text := {
 }
 # the frame's depth, one max per 8 by 8 tile, kept for the next frame's cull. A new size starts at the far plane.
 pyramid_reduced(encoder: int, depth_view: int, width: int, height: int): bool := {
-	tiles_x = (width + PYRAMID_TILE - 1) /! PYRAMID_TILE
-	tiles_y = (height + PYRAMID_TILE - 1) /! PYRAMID_TILE
 	pyramid_for(width, height)
-	code = pyramid_code(tiles_x, tiles_y, width, height)
+	code = pyramid_code(tiles(width), tiles(height), width, height)
 	if pyramid_pipeline == 0 or pyramid_shader_code != code {
 		if pyramid_pipeline != 0 { wgpuComputePipelineRelease(pyramid_pipeline) }
 		wgpuDevicePushErrorScope(device, ERROR_FILTER_VALIDATION)
@@ -1385,15 +1353,9 @@ image_drawn(encoder: int, drawing: Drawing, width: int, height: int): int := {
 	}
 	image
 }
-drawing_of(shader: text, values: any, width: int, height: int) := drawing_made(shader, values_filled(shader, values, width, height), width, height)
+drawing_of(shader: text, values: any, width: int, height: int): Drawing? := drawing_made(shader, values_filled(shader, values, width, height), width, height)
 # the image kept as the drawing's previous frame, else let go
-image_done(drawing: Drawing, image: int) := {
-	if not drawing.reads_previous {
-		wgpuTextureRelease(image)
-		return
-	}
-	previous_kept(image)
-}
+image_done(drawing: Drawing, image: int) := if drawing.reads_previous then previous_kept(image) else wgpuTextureRelease(image)
 extent_of(width: int, height: int): int := {
 	extent = struct_of(EXTENT)
 	set_field_i32(extent, 0, width)
@@ -1414,21 +1376,22 @@ buffer_mapped(buffer: int, size: int): int := {
 
 # host_shader_painted(shader, width, height, values, pixels): the shader painted on the GPU, its pixels RGBA, a byte
 # each, row by row into `pixels` (the driver's, width × height × 4 bytes); 0, else -1 and why on standard error
-host_shader_painted(given_shader, width: int, height: int, values: any, pixels: int): int :=
-	if shader_painted(text(given_shader), width, height, values, pixels) then 0 else said_failed("paint of a shader")
+host_shader_painted(shader: text, width: int, height: int, values: any, pixels: int): int :=
+	if shader_painted(shader, width, height, values, pixels) then 0 else said_failed("paint of a shader")
 # gpu_render(shader, width, height, values): the shader's pixels, each a color word as `red` is one (alpha, red, green,
 # blue from the highest byte, as the page gives them); a shader that fails raises with why
-host_gpu_render(given_shader, width: int, height: int, values: any): any? := {
+host_gpu_render(shader: text, width: int, height: int, values: any): list<int> := {
 	gpu_failure = ""
 	size = width * height * PIXEL_BYTES
 	pixels = struct_of(size)
-	painted = shader_painted(text(given_shader), width, height, values, pixels)
+	painted = shader_painted(shader, width, height, values, pixels)
 	words = if painted then pixel_words(pixels, width, height, width * PIXEL_BYTES) else []
 	free(pixels)
-	if painted then words else error(gpu_failure)
+	if not painted { raise gpu_failure }
+	words
 }
 # the color words of RGBA pixels in memory, rows `stride` bytes apart, one C read a pixel
-pixel_words(memory: int, width: int, height: int, stride: int): list := [color_word(field_u32(memory, row * stride + col * PIXEL_BYTES)) for row in 0 ..< height for col in 0 ..< width]
+pixel_words(memory: int, width: int, height: int, stride: int): list<int> := [color_word(field_u32(memory, row * stride + col * PIXEL_BYTES)) for row in 0 ..< height for col in 0 ..< width]
 # a pixel's RGBA bytes read as one little-endian word, as a color word (alpha, red, green, blue from the highest byte):
 # red and blue change places
 color_word(rgba: int): int := both_bits(rgba, ALPHA_GREEN) + (both_bits(rgba, BYTE) << 16) + both_bits(shift_right(rgba, 16), BYTE)
@@ -1602,8 +1565,7 @@ painting_layer(width: int, height: int): int := if device_ready() then host_wind
 # host_shader_shown(shader, width, height, values): the shader shown in the window: 1, 0 with no window open (the
 # driver paints its PNG), -1 failed, why on standard error. It draws into an image of the painting's size first (kept
 # for the next frame by a shader reading its previous one), then shown scaled
-host_shader_shown(given_shader, width: int, height: int, values: any): int := {
-	shader = text(given_shader)
+host_shader_shown(shader: text, width: int, height: int, values: any): int := {
 	layer = painting_layer(width, height)
 	if layer == 0 { return 0 }
 	# shaded at the window's own pixels, not scaled up from the painting's size: crisp on a Retina display
@@ -1649,47 +1611,50 @@ shown_again() := {
 # declares the storage array of that name, f32 unless array<i32> or array<u32>; the arrays it left come back as a map,
 # in the order given. `arrays` a list: the numbers at @binding(0), they come back as a list. A GPU list's cells
 # (extensions/gpu_lists) are the program's memory, read and written where they are
-class StorageArray { name: text, binding: int, element: text, given: any, cell: text, writes: bool, type: text }
+class StorageArray { name: text, binding: int, element: text, given: list<any>, cell: text, writes: bool, type: text }
 # the storage arrays the shader declares: `@binding(1) var<storage, read_write> counts: array<i32>`
-storage_arrays(shader: text): list := {
-	declared = []
+storage_arrays(shader: text): list<StorageArray> := {
+	declared: list<StorageArray> = []
 	parts = shader.split("var<storage")
 	for i in 1 ..< #parts {
 		before = parts[i - 1]
 		if not before.contains("@binding(") { continue }
-		binding = int(leading(before.split("@binding(").last(), "0123456789"))
+		binding = int(leading(before.split("@binding(")[-1], "0123456789"))
 		if not parts[i].contains(">") { continue }
 		declaration = parts[i].split(">")[1 ..].join(">").trim()
 		name = leading(declaration, NAME_BYTES)
 		element = "f32"
 		for cell in ["i32", "u32", HALF] { if declaration.contains("array<" + cell) { element = cell } }
 		type = declaration.split(":")[1 ..].join(":").split(";")[0].trim()
-		declared.add(StorageArray(name, binding, element, ø, "", parts[i].split(">")[0].contains("read_write"), type))
+		declared.add(StorageArray(name, binding, element, [], "", parts[i].split(">")[0].contains("read_write"), type))
 	}
 	declared
 }
-# the given arrays put into the declared ones, in the order given; a text saying why where they do not fit
-arrays_given(given: any, declared: list): any := {
-	if not (given is map) {
-		if not (given is list) { return "gpu_compute takes a list of numbers or a map of named lists" }
+# the given arrays put into the declared ones, in the order given; raises why where they do not fit
+arrays_given(given: any, declared: list<StorageArray>): list<StorageArray> := {
+	if given is list<any> {
 		first = declared.filter(array => array.binding == 0)
-		if #first == 0 { return "gpu_compute of a list: the shader declares no storage array at @binding(0)" }
+		if #first == 0 { raise "gpu_compute of a list: the shader declares no storage array at @binding(0)" }
 		array_given(first[0], given)
-		return [first[0]]
+		return first
 	}
-	if #given.keys > MOST_COMPUTE_ARRAYS { return "gpu_compute binds at most 8 arrays" }
-	order = []
+	if not (given is map<text, list<any>>) { raise "gpu_compute takes a list of numbers or a map of named lists" }
+	arrays_named(given, declared)
+}
+arrays_named(given: map<text, list<any>>, declared: list<StorageArray>): list<StorageArray> := {
+	if #given.keys > MOST_COMPUTE_ARRAYS { raise "gpu_compute binds at most 8 arrays" }
+	order: list<StorageArray> = []
 	for name in given.keys {
 		named = declared.filter(array => array.name == name)
-		if #named == 0 { return "the shader declares no storage array " + name }
-		if #given[name] == 0 { return name + " is empty: a storage array holds at least one number" }
+		if #named == 0 { raise "the shader declares no storage array " + name }
+		if #given[name] == 0 { raise name + " is empty: a storage array holds at least one number" }
 		array_given(named[0], given[name])
 		order.add(named[0])
 	}
-	for array in declared { if array.given == ø { return "the shader's array " + array.name + " has no numbers" } }
+	for array in declared { if #array.given == 0 { raise "the shader's array " + array.name + " has no numbers" } }
 	order
 }
-array_given(array: StorageArray, numbers: any) := {
+array_given(array: StorageArray, numbers: list<any>) := {
 	array.given = numbers
 	array.cell = if is_gpu_list(numbers) then GPU_CELLS[gpu_list_cell(numbers)] else ""
 }
@@ -1707,14 +1672,14 @@ array_buffer(array: StorageArray): int := {
 	slow("the storage array " + array.name + " is not a GPU list: each number is walked to its bits on every upload", "make it as " + array.name + ": [" + array.element + "] = …")
 	cells_kept(array.name, [cell_bits(array.element, x) for x in array.given], usage)
 }
-# why an array cannot bind what it is given, ø where it can (as host-gpu.js cellsUnfit says it): an array<f16> takes
-# only a GPU list [f16], whose cells it binds as they are, and a GPU list [f16] only one; a GPU list [bf16] has no
-# WGSL array type yet (card gpu-lists)
-cells_unfit(array: StorageArray): text? := {
-	if array.cell == BRAIN { return "the GPU list [bf16] " + array.name + " has no WGSL array type to bind as yet" }
-	if array.cell.starts_with("vec") { return "the GPU list [" + array.cell + "] " + array.name + " binds in paint's values; gpu_compute's arrays take lists of numbers" }
-	if (array.element == HALF) == (array.cell == HALF) { return ø }
-	if array.element == HALF then "the shader's array<f16> " + array.name + " takes a GPU list [f16]: make it as " + array.name + ": [f16] = …" else "the GPU list [f16] " + array.name + " needs the shader's array<f16>, not array<" + array.element + ">"
+# an array binds what it is given, else raises why (as host-gpu.js cellsUnfit says it): an array<f16> takes only a GPU
+# list [f16], whose cells it binds as they are, and a GPU list [f16] only one; a GPU list [bf16] has no WGSL array type
+# yet (card gpu-lists)
+cells_fitted(array: StorageArray) := {
+	if array.cell == BRAIN { raise "the GPU list [bf16] " + array.name + " has no WGSL array type to bind as yet" }
+	if array.cell.starts_with("vec") { raise "the GPU list [" + array.cell + "] " + array.name + " binds in paint's values; gpu_compute's arrays take lists of numbers" }
+	if array.element == HALF and array.cell != HALF { raise "the shader's array<f16> " + array.name + " takes a GPU list [f16]: make it as " + array.name + ": [f16] = …" }
+	if array.cell == HALF and array.element != HALF { raise "the GPU list [f16] " + array.name + " needs the shader's array<f16>, not array<" + array.element + ">" }
 }
 # an array's bytes: its cells' (two each of an f16), whole words, as WebGPU copies and binds a buffer
 cells_bytes(array: StorageArray): int := #array.given * (if array.element == HALF then 2 else WORD_BYTES)
@@ -1769,18 +1734,15 @@ array_left(array: StorageArray, mapped: int): any := {
 	gpu_list_kept(array.given)
 	array.given
 }
-host_gpu_computed(given_shader, arrays: any, workgroups: int): any? := {
-	shader = text(given_shader)
+host_gpu_computed(shader: text, arrays: any, workgroups: int): any := {
 	gpu_failure = ""
 	order = arrays_given(arrays, storage_arrays(shader))
-	if order is text { return error(order) }
-	unfit = order.map(array => cells_unfit(array)).filter(why => why != ø)
-	if #unfit > 0 { return error(unfit#1) }
-	if not device_ready() { return error(gpu_failure) }
-	if shader.contains(HALVES_ENABLED) and not halves_offered { return error(NO_HALVES) }
+	for array in order { cells_fitted(array) }
+	if not device_ready() { raise gpu_failure }
+	if shader.contains(HALVES_ENABLED) and not halves_offered { raise NO_HALVES }
 	left = arrays_computed(shader, order, workgroups)
-	if left == ø { return error(gpu_failure) }
-	if not (arrays is map) { return left[0] }
+	if left == ø { raise gpu_failure }
+	if not (arrays is map<text, any>) { return left[0] }
 	answer = {}
 	for a in 0 ..< #order { answer[order[a].name] = left[a] }
 	answer
@@ -1839,7 +1801,7 @@ good_field_name(name: text): bool := {
 }
 # the names, or a text saying why they are not
 field_names(given: any): any := {
-	if not (given is list) { return "gpu_fields takes a list of names" }
+	if not (given is list<any>) { return "gpu_fields takes a list of names" }
 	if #given < 1 or #given > MOST_FIELDS { return "gpu_fields takes 1 to 8 names" }
 	kept = []
 	for item in given {
@@ -1996,15 +1958,15 @@ pass_drawn(shader: text, given: any, width: int, height: int, reads: list, targe
 	frame_opened()
 	values = values_copied(shader, given, width, height)
 	layout = values_laid_out(values)
-	if layout is bool { return no }
+	if layout is ø { return no }
 	# (a list it reads is a storage array, bound after the fields as paint binds its own)
-	renaming = arrays_renamed(shader, layout.arrays.map(array => array[0]))
-	read_arrays = layout.arrays.filter(array => array[0] in renaming[1])
+	renaming = arrays_renamed(shader, layout.arrays.map(array => array.name))
+	read_arrays = layout.arrays.filter(array => array.name in renaming.read)
 	decl = ""
 	if #layout.declarations > 0 { decl = "\nstruct WarpValues { " + layout.declarations.join(", ") + " }\n@group(0) @binding(" + VALUES_BINDING + ") var<uniform> " + VALUES_NAME + ": WarpValues;" }
-	code = pass_code(renaming[0], decl, reads)
+	code = pass_code(renaming.body, decl, reads)
 	first_array = (if fields_filterable and #reads > 0 then 2 else 1) + #reads
-	for i in 0 ..< #read_arrays { code += storage_declared(first_array + i, read_arrays[i][0], read_type(read_arrays[i][0], [])) }
+	for i in 0 ..< #read_arrays { code += storage_declared(first_array + i, read_arrays[i].name, read_type(read_arrays[i].name, [])) }
 	pipeline = pass_pipeline(code, format)
 	if pipeline == 0 { return no }
 	entries = []
@@ -2025,7 +1987,7 @@ pass_drawn(shader: text, given: any, width: int, height: int, reads: list, targe
 		binding += 1
 	}
 	for array in read_arrays {
-		made = stored_array(array[0], array[1], BUFFER_STORAGE)
+		made = stored_array(array.name, array.value, BUFFER_STORAGE)
 		if made == ø { return no }
 		entries.add(Binding(binding, made.buffer, made.bytes))
 		binding += 1
@@ -2048,8 +2010,8 @@ fields_set(id: int): FieldSet := {
 	field_sets[id - 1]
 }
 fields_read(shader: text, set: FieldSet): list := set.fields.filter(field => names(shader, FIELD_PREFIX + field.name))
-host_gpu_fields_format(): any := {
-	if not fields_format_chosen() { return error(gpu_failure) }
+host_gpu_fields_format(): text := {
+	if not fields_format_chosen() { raise gpu_failure }
 	fields_format_name
 }
 host_gpu_fields(width: int, height: int, given: any): int := {
@@ -2078,14 +2040,12 @@ host_gpu_fields(width: int, height: int, given: any): int := {
 	field_sets.add(set)
 	#field_sets
 }
-# -1 where `into` names no field: the library word raises that, so a program can catch it
-host_gpu_pass_recorded(given_shader, id: int, into: any, given: any): int := {
+# -1 where `name` names no field: the library word raises that, so a program can catch it
+host_gpu_pass_recorded(shader: text, id: int, name: text, given: any): int := {
 	started = wall_clock_ms()
 	set = fields_set(id)
-	name = text(into)
 	found = set.fields.filter(field => field.name == name)
 	if #found == 0 { return -1 }
-	shader = text(given_shader)
 	reads = fields_read(shader, set)
 	if not pass_drawn(shader, given, set.width, set.height, reads, found[0].back, fields_format) { raise gpu_failure }
 	field_swapped(found[0])
@@ -2122,7 +2082,7 @@ fitted_timed(scale: float) := {
 	slow_fitted = 0
 	eprint("hint: frames come slower than 30 a second, so the window shades " + text(shade_ceiling) + " pixels a point")
 }
-host_gpu_show(given_shader, id: int, given: any): int := {
+host_gpu_show(shader: text, id: int, given: any): int := {
 	set = fields_set(id)
 	layer = painting_layer(set.width, set.height)
 	upload = pass_ms
@@ -2135,7 +2095,6 @@ host_gpu_show(given_shader, id: int, given: any): int := {
 		return 0
 	}
 	started = wall_clock_ms()
-	shader = text(given_shader)
 	image = shade_image(shader, set, given, set.width, set.height)
 	if image == 0 {
 		passes_finished()
@@ -2151,7 +2110,7 @@ host_gpu_show(given_shader, id: int, given: any): int := {
 	if not shown { raise gpu_failure }
 	1
 }
-host_gpu_show_sized(given_shader, id: int, width: int, height: int, given: any): int := {
+host_gpu_show_sized(shader: text, id: int, width: int, height: int, given: any): int := {
 	if width < 1 or height < 1 { raise "gpu_show needs a positive width and height" }
 	set = fields_set(id)
 	layer = painting_layer(width, height)
@@ -2172,7 +2131,6 @@ host_gpu_show_sized(given_shader, id: int, width: int, height: int, given: any):
 		shade_h = fitted[1]
 	}
 	started = wall_clock_ms()
-	shader = text(given_shader)
 	shading_scale = shade_w / width
 	image = shade_image(shader, set, given, shade_w, shade_h)
 	shading_scale = 1.0
@@ -2190,25 +2148,24 @@ host_gpu_show_sized(given_shader, id: int, width: int, height: int, given: any):
 	if not shown { raise gpu_failure }
 	1
 }
-host_gpu_picture(given_shader, id: int, given: any): any := {
+host_gpu_picture(shader: text, id: int, given: any): list<int> := {
 	set = fields_set(id)
-	host_gpu_picture_sized(given_shader, id, set.width, set.height, given)
+	host_gpu_picture_sized(shader, id, set.width, set.height, given)
 }
-host_gpu_picture_sized(given_shader, id: int, width: int, height: int, given: any): any := {
-	if width < 1 or height < 1 { return error("gpu_picture needs a positive width and height") }
+host_gpu_picture_sized(shader: text, id: int, width: int, height: int, given: any): list<int> := {
+	if width < 1 or height < 1 { raise "gpu_picture needs a positive width and height" }
 	set = fields_set(id)
-	shader = text(given_shader)
 	image = shade_image(shader, set, given, width, height)
 	if image == 0 {
 		passes_finished()
-		return error(gpu_failure)
+		raise gpu_failure
 	}
 	encoder = pass_encoder
 	pass_encoder = 0
 	read = pixels_mapped(encoder, image, width, height)
 	passes_released()
 	wgpuTextureRelease(image)
-	if read[1] == 0 { return error(gpu_failure) }
+	if read[1] == 0 { raise gpu_failure }
 	words = pixel_words(read[1], width, height, copy_stride(width))
 	wgpuBufferUnmap(read[0])
 	frame_closed()
