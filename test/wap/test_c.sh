@@ -69,8 +69,11 @@ made40(): handle from '$stage/libs40.dylib'
 m = made40()
 print(text(sum40(m)) + \" \" + text(first40(m)))")" "14 1"
 # a function that gives nothing is a C callback too, answering 0 (wiki/c.md: an Objective-C delegate)
-check "a function that gives nothing is called back through c_callback" "$(ran resultless_callback 'use callbacks
+printf '%s\n' '#include <stdint.h>' 'void notify2(void (*f)(int64_t, int64_t)) { f(3, 4); f(0, 5); }' >"$stage/notify.c" && cc -shared -o "$stage/libnotify.dylib" "$stage/notify.c"
+check "a function that gives nothing is called back through c_callback" "$(ran resultless_callback "use callbacks
+notify2(f: handle): void from '$stage/libnotify.dylib'
 hits: list<int> = []
-noted(a: int, b: int) := { if a > 0 { hits.add(a) } }
-print(text(c_callback(noted, ["i64", "i64"]) > 0))')" "yes"
+noted(a: int, b: int) := { if a > 0 { hits.add(a + b) } }
+notify2(c_callback(noted, [\"i64\", \"i64\"]))
+print(text(hits))")" "[7]"
 exit $((failures > 0))
