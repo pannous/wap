@@ -180,24 +180,24 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - notes.md (48 lines): wap-wiki, internal notes: asked to hide
 - null.md (100 lines): wap-wiki, tests test_null_page.wap green, test_null_wanted.wap the forms still to build; asked (required/maybe words, Person.null, todos)
 - number.md (119 lines): wap-wiki, tests test_number_page.wap green, test_number_wanted.wap the forms still to build (exact decimals, big ints, glyphs)
-- object.md (3 lines):
-- operator.md (223 lines):
-- optional.md (95 lines):
-- overflow.md (10 lines):
+- object.md (3 lines): wap-wiki, prose; asked (wasp, node_pointer)
+- operator.md (223 lines): wap-wiki, tests test_operator_page.wap green, test_operator_wanted.wap the forms still to build; asked (verbed, | overload, n-ary todos)
+- optional.md (95 lines): wap-wiki, tests test_optional_page.wap green, test_optional_wanted.wap the forms still to build; asked (field spellings, schemes sketches, list ø)
+- overflow.md (10 lines): wap-wiki, internals: asked
 - overloading.md (0 lines):
-- packages.md (23 lines):
-- pair.md (32 lines):
-- partial-evaluation.md (8 lines):
-- pattern-matching.md (297 lines):
-- pattern.md (72 lines):
-- Perfect.md (12 lines):
-- Philosophy.md (80 lines):
-- pipe.md (70 lines):
-- plural.md (17 lines):
-- pointer.md (4 lines):
-- polymorphism.md (79 lines):
-- possessive.md (8 lines):
-- precedence.md (11 lines):
+- packages.md (23 lines): wap-wiki, design chat: asked to move to notes
+- pair.md (32 lines): wap-wiki, tests test_pair_wanted.wap the forms still to build; asked (wasp prose)
+- partial-evaluation.md (8 lines): wap-wiki, a todo: asked
+- pattern-matching.md (297 lines): wap-wiki, tests test_pattern_matching_page.wap green, test_pattern_matching_wanted.wap the forms still to build
+- pattern.md (72 lines): wap-wiki, design essay: asked (move to notes, keep holes)
+- Perfect.md (12 lines): wap-wiki, prose; asked (path quotes)
+- Philosophy.md (80 lines): wap-wiki, prose
+- pipe.md (70 lines): wap-wiki, tests test_pipe_page.wap green, test_pipe_wanted.wap the forms still to build; asked (& as pipe, todos)
+- plural.md (17 lines): wap-wiki, tests test_plural_page.wap green; asked (loop name picks words)
+- pointer.md (4 lines): ✓ wap-wiki, links
+- polymorphism.md (79 lines): wap-wiki, tests test_polymorphism_page.wap green, test_polymorphism_wanted.wap the forms still to build; asked (C-style heads, first shadowing)
+- possessive.md (8 lines): wap-wiki, tests test_possessive_page.wap green, test_possessive_wanted.wap; asked ('s, [name:])
+- precedence.md (11 lines): wap-wiki, tests test_precedence_page.wap green; asked (superscript, todo)
 - primitive.md (45 lines):
 - property.md (48 lines):
 - pure.md (34 lines):
