@@ -111,6 +111,11 @@ The languages, each a set of Node shapes:
   A function whose parameters have no type stands as one Define per tuple of argument types it is called with; one
   nothing calls is gone. The program comes first after the types module's functions it calls: one Block
   (core/analyze/types.wap). Every node with a position also has its `file` (core/stage.wap `file_of`).
+  A function value is typed `fn<key, captures…>`, its own type, and called directly while it stays one; where it meets
+  a typed place or another value it is typed by its signature `(A…) -> R` and carries the facts `adapted` (the
+  instance typed for that signature; a λ's instance takes its closure as `any` and casts it itself) and
+  `function_value` (its own type). The emitter makes such a value a funcref with a captures struct and calls it by
+  call_ref (card signature-function-values).
 - **emit** reads the typed kernel's `type` and `binding` facts and decides nothing about them: it may choose its code
   by them, but computes no type (test_guardrails.sh emit-infers-type).
 
