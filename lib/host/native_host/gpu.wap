@@ -71,17 +71,11 @@ DEPTH_ATTACHMENT := 48
 DEPTH_ATTACHMENT_AT := 40
 VALUE_TYPES := ["f32", "vec2f", "vec3f", "vec4f"]
 VALUE_ALIGNMENTS := [1, 2, 4, 4]
-# a GPU list's cell types, by extensions/gpu_lists GpuCell
-GPU_CELLS := ["f32", "i32", "u32", "f16", "bf16", "vec2", "vec3", "vec4"]
-# the GPU lists whose cells are already a values array<vec4f>'s bytes: f32 ones, vec3 (padded to four) and vec4
-VEC4F_CELLS := ["f32", "vec3", "vec4"]
-# gpu_list_place of a value that is no GPU list: any other place is one, a negative one too, its address past 2 GiB
-# of the program's memory ((address << 32) + count, warp's extensions/gpu_lists/runtime.warp)
-NO_PLACE := -1
 VEC4F_BYTES := 16
 # WGSL's 16-bit float, a device feature (webgpu.h WGPUFeatureName_ShaderF16): an array<f16> holds two to a word
 HALF := "f16"
-BRAIN := "bf16"
+HALF_BYTES := 2
+HALF_BITS := 16
 FEATURE_SHADER_F16 := 11
 # webgpu.h WGPUFeatureName_Float32Filterable: an rgba32float texture sampled linearly
 FEATURE_FLOAT32_FILTERABLE := 14
@@ -459,8 +453,7 @@ leading(t: text, allowed: text): text := {
 
 # --- pictures: an image among paint's values (anything with width, height and pixels, 0xAARRGGBB each, a pixel
 # without an alpha byte opaque) is a texture_2d<f32> the shader reads as `values.<name>`: textureSampleLevel(
-# values.channel0, bilinear_repeat, uv, 0.0), textureDimensions(values.channel0). Its pixels, a GPU list [u32], are
-# written into the texture where they are; any other list is walked to bytes on every upload
+# values.channel0, bilinear_repeat, uv, 0.0), textureDimensions(values.channel0)
 class Picture { width: int, height: int, pixels: list<int> }
 # bgra8unorm: a 0xAARRGGBB word is its bytes B, G, R, A in memory, so the pixels go in as they are
 PICTURE_FORMAT := FORMAT_BGRA8
@@ -482,10 +475,9 @@ picture_texture(name: text, picture: Picture): int := {
 		gpu.kept_pictures[name] = KeptPicture(texture_made(picture_width, picture_height, TEXTURE_BINDING + TEXTURE_COPY_DST, PICTURE_FORMAT), picture_width, picture_height)
 	}
 	texture = gpu.kept_pictures[name].texture
-	listed = is_gpu_list(pixels) and GPU_CELLS[gpu_list_cell(pixels)] == "u32"
-	staged = if listed then program_cells(gpu_list_place(pixels)) else picture_staged(name, pixels)
+	staged = picture_staged(pixels)
 	pixels_written(texture, staged, picture_width, picture_height)
-	if not listed { free(staged) }
+	free(staged)
 	texture
 }
 # a texture's whole image, as a copy names it
@@ -505,9 +497,8 @@ pixels_written(texture: int, pixels: int, width: int, height: int) := {
 	free(into)
 	free(rows)
 }
-# a picture's pixels that are no GPU list [u32], walked into bytes, each opaque that has no alpha byte
-picture_staged(name: text, pixels: list<int>): int := {
-	slow("the picture " + name + "'s pixels are not a GPU list: they are walked to bytes on every upload", "make them as pixels: [u32] = …")
+# a picture's pixels as C's bytes, each opaque that has no alpha byte
+picture_staged(pixels: list<int>): int := {
 	staged = calloc(#pixels, PIXEL_BYTES)
 	for i in 0 .. #pixels {
 		pixel = pixels[i]
@@ -585,23 +576,16 @@ member_laid_out(layout: Layout, name: text, value: any): text := {
 		return ""
 	}
 	if value is list<any> {
-		# a GPU list [f32] longer than a vec4f, or one [vec4], is already the storage array's bytes, its tail padded to a
-		# whole vec4f (storage_bytes); a shorter one is a uniform, as a list of as many numbers is
-		if is_gpu_cells(value) and GPU_CELLS[gpu_list_cell(value)] in VEC4F_CELLS and (#value > VECTOR_FLOATS or gpu_list_cell(value) > 0) {
-			return array_laid(layout, name, value)
-		}
-		# (any other GPU list read once as a for reads it: it takes no list word)
-		items = if is_gpu_cells(value) then [item for item in value] else value
-		vectors = items.any(item => item is list<any>)
-		if vectors or #items > VECTOR_FLOATS {
-			array_walked(name, value, vectors)
-			numbers = if vectors then [if i < #item then float(item[i]) else 0.0 for item in items for i in 0 .. VECTOR_FLOATS] else [float(x) for x in items]
+		# more numbers than a vec4f holds, or vectors, are a storage array<vec4f>, its tail padded to a whole vec4f
+		vectors = value.any(item => item is list<any>)
+		if vectors or #value > VECTOR_FLOATS {
+			numbers = if vectors then [if i < #item then float(item[i]) else 0.0 for item in value for i in 0 .. VECTOR_FLOATS] else [float(x) for x in value]
 			padded(numbers, VECTOR_FLOATS)
 			if #numbers == 0 { numbers = [0.0, 0.0, 0.0, 0.0] }
 			return array_laid(layout, name, numbers)
 		}
-		if #items < 1 { return "is one number or a list of two to four" }
-		return uniform_member(layout, name, [float(x) for x in items])
+		if #value < 1 { return "is one number or a list of two to four" }
+		return uniform_member(layout, name, [float(x) for x in value])
 	}
 	if name == COMPUTE_NAME {
 		layout.compute = text(value)
@@ -616,19 +600,10 @@ member_laid_out(layout: Layout, name: text, value: any): text := {
 	}
 	uniform_member(layout, name, [float(value)])
 }
-is_gpu_cells(value: any): bool := is_gpu_list(value)
-# a storage array whose numbers are walked to f32 bits on every upload, said with the fix its shape takes: a list of
-# numbers becomes a GPU list [f32], a list of vectors one [vec4]
-array_walked(name: text, value: list<any>, vectors: bool) := {
-	walked = "its numbers are walked to f32 bits on every upload"
-	if is_gpu_cells(value) { slow("the GPU list " + name + " [" + GPU_CELLS[gpu_list_cell(value)] + "] is no array<vec4f>: " + walked, "make it as " + name + ": [f32] = … or [vec4] = …") }
-	else if vectors { slow("the storage array " + name + " is a list of vectors: " + walked, "make it as " + name + ": [vec4] = …") }
-	else { slow("the storage array " + name + " is not a GPU list: " + walked, "make it as " + name + ": [f32] = …") }
-}
-array_laid(layout: Layout, name: text, cells: any): text := {
+array_laid(layout: Layout, name: text, numbers: list<float>): text := {
 	why = array_room(layout)
 	if why != "" { return why }
-	layout.arrays.add(Named(name, cells))
+	layout.arrays.add(Named(name, numbers))
 	""
 }
 uniform_member(layout: Layout, name: text, numbers: list<float>): text := {
@@ -811,26 +786,8 @@ kept_buffer(name: text, bytes: int, usage: int): int := {
 	gpu.stored_buffers[key] = StoredBuffer(buffer, bytes)
 	buffer
 }
-# a GPU list copied from the program's memory in one write, 0 where this value is not one (the caller walks
-# its numbers)
-gpu_storage(name: text, cells: any): int := {
-	place = gpu_list_place(cells)
-	if place == NO_PLACE { return 0 }
-	buffer = kept_buffer(name, storage_bytes(cells), BUFFER_STORAGE)
-	wgpuQueueWriteBuffer(gpu.queue, buffer, 0, program_cells(place), gpu_list_bytes(cells))
-	buffer
-}
-# a GPU list's bytes as a storage array<vec4f> binds them: rounded up to a whole vec4f, the tail zero
-storage_bytes(cells: any): int := vec4f_rounded(gpu_list_bytes(cells))
 # bytes rounded up to a whole vec4f, the least a storage array<vec4f> binds (a one-pixel atlas is 4 bytes)
 vec4f_rounded(bytes: int): int := (bytes + VEC4F_BYTES - 1) /! VEC4F_BYTES * VEC4F_BYTES
-# where a GPU list's cells are staged in the program's memory (gpu_list_place, gpu_list_room), as C sees them; never
-# a walk number by number where the driver recorded no memory (the run's start records it)
-program_cells(place: int): int := {
-	base = system_value("program memory")
-	if base == 0 { raise "a GPU list's cells: the driver recorded no program memory to copy them from" }
-	pointer_handle(base + shift_right(place, 32))
-}
 # a buffer of its own holding the cells (numbers as f32 bits or int32s), bound so: one of several in one command
 # encoder (gpu_pass)
 cells_buffer(cells: list<int>, usage: int): int := cells_written(buffer_of(#cells * 4, usage + BUFFER_COPY_DST), cells)
@@ -920,8 +877,7 @@ atlas_refused(file: int, head: int, why: text): int := {
 	failed("atlas: " + why)
 	0
 }
-# the storage buffer kept for the array's name (kept_buffer) and its bytes: a baked atlas, a GPU list copied in one
-# write, else a list of numbers
+# the storage buffer kept for the array's name (kept_buffer) and its bytes: a baked atlas, else a list of numbers
 stored_array(array: Named): StoredBuffer? := {
 	name = array.name
 	value = array.value
@@ -934,8 +890,6 @@ stored_array(array: Named): StoredBuffer? := {
 		wgpuQueueWriteBuffer(gpu.queue, buffer, 0, pixels, gpu.atlas_span)
 		return StoredBuffer(buffer, bytes)
 	}
-	listed = gpu_storage(name, value)
-	if listed != 0 { return StoredBuffer(listed, storage_bytes(value)) }
 	cells = f32_cells(value as list<float>)
 	StoredBuffer(cells_kept(name, cells, usage), #cells * 4)
 }
@@ -1654,9 +1608,9 @@ shown_again() := {
 # --- gpu_compute(shader, arrays, workgroups): a WGSL compute shader, its entry point `main`, run over
 # storage arrays as host-gpu.js gpuComputedArrays runs it. `arrays` a map of named lists, each bound where the shader
 # declares the storage array of that name, f32 unless array<i32> or array<u32>; the arrays it left come back as a map,
-# in the order given. `arrays` a list: the numbers at @binding(0), they come back as a list. A GPU list's cells
-# (extensions/gpu_lists) are the program's memory, read and written where they are
-class StorageArray { name: text, binding: int, element: text, given: list<any>, cell: text, writes: bool, type: text }
+# in the order given. `arrays` a list: the numbers at @binding(0), they come back as a list. Each number crosses as a
+# cell of the array's element: an f32, i32 or u32, or an f16, two to a word
+class StorageArray { name: text, binding: int, element: text, given: list<any>, writes: bool, type: text }
 # the storage arrays the shader declares: `@binding(1) var<storage, read_write> counts: array<i32>`
 storage_arrays(shader: text): list<StorageArray> := {
 	declared: list<StorageArray> = []
@@ -1671,7 +1625,7 @@ storage_arrays(shader: text): list<StorageArray> := {
 		element = "f32"
 		for cell in ["i32", "u32", HALF] { if declaration.contains("array<" + cell) { element = cell } }
 		type = declaration.split(":")[1 ..].join(":").split(";")[0].trim()
-		declared.add(StorageArray(name, binding, element, [], "", parts[i].split(">")[0].contains("read_write"), type))
+		declared.add(StorageArray(name, binding, element, [], parts[i].split(">")[0].contains("read_write"), type))
 	}
 	declared
 }
@@ -1680,7 +1634,7 @@ arrays_given(given: any, declared: list<StorageArray>): list<StorageArray> := {
 	if given is list<any> {
 		first = declared.filter(array => array.binding == 0)
 		if #first == 0 { raise "gpu_compute of a list: the shader declares no storage array at @binding(0)" }
-		array_given(first[0], given)
+		first[0].given = given
 		return first
 	}
 	if not (given is map<text, list<any>>) { raise "gpu_compute takes a list of numbers or a map of named lists" }
@@ -1693,45 +1647,31 @@ arrays_named(given: map<text, list<any>>, declared: list<StorageArray>): list<St
 		named = declared.filter(array => array.name == name)
 		if #named == 0 { raise "the shader declares no storage array " + name }
 		if #given[name] == 0 { raise name + " is empty: a storage array holds at least one number" }
-		array_given(named[0], given[name])
+		named[0].given = given[name]
 		order.add(named[0])
 	}
 	for array in declared { if #array.given == 0 { raise "the shader's array " + array.name + " has no numbers" } }
 	order
 }
-array_given(array: StorageArray, numbers: list<any>) := {
-	array.given = numbers
-	array.cell = if is_gpu_list(numbers) then GPU_CELLS[gpu_list_cell(numbers)] else ""
-}
 # a C pointer `by` bytes on
 pointer_moved(pointer: int, by: int): int := pointer_handle(handle_pointer(pointer) + by)
-# an array's cells as the shader reads them: a GPU list of its type where it is, else the numbers as its type's bits
-array_buffer(array: StorageArray): int := {
-	usage = BUFFER_STORAGE + BUFFER_COPY_SRC
-	if array.cell == array.element {
-		size = buffer_bytes(array)
-		buffer = kept_buffer(array.name, size, usage)
-		wgpuQueueWriteBuffer(gpu.queue, buffer, 0, program_cells(gpu_list_place(array.given)), size)
-		return buffer
-	}
-	slow("the storage array " + array.name + " is not a GPU list: each number is walked to its bits on every upload", "make it as " + array.name + ": [" + array.element + "] = …")
-	cells_kept(array.name, [cell_bits(array.element, x) for x in array.given], usage)
-}
-# an array binds what it is given, else raises why (as host-gpu.js cellsUnfit says it): an array<f16> takes only a GPU
-# list [f16], whose cells it binds as they are, and a GPU list [f16] only one; a GPU list [bf16] has no WGSL array type
-cells_fitted(array: StorageArray) := {
-	if array.cell == BRAIN { raise "the GPU list [bf16] " + array.name + " has no WGSL array type to bind as yet" }
-	if array.cell.starts_with("vec") { raise "the GPU list [" + array.cell + "] " + array.name + " binds in paint's values; gpu_compute's arrays take lists of numbers" }
-	if array.element == HALF and array.cell != HALF { raise "the shader's array<f16> " + array.name + " takes a GPU list [f16]: make it as " + array.name + ": [f16] = …" }
-	if array.cell == HALF and array.element != HALF { raise "the GPU list [f16] " + array.name + " needs the shader's array<f16>, not array<" + array.element + ">" }
-}
+# an array's numbers as the shader reads them, its element's cells
+array_buffer(array: StorageArray): int := cells_kept(array.name, array_cells(array), BUFFER_STORAGE + BUFFER_COPY_SRC)
+array_cells(array: StorageArray): list<int> := if array.element == HALF then halves_paired([f16_bits(float(x)) for x in array.given]) else [cell_bits(array.element, x) for x in array.given]
+# two-byte cells two to a word, the first in the low half, as WGSL's array<f16> holds them
+halves_paired(halves: list<int>): list<int> := [halves[2 * w] + (if 2 * w + 1 < #halves then halves[2 * w + 1] << HALF_BITS else 0) for w in 0 .. (#halves + 1) /! 2]
 # an array's bytes: its cells' (two each of an f16), whole words, as WebGPU copies and binds a buffer
-cells_bytes(array: StorageArray): int := #array.given * (if array.element == HALF then 2 else WORD_BYTES)
-buffer_bytes(array: StorageArray): int := (cells_bytes(array) + WORD_BYTES - 1) /! WORD_BYTES * WORD_BYTES
+buffer_bytes(array: StorageArray): int := (#array.given * cell_bytes(array.element) + WORD_BYTES - 1) /! WORD_BYTES * WORD_BYTES
+cell_bytes(element: text): int := if element == HALF then HALF_BYTES else WORD_BYTES
 cell_bits(element: text, x: any): int := if element == "f32" then f32_bits(float(x)) else low_bits(int(x), 32)
-cell_number(element: text, bits: int): any := if element == "f32" then f32_float(bits) else if element == "i32" and bits >= 1 << 31 then bits - (1 << 32) else bits
-# the shader run over the arrays: what each left, read back as numbers (a GPU list's cells written back in place)
-arrays_computed(shader: text, order: list<StorageArray>, workgroups: int): list<any>? := {
+# the index-th number the shader left in the mapped array
+cell_read(element: text, mapped: int, index: int): any := {
+	if element == HALF { return f16_float(low_bits(field_i16(mapped, HALF_BYTES * index), HALF_BITS)) }
+	bits = field_u32(mapped, WORD_BYTES * index)
+	if element == "f32" then f32_float(bits) else if element == "i32" and bits >= 1 << 31 then bits - (1 << 32) else bits
+}
+# the shader run over the arrays: what each left, read back as numbers
+arrays_computed(shader: text, order: list<StorageArray>, workgroups: int): list<list<any>>? := {
 	scope_opened()
 	compiled = shader_module(shader)
 	pipeline = main_pipeline_made(compiled)
@@ -1753,35 +1693,20 @@ arrays_computed(shader: text, order: list<StorageArray>, workgroups: int): list<
 	wgpuComputePassEncoderRelease(pass)
 	for a in 0 .. #order { wgpuCommandEncoderCopyBufferToBuffer(encoder, storages[a], 0, readbacks[a], 0, sizes[a]) }
 	submitted(encoder)
-	left = []
+	left: list<list<any>> = []
 	for a in 0 .. #order {
 		mapped = buffer_mapped(readbacks[a], sizes[a])
 		if mapped == 0 { return ø }
-		left.add(array_left(order[a], mapped))
+		left.add([cell_read(order[a].element, mapped, i) for i in 0 .. #order[a].given])
 		wgpuBufferUnmap(readbacks[a])
 	}
 	wgpuBindGroupRelease(bindings)
 	wgpuComputePipelineRelease(pipeline)
 	left
 }
-# what the shader left in an array: a GPU list's cells written into it (the list itself), else a list of numbers
-array_left(array: StorageArray, mapped: int): any := {
-	if array.cell == array.element {
-		memmove(program_cells(gpu_list_room(array.given)), mapped, cells_bytes(array))
-		gpu_list_kept(array.given)
-		return array.given
-	}
-	numbers = [cell_number(array.element, field_u32(mapped, WORD_BYTES * i)) for i in 0 .. #array.given]
-	if array.cell == "" { return numbers }
-	# (a GPU list of another cell type takes the numbers into its own cells)
-	memcpy(program_cells(gpu_list_room(array.given)), [cell_bits(array.cell, x) for x in numbers])
-	gpu_list_kept(array.given)
-	array.given
-}
 host_gpu_computed(shader: text, arrays: any, workgroups: int): any := {
 	gpu.failure = ""
 	order = arrays_given(arrays, storage_arrays(shader))
-	for array in order { cells_fitted(array) }
 	if not device_ready() { raise gpu.failure }
 	if shader.contains(HALVES_ENABLED) and not gpu.halves_offered { raise NO_HALVES }
 	left = arrays_computed(shader, order, workgroups)
