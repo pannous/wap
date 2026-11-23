@@ -205,7 +205,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - Purpose.md (644 lines):
 - questions.md (144 lines):
 - quote.md (3 lines):
-- random.md (23 lines):
+- random.md (23 lines): waits: xor/shift (5bb73f5, queued), a seeded Random in plain wap
 - range.md (23 lines):
 - rant.md (15 lines):
 - README.md (0 lines):
