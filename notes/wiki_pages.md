@@ -118,10 +118,10 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - integer.md (2 lines): ✓ wap-wiki, a link
 - inventions.md (258 lines):
 - it.md (21 lines): wap-wiki
-- iteration.md (72 lines):
+- iteration.md (72 lines): ✓ wap-wiki, tests test_iteration_wanted.wap the forms still to build
 - iterator.md (0 lines):
 - json.md (26 lines): ✓ (lib/json.wap replacing json.warp, test/test_json.wap 8 ✓ + the one-char line red, test_json_class red: class reflection)
-- Julia.md (59 lines):
+- Julia.md (59 lines): wap-wiki
 - key.md (37 lines): wap-wiki, asked (bare names, top-level colon)
 - keyword.md (308 lines):
 - kind.md (31 lines): wap-wiki, C++ internals: asked to hide
