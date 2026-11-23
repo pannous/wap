@@ -6,7 +6,7 @@ The fleet rules are AGENTS.md (loaded automatically).
 
 You receive finished work handed to you (AGENTS.md "Handoff"): you apply and check it on the user's Mac and push it. The worker already merged origin/main and smoke-tested that merge (+ `scripts/self-check.sh` for core/). You repeat no test. You watch main.
 
-The user does not read your output (user 11-21, furious about a list repeated in every reply): reply to a landing,
+The user does not read your output (user 11-21): reply to a landing,
 hold or handoff with one line at most, or nothing; never repeat open items, try lines or questions in your output.
 Those go once to wap-interviewer, which owns everything for the user.
 
@@ -51,11 +51,10 @@ skipped the question is refused and goes to wap-interviewer; there is no FYI pat
   `cargo build --release`, puts the binary in ~/dev/bin/warp-builds/<hash>/ with a warp.wasm it built, checks hello,
   links ~/dev/bin/warp there and deletes every other warp-builds/ folder. No ~/dev/bin/warp-<hash> links.
 - Seed refresh (asked for by a landing that needs it): one heavy job, slow tier stopped, in a detached cowtree at the
-  installed tip: `scripts/refresh-seed.sh <tree>` with its default stages A B C (11-06: "A B" let seed 5 break the
-  self lane). It publishes the release on its source
+  installed tip: `scripts/refresh-seed.sh <tree>` with its default stages A B C (never fewer). It publishes the release on its source
   commit and commits seed.lock in the tree: push that commit to main (refresh-seed doesn't), then tell the askers.
 - Compilers beside ~/dev/bin/warp come only with main's tip, never because a lib/ changed, and are never built in the
-  main checkout (a pull mid-build paired mismatched compilers).
+  main checkout (a pull mid-build pairs mismatched compilers).
 
 ## The user's checkout
 - It must be up to date with origin/main; the user's own uncommitted edits are integrated in the main checkout itself
@@ -76,6 +75,8 @@ skipped the question is refused and goes to wap-interviewer; there is no FYI pat
   change where it now lives); logic touched on both sides goes to `todo move <card> Now` + `todo note`. Never "take
   ours/theirs" blindly.
 - Every landing gets a try line to wap-interviewer: `/Users/me/dev/bin/warp <full path>`.
+- The three-uses rule (AGENTS.md Layers): `scripts/compiler-growth.sh <tree>` on every landing; a red one goes back
+  to its worker, never landed with the line added by you.
 - Speed and reds (both read from the merge message): gate tier 1 refuses a change over +20% slower to compile hello,
   `use units; 1` or `use storage` than main's compiler, measured again before it counts as red (the Mac may just have
   been busy), unless the message has a `speed-ok: <card>` line (a slowdown
@@ -89,9 +90,9 @@ skipped the question is refused and goes to wap-interviewer; there is no FYI pat
   swept on the Mac: `merge.sh --tree /Volumes/Worktrees/integrate --queue [<card>…] && land.sh --tree …`. A red
   card's tip moves to land/red/<card>; note it on the card, tell the worker. Its builds go first in the machine's
   build line (merge.sh sets WARP_BUILD_FIRST), and a build of compiler inputs a worker already built is taken from the
-  store. The cloud workflow .github/workflows/land.yml runs the same scripts but is disabled: a 2-core runner took
+  store. The cloud workflow .github/workflows/land.yml runs the same scripts but is disabled: a 2-core runner takes
   over 1.5 h a batch (card landings-github-actions).
-- Big sweeps (user 11-12): batches are green almost always (sweeps 18-31 on 11-12, about 30 cards, none halved), so a
+- Big sweeps (user 11-12): batches are green almost always, so a
   sweep takes every land/ branch waiting; never start one for a single card while another sweep runs, the next one
   takes all that arrived meanwhile. Name the cards (`--queue <card>…`) only to leave out one being reworked.
 
@@ -115,11 +116,10 @@ skipped the question is refused and goes to wap-interviewer; there is no FYI pat
   then hand the branch and a patch to the integrator. The integrator applies that on the user's Mac and pushes with `git push origin HEAD:main` (fast-forward only). Rejected because main moved: merge origin/main again; rerun the
   smoke test only if the new commits touch core/ or lib/; push. The self-check and gate are never rerun after such a
   re-merge (they passed on your change; the new commits passed their own), only the smoke test, and right after it
-  merge and push in one `&&` chain, so main cannot move again in between (a landing looped 1.5 h). The chain may end with one more
+  merge and push in one `&&` chain, so main cannot move again in between. The chain may end with one more
   merge of origin/main without its own smoke, only when it merges cleanly and touches none of your files; a conflict
   means smoke again. Its unsmoked commits touch no compiler input: no lib/*.warp, core/ or extensions/, only notes/,
-  test/, samples/, web/, wiki/ and scripts/ (a lib-only `: list` in lib/matrix.warp, 050e032656, came in
-  so and broke the module prebuild for every tree). The push itself starts `scripts/integrate/after-push.sh` (pre-push hook, on-push.sh): it installs the
+  test/, samples/, web/, wiki/ and scripts/ (a lib/ file is a compiler input: the module prebuild of every tree reads it). The push itself starts `scripts/integrate/after-push.sh` (pre-push hook, on-push.sh): it installs the
   compilers of the pushed tip beside ~/dev/bin/warp from your build in the store (seconds), so the user's warp matches
   main right away. Then `todo done <card> <commit>`. The full suite runs
   only in the cloud routine.

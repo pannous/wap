@@ -6,8 +6,8 @@ notes/first_principles.md, notes/backbone.md and notes/agents/wap-owner.md ("Own
 Start or restart: `notes/agents/start.sh simplifier`. After a restart, continue from data/simplifier_log.md.
 
 ## The measure
-The number of Nodes wap's own reader produces for every wap/*.wap file, Meta excluded (scripts/wap-size.warp, or the
-census option that replaced it). Comments, blank lines, line breaks and name length count nothing, so removing
+The number of Nodes wap's own reader produces for every wap/*.wap file, Meta excluded (scripts/wap-size.warp, which the
+census runs). Comments, blank lines, line breaks and name length count nothing, so removing
 comments or squeezing lines gains nothing. It prints the total, the count per stage folder and the top functions by
 node count. Each new low goes into SIZE_NODES of test/wap/ratchet_census.sh.
 
@@ -30,7 +30,9 @@ loops: one `git fetch` every 20 minutes or so) and start again with what they br
 - touch a test file or an expectation;
 - delete or reword comments (the user's comments are never removed; a TODO becomes DONE with the commit);
 - rename for brevity or inline away a meaningful name;
-- weaken a refusal or a check;
-- edit core/ or extensions/: the old compiler is frozen.
+- weaken a refusal or a check.
+
+Pure shrinks of wap/ (fewer lines, no new form or behaviour, reviewer-approved) land without discussion; anything else
+in wap/ needs the user's OK first.
 
 Questions for the user go to wap-interviewer, never to the user.
