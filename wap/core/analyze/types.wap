@@ -41,8 +41,6 @@ use "../rules/typed.wap"
 # the types of the literals, as a program writes them (and core/type_notation.wap)
 BOOL_TYPE = "bool"
 BOOL_SYMBOL = symbol(BOOL_TYPE)
-EMPTY_TYPE = "ø"
-EMPTY_SYMBOL = symbol(EMPTY_TYPE)
 # what a conversion refused at a function's result says the function promised
 FUNCTION_GIVES = "the function says it gives"
 # the result a built-in writes when it never returns, `raise(message: text): never`: its calls jump, of no type
@@ -76,6 +74,8 @@ class TypingState {
 	globals: list<Binding> = []
 	# the keys of the globals functions read before the statements that give them their values, until those statements
 	unset: list<text> = []
+	# the types the library's globals are declared with, `c_handles: map<int, int> = {}`, which a function reads before
+	declared: list<Binding> = []
 	# the functions of the function values met, and the keys of the variables they capture
 	lambdas: list<Node> = []
 	# the functions dynamic calls dispatch through (core/analyze/dispatch.wap)
@@ -191,6 +191,7 @@ typed_among(program: Block, library: list, rules: KindRules, library_scope: Scop
 	s.definitions = signatures.filter(signature => is_function(signature))
 	definitions_held(defines, s)
 	records_added(library, s)
+	globals_declared(library, s)
 	overloads_checked(defined, declared, words, s)
 	values = library_values(library).map(value => typed_form(value, s, TypeFrame(), ø))
 	typed = try typed_form(program, s, TypeFrame(), ø) catch e { if #s.retyped == #before.retyped then refused_all(s, [e.message]) else Block([]) }
@@ -299,6 +300,8 @@ held_function(definition: Node, s: TypingState) as Signature := definition_keyed
 # a definition's Define as it is now, found by its record's key; a record whose Define typing never saw is the
 # pipeline's bug, never skipped
 define_of(definition: Signature, s: TypingState) as Define := if s.defines.has(definition.key) then s.defines[definition.key] else refused(Text(definition.key), "typing holds no definition for this record: the pipeline lost it")
+# the library globals' written types, shaped, which its functions read before the statements that give the values
+globals_declared(statements: list, s: TypingState) := { s.declared += statements.filter(statement => statement is Set and declared_type(statement) != ø).map(statement => Binding(place_key(declared_name(statement)), shaped(declared_type(statement)!, s))) }
 # the records among statements added to those typing knows, their fields' written types shaped once all are known, as
 # a definition's are: a field of a pattern's type holds a Node
 records_added(statements: list, s: TypingState) := {
@@ -306,9 +309,11 @@ records_added(statements: list, s: TypingState) := {
 	if statements.any(statement => statement is Record) { s.records = Records(s.records.items.map(record => record_shaped(record, s)), s.records.names) }
 }
 record_shaped(record: Node, s: TypingState) as Node := match record {
-	Record(name, fields, variants) => refitted(Record(name, with_items(fields, items_of(fields).map(field => if names_bare_kind(declared_type(field)) then refused(field, "a field writes its full type, list<int> rather than list: a bare kind takes the type of the value given, which a field has none of") else shaped_key(field, s))), variants), record)
+	Record(name, fields, variants) => refitted(Record(name, with_items(fields, items_of(fields).map(callable_held).map(field => if names_bare_kind(declared_type(field)) then refused(field, "a field writes its full type, list<int> rather than list: a bare kind takes the type of the value given, which a field has none of") else shaped_key(field, s))), variants), record)
 	_ => record
 }
+# a field written `block` or a bare `function` holds one function value of one layout: one called as () -> any
+callable_held(field: Node) as Node := match field { Set(place, value) => refitted(Set(callable_held(place), value), field); _ => if text(declared_type(field) ?? Empty) in [BLOCK_WORD, FUNCTION_WORD] then refitted(Key(declared_name(field), Op.Colon, function_type_of([], ANY_SYMBOL)), field) else field }
 # the definitions among statements
 defines_in(statements: list) as list<Define> := statements.flat_map(statement => if statement is Define then [statement] else [])
 # Defines typing now holds, each by its record's key unless it holds one already: the record declare wrote, else one
@@ -464,7 +469,7 @@ name_typed(n: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
 # (wiki/Footguns.md: free variables are read at call time): of a type its statement settles
 read_before_given(n: Node, s: TypingState, f: TypeFrame) as Node? := {
 	if not is_bound(n, DefinitionKind.Global) or f.function == ø { return ø }
-	type = unknown_type(s)
+	type = type_keyed(place_key(defined_at(n)), s.declared) ?? unknown_type(s)
 	remembered(n, type, s, f)
 	s.unset = s.unset + [place_key(defined_at(n))]
 	type
