@@ -130,7 +130,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - laws.md (76 lines):
 - LEB128.md (3 lines):
 - length.md (2 lines):
-- library-cli.md (232 lines):
+- library-cli.md (232 lines): wap-wiki-lib
 - library-collections.md (47 lines): ✓ c354c23 (lib/collections.wap, test/test_collections.wap 6 ✓ + Counter/LRU red until any-char-equality)
 - library-complex.md (36 lines): ✓ b85dcc3 (lib/complex.wap, test/test_complex.wap 8 ✓; numbers on either side, exp and log in math)
 - library-compress.md (40 lines):
