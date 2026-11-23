@@ -1,0 +1,94 @@
+# The standard module gpu_passes (wiki/graphics.md "Fields and passes"): a list of passes is a pipeline, run in the
+# order written. Each pass but the last draws into the field of its name, kept on the GPU from frame to frame at the
+# painting's size; the last shows in the window. A shader reads a field as `$name(at)`, at the pixel `at`: the latest
+# written earlier in the frame, else last frame's, so a shader reading its own name reads what it drew the frame before.
+# Passes of program functions carry the fields the program declares (`ink = field(1, 320, 180)`): every list of them
+# shares these, made at their size, which its functions read at a cell, `ink(x, y)`; a list whose last function draws
+# a field too shows nothing
+use "host/native_host/gpu.wap"
+use "host/native_host/window.wap"
+use "host/native_host/paint.wap"
+
+# a field the passes draw and read on the GPU: `width` numbers at each of its columns × rows cells
+MOST_FIELD_NUMBERS := 4
+class GpuField { width: int, columns: int, rows: int }
+field(width: int, columns: int, rows: int): GpuField := {
+	if width < 1 or width > MOST_FIELD_NUMBERS { raise "a field holds 1 to 4 numbers at each cell, not ${width}" }
+	GpuField(width, columns, rows)
+}
+
+# a pass: the field it draws (none for the last), its WGSL shader, the values it reads now, and for a pass of a program
+# function the fields the program declares by name
+class Pass { name: text, shader: text, values: any = {}, declared: map<text, GpuField>? = ø }
+
+# the fields of a pass list, made once for each list of names and size
+global painted_fields: map<text, int> = {}
+
+# the pass drawn into its field, or a "no field" where `into` is not one of the fields
+gpu_pass(shader: text, fields: int, into: text, values: any): int := {
+	recorded = gpu_pass_recorded(shader, fields, into, values)
+	if recorded < 0 { raise "no field " + into }
+	recorded
+}
+
+paint(passes: list<Pass>, width: int, height: int) := {
+	names = passes.map(pass => pass.name)
+	shown = passes[-1]
+	if names[0 .. #names - 1].any(name => name == "") { raise "each pass before the last draws into a field: fix: name it, `velocity: advect`" }
+	size = fields_size(shown, width, height)
+	if shown.declared != ø { names = shown.declared.keys() }
+	if shown.declared != ø and shown.name != "" { run_passes(passes, names, fields_kept(names, size), size) } else { shown_passes(passes, names, size, width, height) }
+}
+# the passes drawn and the last shown in the window (a last shader whose field is read draws into it too, then shows it)
+shown_passes(passes: list<Pass>, names: list<text>, size: list<int>, width: int, height: int) := {
+	shown = passes[-1]
+	read_back = passes.any(pass => reads_field(pass.shader, shown.name))
+	drawn = if read_back then passes else passes[0 .. #passes - 1]
+	fields = fields_kept(if shown.declared != ø then names else drawn.map(pass => pass.name), size)
+	run_passes(drawn, names, fields, size)
+	shader = if read_back then FIELD_SHOWN.replace(FIELD_HOLE, shown.name) else fields_placed(shown.shader, names, read_scale(shown, size))
+	values = if read_back then {} else shown.values
+	if not window_possible() { no_window() }
+	gpu_show_sized(shader, fields, width, height, values)
+}
+# the fields of these names at this size, made once
+fields_kept(names: list<text>, size: list<int>): int := {
+	key = names.join(" ") + " " + size[0] + "×" + size[1]
+	if not painted_fields.has(key) { painted_fields[key] = gpu_fields(size[0], size[1], names) }
+	painted_fields[key]
+}
+# each pass drawn into its field, its reads of the fields (of these names) placed
+run_passes(passes: list<Pass>, names: list<text>, fields: int, size: list<int>) := {
+	for pass in passes { gpu_pass(fields_placed(pass.shader, names, read_scale(pass, size)), fields, pass.name, pass.values) }
+}
+# the size the fields are made at: the one the program's declared fields share, else the painting's. Declared fields
+# keep numbers beyond 0..1, which a GPU storing 8 bits a channel cannot
+NARROW_FORMAT := "rgba8unorm"
+fields_size(pass: Pass, width: int, height: int): list<int> := {
+	if pass.declared == ø { return [width, height] }
+	sizes = pass.declared.values().map(field => [field.columns, field.rows])
+	if #sizes == 0 { raise "functions in paint's list draw fields the program declares: fix: declare one, `ink = field(1, columns, rows)`" }
+	if sizes.any(size => size != sizes[0]) { raise "paint's fields share one size; these declare " + sizes.map(size => "${size[0]}×${size[1]}").join(", ") }
+	if gpu_fields_format() == NARROW_FORMAT { raise "this GPU keeps a field in 8 bits a channel, too few for numbers beyond 0..1" }
+	sizes[0]
+}
+# what a pixel `at` is divided by to sample a field: a text shader's `$dye(at)` reads at a pixel of the painting, a
+# function's `dye(x, y)` at a cell of the fields
+read_scale(pass: Pass, size: list<int>): text := if pass.declared != ø then "vec2f(${size[0]}.0, ${size[1]}.0)" else "values.size"
+# a shader's reads of the fields, `values.dye(at)` as its `$dye(at)` was written, as reads of the field at that pixel
+FIELD_HOLE := "NAME"
+FIELD_SCALE := "SCALE"
+FIELD_AT := "\nfn field_NAME_at(at: vec2f) -> vec4f { return field_NAME(at / SCALE); }\n"
+FIELD_SHOWN := "@fragment fn main(@builtin(position) at: vec4f) -> @location(0) vec4f { return field_NAME(at.xy / values.size); }"
+VALUES_READ := "values."
+reads_field(shader: text, name: text): bool := shader.contains(VALUES_READ + name + "(")
+# a read of a field no shader of the list draws is refused, naming the shader to put before it
+fields_placed(shader: text, names: list<text>, scale: text): text := {
+	placed = shader
+	for name in names.filter(name => reads_field(shader, name)) { placed = placed.replace(VALUES_READ + name + "(", FIELD_PREFIX + name + "_at(") + FIELD_AT.replace(FIELD_HOLE, name).replace(FIELD_SCALE, scale) }
+	for rest in placed.split(VALUES_READ)[1 ..] {
+		name = leading(rest, NAME_BYTES)
+		if name != "" and rest[#name ..].starts_with("(") { raise "$" + name + "(at) reads a field no shader of paint's list draws: fix: put " + name + " in the list before the shader reading it" }
+	}
+	placed
+}
