@@ -153,7 +153,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-primes.md (26 lines):
 - library-reference.md (36 lines):
 - library-regex.md (107 lines):
-- library-slugs.md (36 lines):
+- library-slugs.md (36 lines): wap-wiki-lib
 - library-tables.md (47 lines):
 - library-template.md (37 lines):
 - library-time-patterns-durations.md (42 lines):
