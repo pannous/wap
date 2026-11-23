@@ -30,7 +30,7 @@ warp-host-fixer; this file is the inventory.
   (core/emit/host.wap memory_raised). try/catch stays GC-only.
 
 ## Not yet
-- A lib module's function as the callback C calls: lib/callbacks.warp's `export c_callback_fired` is no wap form, and a
+- A lib module's function as the callback C calls: lib/callbacks.wap's `export c_callback_fired` is no wap form, and a
   used module's functions are not exported (SDL, sqlite, audio need it).
 - C structs by value larger than a register, and all-float ones (HFA: raylib's Vector2); out-pointers are answered (native-imports).
 - The host words of warp's lib/host/native_host (3400 lines), needed once lib's window, sound, gpu and webview
