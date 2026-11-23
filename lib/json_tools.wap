@@ -11,22 +11,6 @@ use "regex.wap"
 
 # --- values
 
-# the value with every map and list in it a fresh map<text, any> and list<any>, a char a text
-json_value(x: any): any := if is_map(x) then object_of(x) else if is_list(x) then array_of(x) else if x is char then "${x}" else x
-object_of(m: map<K, V>): map<text, any> := {
-	out: map<text, any> = {}
-	for key in keys(m) { out["${key}"] = json_value(m[key]) }
-	out
-}
-array_of(xs: list<T>): list<any> := {
-	out: list<any> = []
-	for x in xs { out.add(json_value(x)) }
-	out
-}
-# a value json_value made, as the map or list it is
-as_object(x: any): map<text, any> := x as map<text, any>
-as_array(x: any): list<any> := x as list<any>
-
 json_kind(x: any): text := {
 	if x == ø then "null"
 	else if x is bool then "boolean"
@@ -42,8 +26,8 @@ is_whole(x: any): bool := x is int or (x is float and floor(x as float) == x as 
 json_equal(a: any, b: any): bool := {
 	kind = json_kind(a)
 	if kind != json_kind(b) then no
-	else if kind == "array" then arrays_equal(as_array(a), as_array(b))
-	else if kind == "object" then objects_equal(as_object(a), as_object(b))
+	else if kind == "array" then arrays_equal(as_data_list(a), as_data_list(b))
+	else if kind == "object" then objects_equal(as_data_map(a), as_data_map(b))
 	else if kind == "number" then number_of(a) == number_of(b)
 	else a == b
 }
@@ -79,15 +63,15 @@ array_index(token: text, size: int, past_end: bool, pointer: text): int := {
 walked(doc: any, tokens: list<text>, pointer: text): any := tokens.fold(doc, (here, token) => stepped_in(here, token, pointer))
 stepped_in(here: any, token: text, pointer: text): any := {
 	if is_map(here) {
-		object = as_object(here)
+		object = as_data_map(here)
 		if not object.has(token) { raise "json pointer ${pointer}: no member ${token}" }
 		return object[token]
 	}
 	if not is_list(here) { raise "json pointer ${pointer}: ${token} reaches into a ${json_kind(here)}" }
-	array = as_array(here)
+	array = as_data_list(here)
 	array[array_index(token, #array, no, pointer)]
 }
-json_pointer_get(doc: any, pointer: text): any := walked(json_value(doc), pointer_tokens(pointer), pointer)
+json_pointer_get(doc: any, pointer: text): any := walked(plain_data(doc), pointer_tokens(pointer), pointer)
 json_pointer_has(doc: any, pointer: text): bool := try {
 	json_pointer_get(doc, pointer)
 	yes
@@ -100,8 +84,8 @@ class Change { tokens: list<text>, how: text, value: any, pointer: text }
 # doc with the change made from the token at depth on, copied along the way only
 changed(doc: any, change: Change, depth: int): any := {
 	if depth == #change.tokens then (if change.how == "remove" then ø else change.value)
-	else if is_map(doc) then object_changed(as_object(doc), change, depth)
-	else if is_list(doc) then array_changed(as_array(doc), change, depth)
+	else if is_map(doc) then object_changed(as_data_map(doc), change, depth)
+	else if is_list(doc) then array_changed(as_data_list(doc), change, depth)
 	else raise "json pointer ${change.pointer}: ${change.tokens[depth]} reaches into a ${json_kind(doc)}"
 }
 object_changed(doc: map<text, any>, change: Change, depth: int): map<text, any> := {
@@ -130,7 +114,7 @@ member(op: map<text, any>, name: text): any := {
 }
 patch_step(doc: any, step: any): any := {
 	if not is_map(step) { raise "the operation is no JSON object but a JSON ${json_kind(step)}" }
-	op = as_object(step)
+	op = as_data_map(step)
 	verb = "${member(op, "op")}"
 	target = "${member(op, "path")}"
 	tokens = pointer_tokens(target)
@@ -150,11 +134,11 @@ patch_step(doc: any, step: any): any := {
 	changed(changed(doc, Change(source_tokens, "remove", ø, source), 0), Change(tokens, "add", value, target), 0)
 }
 # where an operation points, for its error
-target_of(step: any): text := if is_map(step) and as_object(step).has("path") then " (${as_object(step)["path"]})" else ""
+target_of(step: any): text := if is_map(step) and as_data_map(step).has("path") then " (${as_data_map(step)["path"]})" else ""
 # the document after every operation in order; a failing one raises naming its index, the input unchanged
 json_patch(doc: any, ops: list<T>): any := {
-	result = json_value(doc)
-	steps = array_of(ops)
+	result = plain_data(doc)
+	steps = data_list(ops)
 	for i in 0 upto #steps {
 		step = steps[i]
 		result = try patch_step(result, step) catch e { raise "json_patch: operation ${i}${target_of(step)}: ${e.message}" }
@@ -164,12 +148,12 @@ json_patch(doc: any, ops: list<T>): any := {
 
 # --- JSON Merge Patch
 
-json_merge_patch(target: any, patch: any): any := merge_patched(json_value(target), json_value(patch))
+json_merge_patch(target: any, patch: any): any := merge_patched(plain_data(target), plain_data(patch))
 merge_patched(target: any, patch: any): any := {
 	if not is_map(patch) { return patch }
-	changes = as_object(patch)
+	changes = as_data_map(patch)
 	out: map<text, any> = {}
-	if is_map(target) { out = merge(out, as_object(target)) }
+	if is_map(target) { out = merge(out, as_data_map(target)) }
 	for key in keys(changes) {
 		if changes[key] == ø { out.remove(key) }
 		else {
@@ -187,8 +171,8 @@ merge_patched(target: any, patch: any): any := {
 # the schema the $refs point into and the errors found so far
 class Validation { root: any, errors: list<text> }
 json_validate(doc: any, schema: any): list<text> := {
-	root = json_value(schema)
-	errors_of(json_value(doc), root, [], root)
+	root = plain_data(schema)
+	errors_of(plain_data(doc), root, [], root)
 }
 json_valid(doc: any, schema: any): bool := json_validate(doc, schema) is empty
 errors_of(x: any, schema: any, tokens: list<text>, root: any): list<text> := {
@@ -203,7 +187,7 @@ check_value(x: any, schema: any, tokens: list<text>, v: Validation) := {
 	if schema is bool {
 		if schema == no { found(v, tokens, "no value is allowed here") }
 	} else if is_map(schema) {
-		check_schema(x, as_object(schema), tokens, v)
+		check_schema(x, as_data_map(schema), tokens, v)
 	} else {
 		raise "json_validate: a schema is an object or a bool, not a ${json_kind(schema)}"
 	}
@@ -220,19 +204,19 @@ check_schema(x: any, s: map<text, any>, tokens: list<text>, v: Validation) := {
 		check_typed(x, s, tokens, v)
 	}
 }
-type_holds(x: any, kinds: any): bool := if is_list(kinds) then as_array(kinds).any(kind => kind_holds(x, "${kind}")) else kind_holds(x, "${kinds}")
+type_holds(x: any, kinds: any): bool := if is_list(kinds) then as_data_list(kinds).any(kind => kind_holds(x, "${kind}")) else kind_holds(x, "${kinds}")
 kind_holds(x: any, kind: text): bool := if kind == "integer" then is_whole(x) else json_kind(x) == kind
-types_text(kinds: any): text := if is_list(kinds) then as_array(kinds).map(kind => "${kind}").join(" or ") else "${kinds}"
+types_text(kinds: any): text := if is_list(kinds) then as_data_list(kinds).map(kind => "${kind}").join(" or ") else "${kinds}"
 # the checks past the type
 check_typed(x: any, s: map<text, any>, tokens: list<text>, v: Validation) := {
 	if s.has("const") and not json_equal(x, s["const"]) { found(v, tokens, "expected ${show(s["const"])}") }
-	if s.has("enum") and not as_array(s["enum"]).any(option => json_equal(x, option)) { found(v, tokens, "${show(x)} is not one of ${show(s["enum"])}") }
+	if s.has("enum") and not as_data_list(s["enum"]).any(option => json_equal(x, option)) { found(v, tokens, "${show(x)} is not one of ${show(s["enum"])}") }
 	if x is int or x is float { check_number(x, s, tokens, v) }
 	if x is text { check_text("${x}", s, tokens, v) }
-	if is_list(x) { check_array(as_array(x), s, tokens, v) }
-	if is_map(x) { check_object(as_object(x), s, tokens, v) }
+	if is_list(x) { check_array(as_data_list(x), s, tokens, v) }
+	if is_map(x) { check_object(as_data_map(x), s, tokens, v) }
 	if s.has("allOf") {
-		for part in as_array(s["allOf"]) { check_value(x, part, tokens, v) }
+		for part in as_data_list(s["allOf"]) { check_value(x, part, tokens, v) }
 	}
 	if s.has("anyOf") and passing(x, s["anyOf"], tokens, v) == 0 { found(v, tokens, "matches none of anyOf") }
 	if s.has("oneOf") {
@@ -242,7 +226,7 @@ check_typed(x: any, s: map<text, any>, tokens: list<text>, v: Validation) := {
 	if s.has("not") and errors_of(x, s["not"], tokens, v.root) is empty { found(v, tokens, "must not match the not schema") }
 }
 # how many of the schemas x is valid against
-passing(x: any, schemas: any, tokens: list<text>, v: Validation): int := as_array(schemas).filter(part => errors_of(x, part, tokens, v.root) is empty).count
+passing(x: any, schemas: any, tokens: list<text>, v: Validation): int := as_data_list(schemas).filter(part => errors_of(x, part, tokens, v.root) is empty).count
 # the limit a schema keyword sets, as a float
 limit(s: map<text, any>, keyword: text): float := number_of(s[keyword])
 # whether n breaks the schema's limit of that keyword
@@ -283,7 +267,7 @@ check_array(xs: list<any>, s: map<text, any>, tokens: list<text>, v: Validation)
 		}
 	}
 	prefix: list<any> = []
-	if s.has("prefixItems") { prefix = as_array(s["prefixItems"]) }
+	if s.has("prefixItems") { prefix = as_data_list(s["prefixItems"]) }
 	for i in 0 upto #xs {
 		item_tokens = tokens + ["${i}"]
 		if i < #prefix { check_value(xs[i], prefix[i], item_tokens, v) }
@@ -292,12 +276,12 @@ check_array(xs: list<any>, s: map<text, any>, tokens: list<text>, v: Validation)
 }
 check_object(m: map<text, any>, s: map<text, any>, tokens: list<text>, v: Validation) := {
 	if s.has("required") {
-		for key in as_array(s["required"]) {
+		for key in as_data_list(s["required"]) {
 			if not m.has("${key}") { found(v, tokens, "missing required property ${key}") }
 		}
 	}
 	properties: map<text, any> = {}
-	if s.has("properties") { properties = as_object(s["properties"]) }
+	if s.has("properties") { properties = as_data_map(s["properties"]) }
 	for key in keys(m) {
 		key_tokens = tokens + [key]
 		if properties.has(key) { check_value(m[key], properties[key], key_tokens, v) }
