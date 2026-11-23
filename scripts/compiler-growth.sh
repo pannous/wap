@@ -53,13 +53,16 @@ spec=$(grep -m1 -E '^spec: wiki/[^ ]+\.md' <<<"$messages" | sed 's/^spec: //')
 uses=$(grep -m1 -E '^uses: ' <<<"$messages" | sed 's/^uses: //' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' | sort -u)
 used_by=$(grep -c . <<<"$uses")
 
-[ -n "$spec" ] && [ -f "$spec" ] && exit 0
+# the wiki is its own clone in the main checkout only (a worktree has none): pages are looked up there
+wiki_home=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+[ -n "$spec" ] && [ ! -d "$wiki_home/wiki" ] && { echo "FAIL no wiki clone at $wiki_home/wiki to check '$spec' against"; exit 1; }
+[ -n "$spec" ] && [ -f "$wiki_home/$spec" ] && exit 0
 [ "$used_by" -ge "$REQUIRED_USES" ] && exit 0
 
 echo "FAIL this change widens the language without saying who needs it (AGENTS.md Layers, the three-uses rule):"
 [ -n "$new_rules" ] && sed 's/^/  new rule  /' <<<"$new_rules"
 [ -n "$new_files" ] && sed 's/^/  new file  /' <<<"$new_files"
-[ -n "$spec" ] && echo "  spec: $spec is no page of wiki/ (its own clone, pannous/wap.wiki)"
+[ -n "$spec" ] && echo "  spec: $spec is no page of $wiki_home/wiki (its own clone, pannous/wap.wiki)"
 [ -n "$uses" ] && echo "  uses: names $used_by, $REQUIRED_USES needed"
 echo "  add to a commit message 'uses: <a>, <b>, <c>' ($REQUIRED_USES different libraries using it, the asking one included)"
 echo "  or 'spec: wiki/<page>.md' (a language form that page specifies); else write it as plain wap in the library"
