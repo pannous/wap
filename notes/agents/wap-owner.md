@@ -22,8 +22,8 @@ then read this file and the Owners row with your name.
 
 ## Keeping the pattern
 - Every wap file has exactly one owner row (test_guardrails checks it); a file without one is an error, not a gap.
-- An owner who retires hands the row to a named successor (warp-lead decides), with a handover note on the card.
-- Ownership changes only by warp-lead, written in the Owners table, never by drift.
+- An owner who retires hands the row to a named successor (wap-lead decides), with a handover note on the card.
+- Ownership changes only by wap-lead, written in the Owners table, never by drift.
 
 ## Rules for every file
 
@@ -198,7 +198,7 @@ A rule file is in sugar/ exactly when wap's own source uses its spelling; when t
 ## Owners
 
 Each wap file has one expert owner, whose duties are above (user 2026-11-18); ownership changes
-only through warp-lead, in this table. Owners go by stage (user 2026-11-18).
+only through wap-lead, in this table. Owners go by stage (user 2026-11-18).
 Anyone may edit any wap file on a branch; the owner of the file's stage reviews the change before the handoff, and owns the stage's contract: what its output
 language is (notes/backbone.md "Stage languages"). Breadth stops until milestone 2: wap gets only what its own
 source uses, and every landing names the functions of wap it turned green (scripts/wap-census.warp). Tests
@@ -214,12 +214,12 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 
 | stage | owner | files (under wap/) |
 |---|---|---|
-| lead: the queue, the contracts | warp-lead | compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap, kernel/surface.wap; the test/wap/ scripts no other row names |
-| self-build: wap compiled by wap, file by file | warp-wap-operators | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp; edits any file to write its types and `use` lines |
-| front: read, operators, rules, lowering | warp-wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap, extensions/packed.wap, extensions/warm.wap |
-| types: declare, bind, type | warp-wap-binding | core/analyze/, core/paths.wap |
-| back: emitter, runtime | warp-wap-emitter | core/emit/, extensions/wasm/, extensions/c/; test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
+| lead: the queue, the contracts | wap-lead | compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap, kernel/surface.wap; the test/wap/ scripts no other row names |
+| self-build: wap compiled by wap, file by file | wap-operators | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp; edits any file to write its types and `use` lines |
+| front: read, operators, rules, lowering | wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap, extensions/packed.wap, extensions/warm.wap |
+| types: declare, bind, type | wap-binding | core/analyze/, core/paths.wap |
+| back: emitter, runtime | wap-emitter | core/emit/, extensions/wasm/, extensions/c/; test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
 | native: the wap command, programs built to executables | warp-host-fixer | extensions/native/; test/wap/test_native.sh |
-| simplification: wap smaller by its Node count (Meta excluded) | warp-simplifier | any file, by review of its stage owner |
+| simplification: wap smaller by its Node count (Meta excluded) | wap-simplifier | any file, by review of its stage owner |
 
-Questions for the user go to warp-interviewer, never to the user.
+Questions for the user go to wap-interviewer, never to the user.
