@@ -1,0 +1,143 @@
+# The standard module bits: `use bits`, whole numbers as the bits of a 64-bit word (or of a narrower width) and as
+# bytes, floats as their IEEE 754 bytes: int_bytes(258, 16) is [1, 2], float_bytes(1.0, 32) is [63, 128, 0, 0],
+# popcount(255) is 8. Widths are in bits, 8, 16, 32 or 64; the byte order ByteOrder.big (most significant first) or
+# ByteOrder.little.
+# An int is a signed 64-bit word here: an unsigned 64-bit value of 2^63 or more reads as its negative twin.
+
+WORD_BITS := 64
+BYTE_BITS := 8
+BYTE_MASK := 255
+# the order of a number's bytes: its most significant first or last
+enum ByteOrder { big, little }
+# an IEEE 754 binary float's layout: its exponent and fraction bits
+class FloatFormat { exponent_bits: int, fraction_bits: int }
+F64 := FloatFormat(11, 52)
+F32 := FloatFormat(8, 23)
+F16 := FloatFormat(5, 10)
+# bfloat16: an f32's exponent, 7 fraction bits
+BF16 := FloatFormat(8, 7)
+FLOAT_EXPONENT_BITS := F64.exponent_bits
+FLOAT_FRACTION_BITS := F64.fraction_bits
+
+# the word instructions themselves
+popcount(n: int): int := prim i64.popcnt(n)
+leading_zeros(n: int): int := prim i64.clz(n)
+trailing_zeros(n: int): int := prim i64.ctz(n)
+# the logical shift: zeros come in from the left (`>>` keeps the sign)
+shift_right(n: int, count: int): int := n >>> count
+rotate_left(n: int, count: int): int := prim i64.rotl(n, count)
+rotate_right(n: int, count: int): int := prim i64.rotr(n, count)
+
+# the low width bits of n
+bit_mask(width: int): int := if width >= WORD_BITS then -1 else (1 << width) - 1
+low_bits(n: int, width: int): int := n & bit_mask(width)
+# of the low width bits only
+popcount(n: int, width: int): int := popcount(low_bits(n, width))
+leading_zeros(n: int, width: int): int := leading_zeros(low_bits(n, width)) - (WORD_BITS - width)
+trailing_zeros(n: int, width: int): int := min(trailing_zeros(n), width)
+# the bits n needs, its highest one bit's place: bit_length(5) is 3, bit_length(0) is 0, a negative number 64
+bit_length(n: int): int := WORD_BITS - leading_zeros(n)
+rotate_left(n: int, count: int, width: int): int := {
+	if width >= WORD_BITS { return rotate_left(n, count) }
+	x = low_bits(n, width)
+	k = count % width
+	low_bits(x << k, width) + (x >>> (width - k))
+}
+rotate_right(n: int, count: int, width: int): int := rotate_left(n, width - count % width, width)
+# the low width bits as a signed number: signed(255, 8) is -1
+signed(n: int, width: int): int := {
+	x = low_bits(n, width)
+	if width < WORD_BITS and x >= 1 << (width - 1) then x - (1 << width) else x
+}
+
+# n's low width bits as width / 8 bytes, two's complement for a negative n
+int_bytes(n: int, width: int, order: ByteOrder = ByteOrder.big): list<int> := {
+	bytes = (0 upto width ÷ BYTE_BITS).map(i => (n >>> (BYTE_BITS * i)) & BYTE_MASK)
+	if order == ByteOrder.big then bytes.reverse() else bytes
+}
+# bytes back to their number, unsigned or (signed_number: yes) two's complement
+bytes_int(bytes: list<int>, order: ByteOrder = ByteOrder.big, signed_number: bool = no): int := {
+	ordered = if order == ByteOrder.big then bytes else bytes.reverse()
+	n = ordered.fold(0, (sum, b) => (sum << BYTE_BITS) + b)
+	if signed_number then signed(n, BYTE_BITS * #bytes) else n
+}
+# a number as its bytes, most significant first (big) or last; size counts bytes
+big_endian(n: int, size: int): list<int> := int_bytes(n, size * BYTE_BITS, ByteOrder.big)
+little_endian(n: int, size: int): list<int> := int_bytes(n, size * BYTE_BITS, ByteOrder.little)
+from_big_endian(bytes: list<int>): int := bytes_int(bytes, ByteOrder.big)
+from_little_endian(bytes: list<int>): int := bytes_int(bytes, ByteOrder.little)
+
+# a float's bits as a narrower IEEE 754 float's of so many exponent and fraction bits, rounded to nearest, ties to
+# even; subnormals, ±0, ±infinity and NaN kept, too large a magnitude infinity
+narrowed_bits(x: float, format: FloatFormat): int := {
+	exponent_bits = format.exponent_bits
+	fraction_bits = format.fraction_bits
+	b = float_bits(x)
+	sign = (b >>> (WORD_BITS - 1)) << (exponent_bits + fraction_bits)
+	exponent = low_bits(b >>> FLOAT_FRACTION_BITS, FLOAT_EXPONENT_BITS)
+	fraction = low_bits(b, FLOAT_FRACTION_BITS)
+	float_top = bit_mask(FLOAT_EXPONENT_BITS)
+	top = bit_mask(exponent_bits)
+	cut = FLOAT_FRACTION_BITS - fraction_bits
+	if exponent == float_top {
+		return sign + (top << fraction_bits) + (if fraction == 0 then 0 else (1 << (fraction_bits - 1)) + (low_bits(fraction, FLOAT_FRACTION_BITS - 1) >>> cut))
+	}
+	if exponent == 0 and fraction == 0 { return sign }
+	significand = if exponent == 0 then fraction else fraction + (1 << FLOAT_FRACTION_BITS)
+	field = (if exponent == 0 then 1 else exponent) - exponent_bias(FLOAT_EXPONENT_BITS) + exponent_bias(exponent_bits)
+	shift = if field >= 1 then cut else cut + 1 - field
+	if shift >= FLOAT_FRACTION_BITS + 2 { return sign }
+	q = significand >>> shift
+	rest = low_bits(significand, shift)
+	half = 1 << (shift - 1)
+	if rest > half or (rest == half and q % 2 == 1) { q += 1 }
+	if field < 1 { return sign + q }
+	if q == 1 << (fraction_bits + 1) {
+		q = 1 << fraction_bits
+		field += 1
+	}
+	if field >= top { return sign + (top << fraction_bits) }
+	sign + (field << fraction_bits) + q - (1 << fraction_bits)
+}
+# a narrower IEEE 754 float's bits as the float of the same value, exactly
+widened_float(bits: int, format: FloatFormat): float := {
+	exponent_bits = format.exponent_bits
+	fraction_bits = format.fraction_bits
+	sign = ((bits >>> (exponent_bits + fraction_bits)) & 1) << (WORD_BITS - 1)
+	top = bit_mask(exponent_bits)
+	field = (bits >>> fraction_bits) & top
+	fraction = low_bits(bits, fraction_bits)
+	widened = FLOAT_FRACTION_BITS - fraction_bits
+	if field == top { return bits_float(sign + (bit_mask(FLOAT_EXPONENT_BITS) << FLOAT_FRACTION_BITS) + (fraction << widened)) }
+	if field == 0 {
+		if fraction == 0 { return bits_float(sign) }
+		# a subnormal, fraction · 2^(1 - bias - fraction_bits), a normal float: its top one bit becomes the implicit one
+		highest = bit_length(fraction) - 1
+		exponent = highest + 1 - exponent_bias(exponent_bits) - fraction_bits + exponent_bias(FLOAT_EXPONENT_BITS)
+		return bits_float(sign + (exponent << FLOAT_FRACTION_BITS) + low_bits(fraction << (FLOAT_FRACTION_BITS - highest), FLOAT_FRACTION_BITS))
+	}
+	bits_float(sign + ((field - exponent_bias(exponent_bits) + exponent_bias(FLOAT_EXPONENT_BITS)) << FLOAT_FRACTION_BITS) + (fraction << widened))
+}
+exponent_bias(exponent_bits: int): int := (1 << (exponent_bits - 1)) - 1
+# the IEEE 754 binary32 (f32), binary16 (f16) and bfloat16 (bf16) bits of a float, and back
+f32_bits(x: float): int := narrowed_bits(x, F32)
+f32_float(bits: int): float := widened_float(bits, F32)
+f16_bits(x: float): int := narrowed_bits(x, F16)
+f16_float(bits: int): float := widened_float(bits, F16)
+bf16_bits(x: float): int := narrowed_bits(x, BF16)
+bf16_float(bits: int): float := widened_float(bits, BF16)
+# x as its IEEE 754 bytes: width 64 (binary64), 32 (binary32) or 16 (binary16), the narrower ones rounded to nearest
+float_bytes(x: float, width: int = WORD_BITS, order: ByteOrder = ByteOrder.big): list<int> := {
+	bits = if width == WORD_BITS then float_bits(x) else if width == 32 then f32_bits(x) else if width == 16 then f16_bits(x) else raise("float_bytes: no float is ${width} bits wide: 16, 32 or 64")
+	int_bytes(bits, width, order)
+}
+# 2, 4 or 8 bytes back to their float
+bytes_float(bytes: list<int>, order: ByteOrder = ByteOrder.big): float := {
+	n = bytes_int(bytes, order)
+	if #bytes == 8 then bits_float(n) else if #bytes == 4 then f32_float(n) else if #bytes == 2 then f16_float(n) else raise("bytes_float: no float is ${#bytes} bytes long: 2, 4 or 8")
+}
+# the u16, u32 and f32 at byte `at` of a file's bytes (read_bytes), little-endian as binary files mostly keep them,
+# read in place
+u16_at(bytes: list<int>, at: int): int := bytes[at] + (bytes[at + 1] << BYTE_BITS)
+u32_at(bytes: list<int>, at: int): int := u16_at(bytes, at) + (u16_at(bytes, at + 2) << (2 * BYTE_BITS))
+f32_at(bytes: list<int>, at: int): float := f32_float(u32_at(bytes, at))
