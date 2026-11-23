@@ -72,7 +72,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - elvis.md (5 lines):
 - enum.md (91 lines):
 - equality.md (62 lines):
-- Error.md (176 lines): wap-wiki-b
+- Error.md (176 lines): wap-wiki (from wiki-b): tests d2b56ad (try/catch/raise/throw, ??, or); not yet sent: error values (`error "x"`, failed, r.message, `!`), bare `try X`, default and its aliases, finally, `on error of f`, `effects of`, assert … else, a catchable ÷ 0; spec question for wap-interviewer: `10/0` is ∞ (float /), the page uses it as the raised example: rewrite with `10 ÷ 0`?
 - evaluation.md (21 lines):
 - examples.md (90 lines):
 - Exception.md (37 lines):
@@ -89,7 +89,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - for.md (70 lines):
 - full-evaluation.md (17 lines):
 - function-pointer.md (22 lines):
-- function.md (179 lines): wap-wiki-b, tests 632486d (branch wiki-b), wiki 47bea94; waits: 22 gaps + a types patch (wap-lead → wap-reader, wap-binding), card should-argument (user)
+- function.md (179 lines): wap-wiki (from wiki-b): tests 632486d (branch wiki-b, land 264f14d), wiki 47bea94; waits: 22 gaps + a types patch (bits, pipe, words, round_to: ~/Library/Logs/warp/wiki-b/function-types.patch) with wap-lead (→ wap-reader, wap-binding), card should-argument (user)
 - functional.md (5 lines):
 - functor.md (18 lines):
 - gap-filling.md (14 lines):
