@@ -153,17 +153,39 @@ is_fields(item: Node) as bool := match item {
 # a call's arguments, a block where every definition of the word takes code there a function of no parameters, run by
 # its call: `twice { 4 }` of twice(body: block) (wiki/block.md "A block runs by a call"); code naming `it` where every
 # definition takes a function of one parameter there, a function of it: `filter(xs, it > 1)`
-call_arguments_lowered(language: Language, head: Node, arguments: list) as list<Node> := (1 to #arguments).map(at => {
-	argument = arguments#at
-	if is_code_block(argument) and takes_code(language, head, at, #arguments, 0) then Fn(parameter_list(language, Empty), lowered(language, argument)) else if names_it(argument) and takes_code(language, head, at, #arguments, 1) then it_function(language, argument) else argument_lowered(language, argument)
-})
+# any other argument there run only by that call, `when(ready, print "go")` of when(c: bool, then: () -> any)
+call_arguments_lowered(language: Language, head: Node, written: list) as list<Node> := {
+	arguments = phrased(language, head, written)
+	(1 to #arguments).map(at => {
+		argument = arguments#at
+		if is_deferred(argument) and takes_code(language, head, at, #arguments, 0) then Fn(parameter_list(language, Empty), lowered(language, argument)) else if names_it(argument) and takes_code(language, head, at, #arguments, 1) then it_function(language, argument) else argument_lowered(language, argument)
+	})
+}
 is_code_block(n: Node) as bool := match n { List(items, Bracket.Curly, separator) => not items.all(is_fields); _ => no }
+# code a code place runs later: a block, or any value but a name or a function value, which are passed as they are
+is_deferred(n: Node) as bool := is_code_block(n) or not (n is symbol or match n { Call(called, parts) => FUNCTION_ARROWS.contains(text(called)); _ => no })
+# the declarations of a word, none for a word nothing declares
+declared_of(language: Language, head: Node) as list<Signature> := if head is symbol and language.declarations.by_name.has(text(head)) then language.declarations.by_name[text(head)] else []
 # whether every declaration of a word taking this many arguments takes code at this place: a block, or a function of
 # that many parameters
 takes_code(language: Language, head: Node, at: int, count: int, taking: int) as bool := {
-	declared = (if head is symbol and language.declarations.by_name.has(text(head)) then language.declarations.by_name[text(head)] else []).filter(signature => #signature.parameters == count)
+	declared = declared_of(language, head).filter(signature => #signature.parameters == count)
 	declared is not empty and declared.all(signature => wants_code(signature.parameters#at, taking))
 }
+# A phrase parameter takes the words written at its place as one phrase, `once the download finishes: …` the phrase
+# "the download finishes": the words the other parameters leave, a last `word: value` giving its word to the phrase and
+# its value to the parameter after (wiki/async.md)
+phrased(language: Language, head: Node, arguments: list) as list := {
+	declared = declared_of(language, head).find(signature => signature.parameters.any(is_phrase)) ?? return arguments
+	words = arguments.take(#arguments - 1) + (match arguments.last { Key(word, Op.Colon, value) => if word is symbol then [word, value] else [arguments.last]; _ => [arguments.last] })
+	at = (1 to #declared.parameters).find(place => is_phrase(declared.parameters#place))!
+	taken = #words - #declared.parameters + 1
+	if taken < 1 { return arguments }
+	words.take(at - 1) + [phrase_of(words.drop(at - 1).take(taken))] + words.drop(at - 1 + taken)
+}
+is_phrase(type: Node?) as bool := type == symbol(PHRASE_WORD)
+# the phrase of words as written, the words kept for binding to check that none names something (core/analyze/scope.wap)
+phrase_of(words: list) as Node := with_fact(Call(symbol(PHRASE_WORD), [Text(words.map(word => text(word)).join(" "))]), PHRASE_WORDS, data_list(words))
 wants_code(type: Node?, taking: int) as bool := (taking == 0 and type == symbol(BLOCK_WORD)) or #((function_parts(type) ?? return no).parameters) == taking
 
 # `it`, the parameter code names without declaring it (wiki/function.md): `square := it * it` is square(it),
