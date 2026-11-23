@@ -1,0 +1,88 @@
+# The standard module i18n: `use i18n`. Translations are data, one map per language; a message is a text with {name}
+# holes, or a map of plural categories (Unicode CLDR: zero one two few many other) chosen by the value `count`:
+#   messages = {en: {cart: {one: "{count} item", other: "{count} items"}}, de: {cart: {one: "{count} Artikel", other: "{count} Artikel"}}}
+#   translate(messages, "de", "cart", {count: 3}) is "3 Artikel"
+# A language the messages lack, or a message one language lacks, comes from the first language (de-AT reads de first).
+# A key no language has is the error `no translation of <key>`, never an empty text; a plural map without the category
+# falls back to `other`. Plural categories of whole numbers only (CLDR's v and f operands are not modelled).
+use text
+use unicode
+
+# the languages whose plural rules share a shape
+NO_PLURALS := ["ja", "zh", "ko", "th", "vi", "id", "ms"]
+ONE_UP_TO_1 := ["fr", "hi"]
+EAST_SLAVIC := ["ru", "uk", "be"]
+WEST_SLAVIC := ["cs", "sk"]
+ARABIC_SMALL := ["zero", "one", "two"]
+
+translate(messages: map<text, map<text, any>>, language: text, key: text, values: map<text, any>): text := {
+	message = message_of(messages, language, key)
+	chosen = if message is text then message else plural_form(message, plural_category(language, values.get("count") ?? 0))
+	filled(chosen, values)
+}
+
+# the language's base, de for de-AT
+base_language(language: text): text := language.split("-")[0]
+
+# the message of a key: in the language, its base language, else the first language
+message_of(messages: map<text, map<text, any>>, language: text, key: text): any := {
+	for candidate in [language, base_language(language), messages.keys()[0]] {
+		if messages.keys().contains(candidate) and messages[candidate].keys().contains(key) { return messages[candidate][key] }
+	}
+	raise "no translation of ${key}"
+}
+
+# a plural message's form for the category, else its form other
+plural_form(forms: map<text, text>, category: text): text := forms.get(category) ?? forms["other"]
+
+# the text with each {name} replaced by the value named name
+filled(message: text, values: map<text, any>): text := values.keys().fold(message, (out, name) => out.replace("{${name}}", "${values[name]}"))
+
+# the CLDR plural category of a whole number in a language: "one", "few", "other", …
+plural_category(language: text, n: int): text := {
+	base = base_language(language)
+	last = n % 10
+	last_two = n % 100
+	few = last >= 2 and last <= 4 and not (last_two >= 12 and last_two <= 14)
+	if NO_PLURALS.contains(base) then "other"
+	else if ONE_UP_TO_1.contains(base) then (if n <= 1 then "one" else "other")
+	else if EAST_SLAVIC.contains(base) then (if last == 1 and last_two != 11 then "one" else if few then "few" else "many")
+	else if base == "pl" then (if n == 1 then "one" else if few then "few" else "many")
+	else if WEST_SLAVIC.contains(base) then (if n == 1 then "one" else if n >= 2 and n <= 4 then "few" else "other")
+	else if base == "ar" then (if n <= 2 then ARABIC_SMALL[n] else if last_two >= 3 and last_two <= 10 then "few" else if last_two >= 11 then "many" else "other")
+	else if n == 1 then "one" else "other"
+}
+
+# Transliteration (wiki/in.md): a text's Latin letters written in another script, letter for letter, by a table; every
+# other character kept. `"Peter" in cyrillic` is "Петер", and `print name in cyrillic` prints it so. The table reads
+# English spellings the Russian way, the longest Latin spelling first ("shch" before "sh" before "s").
+class Spelling { latin: text, letter: text }
+CYRILLIC_LETTERS := [Spelling("shch", "щ"), Spelling("sch", "щ"), Spelling("zh", "ж"), Spelling("kh", "х"), Spelling("ts", "ц"), Spelling("ch", "ч"), Spelling("sh", "ш"), Spelling("yu", "ю"), Spelling("ya", "я"), Spelling("yo", "ё"), Spelling("a", "а"), Spelling("b", "б"), Spelling("c", "к"), Spelling("d", "д"), Spelling("e", "е"), Spelling("f", "ф"), Spelling("g", "г"), Spelling("h", "х"), Spelling("i", "и"), Spelling("j", "дж"), Spelling("k", "к"), Spelling("l", "л"), Spelling("m", "м"), Spelling("n", "н"), Spelling("o", "о"), Spelling("p", "п"), Spelling("q", "к"), Spelling("r", "р"), Spelling("s", "с"), Spelling("t", "т"), Spelling("u", "у"), Spelling("v", "в"), Spelling("w", "в"), Spelling("x", "кс"), Spelling("y", "ы"), Spelling("z", "з")]
+
+# a script a text's letters are written in by its table of spellings
+class Script { spellings: list<Spelling> }
+cyrillic = Script(CYRILLIC_LETTERS)
+# the text in the script's letters: each Latin spelling its letter, a capital's spelling capitalized ("Sh" is "Ш")
+in(t: text, script: Script): text := transliterated(t, script.spellings)
+
+# the text with each spelling of the table, matched case-blind, replaced by its letter, upper case after a capital
+transliterated(t: text, table: list<Spelling>): text := {
+	out = ""
+	at = 0
+	while at < #t {
+		matched = spellings_at(t, at, table)
+		if matched is empty {
+			out += t[at:at + 1]
+			at += 1
+		} else {
+			out += capitalized_like(matched[0].letter, t[at:at + 1])
+			at += #matched[0].latin
+		}
+	}
+	out
+}
+
+# the table's spellings the text has at a place
+spellings_at(t: text, at: int, table: list<Spelling>): list<Spelling> := table.filter(s => lower(t[at:at + #s.latin]) == s.latin)
+# the letter in upper case when the character it stands for is a capital
+capitalized_like(letter: text, character: text): text := if unicode_upper(character) == character and unicode_lower(character) != character then unicode_upper(letter[0:1]) + letter[1:] else letter
