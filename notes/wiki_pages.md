@@ -182,7 +182,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - number.md (119 lines): wap-wiki, tests test_number_page.wap green, test_number_wanted.wap the forms still to build (exact decimals, big ints, glyphs)
 - object.md (3 lines): wap-wiki, prose; asked (wasp, node_pointer)
 - operator.md (223 lines): wap-wiki, tests test_operator_page.wap green, test_operator_wanted.wap the forms still to build; asked (verbed, | overload, n-ary todos)
-- optional.md (95 lines):
+- optional.md (95 lines): wap-wiki, tests test_optional_page.wap green, test_optional_wanted.wap the forms still to build; asked (field spellings, schemes sketches, list ø)
 - overflow.md (10 lines):
 - overloading.md (0 lines):
 - packages.md (23 lines):
