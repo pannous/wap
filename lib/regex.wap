@@ -1,0 +1,338 @@
+# The standard module regex (wiki/library-regex.md): regular expressions in plain wap, one engine everywhere. The
+# syntax is POSIX extended with the classes everybody writes: . [abc] [^a-z] * + ? {n} {n,} {n,m} | (group) (?:group)
+# ^ $ \d \w \s (and \D \W \S outside brackets) \b, a backslash taking any other character literally. A pattern is
+# parsed into a tree, compiled into a small program and run by backtracking, the leftmost match first and the
+# alternatives in their order (as Perl and JavaScript do). No look-around, no backreferences.
+
+# --- character sets
+
+# code point ranges [lo, hi], the set holding them or, negated, every other code point
+class CharSet { ranges: list<list<int>>, negated: bool }
+DIGIT_RANGES := [[48, 57]]
+WORD_RANGES := [[48, 57], [65, 90], [95, 95], [97, 122]]
+SPACE_RANGES := [[9, 13], [32, 32]]
+NEWLINE := 10
+
+holds_code(set: CharSet, code: int): bool := set.ranges.any(range => code >= range[0] and code <= range[1]) != set.negated
+is_word_at(chars: list<char>, at: int): bool := at >= 0 and at < #chars and holds_code(CharSet(WORD_RANGES, no), ord(chars[at]))
+# the ranges of a class escape's letter (d, w, s, any case), ø for another letter
+escape_ranges(letter: text): list<list<int>>? := match letter.lower() {
+	"d" => DIGIT_RANGES
+	"w" => WORD_RANGES
+	"s" => SPACE_RANGES
+	_ => ø
+}
+# the character a backslash escape writes: \n, \t, \r, else the character itself
+escaped_code(letter: text): int := match letter {
+	"n" => 10
+	"t" => 9
+	"r" => 13
+	_ => ord(char(letter))
+}
+
+# --- parsing
+
+enum TermKind { Chars, Sequence, Choice, Group, Repeat, LineStart, LineEnd, WordBoundary }
+# a pattern's tree: a character set, a sequence or choice of children, a capture group (number 0 for (?:…)), a
+# repetition of its child from least to most times (-1: no limit)
+class Term { kind: TermKind, children: list<Term>, set: CharSet, group: int, least: int, most: int }
+NO_CHILDREN := []
+EMPTY_SET := CharSet([], no)
+term(kind: TermKind, children: list<Term>): Term := Term(kind, children, EMPTY_SET, 0, 0, 0)
+chars_term(set: CharSet): Term := Term(Chars, [], set, 0, 0, 0)
+
+# the pattern being read and the place reached, the groups counted so far
+class Reader { pattern: text, at: int, groups: int }
+peek(r: Reader): text := r.pattern[r.at:r.at + 1]
+taken(r: Reader): text := {
+	c = peek(r)
+	r.at += 1
+	c
+}
+refused(r: Reader, why: text): any := raise "regex ${r.pattern}: ${why} at ${r.at + 1}"
+
+choice_of(r: Reader): Term := {
+	options = [sequence_of(r)]
+	while peek(r) == "|" {
+		r.at += 1
+		options.add(sequence_of(r))
+	}
+	if #options == 1 then options[0] else term(Choice, options)
+}
+sequence_of(r: Reader): Term := {
+	items: list<Term> = []
+	while r.at < #r.pattern and peek(r) != "|" and peek(r) != ")" { items.add(repeated(r, atom_of(r))) }
+	term(Sequence, items)
+}
+digits_of(r: Reader): int := {
+	start = r.at
+	while "0123456789".contains(peek(r)) and peek(r) != "" { r.at += 1 }
+	if r.at == start then -1 else int(r.pattern[start:r.at])
+}
+repeated(r: Reader, item: Term): Term := {
+	c = peek(r)
+	bounds = if c == "*" then [0, -1] else if c == "+" then [1, -1] else if c == "?" then [0, 1] else if c == "{" then braces_of(r) else []
+	if bounds is empty { return item }
+	if c != "{" { r.at += 1 }
+	repeated(r, Term(Repeat, [item], EMPTY_SET, 0, bounds[0], bounds[1]))
+}
+# {n}, {n,} or {n,m}: the least and most counts, the reader after the closing brace
+braces_of(r: Reader): list<int> := {
+	r.at += 1
+	least = digits_of(r)
+	most = least
+	if peek(r) == "," {
+		r.at += 1
+		most = digits_of(r)
+	}
+	if least < 0 or taken(r) != "}" { refused(r, "a repetition is {n}, {n,} or {n,m}") }
+	[least, most]
+}
+atom_of(r: Reader): Term := {
+	c = taken(r)
+	if c == "(" then group_of(r)
+	else if c == "[" then chars_term(bracket_of(r))
+	else if c == "." then chars_term(CharSet([[NEWLINE, NEWLINE]], yes))
+	else if c == "^" then term(LineStart, [])
+	else if c == "$" then term(LineEnd, [])
+	else if c == "\\" then escape_of(r)
+	else if c == "*" or c == "+" or c == "?" then refused(r, "nothing to repeat before ${c}")
+	else chars_term(CharSet([[ord(char(c)), ord(char(c))]], no))
+}
+# a group after its (: capturing and numbered, or (?:…) not
+group_of(r: Reader): Term := {
+	capturing = not r.pattern[r.at:].starts_with("?:")
+	if capturing { r.groups += 1 } else { r.at += 2 }
+	number = if capturing then r.groups else 0
+	inner = choice_of(r)
+	if taken(r) != ")" { refused(r, "an unclosed (") }
+	Term(Group, [inner], EMPTY_SET, number, 0, 0)
+}
+escape_of(r: Reader): Term := {
+	letter = taken(r)
+	if letter == "" { refused(r, "a pattern ending in a backslash") }
+	ranges = escape_ranges(letter)
+	if letter == "b" then term(WordBoundary, [])
+	else if ranges != ø then chars_term(CharSet(ranges!, letter != letter.lower()))
+	else chars_term(CharSet([[escaped_code(letter), escaped_code(letter)]], no))
+}
+# [abc], [^a-z], [\d_]: a ] right after the opening is literal
+bracket_of(r: Reader): CharSet := {
+	negated = peek(r) == "^"
+	if negated { r.at += 1 }
+	ranges: list<list<int>> = []
+	first = yes
+	while peek(r) != "]" or first {
+		if peek(r) == "" { refused(r, "an unclosed [") }
+		first = no
+		c = taken(r)
+		class_ranges = if c == "\\" then escape_ranges(peek(r)) else ø
+		if class_ranges != ø {
+			r.at += 1
+			ranges = ranges + class_ranges!
+		} else {
+			low = if c == "\\" then escaped_code(taken(r)) else ord(char(c))
+			high = low
+			if peek(r) == "-" and r.pattern[r.at + 1:r.at + 2] != "]" and r.pattern[r.at + 1:r.at + 2] != "" {
+				r.at += 1
+				high = ord(char(taken(r)))
+			}
+			ranges.add([low, high])
+		}
+	}
+	r.at += 1
+	CharSet(ranges, negated)
+}
+
+# --- the program
+
+enum Op { Match, Step, Split, Jump, Save, AtStart, AtEnd, AtBoundary }
+# one instruction: Step takes a character of the set; Split tries next first, then other; Jump goes to next; Save
+# notes the place in the slot
+class Instruction { op: Op, set: CharSet, next: int, other: int, slot: int }
+instruction(op: Op): Instruction := Instruction(op, EMPTY_SET, 0, 0, 0)
+class Program { steps: list<Instruction>, groups: int }
+
+emitted(p: Program, step: Instruction): int := {
+	p.steps.add(step)
+	#p.steps - 1
+}
+# a Split or Jump at the place pointed to its targets
+pointed(p: Program, at: int, next: int, other: int) := { p.steps[at] = Instruction(p.steps[at].op, EMPTY_SET, next, other, 0) }
+compiled_into(p: Program, n: Term) := match n.kind {
+	Chars => emitted(p, Instruction(Step, n.set, 0, 0, 0))
+	Sequence => for child in n.children { compiled_into(p, child) }
+	Choice => choices_into(p, n.children)
+	Group => {
+		if n.group > 0 { emitted(p, Instruction(Save, EMPTY_SET, 0, 0, 2 * n.group)) }
+		compiled_into(p, n.children[0])
+		if n.group > 0 { emitted(p, Instruction(Save, EMPTY_SET, 0, 0, 2 * n.group + 1)) }
+	}
+	Repeat => repeat_into(p, n.children[0], n.least, n.most)
+	LineStart => emitted(p, instruction(AtStart))
+	LineEnd => emitted(p, instruction(AtEnd))
+	WordBoundary => emitted(p, instruction(AtBoundary))
+}
+# a | b | c: split to a or the rest, each option jumping past the others
+choices_into(p: Program, options: list<Term>) := {
+	jumps: list<int> = []
+	for i in 0 upto #options - 1 {
+		split = emitted(p, instruction(Split))
+		compiled_into(p, options[i])
+		jumps.add(emitted(p, instruction(Jump)))
+		pointed(p, split, split + 1, #p.steps)
+	}
+	compiled_into(p, options.last)
+	for jump in jumps { pointed(p, jump, #p.steps, 0) }
+}
+# the child least times, then up to most - least optional ones, or a loop when there is no limit
+repeat_into(p: Program, child: Term, least: int, most: int) := {
+	for i in 0 upto least { compiled_into(p, child) }
+	if most < 0 {
+		loop = emitted(p, instruction(Split))
+		compiled_into(p, child)
+		back = emitted(p, instruction(Jump))
+		pointed(p, back, loop, 0)
+		pointed(p, loop, loop + 1, #p.steps)
+	} else {
+		splits: list<int> = []
+		for i in least upto most {
+			splits.add(emitted(p, instruction(Split)))
+			compiled_into(p, child)
+		}
+		for split in splits { pointed(p, split, split + 1, #p.steps) }
+	}
+}
+program_of(pattern: text): Program := {
+	r = Reader(pattern, 0, 0)
+	tree = choice_of(r)
+	if r.at < #pattern { refused(r, "an unopened )") }
+	steps: list<Instruction> = []
+	p = Program(steps, r.groups)
+	# slots 0 and 1 hold where the whole match starts and ends
+	emitted(p, Instruction(Save, EMPTY_SET, 0, 0, 0))
+	compiled_into(p, tree)
+	emitted(p, Instruction(Save, EMPTY_SET, 0, 0, 1))
+	emitted(p, instruction(Match))
+	p
+}
+
+# --- running
+
+# the slots (each group's start and end, -1 when it took no part) of a match of the program from the place, ø for none
+run(p: Program, chars: list<char>, at: int, place: int, slots: list<int>): list<int>? := {
+	pc = at
+	pos = place
+	saved = slots
+	while yes {
+		step = p.steps[pc]
+		match step.op {
+			Match => return saved
+			Step => {
+				if pos >= #chars or not holds_code(step.set, ord(chars[pos])) { return ø }
+				pc += 1
+				pos += 1
+			}
+			Split => {
+				tried = run(p, chars, step.next, pos, saved)
+				if tried != ø { return tried }
+				pc = step.other
+			}
+			Jump => { pc = step.next }
+			Save => {
+				saved = saved.take(step.slot) + [pos] + saved.drop(step.slot + 1)
+				pc += 1
+			}
+			AtStart => {
+				if pos != 0 { return ø }
+				pc += 1
+			}
+			AtEnd => {
+				if pos != #chars { return ø }
+				pc += 1
+			}
+			AtBoundary => {
+				if is_word_at(chars, pos - 1) == is_word_at(chars, pos) { return ø }
+				pc += 1
+			}
+		}
+	}
+	ø
+}
+
+# a match: where it starts and ends, and each group's text ("" for a group that took no part)
+class Found { start: int, end: int, groups: list<text> }
+# the leftmost match starting at or after from, ø for none
+found_from(p: Program, chars: list<char>, from: int): Found? := {
+	empty = (0 upto 2 * p.groups + 2).map(i => -1)
+	for start in from upto #chars + 1 {
+		slots = run(p, chars, 0, start, empty)
+		if slots != ø {
+			ends = slots!
+			groups = (1 upto p.groups + 1).map(g => if ends[2 * g] < 0 or ends[2 * g + 1] < 0 then "" else chars.take(ends[2 * g + 1]).drop(ends[2 * g]).map(c => text(c)).join(""))
+			return Found(start, ends[1], groups)
+		}
+	}
+	ø
+}
+# every match, left to right, none overlapping; an empty match moves on by one
+every_found(t: text, pattern: text): list<Found> := {
+	p = program_of(pattern)
+	chars = t.codepoints
+	found: list<Found> = []
+	from = 0
+	while from <= #chars {
+		next = found_from(p, chars, from)
+		if next == ø { return found }
+		found.add(next!)
+		from = if next!.end > next!.start then next!.end else next!.end + 1
+	}
+	found
+}
+slice_of(t: text, f: Found): text := t[f.start:f.end]
+
+# --- the words
+
+infix operator matches(t: text, pattern: text): bool := found_from(program_of(pattern), t.codepoints, 0) != ø
+first_match(t: text, pattern: text): text? := {
+	found = found_from(program_of(pattern), t.codepoints, 0)
+	if found == ø then ø else slice_of(t, found!)
+}
+find_all(t: text, pattern: text): list<text> := every_found(t, pattern).map(f => slice_of(t, f))
+match_groups(t: text, pattern: text): list<text>? := {
+	found = found_from(program_of(pattern), t.codepoints, 0)
+	if found == ø then ø else found!.groups
+}
+find_all_groups(t: text, pattern: text): list<list<text>> := every_found(t, pattern).map(f => f.groups)
+# the replacement with $1 … $9 or ${n} as the groups and $$ a dollar
+filled_in(replacement: text, matched: text, groups: list<text>): text := {
+	out = ""
+	at = 0
+	while at < #replacement {
+		c = replacement[at:at + 1]
+		after = replacement[at + 1:at + 2]
+		braced = after == "{" and find(replacement[at:], "}") > 0
+		number_text = if braced then replacement[at + 2:at + find(replacement[at:], "}") - 1] else after
+		if c == "$" and after == "$" {
+			out += "$"
+			at += 2
+		} else if c == "$" and is_digits(number_text) {
+			n = int(number_text)
+			out += if n == 0 then matched else if n <= #groups then groups[n - 1] else ""
+			at += if braced then #number_text + 3 else 2
+		} else {
+			out += c
+			at += 1
+		}
+	}
+	out
+}
+replace_all(t: text, pattern: text, replacement: text): text := {
+	out = ""
+	last = 0
+	for f in every_found(t, pattern) {
+		out += t[last:f.start] + filled_in(replacement, slice_of(t, f), f.groups)
+		last = f.end
+	}
+	out + t[last:]
+}
