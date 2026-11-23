@@ -110,9 +110,9 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - import.md (8 lines): wap-wiki, asked
 - in.md (17 lines): wap-wiki
 - include.md (10 lines): wap-wiki, asked
-- indexing.md (45 lines):
+- indexing.md (45 lines): wap-wiki
 - inspiration.md (10 lines):
-- int.md (26 lines):
+- int.md (26 lines): wap-wiki, asked (warp internals)
 - int28.md (4 lines):
 - int60.md (0 lines):
 - integer.md (2 lines):
