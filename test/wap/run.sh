@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # all of wap's tests, test/wap/run.sh [--wait] [--stage <n>] [<tests>] (default every test program test/test_*.wap and
-# script test/wap/test_*.sh; a test is a path or an area, `run.sh nodes`): first wap's compiler compiled and run once,
+# script test/wap/test_*.wap and test_*.sh; a test is a path or an area, `run.sh nodes`): first wap's compiler compiled and run once,
 # or its error, the first signal a worker waits for; then the tests run detached, niced, as many at once as the
 # machine's job slots allow (scripts/job-slot.sh, shared by every worktree), each one's output in
-# data/wap-tests/<test file>.txt and one summary line in data/wap-tests/summary.txt, read later; a run of all tests
+# data/wap-tests/<test file>.txt (a script's in data/wap-tests/wap/) and one summary line in data/wap-tests/summary.txt, read later; a run of all tests
 # writes its line to data/wap-tests/full-summary.txt too, which a run of some leaves alone (vitals reads it). --wait
 # runs them in the foreground and prints the summary. Its modules run on the native wap on PATH. The self-build ratchet,
 # ratchet_census.sh (about 4 min), is no default script: run it by name, test/wap/run.sh --wait
@@ -15,8 +15,14 @@ FULL_SUMMARY="$results/full-summary.txt"
 cores=$(getconf _NPROCESSORS_ONLN)
 job_slot="$here/../../scripts/job-slot.sh"
 
-# the outputs of the tests run, each data/wap-tests/<test file>.txt
-outputs() { for test in "$@"; do echo "$results/$(basename "$test").txt"; done; }
+# the outputs of the tests run, each data/wap-tests/<test file>.txt, a script's data/wap-tests/wap/<test file>.txt
+outputs() {
+	for test in "$@"; do
+		if in_scripts "$test"; then echo "$results/wap/$(basename "$test").txt"; else echo "$results/$(basename "$test").txt"; fi
+	done
+}
+# a test of test/wap/, however its path is written
+in_scripts() { [ "$(cd -P "$(dirname "$1")" && pwd -P)" = "$here" ]; }
 # the tests' outputs read into one line: checks passed and failed, the tests that failed
 summed() {
 	local passed failed
@@ -25,9 +31,12 @@ summed() {
 	echo "wap tests: $passed ✓, $failed ✗ in $# tests, $(($(date +%s) - started)) s$( [ "$failed" = 0 ] || printf '; failed: %s' "$(outputs "$@" | xargs grep -l '^✗' | xargs -n1 basename | sed 's/\.txt$//' | tr '\n' ' ')")"
 }
 # one test given the compiler under test (one_run <test> <module or "">): a test program, test/test_<area>.wap,
-# compiled by it and run; a test script run with it
+# compiled by it and run; a test script run with it, a wap one, test/wap/test_<area>.wap, compiled by it and given the
+# wap binary, it, the script's folder in the tree's data/ and the tree as arguments
 one_run() {
+	in_scripts "$1" && case $1 in *.wap) set -- "$here/$(basename "$1")" "$2" ;; esac
 	case $1 in
+		"$here"/*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/script.wasm" 2>&1 && $wap "$stage/script.wasm" "$wap" "$compiler" "$stage" "$tree" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
 		*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/test.wasm" 2>&1 && $wap "$stage/test.wasm" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
 		*) bash "$1" ${2:+--compiler "$2"} ;;
 	esac
@@ -66,7 +75,7 @@ while [ $# -gt 0 ]; do
 	esac
 done
 # the tests named: each a path, or an area, its test programs test/test_<area>.wap and test_<area>_<part>.wap and
-# its script test/wap/test_<area>.sh; default all of them
+# its scripts test/wap/test_<area>.wap and test_<area>.sh; default all of them
 programs="$(cd -P "$here/.." && pwd -P)"
 shopt -s nullglob
 tests=()
@@ -74,13 +83,13 @@ for test in "$@"; do
 	case $test in
 		*/*) tests+=("$test") ;;
 		*) found=${#tests[@]}
-			for file in "$programs/test_$test.wap" "$programs/test_$test"_*.wap "$here/test_$test.sh"; do [ -f "$file" ] && tests+=("$file"); done
+			for file in "$programs/test_$test.wap" "$programs/test_$test"_*.wap "$here/test_$test.wap" "$here/test_$test.sh"; do [ -f "$file" ] && tests+=("$file"); done
 			[ ${#tests[@]} -gt "$found" ] || { echo "no test of $test" >&2; exit 2; } ;;
 	esac
 done
-if [ $# -gt 0 ]; then all=no; set -- "${tests[@]}"; else all=yes; set -- "$programs"/test_*.wap "$here"/test_*.sh; fi
+if [ $# -gt 0 ]; then all=no; set -- "${tests[@]}"; else all=yes; set -- "$programs"/test_*.wap "$here"/test_*.wap "$here"/test_*.sh; fi
 for test in "$@"; do [ -f "$test" ] || { echo "no test $test" >&2; exit 2; }; done
-mkdir -p "$results" && rm -f $(outputs "$@") "$SUMMARY"
+mkdir -p "$results/wap" && rm -f $(outputs "$@") "$SUMMARY"
 source "$here/compile.sh"
 # --stage <n>: the compiler under test is wap<n>, wap built by itself n times (milestone 2: the tests pass with wap2)
 module=

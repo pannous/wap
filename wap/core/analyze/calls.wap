@@ -51,7 +51,9 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	# `{ a; return 7 }`
 	jumped = (1 to #given).filter(at => jumps(given#at))
 	if jumped { return jumping(refitted(Block(given.take(jumped#1)), n)) }
-	scopes = with_last_scope(scopes, own_words(called, given, s))
+	# a type's own words are innermost, so the program's own Op's text beats the library's Op's in library code too
+	own = own_words(called, given, s)
+	scopes = [own] + scopes.map(scope => scope.filter(definition => not own.any(word => word.key == definition.key)))
 	made = made_from_map(n, called, candidates, given, s)
 	if made != ø { return typed_form(made, s, f, expected) }
 	call_chosen(n, called, scopes, given, expected, s, f)
@@ -75,8 +77,7 @@ spread_alone(arguments: list, candidates: list<Signature>, s: TypingState) as li
 result_wanted(argument: Node, at: int, outer: list<Signature>, s: TypingState) as Node? := {
 	results = results_written(argument, s)
 	if #results < 2 { return ø }
-	# a generic parameter there takes any of them, so no one definition is meant
-	taking = outer.filter(definition => results.any(result => wants_at(definition, at, result)) or has_letters(parameter_type_at(definition, at) ?? EMPTY_SYMBOL, s.records))
+	taking = outer.filter(definition => results.any(result => wants_at(definition, at, result)))
 	giving = taking.filter(definition => wants_at(definition, at, definition.result))
 	chosen = if #giving == 1 then giving else taking
 	if #chosen == 1 then parameter_type_at(chosen#1, at) else ø
@@ -89,7 +90,6 @@ wants_at(definition: Signature, at: int, type: Node?) as bool := {
 # the types an argument may be read as: the results a call's definitions write, of those taking as many arguments; a
 # one-character literal a char or a text, a list of them a list of either
 results_written(argument: Node, s: TypingState) as list<Node> := match argument {
-	Char(value) => [symbol(CHAR_TYPE), TEXT_SYMBOL]
 	List(items, Bracket.Square, separator) => if items is empty then [] else results_written(items#1, s).map(list_type)
 	Call(called, parts) => if fact_of(called, CANDIDATES) == ø and fact_of(called, DEFINED_AT) == ø or holds_value(called) then [] else candidate_scopes(called).flat_map(scope => scope).map(definer => definition_at(definer, s)).filter(definition => takes_count(definition, #parts, s)).map(definition => definition.result).compact()
 	_ => []
@@ -160,6 +160,8 @@ part_typed(n: Node, typed: Node, key: Node, s: TypingState, f: TypeFrame, expect
 # its text, any other value the call text(c), a range list(r), an atom Node('a')
 as_read(n: Node, wanted: Node, s: TypingState) as Node := {
 	given = value_type(n)
+	# a list whose items read as the wanted list's: a written one item by item, any other by the list word, list(cs)
+	if item_type(given) != ø and item_type(wanted) != ø and reads_as(item_type(wanted)!, item_type(given)!, s.records) { return if n is List then with_type_of(refitted(with_items(n, items_of(n).map(item => converted(item, item_type(wanted)!, s, item, "the list holds"))), n), wanted) else word_called(n, type_word(wanted), [n], ø, s) }
 	read = read_type(given, wanted, s.records) ?? refused(n, "this value reads as no other type")
 	if n is Char and read == TEXT_SYMBOL { return char_text(n) }
 	# an enum's case where a Node is wanted is the Symbol of its text: `n == int`, `n: Node = TypeWord.int`
@@ -215,7 +217,7 @@ made_from_map(n: Node, called: Node, candidates: list<Signature>, given: list, s
 	instance_from_map(n, record, given#1, s)
 }
 # A type's own words travel with it: the definitions of a called name that the module of an argument's record declares
-# taking a value of that record, so a library's `show(xs#at)` finds a program's show(p: P), in the one ranking
+# taking a value of that record, so a library's `show(xs#at)` finds a program's show(p: P), innermost
 own_words(called: Node, given: list, s: TypingState) as list := {
 	records = given.map(argument => record_named(s.records, base_or_self(value_type(argument)))).compact()
 	definitions_named(text(called), s).filter(definition => records.any(record => definition.module == (file_of(record) ?? "") and definition.parameters.any(type => takes_record(type, record))))
