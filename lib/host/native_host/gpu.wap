@@ -309,8 +309,6 @@ class Gpu {
 	surface_height: int = 0
 	# the most pixels a point a window shades, lowered while its frames are slow (fitted_timed), when it was last shaded
 	shade_ceiling: float = 1000.0
-	# the pixels a point of the painting being shaded spans: more than 1 only while a window shades it fitted
-	shading_scale: float = 1.0
 	fitted_at: int = 0
 	slow_fitted: int = 0
 	# the last picture shown, shown again as the window comes into sight or changes size
@@ -639,26 +637,27 @@ uniform_member(layout: Layout, name: text, numbers: list<float>): text := {
 }
 padded(numbers: list<float>, alignment: int) := { while #numbers % alignment != 0 { numbers.add(0.0) } }
 # the program's values with the built-in holes its shader reads and it gave none
-values_copied(shader: text, given: any, width: int, height: int): map<text, any> := {
+# scale: the pixels a point of the painting spans, more than 1 only while a window shades it fitted
+values_copied(shader: text, given: any, width: int, height: int, scale: float = 1.0): map<text, any> := {
 	values: map<text, any> = {}
 	if given is map<text, any> { for name in given.keys { values[name] = given[name] } }
 	if gpu.first_painting_ms == 0 { gpu.first_painting_ms = wall_clock_ms() }
 	for hole in BUILTIN_HOLES {
 		if not names(shader, VALUES_NAME + "." + hole) or values.has(hole) { continue }
-		values[hole] = hole_value(hole, width, height)
+		values[hole] = hole_value(hole, width, height, scale)
 	}
 	values
 }
-values_filled(shader: text, given: any, width: int, height: int): map<text, any> := {
-	filled = values_copied(shader, given, width, height)
+values_filled(shader: text, given: any, width: int, height: int, scale: float = 1.0): map<text, any> := {
+	filled = values_copied(shader, given, width, height, scale)
 	gpu.paintings += 1
 	filled
 }
-hole_value(hole: text, width: int, height: int): any := {
+hole_value(hole: text, width: int, height: int, scale: float): any := {
 	if hole == "width" { return width }
 	if hole == "height" { return height }
 	if hole == "size" { return [width, height] }
-	if hole == "pixel_scale" { return gpu.shading_scale }
+	if hole == "pixel_scale" { return scale }
 	if hole == "time" { return (wall_clock_ms() - gpu.first_painting_ms) / 1000.0 }
 	if hole == "frame" { return gpu.paintings }
 	# the pointer, told in the painting's points, in the pixels shaded (shade_fitted shades more of them)
@@ -1001,7 +1000,28 @@ previous_kept(image: int) := {
 # (a drawing without compute passes, the window's picture, leaves the compute fields out)
 # a buffer a drawing binds, by the name its compute shader reads it as; a field holds what its shader declares
 class NamedBuffer { name: text, buffer: int, bytes: int, field: bool = no }
-class Drawing { pipeline: int, bindings: int, previous: int, reads_previous: bool, corners: int, instances: int, depth: bool, index_buffer: int, index_count: int, width: int, height: int, named: list<NamedBuffer> = [], compute: text = "", workgroups: list<int> = [1, 1, 1], indirect_buffer: int = 0, indirect_words: int = 0, compute_pipelines: list<int> = [], compute_bindings: int = 0, views: list<int> = [] }
+# the GPU objects a drawing holds: 0 where it has none
+class Drawing {
+	pipeline: int = 0
+	bindings: int = 0
+	previous: int = 0
+	reads_previous: bool = no
+	corners: int = TRIANGLE_CORNERS
+	instances: int = 1
+	depth: bool = no
+	index_buffer: int = 0
+	index_count: int = 0
+	width: int = 0
+	height: int = 0
+	named: list<NamedBuffer> = []
+	compute: text = ""
+	workgroups: list<int> = [1, 1, 1]
+	indirect_buffer: int = 0
+	indirect_words: int = 0
+	compute_pipelines: list<int> = []
+	compute_bindings: int = 0
+	views: list<int> = []
+}
 drawing_made(written: text, values: map<text, any>, width: int, height: int): Drawing? := {
 	shader = uncommented(written)
 	gpu.failure = ""
@@ -1022,7 +1042,7 @@ drawing_made(written: text, values: map<text, any>, width: int, height: int): Dr
 		failed("an indexed indirect draw is five numbers")
 		return ø
 	}
-	drawing = Drawing(0, 0, 0, names(shader, PREVIOUS_HOLE), if quads then QUAD_CORNERS else TRIANGLE_CORNERS, if quads or indexed then layout.instances else 1, layout.depth, 0, #layout.indices, width, height, [], layout.compute, layout.workgroups, 0, #layout.indirect, [], 0)
+	drawing = Drawing(reads_previous: names(shader, PREVIOUS_HOLE), corners: if quads then QUAD_CORNERS else TRIANGLE_CORNERS, instances: if quads or indexed then layout.instances else 1, depth: layout.depth, index_count: #layout.indices, width: width, height: height, compute: layout.compute, workgroups: layout.workgroups, indirect_words: #layout.indirect)
 	body = if drawing.reads_previous then renamed(shader, PREVIOUS_HOLE, PREVIOUS_FUNCTION) else shader
 	fields = compute_fields(layout.compute, values)
 	if fields is ø { return ø }
@@ -1381,7 +1401,7 @@ image_drawn(encoder: int, drawing: Drawing, width: int, height: int): int := {
 	}
 	image
 }
-drawing_of(shader: text, values: any, width: int, height: int): Drawing? := drawing_made(shader, values_filled(shader, values, width, height), width, height)
+drawing_of(shader: text, values: any, width: int, height: int, scale: float = 1.0): Drawing? := drawing_made(shader, values_filled(shader, values, width, height, scale), width, height)
 # the image kept as the drawing's previous frame, else let go
 image_done(drawing: Drawing, image: int) := if drawing.reads_previous then previous_kept(image) else wgpuTextureRelease(image)
 extent_of(width: int, height: int): int := {
@@ -1574,7 +1594,7 @@ picture_presented(encoder: int, picture: int, layer: int, width: int, height: in
 		return no
 	}
 	texture_view = wgpuTextureCreateView(picture, 0)
-	drawing = Drawing(gpu.picture_pipeline, bindings_of(wgpuRenderPipelineGetBindGroupLayout(gpu.picture_pipeline, 0), [Binding(0, view: texture_view)]), 0, no, TRIANGLE_CORNERS, 1, no, 0, 0, 0, 0)
+	drawing = Drawing(pipeline: gpu.picture_pipeline, bindings: bindings_of(wgpuRenderPipelineGetBindGroupLayout(gpu.picture_pipeline, 0), [Binding(0, view: texture_view)]))
 	shown = presented(encoder, drawing, letterboxed(width, height))
 	wgpuBindGroupRelease(drawing.bindings)
 	wgpuTextureViewRelease(texture_view)
@@ -1602,9 +1622,7 @@ host_shader_shown(shader: text, width: int, height: int, values: any): int := {
 	if layer == 0 { return 0 }
 	sides = window_sides(layer, width, height)
 	t0 = wall_clock_ms()
-	gpu.shading_scale = sides[0] / width
-	drawing = drawing_of(shader, values, sides[0], sides[1])
-	gpu.shading_scale = 1.0
+	drawing = drawing_of(shader, values, sides[0], sides[1], sides[0] / width)
 	t1 = wall_clock_ms()
 	if drawing == ø { return said_failed(WINDOW_PAINT) }
 	encoder = wgpuDeviceCreateCommandEncoder(gpu.device, 0)
@@ -1952,9 +1970,9 @@ frame_closed() := {
 	gpu.paintings += 1
 	gpu.pass_frame_open = no
 }
-pass_drawn(shader: text, given: any, width: int, height: int, reads: list<FluidField>, target: int, format: int): bool := {
+pass_drawn(shader: text, given: any, width: int, height: int, reads: list<FluidField>, target: int, format: int, scale: float = 1.0): bool := {
 	frame_opened()
-	values = values_copied(shader, given, width, height)
+	values = values_copied(shader, given, width, height, scale)
 	layout = values_laid_out(values)
 	if layout is ø { return no }
 	# (a list it reads is a storage array, bound after the fields as paint binds its own)
@@ -2049,10 +2067,10 @@ host_gpu_pass_recorded(shader: text, id: int, name: text, given: any): int := {
 }
 # the shading pass into an RGBA8 image of width × height, after the passes already encoded. 0 where it fails.
 # The fields stay at their own size: the shader samples them in 0..1, so the picture can be larger than the grid
-shade_image(shader: text, set: FieldSet, given: any, width: int, height: int): int := {
+shade_image(shader: text, set: FieldSet, given: any, width: int, height: int, scale: float = 1.0): int := {
 	reads = fields_read(shader, set)
 	image = rgba_target(width, height)
-	if not pass_drawn(shader, given, width, height, reads, image, FORMAT_RGBA8) {
+	if not pass_drawn(shader, given, width, height, reads, image, FORMAT_RGBA8, scale) {
 		wgpuTextureRelease(image)
 		return 0
 	}
@@ -2102,9 +2120,7 @@ fields_shown(shader: text, set: FieldSet, given: any, width: int, height: int, f
 		return 0
 	}
 	shaded = if fitted then window_sides(layer, width, height) else [width, height]
-	gpu.shading_scale = shaded[0] / width
-	image = shade_image(shader, set, given, shaded[0], shaded[1])
-	gpu.shading_scale = 1.0
+	image = shade_image(shader, set, given, shaded[0], shaded[1], shaded[0] / width)
 	if image == 0 {
 		passes_finished()
 		raise gpu.failure
