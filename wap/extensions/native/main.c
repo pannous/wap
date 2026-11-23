@@ -2,6 +2,7 @@
 // run by lib/native/wasi.c, which answers its WASI calls over libc and holds main(); the glue build.sh writes with
 // glue.awk calls the C functions the program imports. A program of no GC value (no text, list or raise), as wasm2c
 // takes no GC type
+#include <string.h>
 #include "program.h"
 #include "native/wasi.c"
 
@@ -43,7 +44,6 @@ static void* epoch_ticking(void* engine) {
 }
 // the library folder the native wap found beside its compiler (linking.wap), which the programs it runs read
 // (types/system.wap library_folder)
-#include <string.h>
 static const char* library_folder = "";
 void wap_library_folder_set(const char* folder) { library_folder = strdup(folder); }
 const char* wap_library_folder(void) { return library_folder; }
