@@ -1,0 +1,114 @@
+# The standard module color (wiki/graphics.md): a Color holds one number 0xAARRGGBB and prints as its name or as CSS
+# writes it, #RRGGBB or #RRGGBBAA. The named colors, rgb, hsv, mix, with_alpha and alpha_of; draw paints them, and
+# light adds: red + blue is #ff00ff.
+use math
+use text
+
+# the alpha byte of a fully opaque color, in its place
+OPAQUE := 0xFF000000
+# a color's channels, each one byte: where alpha, red, green and blue sit in 0xAARRGGBB
+ALPHA_SHIFT := 24
+RED_SHIFT := 16
+GREEN_SHIFT := 8
+BLUE_SHIFT := 0
+LIGHT_SHIFTS := [RED_SHIFT, GREEN_SHIFT, BLUE_SHIFT]
+ALL_SHIFTS := [ALPHA_SHIFT, RED_SHIFT, GREEN_SHIFT, BLUE_SHIFT]
+CHANNEL := 256
+BRIGHTEST := 255
+# the colors that a number of six hex digits writes, its alpha left out
+RGB_RANGE := 16777216
+HEX := 16
+HUE_DEGREES := 360
+HUE_SECTOR := 60.0
+
+# a color as its number 0xAARRGGBB: Color(0xFF0000FF) is opaque blue; color(n) reads a number as CSS reads hex
+class Color { argb: int }
+
+black := color(0x000000)
+white := color(0xFFFFFF)
+gray := color(0x808080)
+red := color(0xFF0000)
+green := color(0x00A000)
+blue := color(0x0000FF)
+yellow := color(0xFFD700)
+orange := color(0xFF8C00)
+purple := color(0x8000C0)
+
+# each named color with its name
+class NamedColor { color: Color, name: text }
+NAMED_COLORS := [NamedColor(black, "black"), NamedColor(white, "white"), NamedColor(gray, "gray"), NamedColor(red, "red"),
+	NamedColor(green, "green"), NamedColor(blue, "blue"), NamedColor(yellow, "yellow"), NamedColor(orange, "orange"),
+	NamedColor(purple, "purple")]
+
+# a number as a color, as CSS reads hex: six digits are opaque, color(0xFF8000); eight end in their alpha, so
+# 0xFF800080 is half transparent; a fully transparent one is with_alpha(c, 0)
+color(n: int): Color := if n < RGB_RANGE then Color(OPAQUE + n) else from_rgba_hex(n)
+rgb(n: int): Color := color(n)
+# a CSS hex text as its color: color("#0000ff"), color("#0000ff80") with its alpha last, the short color("#00f")
+color(css: text): Color := {
+	written = remove_prefix(css, "#")
+	digits = if #written == 3 or #written == 4 then written.codepoints.map(c => "${c}${c}").join("") else written
+	if not is_hex(digits) or not (#digits == 6 or #digits == 8) { raise "not a CSS hex color: " + css }
+	n = from_base(digits, HEX)
+	if #digits == 6 then Color(OPAQUE + n) else from_rgba_hex(n)
+}
+# r, g, b from 0 to 255
+rgb(r: float, g: float, b: float): Color := Color(OPAQUE + round(r) * CHANNEL * CHANNEL + round(g) * CHANNEL + round(b))
+# hue in degrees, saturation and value from 0 to 1
+hsv(h: float, s: float, v: float): Color := {
+	light = hsv_rgb(h, s, v)
+	rgb(light#1 * BRIGHTEST, light#2 * BRIGHTEST, light#3 * BRIGHTEST)
+}
+# hsv as a painted function's color [red, green, blue] from 0 to 1 (what a shader adds up, not a Color): saturation
+# free to leave 0…1, as GLSL's hsv(h, s, v) one-liners let it
+hsv_rgb(h: float, s: float, v: float): list<float> := {
+	turn = h / HUE_DEGREES
+	turned = [turn + 1.0, turn + 2.0 / 3.0, turn + 1.0 / 3.0].map(x => abs(fract(x) * 6.0 - 3.0))
+	turned.map(x => lerp(1.0, clamp(x - 1.0, 0.0, 1.0), s) * v)
+}
+
+# red, else its hex text #RRGGBB
+text(c: Color): text := {
+	for named in NAMED_COLORS { if named.color.argb == c.argb { return named.name } }
+	hex_text(c)
+}
+# the color named so, ø for no named color
+color_named(name: text): Color? := {
+	for named in NAMED_COLORS { if named.name == name { return named.color } }
+	ø
+}
+==(a: Color, b: Color): bool := a.argb == b.argb
+
+# the byte of 0xAARRGGBB at the shift: ALPHA_SHIFT its alpha, then red, green and blue
+channel_byte(c: Color, shift: int): int := (c.argb >>> shift) % CHANNEL
+# [red, green, blue], each from 0 to 1, as a painted pixel takes them
+channels(c: Color): list<float> := LIGHT_SHIFTS.map(shift => float(channel_byte(c, shift)) / BRIGHTEST)
+# alpha from 0 (invisible) to 255 (opaque)
+alpha_of(c: Color): int := channel_byte(c, ALPHA_SHIFT)
+# alpha from 0 (invisible) to 1 (opaque)
+with_alpha(c: Color, alpha: float): Color := Color(round(clamp(alpha, 0.0, 1.0) * BRIGHTEST) * RGB_RANGE + c.argb % RGB_RANGE)
+# the color t of the way from a to b, each channel and the alpha alike: mix(red, blue) is #800080
+mix(a: Color, b: Color, t: float = 0.5): Color :=
+	Color(ALL_SHIFTS.map(shift => round(lerp(float(channel_byte(a, shift)), float(channel_byte(b, shift)), t)) << shift).sum())
+# light adding: each channel summed and capped at 255, `-` floored at 0, a color times a number scales its channels;
+# the left color keeps its alpha
++(a: Color, b: Color): Color := channels_made(a, shift => channel_byte(a, shift) + channel_byte(b, shift))
+-(a: Color, b: Color): Color := channels_made(a, shift => channel_byte(a, shift) - channel_byte(b, shift))
+*(c: Color, f: float): Color := channels_made(c, shift => round(float(channel_byte(c, shift)) * f))
+# a's alpha, and each of red, green and blue the byte its shift gives, kept from 0 to 255
+channels_made(a: Color, byte: (int) -> int): Color :=
+	Color((alpha_of(a) << ALPHA_SHIFT) + LIGHT_SHIFTS.map(shift => clamp(byte(shift), 0, BRIGHTEST) << shift).sum())
+
+# #ff0000, and #ff000080 when not opaque, its alpha last as in CSS
+hex_text(c: Color): text := "#" + padded_hex(c.argb % RGB_RANGE, 6) + (if alpha_of(c) == BRIGHTEST then "" else padded_hex(alpha_of(c), 2))
+# a color as a hex number: argb_hex(red) 0xffff0000 with its alpha first as a color holds it, rgba_hex(red) 0xff0000ff
+# with its alpha last as CSS writes it; from_argb_hex and from_rgba_hex read them back
+argb_hex(c: Color): int := c.argb
+rgba_hex(c: Color): int := c.argb % RGB_RANGE * CHANNEL + alpha_of(c)
+from_argb_hex(h: int): Color := Color(h)
+from_rgba_hex(h: int): Color := Color(h % CHANNEL * RGB_RANGE + h ÷ CHANNEL)
+# the low digits of n in lower-case hexadecimal, zeros in front
+padded_hex(n: int, digits: int): text := {
+	written = ascii_lower(to_base(n, HEX))
+	"0" * (digits - #written) + written
+}
