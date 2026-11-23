@@ -1,0 +1,88 @@
+# The standard module numeric (wiki/library-numeric.md): roots, integrals, interpolation and polynomials over floats.
+# A polynomial is the list of its coefficients from the constant up: [c0, c1, c2] is c0 + c1·x + c2·x².
+use matrix
+
+# how close a root comes: bisection stops below this width, Newton below this step
+ROOT_TOLERANCE := 0.000000000001
+# the most halvings bisection makes, the most steps Newton takes
+ROOT_STEPS := 200
+NEWTON_STEPS := 100
+# how close adaptive Simpson's estimates agree, and how deep it halves at most
+INTEGRAL_TOLERANCE := 0.0000000001
+INTEGRAL_DEPTH := 50
+
+# a root of f between a and b by bisection, f(a) and f(b) of opposite signs (or one of them 0)
+root(f: (float) -> float, a: float, b: float): float := {
+	low = a
+	high = b
+	f_low = f(low)
+	if f_low == 0 { return low }
+	if f(high) == 0 { return high }
+	if (f_low > 0) == (f(high) > 0) { raise "root: f(${a}) and f(${b}) have the same sign, so no root lies between them" }
+	for step in 1 to ROOT_STEPS {
+		middle = (low + high) / 2
+		f_middle = f(middle)
+		if f_middle == 0 or (high - low) / 2 < ROOT_TOLERANCE { return middle }
+		if (f_middle > 0) == (f_low > 0) {
+			low = middle
+			f_low = f_middle
+		} else { high = middle }
+	}
+	(low + high) / 2
+}
+# a root of f by Newton's method from x0, df its derivative: done when a step is under the tolerance (relative)
+newton(f: (float) -> float, df: (float) -> float, x0: float): float := {
+	x = x0
+	for step in 1 to NEWTON_STEPS {
+		slope = df(x)
+		if slope == 0 { raise "newton: the derivative is 0 at x = ${x}, no Newton step from there" }
+		next = x - f(x) / slope
+		if abs(next - x) <= ROOT_TOLERANCE * max(1.0, abs(next)) { return next }
+		x = next
+	}
+	raise "newton: no convergence from x0 = ${x0} within ${NEWTON_STEPS} steps"
+}
+
+# the integral of f from a to b by adaptive Simpson: each half refined until its estimates agree
+integrate(f: (float) -> float, a: float, b: float): float := {
+	middle = (a + b) / 2
+	whole = Simpson(a, b, f(a), f(middle), f(b))
+	refined(f, whole, INTEGRAL_TOLERANCE, INTEGRAL_DEPTH)
+}
+# Simpson's estimate over a … b, from f at the ends and the middle
+class Simpson { a: float, b: float, fa: float, fm: float, fb: float }
+estimate(s: Simpson): float := (s.b - s.a) / 6 * (s.fa + 4 * s.fm + s.fb)
+refined(f: (float) -> float, whole: Simpson, tolerance: float, depth: int): float := {
+	middle = (whole.a + whole.b) / 2
+	left = Simpson(whole.a, middle, whole.fa, f((whole.a + middle) / 2), whole.fm)
+	right = Simpson(middle, whole.b, whole.fm, f((middle + whole.b) / 2), whole.fb)
+	both = estimate(left) + estimate(right)
+	error = both - estimate(whole)
+	if depth <= 0 or abs(error) <= 15 * tolerance then both + error / 15 else refined(f, left, tolerance / 2, depth - 1) + refined(f, right, tolerance / 2, depth - 1)
+}
+
+# y at x on the straight lines through the points (xs ascending); an x outside xs is refused, never extrapolated
+linear_interpolate(xs: list<float>, ys: list<float>, x: float): float := {
+	if x < xs[0] or x > xs.last { raise "linear_interpolate: x = ${x} is outside ${xs[0]} … ${xs.last}" }
+	i = (0 upto #xs - 2).fold(0, (at, k) => if x > xs[k + 1] then k + 1 else at)
+	ys[i] + (x - xs[i]) / (xs[i + 1] - xs[i]) * (ys[i + 1] - ys[i])
+}
+
+# the polynomial's value at x by Horner's rule: poly_eval([1, 2, 3], 2) is 1 + 4 + 12 = 17
+poly_eval(p: list<float>, x: float): float := p.reverse.fold(0.0, (value, c) => value * x + c)
+# [c1, 2·c2, 3·c3, …]; a constant's derivative is []
+poly_derivative(p: list<float>): list<float> := (1 upto #p).map(i => i * p[i])
+# the real roots of a polynomial of degree 1 or 2, ascending ([] for none); higher degrees: root or newton
+poly_roots(p: list<float>): list<float> := {
+	if #p == 2 then [-p[0] / p[1]] else {
+		if #p != 3 { raise "poly_roots: degree 1 or 2 only, this one has ${#p - 1}; use root or newton" }
+		discriminant = p[1] * p[1] - 4 * p[2] * p[0]
+		if discriminant < 0 then [] else [(-p[1] - √discriminant) / (2 * p[2]), (-p[1] + √discriminant) / (2 * p[2])].unique.sorted
+	}
+}
+# the least-squares polynomial of the degree through the points, by the normal equations (Vᵀ V) c = Vᵀ y
+polyfit(xs: list<float>, ys: list<float>, degree: int): list<float> := {
+	vandermonde = xs.map(x => (0 to degree).map(k => x ^ k))
+	transposed = transpose(vandermonde)
+	solve(matmul(transposed, vandermonde), transposed.map(column => (0 upto #ys).map(j => column[j] * ys[j]).sum))
+}

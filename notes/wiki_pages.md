@@ -135,12 +135,12 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-complex.md (36 lines):
 - library-compress.md (40 lines):
 - library-config-formats.md (67 lines):
-- library-csv.md (32 lines):
+- library-csv.md (32 lines): ✓ 95f2e02 (lib/csv.wap, test/test_csv.wap 3 ✓; print of nested texts unquoted, with wap-interviewer)
 - library-diff.md (45 lines):
 - library-dogfood-apps.md (51 lines):
 - library-fractions.md (39 lines):
 - library-functions.md (28 lines):
-- library-geometry.md (38 lines):
+- library-geometry.md (38 lines): ✓ 8e9bd76 (lib/geometry.wap, math.wap trig and round_to, test/test_geometry.wap 5 ✓; round_to without `use math` not yet, with wap-binding)
 - library-graphs.md (40 lines):
 - library-intervals.md (36 lines):
 - library-json-tools.md (33 lines):
@@ -148,12 +148,12 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-markdown.md (54 lines):
 - library-matrix.md (26 lines):
 - library-money.md (43 lines):
-- library-numeric.md (36 lines):
-- library-path.md (46 lines):
-- library-primes.md (26 lines):
+- library-numeric.md (36 lines): ✓ 0fefa6f (lib/numeric.wap, lib/matrix.wap solve, test/test_numeric.wap 5 ✓; intro "highest power first" → constant first, with wap-interviewer)
+- library-path.md (46 lines): wap-wiki-lib
+- library-primes.md (26 lines): ✓ 6b5ca30 (lib/math.wap primes words, test/test_primes.wap 3 ✓; without `use` not yet, with wap-binding)
 - library-reference.md (36 lines):
 - library-regex.md (107 lines):
-- library-slugs.md (36 lines): wap-wiki-lib
+- library-slugs.md (36 lines): ✓ 45356f7 (lib/slugs.wap, test/test_slugs.wap 8 ✓; lib/text.wap holds upper and words until types has them)
 - library-tables.md (47 lines):
 - library-template.md (37 lines):
 - library-time-patterns-durations.md (42 lines):

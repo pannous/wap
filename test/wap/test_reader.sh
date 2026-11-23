@@ -87,4 +87,6 @@ check "a row of fields, then a method" "$(ran field_row 'class Cursor { s: text;
 	done() as bool := at >= 3
 }
 print text(Cursor("x", 4).done())')" "yes"
+# a list of spaced values keeps its round brackets and blanks (user 2026-11-23)
+format_check 'x = (1 2)' 'x = (1 2)'
 exit $((failures > 0))
