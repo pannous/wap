@@ -41,6 +41,14 @@ warp-host-fixer; this file is the inventory.
   host_gpu_picture_sized, host_gpu_computed, host_gpu_fields, host_gpu_fields_format, host_gpu_pass_recorded),
   webview (host_webview_page_text), C calls awaited (host_foreign_call, host_foreign_await, host_foreign_pending),
   the run's life (host_run_ended, host_waited, host_export, host_owns).
+- The gpu words are wap (lib/host/native_host/gpu.wap, compiled only, never run: no window, gpu or sound program
+  runs). They still need: a guard `{ return }` before a closing assignment (seven functions refused, a typing bug), a
+  list of numbers crossing as its cells (`memcpy(…, source: cells<i32>, …)`), the GPU lists warp's
+  extensions/gpu_lists gives (is_gpu_list, gpu_list_cell, gpu_list_place, gpu_list_bytes, gpu_list_room,
+  gpu_list_kept), the driver's system_value("program memory"), os's slow, window.wap's `global window` seen by
+  the modules that use it, and window.wap's value functions (mouse_x, mouse_y, mouse_down, mouse_wheel,
+  key_code_held, window_layer). A paint's value given as `any` is read with `is list<any>` and `is map<text, any>`; a
+  picture is a `Picture { width, height, pixels }`.
 
 ## Parked
 - The emitter's text helpers live in types/ (card text-helpers-out): native texts stays at +9 core lines. The helpers
