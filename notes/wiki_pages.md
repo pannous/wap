@@ -52,12 +52,12 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - class.md (55 lines): wap-wiki
 - cli.md (112 lines): wap-wiki, asked which command the page specifies
 - closure.md (88 lines): wap-wiki
-- code.md (17 lines):
-- comments.md (17 lines):
-- complex.md (4 lines):
-- console.md (11 lines):
+- code.md (17 lines): wap-wiki, asked about code e and the def form
+- comments.md (17 lines): ✓ wap-wiki, tests test_comments_page.wap green
+- complex.md (4 lines): wap-wiki, asked
+- console.md (11 lines): ✓ wap-wiki, interactive completion, no program form to test
 - const.md (0 lines):
-- constant.md (21 lines):
+- constant.md (21 lines): ✓ wap-wiki, tests test_constant_page.wap green, test_constant_wanted.wap var still to build
 - constructor.md (60 lines):
 - conversion.md (153 lines):
 - crystal.md (39 lines):
