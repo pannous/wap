@@ -137,14 +137,13 @@ wap/
     prelude.wap               the built-ins (print …), each a function whose body may be a Prim
     operators.wap             the operator table: precedence groups and their relations, operators, aliases
     list_items.wap            how a list holds its items, the one list file a build may swap (memory_lists.wap)
-    text_bytes.wap            how a text holds its bytes, the one text file a build may swap (memory_texts.wap)
+    text_bytes.wap            how a text holds its bytes (count, a byte, a slice, joined, compared), the one text file a build may swap (memory_texts.wap)
     lists.wap                 list words over function values: map, filter, contains …
     maps.wap                  map words: a key's value, set, has, remove; text keys found by their hash
     texts.wap                 text words over a text's UTF-8 bytes
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
     host.wap                  the host machinery the file and command-line words use, hidden from programs
-    text_bytes.wap            a text's bytes: count, a byte, a slice, made from bytes, joined, compared
     memory_texts.wap          a native build's texts in the module's memory, read by its build in the place of text_bytes.wap
     memory_lists.wap          a native build's lists in the module's memory, read by its build in the place of list_items.wap
     c.wap                     a C function's texts passed as NUL-terminated copies and given back; its out-pointers
@@ -175,11 +174,9 @@ wap/
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
       editing.wap             the console's line edited on a terminal: arrows, word moves, deletes, history
       host_words.wap          a program's C imports answered by the C functions of their names; C calling back into it
-      linking.wap             where a used module is found: beside its importer, its compiler's folder, wap.wasm's
+      linking.wap             where a module imported by name is: the path its compiler resolved, beside the importer unless rooted
       memory.wap              values in the memory, as wasm2c takes no GC type: layouts, literal words, the raise
       programs.wap            a program's machine code kept beside wap.wasm, program-<hash>.cwasm by its sources
-      linking.wap             where a module imported by a bare name is: beside the importer, in the compiler folder
-                              its wap.compiler section names, else in the installed wap-seed
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
     packed.wap                a Node as compact bytes and back, pack and unpack: each text and repeated subtree once
     warm.wap                  the compiler's warm state: the files it reads before a program, operated, packed
