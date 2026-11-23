@@ -59,36 +59,36 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - const.md (0 lines):
 - constant.md (21 lines): ✓ wap-wiki, tests test_constant_page.wap green, test_constant_wanted.wap var still to build
 - constructor.md (60 lines): wap-wiki
-- conversion.md (153 lines):
-- crystal.md (39 lines):
-- danger.md (2 lines):
-- data.md (172 lines):
-- debug.md (25 lines):
-- declaration.md (18 lines):
+- conversion.md (153 lines): wap-wiki
+- crystal.md (39 lines): ✓ wap-wiki, tests test_crystal_page.wap green, test_crystal_wanted.wap number-keyed map still to build
+- danger.md (2 lines): ✓ wap-wiki, a link
+- data.md (172 lines): wap-wiki
+- debug.md (25 lines): wap-wiki, debugging notes, asked to hide
+- declaration.md (18 lines): wap-wiki
 - discouraged.md (0 lines):
-- do.md (9 lines):
-- each.md (2 lines):
-- effects.md (110 lines):
-- elvis.md (5 lines):
-- enum.md (91 lines):
-- equality.md (62 lines):
+- do.md (9 lines): wap-wiki
+- each.md (2 lines): wap-wiki, asked
+- effects.md (110 lines): wap-wiki
+- elvis.md (5 lines): wap-wiki
+- enum.md (91 lines): wap-wiki
+- equality.md (62 lines): wap-wiki
 - Error.md (176 lines): (released by wap-wiki) tests d2b56ad, wiki a1ab2dc (÷ example, default/on error of/effects of not yet); waits: error values (`error "x"`, `r!`: draft on branch wiki-errors-2, unbuilt; bare `try X`, `failed` with wap-reader; the catch-type question parked), finally, assert … else, a catchable ÷ 0 (wap-reader)
-- evaluation.md (21 lines):
-- examples.md (90 lines):
-- Exception.md (37 lines):
-- expression.md (1 lines):
-- Extension-hooks.md (233 lines):
-- falsey.md (35 lines):
-- FAQ.md (1 lines):
-- fast.md (2 lines):
+- evaluation.md (21 lines): wap-wiki
+- examples.md (90 lines): wap-wiki
+- Exception.md (37 lines): wap-wiki, error values wait with Error.md; ABI section asked to hide
+- expression.md (1 lines): ✓ wap-wiki, prose (choices.md tests if as an expression)
+- Extension-hooks.md (233 lines): wap-wiki, compiler internals: asked to move to notes
+- falsey.md (35 lines): wap-wiki
+- FAQ.md (1 lines): ✓ wap-wiki, prose
+- fast.md (2 lines): wap-wiki, asked
 - Features.md (179 lines):
-- field.md (75 lines):
-- final.md (21 lines):
-- folding.md (9 lines):
+- field.md (75 lines): wap-wiki, asked (old field syntax)
+- final.md (21 lines): wap-wiki
+- folding.md (9 lines): wap-wiki, asked
 - Footguns.md (876 lines):
-- for.md (70 lines):
-- full-evaluation.md (17 lines):
-- function-pointer.md (22 lines):
+- for.md (70 lines): wap-wiki
+- full-evaluation.md (17 lines): wap-wiki, interpret asked
+- function-pointer.md (22 lines): wap-wiki
 - function.md (179 lines): (released by wap-wiki) tests 264f14d, wiki 70f163e (settled edits and not-yet marks done); waits: the types patch (~/Library/Logs/warp/wiki-b/function-types.patch: redo the pipe as `|>` plus `|`, BLANK_BYTES#1 for SPACE_BYTE, drop the round shadowing lines), the forms being built (`it`, `square(n)=n*n`, `g 2 {1}`)
 - functional.md (5 lines):
 - functor.md (18 lines):
@@ -158,7 +158,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-template.md (37 lines): ✓ 26959ef (lib/template.wap, lib/html.wap html_escape, test/test_template.wap 3 ✓; `{items: []}` not yet (card any-values), nested-map sections wait for any-truth-crash)
 - library-time-patterns-durations.md (42 lines): ✓ e837aee (lib/time.wap replacing time.warp, test/test_time_patterns.wap 12 ✓; UTC only, no zones)
 - library-unicode.md (33 lines): ✓ 3f56050 (lib/unicode.wap and unicode_data.wap from scripts/gen-unicode-tables.py; test/test_unicode.wap 10 ✓, test_unicode_normalization.wap 22 ✓)
-- library-uuid.md (31 lines):
+- library-uuid.md (31 lines): ✓ wap-wiki-lib, tests test_uuid.wap green (branch uuid-page eb7622e); wiki 093ab38
 - library-xml.md (28 lines): ✓ c48b119 (lib/xml.wap, test/test_xml.wap 8 ✓; elements a class, namespaces cut)
 - like.md (59 lines):
 - Lisp.md (19 lines):
@@ -239,7 +239,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - style-guide.md (21 lines):
 - swift-is-the-better-rust.md (83 lines):
 - swift.md (4 lines):
-- switch.md (89 lines):
+- switch.md (89 lines): ✓ wap-wiki-lib, tests test_switch_page.wap green, test_switch_wanted.wap red (branch switch-page 0105433)
 - symbol.md (67 lines):
 - symbolism.md (275 lines):
 - syntax.md (56 lines):
