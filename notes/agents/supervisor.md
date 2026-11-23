@@ -66,6 +66,9 @@ the team, crash resume), notes/roles.md (what the other roles do).
 - Next fleet restart (user 2026-11-22): everything is named wap: sessions wap-<role>/wap-<card>, start.sh and the watch
   scripts (urgent-card-watch, integrator-watch) use those names, the role files live in the wap repo and sessions start
   there (card fleet-wap-names on the wap board).
+- Wiki-driven development (user 2026-11-23): workers take wap/wiki pages one at a time from notes/wiki_pages.md, first
+  check that the page makes sense and holds no unimportant edge cases (those later or to the Interviewer), then
+  implement it as specified. Workers keep to small problems; the full suite and the coverage run once an hour (cron).
 - Core and extension changes (user 2026-11-22, after the extension audit notes/reviews/2026-11-22-extensions.md): no rubber
   stamps. Each one is discussed with the user (shape, core lines, why no hook or lib would do) before it lands; an
   Interviewer OK alone does not land it.
