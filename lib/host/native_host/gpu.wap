@@ -53,6 +53,8 @@ MOST_COMPUTE_ARRAYS := 8
 INDICES_NAME := "indices"
 DEPTH_NAME := "depth"
 INDIRECT_NAME := "indirect"
+# the last frame's depth, one farthest value per tile, which a compute shader reads to cull what it hides
+PYRAMID_NAME := "pyramid"
 COMPUTE_NAME := "compute"
 WORKGROUPS_NAME := "workgroups"
 BUFFER_INDIRECT := 256
@@ -294,7 +296,6 @@ class Gpu {
 	atlas_kept: int = 0
 	atlas_span: int = 0
 	pyramid_pipeline: int = 0
-	pyramid_shader_code: text = ""
 	depth_width: int = 0
 	depth_height: int = 0
 	picture_pipeline: int = 0
@@ -1122,6 +1123,10 @@ drawing_made(written: text, values: map<text, any>, width: int, height: int): Dr
 		drawing.indirect_buffer = cells_kept(INDIRECT_NAME, words, BUFFER_INDIRECT + BUFFER_STORAGE)
 		drawing.named.add(NamedBuffer(INDIRECT_NAME, drawing.indirect_buffer, #words * WORD_BYTES))
 	}
+	if layout.compute != "" {
+		pyramid_for(width, height)
+		drawing.named.add(NamedBuffer(PYRAMID_NAME, gpu.pyramid_buffer, gpu.pyramid_n * WORD_BYTES))
+	}
 	drawing
 }
 drawing_released(drawing: Drawing) := {
@@ -1235,11 +1240,6 @@ compute_dispatched(encoder: int, drawing: Drawing): bool := {
 	}
 	entries = []
 	for array in declared {
-		if array.name == "pyramid" {
-			pyramid_for(drawing.width, drawing.height)
-			entries.add(Binding(array.binding, gpu.pyramid_buffer, gpu.pyramid_n * WORD_BYTES))
-			continue
-		}
 		found = drawing.named.filter(item => item.name == array.name)
 		if #found == 0 {
 			failed("the compute shader's array " + array.name + " has no values")
@@ -1292,33 +1292,28 @@ pyramid_for(width: int, height: int) := {
 	gpu.pyramid_width = width
 	gpu.pyramid_height = height
 }
-pyramid_code(tiles_x: int, tiles_y: int, width: int, height: int): text := {
-	"@group(0) @binding(0) var src: texture_depth_2d;\n" + "@group(0) @binding(1) var<storage, read_write> pyramid: array<f32>;\n" + "@compute @workgroup_size(1) fn main() {\n" + "let tiles_x = " + text(tiles_x) + "u;\n" + "let tiles_y = " + text(tiles_y) + "u;\n" + "let width = " + text(width) + "u;\n" + "let height = " + text(height) + "u;\n" + "for (var ty = 0u; ty < tiles_y; ty++) {\n" + "for (var tx = 0u; tx < tiles_x; tx++) {\n" + "var far = 0.0;\n" + "let x0 = tx * 8u;\n" + "let y0 = ty * 8u;\n" + "for (var dy = 0u; dy < 8u; dy++) {\n" + "for (var dx = 0u; dx < 8u; dx++) {\n" + "let x = x0 + dx;\n" + "let y = y0 + dy;\n" + "if (x < width && y < height) {\n" + "let d = textureLoad(src, vec2i(i32(x), i32(y)), 0);\n" + "if (d > far) { far = d; }\n" + "}\n" + "}\n" + "}\n" + "pyramid[ty * tiles_x + tx] = far;\n" + "}\n" + "}\n" + "}\n"
-}
-# the frame's depth, one max per 8 by 8 tile, kept for the next frame's cull. A new size starts at the far plane.
+# one invocation per tile writes the farthest depth of its pixels
+PYRAMID_CODE := "const tile = " + PYRAMID_TILE + "u;\n@group(0) @binding(0) var depth: texture_depth_2d;\n@group(0) @binding(1) var<storage, read_write> pyramid: array<f32>;\n@compute @workgroup_size(1) fn main(@builtin(global_invocation_id) at: vec3u) {\n\tlet size = textureDimensions(depth);\n\tvar far = 0.0;\n\tfor (var dy = 0u; dy < tile; dy++) {\n\t\tfor (var dx = 0u; dx < tile; dx++) {\n\t\t\tlet pixel = at.xy * tile + vec2u(dx, dy);\n\t\t\tif (all(pixel < size)) { far = max(far, textureLoad(depth, pixel, 0)); }\n\t\t}\n\t}\n\tpyramid[at.y * ((size.x + tile - 1u) / tile) + at.x] = far;\n}\n"
+# the frame's depth reduced to the pyramid, kept for the next frame's cull. A new size starts at the far plane.
 pyramid_reduced(encoder: int, depth_view: int, width: int, height: int): bool := {
 	pyramid_for(width, height)
-	code = pyramid_code(tiles(width), tiles(height), width, height)
-	if gpu.pyramid_pipeline == 0 or gpu.pyramid_shader_code != code {
-		if gpu.pyramid_pipeline != 0 { wgpuComputePipelineRelease(gpu.pyramid_pipeline) }
+	if gpu.pyramid_pipeline == 0 {
 		wgpuDevicePushErrorScope(gpu.device, ERROR_FILTER_VALIDATION)
-		compiled = shader_module(code)
+		compiled = shader_module(PYRAMID_CODE)
 		pipeline = main_pipeline_made(compiled)
 		wgpuShaderModuleRelease(compiled)
 		if not scope_clean() {
 			if pipeline != 0 { wgpuComputePipelineRelease(pipeline) }
-			gpu.pyramid_pipeline = 0
 			return no
 		}
 		gpu.pyramid_pipeline = pipeline
-		gpu.pyramid_shader_code = code
 	}
 	entries = [Binding(0, view: depth_view), Binding(1, gpu.pyramid_buffer, gpu.pyramid_n * WORD_BYTES)]
 	bindings = bindings_of(wgpuComputePipelineGetBindGroupLayout(gpu.pyramid_pipeline, 0), entries)
 	pass = wgpuCommandEncoderBeginComputePass(encoder, 0)
 	wgpuComputePassEncoderSetPipeline(pass, gpu.pyramid_pipeline)
 	wgpuComputePassEncoderSetBindGroup(pass, 0, bindings, 0, 0)
-	wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1)
+	wgpuComputePassEncoderDispatchWorkgroups(pass, tiles(width), tiles(height), 1)
 	wgpuComputePassEncoderEnd(pass)
 	wgpuComputePassEncoderRelease(pass)
 	wgpuBindGroupRelease(bindings)
