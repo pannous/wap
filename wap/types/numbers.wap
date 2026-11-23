@@ -7,14 +7,14 @@ EXPONENT_BYTES := [69, 101]
 # the digits a float reads exactly into an int before the rest only scale it
 MANTISSA_LIMIT := 100000000000000000
 
-# the constants sin, cos, exp and ln reduce their argument by, and how many terms their series add after the first
-PI := 3.141592653589793
+# the circle's and growth's constants (wiki/math.md)
+π := 3.141592653589793
+pi := π
+HALF_PI := 1.5707963267948966
+QUARTER_PI := 0.7853981633974483
+# tan(π/8): above it atan turns its argument toward 0 by atan(x) = π/4 + atan((x - 1) / (x + 1))
+TAN_EIGHTH_PI := 0.41421356237309503
 LN2 := 0.6931471805599453
-# ln 2 split into a part whose multiples by small ints are exact and the rest, so exp's reduction loses no digit
-LN2_HIGH := 0.6931471803691238
-LN2_LOW := 0.00000000019082149292705877
-SQRT2 := 1.4142135623730951
-SERIES_TERMS := 14
 
 # the smaller and the larger of two values: `min(3, 2)` is 2, `max(1.5, 2.5)` 2.5
 min(a: T, b: T): T := if a < b then a else b
@@ -56,55 +56,57 @@ number(t: text): number := float(t)
 # the character of a code: `char(97)` is 'a'
 char(code: int): char := prim i32.wrap_i64(code)
 
-# The circle and growth functions in plain wap, as wasm has no instruction for them: each moves its argument into a
-# small range where a short series is right to the last digit or one off it
-# the sum of a series from its first term, each next term the one before times step(k), k counting from 0; the terms
-# are added smallest first, so their roundings do not pile up
-series(first: float, step: (int) -> float): float := {
-	terms = [first]
-	for k in 0 .. SERIES_TERMS { terms.add(terms.last * step(k)) }
-	terms.reverse.fold(0.0, (sum, term) => sum + term)
+# The circle and growth functions, in plain wap as wasm has no instruction for them: each brings its argument near 0,
+# where a series converges fast (wiki/math.md)
+# the sum of a series from its first term, each next term made from the one before and its number 1, 2, …; summed
+# until a term no longer changes the sum
+series_sum(first: float, next: (float, int) -> float): float := {
+	sum = first
+	term = first
+	k = 1
+	while sum + next(term, k) != sum {
+		term = next(term, k)
+		sum += term
+		k += 1
+	}
+	sum
 }
-# x moved by whole turns into -π … π, where sin, cos and tan repeat
-within_turn(x: float): float := x - 2.0 * PI * floor((x + PI) / (2.0 * PI))
-# the sine and cosine series within π/4 of zero
-sine_near(t: float): float := series(t, k => -t * t / float((2 * k + 2) * (2 * k + 3)))
-cosine_near(t: float): float := series(1.0, k => -t * t / float((2 * k + 1) * (2 * k + 2)))
-# the sine of x radians: the turn's angle mirrored into 0 … π/2, its sign kept: `sin(PI / 2.0)` is 1
-sin(x: float): float := {
-	turned = within_turn(x)
-	sign = if turned < 0.0 then -1.0 else 1.0
-	folded = if abs(turned) > PI / 2.0 then PI - abs(turned) else abs(turned)
-	sign * (if folded > PI / 4.0 then cosine_near(PI / 2.0 - folded) else sine_near(folded))
+# sine and cosine near 0, |r| ≤ π/4, by their Taylor series
+sine_series(r: float): float := series_sum(r, (term, k) => -term * r * r / ((2 * k) * (2 * k + 1)))
+cosine_series(r: float): float := series_sum(1.0, (term, k) => -term * r * r / ((2 * k - 1) * (2 * k)))
+# sin(x + quarters · π/2): x brought within π/4 of a multiple of π/2, then the series of that quarter
+sine_turned(x: float, quarters: int): float := {
+	nearest = round(x / HALF_PI)
+	r = x - nearest * HALF_PI
+	turn = (nearest + quarters) % 4
+	if turn == 0 then sine_series(r) else if turn == 1 then cosine_series(r) else if turn == 2 then -sine_series(r) else -cosine_series(r)
 }
-# the cosine of x radians: the turn's angle mirrored into 0 … π/2, negative beyond π/2: `cos(0.0)` is 1
-cos(x: float): float := {
-	turned = abs(within_turn(x))
-	sign = if turned > PI / 2.0 then -1.0 else 1.0
-	folded = if turned > PI / 2.0 then PI - turned else turned
-	sign * (if folded > PI / 4.0 then sine_near(PI / 2.0 - folded) else cosine_near(folded))
-}
+sin(x: float): float := sine_turned(x, 0)
+cos(x: float): float := sine_turned(x, 1)
 tan(x: float): float := sin(x) / cos(x)
-# e to the power x, from e^r with r within half a ln 2 of zero, doubled back: `exp(1.0)` is e, 2.71828…
+
+two_to(k: int): float := if k >= 0 then 2.0 ^ k else 1 / 2.0 ^ (0 - k)
+# e^x: x = k·ln 2 + r with |r| ≤ ln 2 / 2, so e^x = 2^k · e^r, e^r by its series
 exp(x: float): float := {
-	doublings = round(x / LN2)
-	rest = x - float(doublings) * LN2_HIGH - float(doublings) * LN2_LOW
-	series(1.0, k => rest / float(k + 1)) * 2.0 ^ doublings
+	k = round(x / LN2)
+	r = x - k * LN2
+	series_sum(1.0, (term, n) => term * r / n) * two_to(k)
 }
-# the natural logarithm of x above 0, from x halved or doubled into √½ … √2, where ln m is 2·atanh((m - 1)/(m + 1)):
-# `ln(8.0) / ln(2.0)` is 3
-ln(x: float): float := {
-	if x <= 0.0 { raise("ln takes a number above 0, not ${x}") }
+# the natural logarithm of a positive x: x = m·2^k with 1 ≤ m < 2, ln m = 2·atanh((m - 1) / (m + 1)) by its series
+log(x: float): float := {
+	if x <= 0 { raise "log of ${x}: only positive numbers have a logarithm" }
+	k = 0
 	m = x
-	doublings = 0
-	while m > SQRT2 {
-		m = m / 2.0
-		doublings += 1
+	while m >= 2 {
+		m = m / 2
+		k += 1
 	}
-	while m < SQRT2 / 2.0 {
-		m = m * 2.0
-		doublings -= 1
+	while m < 1 {
+		m = m * 2
+		k -= 1
 	}
-	u = (m - 1.0) / (m + 1.0)
-	float(doublings) * LN2 + 2.0 * series(u, k => u * u * float(2 * k + 1) / float(2 * k + 3))
+	s = (m - 1) / (m + 1)
+	2 * series_sum(s, (term, n) => term * s * s * (2 * n - 1) / (2 * n + 1)) + k * LN2
 }
+sinh(x: float): float := (exp(x) - exp(-x)) / 2
+cosh(x: float): float := (exp(x) + exp(-x)) / 2
