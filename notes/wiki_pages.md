@@ -1,6 +1,6 @@
 # Wiki-driven development (user 2026-11-23)
 
-One wap/wiki page at a time per worker. Claim a page by writing your session name after it, commit and push this file
+One page at a time (user 2026-11-23: "don't implement too many features at once"): one wiki worker on one page, finished (wiki, tests, its approved forms built) before the next page opens; the approved forms are built one after another, never in parallel. Claim a page by writing your session name after it, commit and push this file
 before you start (a rejected push means someone else claimed: pull and pick another). When done: ✓ plus the commit;
 page needs no code: – plus why; edge cases parked: name the follow-up card.
 Wiki workers change lib/, samples/, test/ and the wiki; a need in wap/ (core, types, sugar, extensions) goes as one
