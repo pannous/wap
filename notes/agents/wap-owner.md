@@ -135,6 +135,7 @@ wap/
     types.wap               the word files below, included in place: the one library every program is bound in
     rules.wap                 the kernel forms' patterns and the ../sugar/ files, used in load order
     prelude.wap               the built-ins (print …), each a function whose body may be a Prim
+    system.wap                the world around a program: files, command line, environment, wall clock (over host.wap)
     operators.wap             the operator table: precedence groups and their relations, operators, aliases
     list_items.wap            how a list holds its items, the one list file a build may swap (memory_lists.wap)
     text_bytes.wap            how a text holds its bytes (count, a byte, a slice, joined, compared), the one text file a build may swap (memory_texts.wap)
@@ -143,7 +144,7 @@ wap/
     texts.wap                 text words over a text's UTF-8 bytes
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
-    host.wap                  the host machinery the file and command-line words use, hidden from programs
+    host.wap                  the host machinery system.wap's words use, hidden from programs
     memory_texts.wap          a native build's texts in the module's memory, read by its build in the place of text_bytes.wap
     memory_lists.wap          a native build's lists in the module's memory, read by its build in the place of list_items.wap
     c.wap                     a C function's texts passed as NUL-terminated copies and given back; its out-pointers
