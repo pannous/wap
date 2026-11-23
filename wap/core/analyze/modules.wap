@@ -57,14 +57,20 @@ module_call(n: Node, called: Node, arguments: list, scope: Scope, depth: int) as
 	word = module_word(called, arguments#1, text(called), scope) ?? return ø
 	refitted(Call(word, all_bound(arguments.drop(1), scope, depth)), n)
 }
-# A program adds to a function every program has only for a type it declares (wiki/function.md): its function of such
-# a name takes a class or an enum of the program; a class's maker belongs to the class, a rule's function to its form
-overloads_checked(modules: list<Module>, library: Scope) := {
+# A program adds to a function every program has only where none of its definitions takes these types already
+# (wiki/function.md): `+(n: int, t: Ship)` adds one, `round(x)` and `missing(x: int?)` are taken; a function taking a
+# class or an enum of the program is its own, a class's maker belongs to the class, a rule's function to its form
+overloads_checked(modules: list<Module>, library: list<Signature>) := {
+	words: map<text, list<Signature>> = {}
+	for word in library { if word.kind == DefinitionKind.Function { words[word.name] = (if words.has(word.name) then words[word.name] else []) + [word] } }
 	signatures = modules.flat_map(module => module.signatures)
 	own = signatures.filter(signature => signature.kind == DefinitionKind.Record).map(signature => signature.name)
+	state = TypingState()
 	for signature in signatures {
-		if signature.kind == DefinitionKind.Function and named_in(library, signature.name).any(definition => definition.depth == PROGRAM_DEPTH and is_function(definition)) and not (own.contains(signature.name) or has_fact(signature.definer, DERIVED) or signature.parameters.any(type => names_type(type, own))) { refused(signature.definer, "${signature.name} is a function every program has: a program adds to it only for a type it declares, `${signature.name}(s: Ship) := …`; give this one another name") }
+		if signature.kind == DefinitionKind.Function and words.has(signature.name) and not (own.contains(signature.name) or has_fact(signature.definer, DERIVED) or signature.parameters.any(type => names_type(type, own))) and words[signature.name].any(word => taken_alike(word, signature, state)) { refused(signature.definer, "${signature.name} is a function every program has, which takes these types already: give this one another name, or take a type the program declares, `${signature.name}(s: Ship) := …`") }
 	}
 }
+# whether a definition takes what another's parameters do: as many, each pair binding, untyped or any taking all
+taken_alike(word: Signature, signature: Signature, s: TypingState) as bool := #word.parameters == #signature.parameters and (1 to #word.parameters).all(at => [word.parameters#at, signature.parameters#at].any(type => type == ø or type == ANY_SYMBOL) or unified(word.parameters#at!, signature.parameters#at, [], s) != ø)
 # whether a written type names one of these types, inside list<…>, an optional or a function type too
 names_type(type: Node?, names: list<text>) as bool := type != ø and (names.contains(text(type!)) or (type_parts(type) ?? []).any(part => names_type(part, names)))
