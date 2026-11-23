@@ -1,0 +1,135 @@
+# The standard module file (wiki/standard-library.md, wiki/script.md), in plain wap: `use file`. read, write, exists,
+# write_bytes, list_files, home_expanded and program are the types module's words; this module adds appending, globs,
+# a file's lines, temporary files and folders, and removing files: delete_file and delete by C's unlink, remove_file
+# to the Trash. The C words run natively; a page, which has no C library, has none of them yet.
+use path
+use random
+use time
+
+# the folder for temporary files when $TMPDIR names none
+DEFAULT_TEMP_FOLDER := "/tmp"
+TEMP_PREFIX := "warp-"
+TEMP_NAMES := 1000000000
+# a folder made for the Trash is the owner's alone (0700)
+OWNER_ONLY := 448
+TRASH_DATE := Pattern("yyyy-MM-dd'T'HH:mm:ss")
+
+unlink(path: text): i32 from 'c'
+rename(from: text, to: text): i32 from 'c'
+rmdir(path: text): i32 from 'c'
+mkdir(path: text, mode: i32): i32 from 'c'
+
+# the text added at the end of the file, which is made when it is not there
+append_file(path: text, addition: text) := {
+	file = home_expanded(path)
+	write(file, (if exists(file) then read(file) else "") + addition)
+}
+# `glob("src/*.wap")`: the paths matching the pattern, sorted; its wildcards * and ? are in its last part and match no
+# leading dot unless the part starts with one (python's glob); a folder that isn't there has none
+glob(pattern: text): list<text> := {
+	expanded = home_expanded(pattern)
+	folder = dirname(expanded)
+	part = basename(expanded)
+	names = if exists(folder) then list_files(folder) else []
+	matching = names.filter(name => path_matches(name, part) and (part.starts_with(".") or not name.starts_with("."))).sorted
+	if expanded.contains("/") then matching.map(name => path_join(folder, name)) else matching
+}
+# the file's text split on "\n", so a final newline leaves a trailing ""
+file_lines(path: text): list<text> := read(home_expanded(path)).split("\n")
+
+# the folder for temporary files: $TMPDIR without its trailing /, else /tmp
+temp_folder(): text := {
+	folder = started_env("TMPDIR") ?? ""
+	if folder == "" then DEFAULT_TEMP_FOLDER else path_trimmed(folder)
+}
+# the path of a new empty file, or folder, in temp_folder(), named as no file there is yet
+temp_file(): text := {
+	path = fresh_temp_path()
+	write(path, "")
+	path
+}
+temp_dir(): text := {
+	path = fresh_temp_path()
+	ensured_folder(path)
+	path
+}
+fresh_temp_path(): text := {
+	path = temp_named()
+	while exists(path) { path = temp_named() }
+	path
+}
+temp_named(): text := path_join(temp_folder(), TEMP_PREFIX + text(random_below(TEMP_NAMES)))
+# the folder and the folders above it made where they are missing
+ensured_folder(path: text) := {
+	if path != "" and not exists(path) {
+		parent = dirname(path)
+		if parent != path and parent != "/" { ensured_folder(parent) }
+		mkdir(path, OWNER_ONLY)
+	}
+}
+
+# `delete_file("~/old.txt")`: the file removed, yes when it was there
+delete_file(path: text): bool := unlink(home_expanded(path)) == 0
+# the file removed; a missing file is refused, naming the path
+delete(path: text) := {
+	file = home_expanded(path)
+	if not exists(file) { raise "delete: no " + file }
+	if unlink(file) != 0 { raise "delete: cannot remove " + file }
+}
+
+# `remove_file(path)`: a file or an empty folder moved to the Trash, with the guard rails of wiki/script.md: never a
+# pattern, the home folder, the root, the working folder or a folder above it
+remove_file(path: text) := {
+	if path == "~" { raise "file.remove: refusing to remove the home folder" }
+	if path.contains("*") or path.contains("?") { raise "file.remove: refusing a pattern " + path }
+	absolute = absolute_path(home_expanded(path))
+	why = removal_refusal(absolute)
+	if why != "" { raise why }
+	folder = is_folder(absolute)
+	if folder and #list_files(absolute) > 0 { raise "file.remove: " + absolute + ": Directory not empty" }
+	trashed(absolute, folder)
+}
+working_folder(): text := started_env("PWD") ?? "."
+removal_refusal(path: text): text := {
+	trimmed = path_trimmed(path)
+	home = path_trimmed(started_env("HOME") ?? "")
+	work = path_trimmed(working_folder())
+	if trimmed == "" then "file.remove: refusing to remove an empty path"
+	else if trimmed == "/" then "file.remove: refusing to remove /"
+	else if home != "" and trimmed == home then "file.remove: refusing to remove the home folder"
+	else if trimmed == work then "file.remove: refusing to remove the working directory"
+	else if work.starts_with(trimmed + "/") then "file.remove: refusing to remove a folder above the working directory"
+	else ""
+}
+absolute_path(path: text): text := normalize_path(if path.starts_with("/") then path else path_join(working_folder(), path))
+is_folder(path: text): bool := exists(path) and exists(path_join(path, "."))
+# ~/.Trash on macOS (files go straight in); else the FreeDesktop trash under ~/.local/share/Trash, which keeps an info
+# file beside each
+trash_files_folder(): text := {
+	mac = home_expanded("~/.Trash")
+	if exists(mac) then mac else home_expanded("~/.local/share/Trash/files")
+}
+trash_info_folder(files: text): text := if files.ends_with("/.Trash") then "" else path_join(dirname(files), "info")
+trashed(path: text, folder: bool) := {
+	files = trash_files_folder()
+	ensured_folder(files)
+	info = trash_info_folder(files)
+	if info != "" { ensured_folder(info) }
+	name = trash_name(files, basename(path))
+	if rename(path, path_join(files, name)) != 0 {
+		removed = if folder then rmdir(path) else unlink(path)
+		if removed != 0 { raise "file.remove: " + path + ": cannot remove" }
+	} else if info != "" {
+		write(path_join(info, name + ".trashinfo"), "[Trash Info]\nPath=" + path + "\nDeletionDate=" + format(now(), TRASH_DATE) + "\n")
+	}
+}
+# the name free in the Trash: the file's own, else with .1, .2, … after it
+trash_name(files: text, base: text): text := {
+	name = base
+	n = 0
+	while exists(path_join(files, name)) {
+		n += 1
+		name = base + "." + text(n)
+	}
+	name
+}
