@@ -123,7 +123,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - json.md (26 lines): ✓ (lib/json.wap replacing json.warp, test/test_json.wap 8 ✓ + the one-char line red, test_json_class red: class reflection)
 - Julia.md (59 lines): wap-wiki
 - key.md (37 lines): wap-wiki, asked (bare names, top-level colon)
-- keyword.md (308 lines):
+- keyword.md (308 lines): wap-wiki, tests test_keyword_page.wap green, test_keyword_wanted.wap the forms still to build; asked (doubtful forms, 1/0)
 - kind.md (31 lines): wap-wiki, C++ internals: asked to hide
 - kotlin.md (18 lines): ✓ wap-wiki, tests test_kotlin_page.wap green, test_kotlin_wanted.wap ⋁ ∧ still to build
 - lambda.md (43 lines): ✓ wap-wiki, tests test_lambda_page.wap green, test_lambda_wanted.wap the forms still to build; words lambda-words (sin…log into types, sorted by a comparator); wiki 9963682, 8a952d3
