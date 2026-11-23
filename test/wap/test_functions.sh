@@ -66,4 +66,7 @@ check "a block given to a function parameter runs by its call" "$(ran block_func
 print "${twice { 4 }}"')" "8"
 check "a block given to a block parameter runs by its call" "$(ran block_parameter 'twice(body: block) := body() + body()
 print "${twice { 4 }}"')" "8"
+# a program adds to a function every program has only where none of its definitions takes the types already
+# (wiki/function.md; own-type-overloads B, user 2026-11-23): missing(x: T?) takes an int? already
+check "a function every program has, redefined for types it takes already, is refused at the definition" "$(ran own_missing $'missing(x: int?) := no\nmissing(3)' | grep -o 'line 1:1: missing is a function every program has')" "line 1:1: missing is a function every program has"
 exit $((failures > 0))
