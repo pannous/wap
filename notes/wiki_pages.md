@@ -132,7 +132,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - length.md (2 lines):
 - library-cli.md (232 lines):
 - library-collections.md (47 lines): ✓ c354c23 (lib/collections.wap, test/test_collections.wap 6 ✓ + Counter/LRU red until any-char-equality)
-- library-complex.md (36 lines): wap-wiki-lib
+- library-complex.md (36 lines): ✓ b85dcc3 (lib/complex.wap, test/test_complex.wap 8 ✓; numbers on either side, exp and log in math)
 - library-compress.md (40 lines):
 - library-config-formats.md (67 lines):
 - library-csv.md (32 lines): ✓ 95f2e02 (lib/csv.wap, test/test_csv.wap 3 ✓; print of nested texts unquoted, with wap-interviewer)
@@ -154,7 +154,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-reference.md (36 lines):
 - library-regex.md (107 lines):
 - library-slugs.md (36 lines): ✓ 45356f7 (lib/slugs.wap, test/test_slugs.wap 8 ✓; lib/text.wap holds upper and words until types has them)
-- library-tables.md (47 lines):
+- library-tables.md (47 lines): wap-wiki-lib
 - library-template.md (37 lines): ✓ 26959ef (lib/template.wap, lib/html.wap html_escape, test/test_template.wap 3 ✓; `{items: []}` not yet (card any-values), nested-map sections wait for any-truth-crash)
 - library-time-patterns-durations.md (42 lines):
 - library-unicode.md (33 lines):
@@ -205,7 +205,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - Purpose.md (644 lines):
 - questions.md (144 lines):
 - quote.md (3 lines):
-- random.md (23 lines): waits: xor/shift (5bb73f5, queued), a seeded Random in plain wap
+- random.md (23 lines): ✓ feea51f (lib/random.wap, test/test_random.wap 10 ✓; die reading; secure random_bytes not yet, card host-random)
 - range.md (23 lines):
 - rant.md (15 lines):
 - README.md (0 lines):
