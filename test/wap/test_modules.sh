@@ -220,4 +220,8 @@ print(twice_sin(1))')" "6
 check "an alias of a rule's word starts its phrase" "$(ran alias_rule 'alias fun => def
 fun halved(n: float) { n / 2 }
 print halved(3.0)')" "1.5"
+# a used module's global keeps its place among the module's globals, whatever the module using it adds of its own
+mkdir -p "$stage/kept" && printf '%s\n' 'global names: list<text> = []' 'named(t: text) := names.add(t)' >"$stage/kept/names.wap" && printf '%s\n' 'use "names.wap"' 'setsockopt(fd: i32, level: i32, name: i32, value: bytes, size: length): i32 from '"'"'c'"'"'' >"$stage/kept/socket.wap"
+check "a module runs whose used module's module has a global, beside a C binding of its own" "$(ran kept_global 'use "kept/socket.wap"
+print 1')" "1"
 exit $((failures > 0))
