@@ -23,8 +23,9 @@ INSTANCE_BYTES := 16
 EXTERN_BYTES := 32
 # a func's place in its extern, past the kind
 EXTERN_VALUE_OFFSET := 8
-# wasmtime's limits for a run: the compiler's GC heap and its wasm stack (core/native/driver.warp's)
-GC_HEAP_BYTES := 134217728
+# wasmtime's limits for a run: the GC heap a store starts with and its wasm stack. A copying heap starting at 128 MB
+# collected over and over: one compile of wap/compiler.wap by the seed took 21 s, 1456 MB at its peak (2026-11-23)
+GC_HEAP_BYTES := 1073741824
 WASM_STACK_BYTES := 251658240
 # the run's clock on (a C bool): epoch deadlines, the time cap below
 EPOCH_INTERRUPTION := 1
@@ -132,9 +133,11 @@ engine_made(): int := {
 	epoch_ticker_started(made)
 	made
 }
-# a store's context, within the run's caps, whose WASI gives the host argument list, the standard files, the
-# environment, the current folder and the root
-context_made(arguments: list<text>): int := {
+# a store's context (a console's, kept for its session)
+context_made(arguments: list<text>): int := wasmtime_store_context(store_made(arguments))
+# a store within the run's caps, whose WASI gives the host argument list, the standard files, the environment, the
+# current folder and the root
+store_made(arguments: list<text>): int := {
 	store = wasmtime_store_new(engine, 0, 0)
 	wasmtime_store_limiter(store, memory_cap_gb * GB, NO_CAP, NO_CAP, NO_CAP, NO_CAP)
 	context = wasmtime_store_context(store)
@@ -148,7 +151,12 @@ context_made(arguments: list<text>): int := {
 	wasi_config_preopen_dir(wasi, ".", ".", 1)
 	wasi_config_preopen_dir(wasi, "/", "/", 1)
 	checked(wasmtime_context_set_wasi(context, wasi))
-	context
+	store
+}
+# the store freed, its GC heap and memories with it; the `finished()` its used modules kept called first
+store_freed(store: int) := {
+	if finishing == wasmtime_store_context(store) { each_finished() }
+	wasmtime_store_delete(store)
 }
 linker_made(): int := {
 	linker = wasmtime_linker_new(engine)
@@ -219,6 +227,7 @@ each_finished() := {
 		wasmtime_func_call(finishing, finishers + EXTERN_BYTES * i + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, host_block(8))
 		i = i + 1
 	}
+	finisher_count = 0
 }
 # whether the linker holds the module of the name vector `from` already, by its memory
 module_started(linker: int, context: int, from: int): bool := {
@@ -262,8 +271,14 @@ vector_item(vector: int, i: int): int := long_at(long_at(vector + 8) + 8 * i)
 beside(path: text, name: text): text := if name.starts_with("/") then name else folder_part(path) + name
 # a path's folder and a slash: names beside the file follow it ("./" for a path naming no folder)
 folder_part(path: text): text := folder_of(path) + "/"
-# the module of the file at the path `importer` run with these arguments, in a store of its own; whether it ran
-module_ran(module: int, arguments: list<text>, importer: text): bool := module != 0 and instance_ran(linker_made(), context_made(arguments), module, importer, yes) != 0
+# the module of the file at the path `importer` run with these arguments, in a store of its own, freed after the run
+# (a compiler's heap is gone before the program it compiled runs); whether it ran
+module_ran(module: int, arguments: list<text>, importer: text): bool := {
+	store = store_made(arguments)
+	ran = module != 0 and instance_ran(linker_made(), wasmtime_store_context(store), module, importer, yes) != 0
+	store_freed(store)
+	ran
+}
 # a new path in the temporary folder by the template
 temporary_path(template: text): text := getenv("TMPDIR") + template
 # a program's path as the compiler reads it, its links followed; as written where nothing is there, for the compiler
