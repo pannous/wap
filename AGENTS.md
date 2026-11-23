@@ -30,9 +30,12 @@ https://github.com/pannous/wap
 - wap/core and wap/kernel are semi-frozen: every change there goes to warp-interviewer first. A new feature goes
   into wap/extensions/ (first case: the native binary).
 - A library feature starts as idiomatic wap (functions, classes, enums, block parameters, operator overloads). A
-  compiler change it asks for (core, kernel or extensions/) goes to warp-interviewer with: the idiomatic attempt and
-  where it fails, the general mechanism, two uses outside that library, the core line count; without them it is
-  refused. A library file that needs odd syntax is rewritten in plain wap, never the compiler widened for it.
+  compiler change it asks for (core, kernel, sugar/, extensions/, or a rewrite rule in a library file) goes to
+  warp-interviewer with: the idiomatic attempt and where it fails, the general mechanism, three different libraries
+  that use it (the asking one included), the core line count; without them it is refused. A library file that needs
+  odd syntax is rewritten in plain wap, never the compiler widened for it. Enforced on every landing:
+  `scripts/compiler-growth.sh <tree>` refuses a new rule or compiler file unless a commit message says
+  `uses: <a>, <b>, <c>` (the three libraries) or `spec: wiki/<page>.md` (a form of the language itself).
 
 ## How it compiles (notes/backbone.md "Stage languages")
 read = parse → shape rules (stage 1) → declare → declaration rules (stage 2) → lower → bind → type, with the kind rules
@@ -61,6 +64,7 @@ removed by whoever meets it.
 - `test/` = every kept test: test programs test/test_<area>.wap (check.wap), test/wap/ the scripts for what a program cannot check; `data/` = kept but ignored: logs, builds, dumps (`data/<topic>/`).
 <!-- DONE (card shell-test-scripts) turn test/wap/*.sh into pure test/*.wap -->
 - `notes/` = the design: backbone.md (stages, milestones, Debts), wap.md (owners, layout), kernel.md, rules.md.
+  Notes say how things are, never how they came to be: no history, no "learned on <date>" stories; history is in git (user).
 <!-- todo (card wap-notes-cleanup): cleanup notes: Everything should already be in the specification, agents.md or roles !  -->
 
 # Rules for every wap session
@@ -240,7 +244,7 @@ main. The worker does not land it, push it to main, or publish it.
   branch and a patch to warp-integrator, who lands it. Then `todo done <card> <commit>`.
 - Paths, checked on that merge, phase by phase; what later tests find is fixed forward, never by rewriting a landed
   phase:
-  - **express** (the default): a green test_hello.sh alone (the compiler builds from the seed and says Hello).
+  - **express** (the default): a green test_hello.sh (the compiler builds from the seed and says Hello) and scripts/compiler-growth.sh (the three-uses rule, Layers).
   - **normal**: express plus the test_<area> files the change touches.
   - **careful**, for a change that may break the compiler for everyone (reader, emitter, value layout, self build,
     seed): normal plus test_self.sh and the census ratchet.
