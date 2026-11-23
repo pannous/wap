@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# lib/jpeg.wap reads a baseline JPEG's pixels (its header names what it reads): pictures Python's PIL writes, gray and
+# what lib/jpeg.wap does not build yet, each red line a to-do (the reader takes no if as an argument and no `not in`):
+# it reads a baseline JPEG's pixels (its header names what it reads): pictures Python's PIL writes, gray and
 # YCbCr at 4:4:4 and 4:2:0, red on the left half, blue on the right, read back as libjpeg reads them (PIL: #fe0000 and
-# #0000fe). Run it with bash test/wap/test_jpeg.sh
+# #0000fe). Run it with bash test/wap/test_jpeg_wanted.sh
 source "$(dirname "$0")/compile.sh"
 
 # a 16 × 8 JPEG, its left half red and right half blue, in a mode and subsampling PIL writes it with
