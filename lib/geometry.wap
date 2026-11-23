@@ -1,0 +1,97 @@
+# The standard module geometry (wiki/library-geometry.md): points and vectors as lists of numbers ([x, y] or
+# [x, y, z]), polygons as lists of [x, y] points (open: the last point is not repeated), geographic points as
+# [latitude, longitude] in degrees.
+use math
+
+# how close two values count as equal: a point this near an edge lies on it, segments this near parallel are parallel
+TOLERANCE := 0.000000001
+EARTH_RADIUS_KM := 6371.0
+
+vec_add(u: list<float>, v: list<float>): list<float> := (0 upto #u).map(i => u[i] + v[i])
+vec_sub(u: list<float>, v: list<float>): list<float> := (0 upto #u).map(i => u[i] - v[i])
+vec_scale(u: list<float>, k: float): list<float> := u.map(x => x * k)
+vec_dot(u: list<float>, v: list<float>): float := (0 upto #u).map(i => u[i] * v[i]).sum
+vec_norm(u: list<float>): float := sqrt(vec_dot(u, u))
+geo_distance(a: list<float>, b: list<float>): float := vec_norm(vec_sub(b, a))
+# the 3D cross product, a vector
+vec_cross(u: list<float>, v: list<float>): list<float> := [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
+# the 2D cross product, the number u.x·v.y - u.y·v.x: positive when v turns counter-clockwise from u
+vec_cross2(u: list<float>, v: list<float>): float := u[0] * v[1] - u[1] * v[0]
+# the angle between two vectors in radians, 0 … π
+vec_angle(u: list<float>, v: list<float>): float := atan2(abs(vec_cross2(u, v)), vec_dot(u, v))
+# a 2D vector turned counter-clockwise
+vec_rotate(v: list<float>, radians: float): list<float> := [v[0] * cos(radians) - v[1] * sin(radians), v[0] * sin(radians) + v[1] * cos(radians)]
+# a 3D vector turned about an axis (of any length) by the right-hand rule, Rodrigues' formula
+rotated_about(v: list<float>, axis: list<float>, radians: float): list<float> := {
+	k = vec_scale(axis, 1 / vec_norm(axis))
+	vec_add(vec_add(vec_scale(v, cos(radians)), vec_scale(vec_cross(k, v), sin(radians))), vec_scale(k, vec_dot(k, v) * (1 - cos(radians))))
+}
+# [the lowest corner, the highest corner]: each coordinate's least and greatest over the points
+bounding_box(points: list<list<float>>): list<list<float>> := {
+	coordinates = (0 upto #points[0]).map(i => points.map(p => p[i]))
+	[coordinates.map(xs => xs.min), coordinates.map(xs => xs.max)]
+}
+
+# the polygon's edges, each [from, to], the last closing it back to the first point
+edges(polygon: list<list<float>>): list<list<list<float>>> := (0 upto #polygon).map(i => [polygon[i], polygon[(i + 1) % #polygon]])
+# the shoelace area: positive when the points run counter-clockwise
+polygon_signed_area(polygon: list<list<float>>): float := edges(polygon).map(e => vec_cross2(e[0], e[1])).sum / 2
+polygon_area(polygon: list<list<float>>): float := abs(polygon_signed_area(polygon))
+# the polygon's area centroid
+polygon_centroid(polygon: list<list<float>>): list<float> := {
+	weighted = edges(polygon).map(e => vec_scale(vec_add(e[0], e[1]), vec_cross2(e[0], e[1])))
+	sum = weighted.fold([0.0, 0.0], vec_add)
+	vec_scale(sum, 1 / (6 * polygon_signed_area(polygon)))
+}
+
+# whether p lies on the segment from a to b
+on_segment(p: list<float>, a: list<float>, b: list<float>): bool := abs(vec_cross2(vec_sub(b, a), vec_sub(p, a))) <= TOLERANCE * (1 + geo_distance(a, b)) and vec_dot(vec_sub(p, a), vec_sub(p, b)) <= TOLERANCE
+# whether p lies in the polygon, its edges and corners counting as inside: a ray to the right crosses the edges an odd
+# number of times
+point_in_polygon(p: list<float>, polygon: list<list<float>>): bool := {
+	if edges(polygon).any(e => on_segment(p, e[0], e[1])) then yes
+	else edges(polygon).filter(e => (e[0][1] > p[1]) != (e[1][1] > p[1]) and p[0] < e[0][0] + (p[1] - e[0][1]) * (e[1][0] - e[0][0]) / (e[1][1] - e[0][1])).count % 2 == 1
+}
+# where the segment a-b crosses the segment c-d, ø when they do not cross (parallel ones never do)
+segment_intersection(a: list<float>, b: list<float>, c: list<float>, d: list<float>): list<float>? := {
+	r = vec_sub(b, a)
+	s = vec_sub(d, c)
+	across = vec_cross2(r, s)
+	if abs(across) < TOLERANCE { return ø }
+	t = vec_cross2(vec_sub(c, a), s) / across
+	u = vec_cross2(vec_sub(c, a), r) / across
+	if t < -TOLERANCE or t > 1 + TOLERANCE or u < -TOLERANCE or u > 1 + TOLERANCE then ø else vec_add(a, vec_scale(r, t))
+}
+
+# how b turns from a, seen from o: positive counter-clockwise, 0 in line
+turn(o: list<float>, a: list<float>, b: list<float>): float := vec_cross2(vec_sub(a, o), vec_sub(b, o))
+# one half of a hull: the points kept while each next one turns counter-clockwise, without the last (the next half's
+# first)
+half_hull(points: list<list<float>>): list<list<float>> := {
+	hull: list<list<float>> = []
+	for p in points {
+		while #hull >= 2 and turn(hull[#hull - 2], hull[#hull - 1], p) <= 0 { hull = hull.take(#hull - 1) }
+		hull.add(p)
+	}
+	hull.take(#hull - 1)
+}
+# the convex hull by Andrew's monotone chain: counter-clockwise from the lowest x (then lowest y), points in line on an
+# edge left out; fewer than 3 distinct points come back as they are, sorted
+convex_hull(points: list<list<float>>): list<list<float>> := {
+	ordered = points.unique.sorted(before: (p, q) => p[0] < q[0] or (p[0] == q[0] and p[1] < q[1]))
+	if #ordered < 3 then ordered else half_hull(ordered) + half_hull(ordered.reverse)
+}
+
+# the great-circle distance between two [latitude, longitude] points in km
+haversine_km(a: list<float>, b: list<float>): float := {
+	h = sin(to_radians(b[0] - a[0]) / 2) ^ 2 + cos(to_radians(a[0])) * cos(to_radians(b[0])) * sin(to_radians(b[1] - a[1]) / 2) ^ 2
+	2 * EARTH_RADIUS_KM * atan2(sqrt(h), sqrt(1 - h))
+}
+# the direction to set out from a toward b, in degrees clockwise from north, 0 up to 360
+initial_bearing(a: list<float>, b: list<float>): float := {
+	from = to_radians(a[0])
+	to = to_radians(b[0])
+	across = to_radians(b[1] - a[1])
+	bearing = to_degrees(atan2(sin(across) * cos(to), cos(from) * sin(to) - sin(from) * cos(to) * cos(across)))
+	if bearing < 0 then bearing + 360 else bearing
+}
