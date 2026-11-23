@@ -1,0 +1,102 @@
+# The standard module os (wiki/script.md, part of `use script`): the environment, the command line, the commands a
+# program runs and its standard input, in plain wap over C's libc and WASI. A command runs through sh with what it
+# prints and says on stderr kept in temporary files, which the program reads back.
+use file
+use path
+
+# a wait status (C's system) holds the exit status above its low byte, a killing signal in its low 7 bits
+STATUS_UNIT := 256
+SIGNAL_BITS := 128
+# the exit status of a command killed by a signal: 128 + the signal, as sh gives it
+KILLED_STATUS := 128
+INPUT_CHUNK := 4096
+
+getenv(name: text): text from 'c'
+setenv(name: text, value: text, overwrite: i32): i32 from 'c'
+system(line: text): i32 from 'c'
+chdir(folder: text): i32 from 'c'
+getcwd(buffer: handle, size: i64): owned_text from 'c'
+
+# a command's exit status, what it printed and what it said on stderr, each without its trailing line ends
+class Ran { status: int, out: text, err: text }
+
+# `env("HOME")`: the variable as the program set it (setenv), else as its environment started with it
+global variables_set: map<text, text> = {}
+env(name: text): text? := variables_set.get(name) ?? started_env(name)
+# `setenv("MODE", "fast")`: the variable set for env and for the commands the program runs, yes when it was
+setenv(name: text, value: text): bool := {
+	variables_set[name] = value
+	setenv(name, value, 1) == 0
+}
+
+# a path, or any text, as one word of a sh line: in single quotes, each ' in it as '\''
+quoted_path(path: text): text := "'" + path.replace("'", "'\\''") + "'"
+# an argument vector as the sh line running it, each word quoted, so no shell expands any of them
+words_line(words: list<text>): text := words.map(quoted_path).join(" ")
+
+# `run(["ls", "-l"])`: the command run, its exit status, output and errors; a failing command is no error, its
+# status says so, a killed one 128 + the signal
+run(words: list<text>): Ran := ran(words_line(words))
+# `command("ls | wc -l")`: a sh line run, what it printed; the explicit opt-in to text as shell. A failing line raises
+# its exit status and what it said on stderr
+command(line: text): text := printed(ran(line), "sh -c " + line)
+# `exec(["crontab", "-l"])`: the argument vector run without a shell's expansions, what it printed; a failure raises
+exec(words: list<text>): text := printed(run(words), words.join(" "))
+printed(answer: Ran, named: text): text := {
+	if answer.status != 0 { raise "${named} failed (exit status: ${answer.status}): ${answer.err}" }
+	answer.out
+}
+# the sh line run with its output and errors in temporary files
+ran(line: text): Ran := {
+	out = temp_file()
+	err = temp_file()
+	waited = system("{ ${line}\n} >${quoted_path(out)} 2>${quoted_path(err)}")
+	answer = Ran(exit_status(waited), without_line_ends(read(out)), without_line_ends(read(err)))
+	delete_file(out)
+	delete_file(err)
+	answer
+}
+exit_status(waited: int): int := {
+	signal = waited % SIGNAL_BITS
+	if signal == 0 then waited ÷ STATUS_UNIT else KILLED_STATUS + signal
+}
+without_line_ends(t: text): text := {
+	end = #t
+	while end > 0 and t#end == "\n" { end -= 1 }
+	t[0 .. end]
+}
+
+# the folder the commands a program runs start in: after `cd` the new one
+cwd(): text := getcwd(0, 0)
+# `cd("~/notes")`: the folder the commands the program runs start in, which $PWD names too; the new folder
+cd(folder: text = "~"): text := {
+	if chdir(home_expanded(folder)) != 0 { raise "cd: no folder ${folder}" }
+	now = cwd()
+	setenv("PWD", now)
+	now
+}
+
+# a line typed on standard input without its line end, ø at the input's end; input("name? ") shows the prompt first
+input(): text? := {
+	line = ""
+	typed = standard_input(1)
+	while typed != "" and typed != "\n" {
+		line += typed
+		typed = standard_input(1)
+	}
+	if typed == "" and line is empty then ø else line
+}
+input(prompt: text): text? := {
+	prompted(prompt)
+	input()
+}
+# all of standard input as one text: `cat notes.txt | wap count.wap`
+stdin(): text := {
+	all = ""
+	chunk = standard_input(INPUT_CHUNK)
+	while chunk != "" {
+		all += chunk
+		chunk = standard_input(INPUT_CHUNK)
+	}
+	all
+}
