@@ -77,18 +77,18 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - examples.md (90 lines): wap-wiki
 - Exception.md (37 lines): wap-wiki, error values wait with Error.md; ABI section asked to hide
 - expression.md (1 lines): ✓ wap-wiki, prose (choices.md tests if as an expression)
-- Extension-hooks.md (233 lines):
+- Extension-hooks.md (233 lines): wap-wiki, compiler internals: asked to move to notes
 - falsey.md (35 lines): wap-wiki
-- FAQ.md (1 lines):
-- fast.md (2 lines):
+- FAQ.md (1 lines): ✓ wap-wiki, prose
+- fast.md (2 lines): wap-wiki, asked
 - Features.md (179 lines):
 - field.md (75 lines):
-- final.md (21 lines):
-- folding.md (9 lines):
+- final.md (21 lines): wap-wiki
+- folding.md (9 lines): wap-wiki, asked
 - Footguns.md (876 lines):
 - for.md (70 lines):
-- full-evaluation.md (17 lines):
-- function-pointer.md (22 lines):
+- full-evaluation.md (17 lines): wap-wiki, interpret asked
+- function-pointer.md (22 lines): wap-wiki
 - function.md (179 lines): (released by wap-wiki) tests 264f14d, wiki 70f163e (settled edits and not-yet marks done); waits: the types patch (~/Library/Logs/warp/wiki-b/function-types.patch: redo the pipe as `|>` plus `|`, BLANK_BYTES#1 for SPACE_BYTE, drop the round shadowing lines), the forms being built (`it`, `square(n)=n*n`, `g 2 {1}`)
 - functional.md (5 lines):
 - functor.md (18 lines):
