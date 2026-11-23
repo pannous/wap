@@ -150,7 +150,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-money.md (43 lines):
 - library-numeric.md (36 lines):
 - library-path.md (46 lines):
-- library-primes.md (26 lines): wap-wiki-lib
+- library-primes.md (26 lines): ✓ 6b5ca30 (lib/math.wap primes words, test/test_primes.wap 3 ✓; without `use` not yet, with wap-binding)
 - library-reference.md (36 lines):
 - library-regex.md (107 lines):
 - library-slugs.md (36 lines): ✓ 45356f7 (lib/slugs.wap, test/test_slugs.wap 8 ✓; lib/text.wap holds upper and words until types has them)
