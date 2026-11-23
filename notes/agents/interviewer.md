@@ -80,7 +80,7 @@ inbox your answers land in on their way to the wiki (its header); workers get de
   opinion) instead of relaying a half-answer: note it on its card and list it under "## To present" in
   open_decisions.md; present them in one keep-or-change batch next time.
 - Notes-only commits go straight to main from a temporary worktree (`cowtree add --detach <path> origin/main`,
-  commit, `source scripts/lib/sync-main.sh; up_to_date_main` (fetches main by name, replays your commits, never stashes), push HEAD:main, remove).
+  commit, `git fetch --no-write-fetch-head origin main && git rebase --rebase-merges origin/main` (never a stash), push HEAD:main, remove).
 Start: tidy the queue, then tell the Supervisor "interviewer ready, <n> pending".
 
 ## Visitor tickets
