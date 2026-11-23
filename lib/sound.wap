@@ -171,3 +171,215 @@ steps_up(root: Note, steps: list<int>): list<Note> := steps.map(s => root + s)
 chord(root: Note, kind: ChordKind): Chord := Chord(steps_up(root, CHORD_STEPS[kind as text]))
 chord(notes: list<Note>): Chord := Chord(notes)
 scale(root: Note, kind: Scale): list<Note> := steps_up(root, SCALE_STEPS[kind as text])
+
+# the synth's settings: filter "lowpass", "highpass" or "bandpass" at cutoff Hz, its resonance the Q (0.707: no peak at
+# the cutoff); the pitch swings vibrato semitones vibrato_rate times a second; the gain dips by the share tremolo
+# tremolo_rate times a second; each pitch sounds as unison voices spread over detune semitones
+global filter = "none"
+global cutoff = 1000.0
+global resonance = 0.707
+global vibrato = 0.0
+global vibrato_rate = 5.0
+global tremolo = 0.0
+global tremolo_rate = 4.0
+global unison = 1
+global detune = 0.1
+# the effects between the voices and the speaker, in this order, each off at 0: distortion the drive of a soft clipper;
+# delay_time seconds of echoes repeating at delay_feedback of the level before, delay_mix their share; reverb_mix the
+# share of a small room's tail
+global distortion = 0.0
+global delay_time = 0.0
+global delay_feedback = 0.4
+global delay_mix = 0.5
+global reverb_mix = 0.0
+
+# samples cross to the host as whole numbers ≥ 0, amplitude + 32768, a stereo sound's left and right interleaved
+SAMPLE_OFFSET := 32768
+LOUDEST_SAMPLE := 32767
+# sine reads a table: a sin each sample made a 2 s chord take seconds
+SINE_TABLE := 2048
+sine_table := (0 upto SINE_TABLE).map(i => sin(2.0 * pi * float(i) / float(SINE_TABLE)))
+# a room's reverb: four combs of these gaps, each echo 0.75 of the one before
+REVERB_DELAYS := [0.0297, 0.0371, 0.0411, 0.0437]
+REVERB_FEEDBACK := 0.75
+# an echo's output below this (-60 dB) for TAIL_SECONDS beyond its longest gap has rung out; it ends on a hundredth of
+# a second
+SILENT := 0.001
+TAIL_SECONDS := 0.05
+TAIL_BLOCKS_PER_SECOND := 100
+BUTTERWORTH_Q := 0.707
+LEAST_Q := 0.001
+LEAST_SECONDS := 0.00001
+QUIETEST := 0.000000001
+DISTORTION_DRIVE := 10.0
+
+# one wave at phase p (0 to 1) of its period, from -1 to 1, a sample advancing the phase by dt; the jumps of square and
+# sawtooth are band-limited, sharp without dt
+wave(shape: text, p: float, dt: float = 0.0): float := {
+	if shape == "square" { return (if p < 0.5 then 1.0 else -1.0) + step_smoothing(p, dt) - step_smoothing(fract(p + 0.5), dt) }
+	if shape == "triangle" { return 1.0 - 4.0 * abs(p - 0.5) }
+	if shape == "sawtooth" { return 2.0 * p - 1.0 - step_smoothing(p, dt) }
+	if shape == "noise" { return 2.0 * random() - 1.0 }
+	sine_table[trunc(p * float(SINE_TABLE)) % SINE_TABLE]
+}
+# the correction of a wave's upward jump of 2 at phase 0 within a sample of it (PolyBLEP): a sharp jump has harmonics
+# above half the sample rate, which fold back as an inharmonic buzz
+step_smoothing(p: float, dt: float): float := {
+	if p < dt { return (p / dt) * (2.0 - p / dt) - 1.0 }
+	if p > 1.0 - dt { return ((p - 1.0) / dt) * ((p - 1.0) / dt + 2.0) + 1.0 }
+	0.0
+}
+# the seconds at sample i
+sample_time(i: int): float := float(i) / float(sample_rate)
+samples_in(seconds: float): float := seconds * float(sample_rate)
+# how far a ramp of that many samples has come after steps: 0 to 1
+ramp(steps: float, samples: float): float := if samples <= 0.0 then 1.0 else clamp(steps / samples, 0.0, 1.0)
+# the level of sample i of n (ADSR): 0 at both ends
+envelope(i: int, n: int): float := {
+	held = if float(i) < samples_in(attack) then 1.0 else 1.0 - (1.0 - sustain) * ramp(float(i) - samples_in(attack), samples_in(decay))
+	ramp(float(i), samples_in(attack)) * held * ramp(float(n - 1 - i), samples_in(release))
+}
+# the cycles a wave of frequency f has run at sample i, its vibrato included: the integral of f · (1 + c·sin(2π r t))
+phase(f: float, i: int): float := {
+	t = sample_time(i)
+	depth = 2.0 ^ (vibrato / float(SEMITONES)) - 1.0
+	f * t + f * depth * (1.0 - cos(2.0 * pi * vibrato_rate * t)) / (2.0 * pi * vibrato_rate)
+}
+# the gain of the tremolo at sample i: 1 at the start, 1 - tremolo at its lowest
+tremolo_gain(i: int): float := 1.0 - tremolo * (0.5 - 0.5 * cos(2.0 * pi * tremolo_rate * sample_time(i)))
+# each pitch as its unison voices, spread over detune semitones
+voices_of(pitches: list<float>): list<float> :=
+	if unison <= 1 then pitches else pitches.flat_map(f => (0 upto unison).map(k => f * 2.0 ^ (detune * (float(k) / float(unison - 1) - 0.5) / float(SEMITONES))))
+# the amplitudes of frequencies sounding together for that many seconds
+chord_amplitudes(pitches: list<float>, seconds: float, shape: text): list<float> := {
+	n = round(samples_in(seconds))
+	voices = voices_of(pitches)
+	sounding = spread(0.0, n)
+	for frequency in voices {
+		step = frequency / float(sample_rate)
+		for i in 0 upto n { sounding[i] = sounding[i] + wave(shape, fract(phase(frequency, i)), step) }
+	}
+	share = loudness * float(LOUDEST_SAMPLE) / float(#voices)
+	(0 upto n).map(i => share * envelope(i, n) * tremolo_gain(i) * sounding[i])
+}
+# amplitudes as samples kept inside the 16 bits
+clamped_samples(amplitudes: list<float>): list<int> := amplitudes.map(a => SAMPLE_OFFSET + clamp(round(a), -LOUDEST_SAMPLE, LOUDEST_SAMPLE))
+# the samples of frequencies sounding together, through the filter
+chord_samples(pitches: list<float>, seconds: float, shape: text): list<int> := clamped_samples(filtered(chord_amplitudes(pitches, seconds, shape)))
+
+# An effect turns amplitudes into amplitudes, given the full scale: the level its quiet tail is measured against, and
+# the 1 of distort and compress. A biquad filter's coefficients come from the Audio EQ Cookbook.
+class Effect { through: (list<float>, float) -> list<float> }
+# the coefficients of a biquad filter, normalized by a0
+class Biquad { b0: float, b1: float, b2: float, a1: float, a2: float }
+# a filter's angle and width at its frequency, and its gain for peak and shelves
+class FilterShape { c: float, alpha: float, a: float }
+filter_shape(frequency: float, q: float, gain_db: float): FilterShape := {
+	w = 2.0 * pi * frequency / float(sample_rate)
+	FilterShape(cos(w), sin(w) / (2.0 * max(q, LEAST_Q)), 10.0 ^ (gain_db / 40.0))
+}
+biquad(b0: float, b1: float, b2: float, a0: float, a1: float, a2: float): Biquad := Biquad(b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0)
+lowpass_biquad(f: FilterShape): Biquad := biquad((1.0 - f.c) / 2.0, 1.0 - f.c, (1.0 - f.c) / 2.0, 1.0 + f.alpha, -2.0 * f.c, 1.0 - f.alpha)
+highpass_biquad(f: FilterShape): Biquad := biquad((1.0 + f.c) / 2.0, -(1.0 + f.c), (1.0 + f.c) / 2.0, 1.0 + f.alpha, -2.0 * f.c, 1.0 - f.alpha)
+bandpass_biquad(f: FilterShape): Biquad := biquad(f.alpha, 0.0, -f.alpha, 1.0 + f.alpha, -2.0 * f.c, 1.0 - f.alpha)
+peak_biquad(f: FilterShape): Biquad :=
+	biquad(1.0 + f.alpha * f.a, -2.0 * f.c, 1.0 - f.alpha * f.a, 1.0 + f.alpha / f.a, -2.0 * f.c, 1.0 - f.alpha / f.a)
+# a shelf raises (sign 1, low) or lowers (sign -1, high) the frequencies past its corner
+shelf_biquad(f: FilterShape, sign: float): Biquad := {
+	slope = 2.0 * sqrt(f.a) * f.alpha
+	up = f.a + 1.0
+	down = f.a - 1.0
+	biquad(f.a * (up - sign * down * f.c + slope), sign * 2.0 * f.a * (down - sign * up * f.c), f.a * (up - sign * down * f.c - slope),
+		up + sign * down * f.c + slope, -sign * 2.0 * (down + sign * up * f.c), up + sign * down * f.c - slope)
+}
+low_shelf_biquad(f: FilterShape): Biquad := shelf_biquad(f, 1.0)
+high_shelf_biquad(f: FilterShape): Biquad := shelf_biquad(f, -1.0)
+biquad_filtered(x: list<float>, k: Biquad): list<float> := {
+	y = spread(0.0, #x)
+	x1 = 0.0
+	x2 = 0.0
+	y1 = 0.0
+	y2 = 0.0
+	for i in 0 upto #x {
+		y[i] = k.b0 * x[i] + k.b1 * x1 + k.b2 * x2 - k.a1 * y1 - k.a2 * y2
+		x2 = x1
+		x1 = x[i]
+		y2 = y1
+		y1 = y[i]
+	}
+	y
+}
+filter_effect(made: (FilterShape) -> Biquad, frequency: float, q: float, gain_db: float = 0.0): Effect :=
+	Effect((x, scale) => biquad_filtered(x, made(filter_shape(frequency, q, gain_db))))
+# feedback combs side by side, y[i] = x[i] + feedback · y[i - gap], their mean mixed in, until the tail rings out: one
+# comb is a delay, four a room's reverb
+echoed(x: list<float>, delays: list<float>, feedback: float, mix: float, silent: float): list<float> := {
+	gaps = delays.map(d => max(round(samples_in(d)), 1))
+	combs = gaps.map(g => spread(0.0, g))
+	at = spread(0, #gaps)
+	tail = gaps.max() + trunc(samples_in(TAIL_SECONDS))
+	block = sample_rate ÷ TAIL_BLOCKS_PER_SECOND
+	quiet = tail
+	out: list<float> = []
+	i = 0
+	while i < #x or quiet < tail or (i - #x) % block != 0 {
+		input = if i < #x then x[i] else 0.0
+		wet = 0.0
+		for k in 0 upto #gaps {
+			echo = input + feedback * combs[k][at[k]]
+			combs[k][at[k]] = echo
+			at[k] = (at[k] + 1) % gaps[k]
+			wet += echo
+		}
+		sample = input + mix * (wet / float(#gaps) - input)
+		out.add(sample)
+		quiet = if abs(sample) < silent then quiet + 1 else 0
+		i += 1
+	}
+	out
+}
+# x through a compressor: an envelope rising in `attack` seconds and falling in `release` turns down what goes over the
+# threshold (dB) by the ratio
+compressed(x: list<float>, threshold: float, ratio: float, rising: float, falling: float): list<float> := {
+	kept_rising = exp(-1.0 / samples_in(max(rising, LEAST_SECONDS)))
+	kept_falling = exp(-1.0 / samples_in(max(falling, LEAST_SECONDS)))
+	slope = 1.0 - 1.0 / max(ratio, 1.0)
+	level_at = 0.0
+	y = spread(0.0, #x)
+	for i in 0 upto #x {
+		level = abs(x[i])
+		level_at = level + (if level > level_at then kept_rising else kept_falling) * (level_at - level)
+		over = 20.0 * decimal_log(max(level_at, QUIETEST)) - threshold
+		y[i] = if over > 0.0 then x[i] * 10.0 ^ (-over * slope / 20.0) else x[i]
+	}
+	y
+}
+gain_effect(share: float): Effect := Effect((x, scale) => x .* share)
+echo_effect(delays: list<float>, feedback: float, mix: float): Effect := Effect((x, scale) => echoed(x, delays, feedback, mix, SILENT * scale))
+delay_effect(seconds: float, feedback: float, mix: float): Effect := echo_effect([seconds], feedback, mix)
+reverb_effect(mix: float): Effect := echo_effect(REVERB_DELAYS, REVERB_FEEDBACK, mix)
+# the shaping effects work on amplitudes of full scale 1
+scaled(x: list<float>, scale: float, shaped: (list<float>) -> list<float>): list<float> := shaped(x ./ scale) .* scale
+distortion_effect(drive: float): Effect := Effect((x, scale) => scaled(x, scale, unit => unit.map(v => tanh(v * (1.0 + DISTORTION_DRIVE * drive)))))
+compressor(threshold: float, ratio: float, rising: float, falling: float): Effect :=
+	Effect((x, scale) => scaled(x, scale, unit => compressed(unit, threshold, ratio, rising, falling)))
+# a signal's full scale: the loudest a voice gets
+full_scale(): float := max(loudness * float(LOUDEST_SAMPLE), 1.0)
+effected(x: list<float>, effect: Effect): list<float> := effect.through(x, full_scale())
+
+# the amplitudes through the synth's filter setting
+filtered(amplitudes: list<float>): list<float> := {
+	if filter == "lowpass" { return effected(amplitudes, filter_effect(lowpass_biquad, cutoff, resonance)) }
+	if filter == "highpass" { return effected(amplitudes, filter_effect(highpass_biquad, cutoff, resonance)) }
+	if filter == "bandpass" { return effected(amplitudes, filter_effect(bandpass_biquad, cutoff, resonance)) }
+	amplitudes
+}
+# the samples through the effect settings: distortion, delay, reverb
+through_effects(samples: list<int>): list<int> := {
+	chain: list<Effect> = []
+	if distortion > 0.0 { chain.add(distortion_effect(distortion)) }
+	if delay_time > 0.0 { chain.add(delay_effect(delay_time, delay_feedback, delay_mix)) }
+	if reverb_mix > 0.0 { chain.add(reverb_effect(reverb_mix)) }
+	if chain is empty { return samples }
+	clamped_samples(chain.fold(samples.map(s => float(s - SAMPLE_OFFSET)), (x, effect) => effected(x, effect)))
+}
