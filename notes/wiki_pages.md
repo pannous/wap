@@ -143,7 +143,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-geometry.md (38 lines): ✓ 8e9bd76 (lib/geometry.wap, math.wap trig and round_to, test/test_geometry.wap 5 ✓; round_to without `use math` not yet, with wap-binding)
 - library-graphs.md (40 lines): ✓ 4435869 (lib/graphs.wap, test/test_graphs.wap 10 ✓; the path alone, path_cost)
 - library-intervals.md (36 lines): ✓ cf91cd6 (lib/intervals.wap, test/test_intervals.wap 5 ✓; Instants not yet)
-- library-json-tools.md (33 lines): wap-wiki-lib
+- library-json-tools.md (33 lines): ✓ d849a9f (lib/json_tools.wap replacing json_tools.warp, test/test_json_tools.wap 12 ✓)
 - library-map-helpers.md (36 lines): ✓ 85d99d6 (lib/map.wap replacing map.warp, test/test_map_helpers.wap 11 ✓; paths count list positions from 0)
 - library-markdown.md (54 lines): ✓ 3b0e579 (lib/markdown.wap, test/test_markdown.wap 10 ✓; CommonMark's corners cut)
 - library-matrix.md (26 lines): ✓ 1845c85 (lib/matrix.wap determinant, inverse, solve; test/test_matrix.wap 3 ✓; the Matrix class of matrix.warp not ported yet)
