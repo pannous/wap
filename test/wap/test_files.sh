@@ -23,6 +23,8 @@ b c
 $stage"
 check "write_bytes writes a file's bytes, read gives them back" "$(ran bytes_file "write_bytes(\"$stage/out.bin\", [104, 105])
 print read(\"$stage/out.bin\")")" "hi"
+check "read_bytes gives a file's bytes back, NULs and all" "$(ran bytes_read "write_bytes(\"$stage/zeros.bin\", [104, 0, 255])
+print text(read_bytes(\"$stage/zeros.bin\"))")" "[104, 0, 255]"
 check "wall_clock_ms is the wall clock's milliseconds since 1970" "$(ran clock 'start = wall_clock_ms()
 print text(start > 1700000000000 and wall_clock_ms() - start < 60000)')" "yes"
 mkdir -p "$stage/listed" && printf 'a' >"$stage/listed/one.txt" && printf 'b' >"$stage/listed/two.wap"
