@@ -1,5 +1,11 @@
 # The standard module hash (wiki/standard-library.md "hash"), in plain wap: `use hash`, of a text's UTF-8 bytes or a
-# list of bytes 0 to 255. crc32 is the CRC-32 of zlib, gzip and PNG, a number: `crc32("hello")` is 907060870.
+# list of bytes 0 to 255. md5 (RFC 1321), sha1, sha256 and sha512 (FIPS 180-4) as lowercase hex; crc32, the CRC-32 of
+# zlib, gzip and PNG, as a number: `crc32("hello")` is 907060870; hmac(key, message, algorithm) of RFC 2104 with any of
+# them, sha256 by default. sha256 and sha512 are one SHA-2 of 32- and of 64-bit words: sha256's constants are the high
+# halves of sha512's.
+use bits
+use encoding
+use math
 
 # the reversed polynomial of CRC-32 (IEEE 802.3) and the 32 bits a CRC starts and ends inverted with
 CRC32_POLYNOMIAL := 3988292384
@@ -18,3 +24,123 @@ crc32(bytes: list<int>): int := {
 	c xor ALL_32_BITS
 }
 crc32(t: text): int := crc32(t.bytes)
+
+# the Merkle–Damgård padding: 0x80, zeros, then the bit length in the block's last bytes, to whole blocks
+padded(bytes: list<int>, block: int, length: list<int>): list<int> := {
+	zeros = (block - (#bytes + 1 + #length) % block) % block
+	bytes + [128] + (0 upto zeros).map(i => 0) + length
+}
+# a block's words of some bytes each, big- or little-endian
+words_of(m: list<int>, start: int, count: int, size: int, little: bool): list<int> := (0 upto count).map(i => {
+	part = m[start + size * i : start + size * (i + 1)]
+	if little then from_little_endian(part) else from_big_endian(part)
+})
+# words added within their width, and two lists of words added word by word
+plus(a: int, b: int, width: int): int := low_bits(a + b, width)
+added(h: list<int>, v: list<int>, width: int): list<int> := (0 upto #h).map(k => plus(h[k], v[k], width))
+sum_of(values: list<int>, width: int): int := low_bits(values.sum, width)
+not_bits(x: int, width: int): int := low_bits(-1 - x, width)
+
+MD5_SHIFTS := [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21]
+MD5_SINES: list<int> = (1 to 64).map(i => int(floor(abs(sin(float(i))) * 4294967296.0)))
+MD5_START := [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476]
+md5(bytes: list<int>): text := {
+	m = padded(bytes, 64, little_endian(#bytes * 8, 8))
+	h = MD5_START
+	for start in (0 upto #m ÷ 64).map(k => 64 * k) {
+		w = words_of(m, start, 16, 4, yes)
+		v = h
+		for i in 0 upto 64 {
+			quarter = i ÷ 16
+			b = v[1]
+			c = v[2]
+			d = v[3]
+			f = if quarter == 0 then (b & c) | (not_bits(b, 32) & d) else if quarter == 1 then (d & b) | (not_bits(d, 32) & c) else if quarter == 2 then b xor c xor d else c xor (b | not_bits(d, 32))
+			g = if quarter == 0 then i else if quarter == 1 then (5 * i + 1) % 16 else if quarter == 2 then (3 * i + 5) % 16 else 7 * i % 16
+			turned = rotate_left(sum_of([v[0], f, MD5_SINES[i], w[g]], 32), MD5_SHIFTS[4 * quarter + i % 4], 32)
+			v = [d, plus(b, turned, 32), b, c]
+		}
+		h = added(h, v, 32)
+	}
+	hex_encode(h.flat_map(x => little_endian(x, 4)))
+}
+
+SHA1_START := [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0]
+SHA1_ROUNDS := [0x5a827999, 0x6ed9eba1, 0x8f1bbcdc, 0xca62c1d6]
+sha1(bytes: list<int>): text := {
+	m = padded(bytes, 64, big_endian(#bytes * 8, 8))
+	h = SHA1_START
+	for start in (0 upto #m ÷ 64).map(k => 64 * k) {
+		w = words_of(m, start, 16, 4, no)
+		for i in 16 upto 80 { w.add(rotate_left(w[i - 3] xor w[i - 8] xor w[i - 14] xor w[i - 16], 1, 32)) }
+		v = h
+		for i in 0 upto 80 {
+			stage = i ÷ 20
+			b = v[1]
+			c = v[2]
+			d = v[3]
+			f = if stage == 0 then (b & c) | (not_bits(b, 32) & d) else if stage == 2 then (b & c) | (b & d) | (c & d) else b xor c xor d
+			t = sum_of([rotate_left(v[0], 5, 32), f, v[4], SHA1_ROUNDS[stage], w[i]], 32)
+			v = [t, v[0], rotate_left(b, 30, 32), c, d]
+		}
+		h = added(h, v, 32)
+	}
+	hex_encode(h.flat_map(x => big_endian(x, 4)))
+}
+
+# SHA-2: the word width, its round constants and start, and the rotations of its four mixing functions
+class Sha2 { width: int, rounds: list<int>, start: list<int>, big_sigma0: list<int>, big_sigma1: list<int>, small_sigma0: list<int>, small_sigma1: list<int> }
+SHA512_ROUNDS := [0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc, 0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118, 0xd807aa98a3030242, 0x12835b0145706fbe, 0x243185be4ee4b28c, 0x550c7dc3d5ffb4e2, 0x72be5d74f27b896f, 0x80deb1fe3b1696b1, 0x9bdc06a725c71235, 0xc19bf174cf692694, 0xe49b69c19ef14ad2, 0xefbe4786384f25e3, 0x0fc19dc68b8cd5b5, 0x240ca1cc77ac9c65, 0x2de92c6f592b0275, 0x4a7484aa6ea6e483, 0x5cb0a9dcbd41fbd4, 0x76f988da831153b5, 0x983e5152ee66dfab, 0xa831c66d2db43210, 0xb00327c898fb213f, 0xbf597fc7beef0ee4, 0xc6e00bf33da88fc2, 0xd5a79147930aa725, 0x06ca6351e003826f, 0x142929670a0e6e70, 0x27b70a8546d22ffc, 0x2e1b21385c26c926, 0x4d2c6dfc5ac42aed, 0x53380d139d95b3df, 0x650a73548baf63de, 0x766a0abb3c77b2a8, 0x81c2c92e47edaee6, 0x92722c851482353b, 0xa2bfe8a14cf10364, 0xa81a664bbc423001, 0xc24b8b70d0f89791, 0xc76c51a30654be30, 0xd192e819d6ef5218, 0xd69906245565a910, 0xf40e35855771202a, 0x106aa07032bbd1b8, 0x19a4c116b8d2d0c8, 0x1e376c085141ab53, 0x2748774cdf8eeb99, 0x34b0bcb5e19b48a8, 0x391c0cb3c5c95a63, 0x4ed8aa4ae3418acb, 0x5b9cca4f7763e373, 0x682e6ff3d6b2b8a3, 0x748f82ee5defb2fc, 0x78a5636f43172f60, 0x84c87814a1f0ab72, 0x8cc702081a6439ec, 0x90befffa23631e28, 0xa4506cebde82bde9, 0xbef9a3f7b2c67915, 0xc67178f2e372532b, 0xca273eceea26619c, 0xd186b8c721c0c207, 0xeada7dd6cde0eb1e, 0xf57d4f7fee6ed178, 0x06f067aa72176fba, 0x0a637dc5a2c898a6, 0x113f9804bef90dae, 0x1b710b35131c471b, 0x28db77f523047d84, 0x32caab7b40c72493, 0x3c9ebe0a15c9bebc, 0x431d67c49c100d4c, 0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817]
+SHA512_START := [0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1, 0x510e527fade682d1, 0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179]
+# a small sigma's last number is a shift, not a rotation
+SHA512 := Sha2(64, SHA512_ROUNDS, SHA512_START, [28, 34, 39], [14, 18, 41], [1, 8, 7], [19, 61, 6])
+SHA256 := Sha2(32, SHA512_ROUNDS.take(64).map(k => k >>> 32), SHA512_START.map(k => k >>> 32), [2, 13, 22], [6, 11, 25], [7, 18, 3], [17, 19, 10])
+big_sigma(x: int, turns: list<int>, width: int): int := turns.map(n => rotate_right(x, n, width)).fold(0, (a, b) => a xor b)
+small_sigma(x: int, turns: list<int>, width: int): int := rotate_right(x, turns[0], width) xor rotate_right(x, turns[1], width) xor (x >>> turns[2])
+sha2(bytes: list<int>, s: Sha2): text := {
+	size = s.width ÷ 8
+	block = 16 * size
+	m = padded(bytes, block, (0 upto size - 8).map(i => 0) + big_endian(#bytes * 8, 8))
+	h = s.start
+	for start in (0 upto #m ÷ block).map(k => block * k) {
+		w = words_of(m, start, 16, size, no)
+		for i in 16 upto #s.rounds { w.add(sum_of([w[i - 16], small_sigma(w[i - 15], s.small_sigma0, s.width), w[i - 7], small_sigma(w[i - 2], s.small_sigma1, s.width)], s.width)) }
+		v = h
+		for i in 0 upto #s.rounds {
+			a = v[0]
+			e = v[4]
+			choice = (e & v[5]) xor (not_bits(e, s.width) & v[6])
+			t1 = sum_of([v[7], big_sigma(e, s.big_sigma1, s.width), choice, s.rounds[i], w[i]], s.width)
+			majority = (a & v[1]) xor (a & v[2]) xor (v[1] & v[2])
+			t2 = plus(big_sigma(a, s.big_sigma0, s.width), majority, s.width)
+			v = [plus(t1, t2, s.width), a, v[1], v[2], plus(v[3], t1, s.width), e, v[5], v[6]]
+		}
+		h = added(h, v, s.width)
+	}
+	hex_encode(h.flat_map(x => big_endian(x, size)))
+}
+sha256(bytes: list<int>): text := sha2(bytes, SHA256)
+sha512(bytes: list<int>): text := sha2(bytes, SHA512)
+
+# the hashes hmac can use, sha256 its default: `hmac("key", "message", algorithm: sha512)`
+enum HashAlgorithm { md5, sha1, sha256, sha512 }
+digest(algorithm: HashAlgorithm, bytes: list<int>): text := {
+	if algorithm == HashAlgorithm.md5 then md5(bytes)
+	else if algorithm == HashAlgorithm.sha1 then sha1(bytes)
+	else if algorithm == HashAlgorithm.sha256 then sha256(bytes)
+	else sha512(bytes)
+}
+# RFC 2104: the key padded to the hash's block (128 bytes for sha512, else 64), hashed first when longer
+hmac(key: list<int>, message: list<int>, algorithm: HashAlgorithm = sha256): text := {
+	block = if algorithm == HashAlgorithm.sha512 then 128 else 64
+	short = if #key > block then hex_decode_bytes(digest(algorithm, key)) else key
+	k = short + (0 upto block - #short).map(i => 0)
+	inner = digest(algorithm, k.map(b => b xor 0x36) + message)
+	digest(algorithm, k.map(b => b xor 0x5c) + hex_decode_bytes(inner))
+}
+hmac(key: text, message: text, algorithm: HashAlgorithm = sha256): text := hmac(key.bytes, message.bytes, algorithm)
+
+md5(t: text): text := md5(t.bytes)
+sha1(t: text): text := sha1(t.bytes)
+sha256(t: text): text := sha256(t.bytes)
+sha512(t: text): text := sha512(t.bytes)
