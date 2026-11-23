@@ -1,0 +1,238 @@
+# The standard module url (wiki/library-url.md): `use url`. Percent-encoding of a text's UTF-8 bytes and query strings
+# (RFC 3986): url_encode("é") is "%C3%A9", query_map("a=1&b=x+y") is {a: "1", b: "x y"}, query_text({a: "1"}) "a=1".
+# parse_url(t) reads a Url, url_text writes it back, resolve_url(base, reference) resolves a relative reference
+# (section 5.2, strict). A part a URL lacks is "", its port 0. IP addresses as bytes, 4 for IPv4 and 16 for IPv6
+# (ip_bytes, ip_text in RFC 5952's canonical form, cidr_contains), and a pragmatic e-mail check (is_email).
+use text
+
+URL_UNRESERVED := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
+URL_HEX := "0123456789ABCDEF"
+SCHEME_MARKS := "+-."
+BYTE := 256
+
+url_byte(b: int): text := if b < 128 and URL_UNRESERVED.contains(byte_text(b)) then byte_text(b) else "%" + URL_HEX[b ÷ 16:b ÷ 16 + 1] + URL_HEX[b % 16:b % 16 + 1]
+url_encode(t: text): text := t.bytes.map(url_byte).join("")
+# %HH back to bytes, a stray % kept
+url_decode(t: text): text := percent_decoded(t)
+# a query component: + is a space here
+query_decode(t: text): text := url_decode(t.replace("+", " "))
+# "a=1&b=x+y" (a leading ? dropped) as a map of the decoded keys to the decoded values
+query_map(t: text): map<text, text> := {
+	m: map<text, text> = {}
+	body = if t.starts_with("?") then t[1:] else t
+	for pair in body.split("&").filter(pair => pair != "") {
+		halves = split_off(pair, "=")
+		m[query_decode(halves[0])] = query_decode(halves[1])
+	}
+	m
+}
+query_text(m: map<text, text>): text := m.keys().map(key => "${url_encode(key)}=${url_encode(m[key])}").join("&")
+
+# [the text before the first mark, the text after it]; [t, ""] without a mark
+split_off(t: text, mark: text): list<text> := {
+	at = find(t, mark)
+	if at == 0 then [t, ""] else [t[0:at - 1], t[at:]]
+}
+# the 0-based place of the first of the characters in t, -1 when none is there
+first_of(t: text, characters: text): int := {
+	at = 0
+	while at < #t and not characters.contains(t[at:at + 1]) { at += 1 }
+	if at < #t then at else -1
+}
+is_scheme(t: text): bool := t != "" and is_alpha(t[0:1]) and t.codepoints.all(c => is_alphanumeric("${c}") or SCHEME_MARKS.contains("${c}"))
+
+# a URL's parts (RFC 3986): parse_url("https://u:p@example.com:8080/a?q=1#top") has scheme "https", user "u",
+# password "p", host "example.com", port 8080, path "/a", query "q=1", fragment "top"; an IPv6 host keeps no brackets
+class Url { scheme: text, user: text, password: text, host: text, port: int, path: text, query: text, fragment: text }
+parse_url(t: text): Url := {
+	u = Url("", "", "", "", 0, "", "", "")
+	with_fragment = split_off(t, "#")
+	u.fragment = with_fragment[1]
+	with_query = split_off(with_fragment[0], "?")
+	u.query = with_query[1]
+	rest = with_query[0]
+	at = first_of(rest, ":/")
+	if at > 0 and rest[at:at + 1] == ":" and is_scheme(rest[0:at]) {
+		u.scheme = lower(rest[0:at])
+		rest = rest[at + 1:]
+	}
+	if rest.starts_with("//") {
+		slash = first_of(rest[2:], "/")
+		authority = if slash < 0 then rest[2:] else rest[2:slash + 2]
+		u.path = if slash < 0 then "" else rest[slash + 2:]
+		read_authority(u, authority)
+	} else {
+		u.path = rest
+	}
+	u
+}
+# user:password@host:port, the userinfo up to the last @ (http://a@b@c is user a@b at c)
+read_authority(u: Url, authority: text) := {
+	at = #authority - 1
+	while at >= 0 and authority[at:at + 1] != "@" { at -= 1 }
+	if at >= 0 {
+		userinfo = split_off(authority[0:at], ":")
+		u.user = userinfo[0]
+		u.password = userinfo[1]
+	}
+	hostport = authority[at + 1:]
+	closing = if hostport.starts_with("[") then find(hostport, "]") else 0
+	if closing > 0 { u.host = hostport[1:closing - 1] }
+	host_and_port = split_off(hostport[closing:], ":")
+	if closing == 0 { u.host = host_and_port[0] }
+	if host_and_port[1] != "" { u.port = int(host_and_port[1]) }
+}
+# the mark and the part, nothing for a part the URL lacks
+part_text(mark: text, part: text, after: bool): text := if part == "" then "" else if after then part + mark else mark + part
+# the URL text of the parts (section 5.3)
+url_text(u: Url): text := {
+	host = if u.host.contains(":") then "[${u.host}]" else u.host
+	userinfo = if u.user == "" then "" else u.user + part_text(":", u.password, no) + "@"
+	authority = if u.host == "" then "" else "//" + userinfo + host + (if u.port == 0 then "" else ":${u.port}")
+	part_text(":", u.scheme, yes) + authority + u.path + part_text("?", u.query, no) + part_text("#", u.fragment, no)
+}
+
+# "/a/b/c/./../../g" is "/a/g" (section 5.2.4)
+remove_dot_segments(path: text): text := {
+	input = path
+	output: list<text> = []
+	while input != "" {
+		if input.starts_with("../") { input = input[3:] }
+		else if input.starts_with("./") or input.starts_with("/./") { input = input[2:] }
+		else if input == "/." { input = "/" }
+		else if input.starts_with("/../") or input == "/.." {
+			input = "/" + input[(if input == "/.." then 3 else 4):]
+			if output { output = output.take(#output - 1) }
+		}
+		else if input == "." or input == ".." { input = "" }
+		else {
+			slash = first_of(input[1:], "/")
+			cut = if slash < 0 then #input else slash + 1
+			output.add(input[0:cut])
+			input = input[cut:]
+		}
+	}
+	output.join("")
+}
+# the path of a reference relative to the base's (section 5.2.3)
+merged_path(base: Url, path: text): text := {
+	if base.host != "" and base.path == "" { return "/" + path }
+	slash = #base.path - 1
+	while slash >= 0 and base.path[slash:slash + 1] != "/" { slash -= 1 }
+	base.path[0:slash + 1] + path
+}
+# the authority of one URL given to another
+authority_from(t: Url, source: Url) := {
+	t.user = source.user
+	t.password = source.password
+	t.host = source.host
+	t.port = source.port
+}
+# a reference resolved against a base URL (section 5.2.2, strict): resolve_url("http://a/b/c/d;p?q", "../g") is "http://a/b/g"
+resolve_url(base_text: text, reference: text): text := {
+	base = parse_url(base_text)
+	r = parse_url(reference)
+	t = Url(if r.scheme == "" then base.scheme else r.scheme, "", "", "", 0, "", r.query, r.fragment)
+	if r.scheme != "" or r.host != "" {
+		authority_from(t, r)
+		t.path = remove_dot_segments(r.path)
+	} else {
+		authority_from(t, base)
+		if r.path == "" {
+			t.path = base.path
+			if r.query == "" { t.query = base.query }
+		} else {
+			t.path = remove_dot_segments(if r.path.starts_with("/") then r.path else merged_path(base, r.path))
+		}
+	}
+	url_text(t)
+}
+
+# --- IP addresses as their bytes, [] for a text that is none
+
+# IPv4 is the strict dotted quad of inet_pton: four decimal numbers 0 to 255 without leading zeros ("01.2.3.4" is
+# refused, as octal would read it)
+ipv4_bytes(t: text): list<int> := {
+	parts = t.split(".")
+	fine = #parts == 4 and parts.all(p => is_digits(p) and #p <= 3 and not (#p > 1 and p.starts_with("0")) and int(p) < BYTE)
+	if fine then parts.map(p => int(p)) else []
+}
+# the 16-bit groups of IPv6 text, a trailing dotted quad as its two groups; [-1] when a group is not 1 to 4 hex digits
+ipv6_groups(t: text): list<int> := {
+	if t == "" { return [] }
+	parts = t.split(":")
+	groups: list<int> = []
+	for i in 0 upto #parts {
+		p = parts[i]
+		quad = if i == #parts - 1 and p.contains(".") then ipv4_bytes(p) else []
+		if quad { groups = groups + [quad[0] * BYTE + quad[1], quad[2] * BYTE + quad[3]] }
+		else if #p <= 4 and is_hex(p) { groups.add(hex_value(p)) }
+		else { return [-1] }
+	}
+	groups
+}
+# RFC 4291 text, :: once for a run of zero groups, an IPv4 address at the end allowed: "::ffff:1.2.3.4"
+ipv6_bytes(t: text): list<int> := {
+	halves = t.split("::")
+	head = ipv6_groups(halves[0])
+	tail = if #halves == 2 then ipv6_groups(halves[1]) else []
+	missing = 8 - #head - #tail
+	fine = #halves <= 2 and not head.contains(-1) and not tail.contains(-1) and (if #halves == 2 then missing >= 1 else missing == 0)
+	if fine then (head + (0 upto missing).map(i => 0) + tail).flat_map(g => [g ÷ BYTE, g % BYTE]) else []
+}
+ip_bytes(t: text): list<int> := if t.contains(":") then ipv6_bytes(t) else ipv4_bytes(t)
+is_ipv4(t: text): bool := ipv4_bytes(t) is not empty
+is_ipv6(t: text): bool := ipv6_bytes(t) is not empty
+# an IPv4 address as one number: ipv4_int("10.0.0.1") is 167772161
+ipv4_int(t: text): int := ipv4_bytes(t).fold(0, (n, b) => n * BYTE + b)
+hex_group(n: int): text := lower(hex_written(n))
+hex_written(n: int): text := if n < 16 then URL_HEX[n:n + 1] else hex_written(n ÷ 16) + URL_HEX[n % 16:n % 16 + 1]
+# the canonical text (RFC 5952) of an address: lower case, no leading zeros, the longest run of two or more zero
+# groups (the first of equal ones) as ::, an IPv4-mapped address as ::ffff:a.b.c.d
+ip_text(address: text): text := ip_text(ip_bytes(address))
+ip_text(bytes: list<int>): text := {
+	if #bytes == 4 { return bytes.join(".") }
+	groups = (0 upto 8).map(i => bytes[2 * i] * BYTE + bytes[2 * i + 1])
+	if groups.take(5).all(g => g == 0) and groups[5] == 65535 { return "::ffff:" + bytes[12:].join(".") }
+	best = -1
+	best_length = 1
+	i = 0
+	while i < 8 {
+		j = i
+		while j < 8 and groups[j] == 0 { j += 1 }
+		if j - i > best_length {
+			best = i
+			best_length = j - i
+		}
+		i = if j > i then j else i + 1
+	}
+	texts = groups.map(hex_group)
+	if best < 0 then texts.join(":") else texts.take(best).join(":") + "::" + texts[best + best_length:].join(":")
+}
+# whether the network "10.0.0.0/8" or "2001:db8::/32" holds the address, of the same family
+cidr_contains(cidr: text, ip: text): bool := {
+	parts = split_off(cidr, "/")
+	network = ip_bytes(parts[0])
+	address = ip_bytes(ip)
+	if network is empty or #network != #address { return no }
+	prefix = if parts[1] == "" then 8 * #network else int(parts[1])
+	whole = prefix ÷ 8
+	rest = prefix % 8
+	network.take(whole) == address.take(whole) and (rest == 0 or network[whole] >> (8 - rest) == address[whole] >> (8 - rest))
+}
+
+# --- a pragmatic e-mail address check, not RFC 5322's whole grammar (no quoted local parts, comments or IP literals):
+# local@domain, the local part dot-atoms (letters, digits and !#$%&'*+/=?^_`{|}~- between single dots), the domain two
+# or more labels of letters, digits and inner hyphens, up to 63 characters each, the address up to 254 characters
+EMAIL_ATOM := "!#$%&'*+/=?^_`{|}~-"
+EMAIL_MAX := 254
+LOCAL_MAX := 64
+LABEL_MAX := 63
+made_of(t: text, marks: text): bool := t != "" and t.codepoints.all(c => is_alphanumeric("${c}") or marks.contains("${c}"))
+is_label(t: text): bool := made_of(t, "-") and #t <= LABEL_MAX and not t.starts_with("-") and not t.ends_with("-")
+is_email(t: text): bool := {
+	parts = t.split("@")
+	if #parts != 2 or #t > EMAIL_MAX or #parts[0] > LOCAL_MAX { return no }
+	labels = parts[1].split(".")
+	parts[0].split(".").all(atom => made_of(atom, EMAIL_ATOM)) and #labels >= 2 and labels.all(is_label)
+}
