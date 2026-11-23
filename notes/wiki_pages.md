@@ -177,8 +177,8 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - mutable.md (116 lines): wap-wiki, tests test_mutable_page.wap green, test_mutable_wanted.wap the forms still to build; asked (uppercase, mutating spellings, TODO comments)
 - node.md (81 lines): wap-wiki, tests test_node_wanted.wap the forms still to build; asked (internal Node sketches)
 - Normalization.md (153 lines): wap-wiki, tests test_normalization_page.wap green; asked (Rust Style internals, canonical clashes)
-- notes.md (48 lines):
-- null.md (100 lines):
+- notes.md (48 lines): wap-wiki, internal notes: asked to hide
+- null.md (100 lines): wap-wiki, tests test_null_page.wap green, test_null_wanted.wap the forms still to build; asked (required/maybe words, Person.null, todos)
 - number.md (119 lines):
 - object.md (3 lines):
 - operator.md (223 lines):
