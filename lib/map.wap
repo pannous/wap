@@ -1,0 +1,113 @@
+# The standard module map (wiki/library-map-helpers.md, wiki/standard-library.md "map"): maps combined, filtered and
+# turned around, and paths into data of maps inside maps and lists. Every function gives a new map; only popitem
+# changes the map it is given. A path is a list of map keys and 0-based list positions:
+# get_path({a: [{b: 5}]}, ["a", 0, "b"]) is 5.
+
+# TODO `value is map` and `value is list` in place once the types module has words over the bare map and list kinds
+# (`keys(m: map)`, as `#(xs: list)` is; wap-lead): an any holding a map carries its own map type, so `is map` narrows to
+# a bare map that no map<K, V> or list<T> parameter takes
+is_map(value: any): bool := value is map
+is_list(value: any): bool := value is list
+
+# a's entries, then b's, b winning a key both have
+merge(a: map<K, V>, b: map<K, V>): map<K, V> := {
+	out: map<K, V> = {}
+	for key in keys(a) { out[key] = a[key] }
+	for key in keys(b) { out[key] = b[key] }
+	out
+}
+# the entries f(key, value) holds for
+filter_entries(m: map<K, V>, f: (K, V) -> bool): map<K, V> := {
+	out: map<K, V> = {}
+	for key in keys(m) {
+		if f(key, m[key]) { out[key] = m[key] }
+	}
+	out
+}
+filter_values(m: map<K, V>, f: (V) -> bool): map<K, V> := filter_entries(m, (key, value) => f(value))
+pick(m: map<K, V>, wanted: list<K>): map<K, V> := filter_entries(m, (key, value) => wanted.contains(key))
+omit(m: map<K, V>, unwanted: list<K>): map<K, V> := filter_entries(m, (key, value) => not unwanted.contains(key))
+# the same values under the keys f gives; of two entries given one key the later wins
+transform_keys(m: map<K, V>, f: (K) -> K): map<K, V> := {
+	out: map<K, V> = {}
+	for key in keys(m) { out[f(key)] = m[key] }
+	out
+}
+map_values(m: map<K, V>, f: (V) -> V): map<K, V> := {
+	out: map<K, V> = {}
+	for key in keys(m) { out[key] = f(m[key]) }
+	out
+}
+# the values become the keys (as texts), the keys the values: {a: 1, b: 2} gives {1: "a", 2: "b"}
+invert(m: map<K, V>): map<text, K> := {
+	out: map<text, K> = {}
+	for key in keys(m) { out["${m[key]}"] = key }
+	out
+}
+# {a: 1, b: 2} gives [["a", 1], ["b", 2]]; from_pairs turns them back
+entries(m: map<K, V>): list<list<any>> := keys(m).map(key => pair(key, m[key]))
+items(m: map<K, V>): list<list<any>> := entries(m)
+pair(key: any, value: any): list<any> := [key, value]
+from_pairs(pairs: list<list<any>>): map<text, any> := {
+	out: map<text, any> = {}
+	for entry in pairs { out["${entry[0]}"] = entry[1] }
+	out
+}
+get_or(m: map<K, V>, key: K, fallback: V): V := if m.has(key) then m[key] else fallback
+# the first key whose value f holds for, ø for none
+find_key(m: map<K, V>, f: (V) -> bool): any := {
+	for key in keys(m) {
+		if f(m[key]) { return key }
+	}
+	ø
+}
+# the last entry as [key, value], taken out of m
+popitem(m: map<K, V>): list<any> := {
+	key = keys(m).last
+	entry = pair(key, m[key])
+	m.remove(key)
+	entry
+}
+
+# --- nested data
+
+# maps inside maps merged key by key; anywhere else (a list, a plain value) b's value replaces a's
+deep_merge(a: map<text, A>, b: map<text, B>): map<text, any> := {
+	out: map<text, any> = {}
+	for key in keys(a) { out[key] = a[key] }
+	for key in keys(b) { out[key] = if out.has(key) then merged(out[key], b[key]) else b[key] }
+	out
+}
+merged(old: any, new: any): any := if is_map(old) and is_map(new) then deep_merge(any_valued(old), any_valued(new)) else new
+
+# the value at the path, ø where the path leaves the data: a missing key, a position past the end, a step into a
+# plain value
+get_path(data: any, path: list<T>): any := path.fold(data, (at, step) => step_into(at, step))
+step_into(at: any, step: any): any := if is_map(at) then entry_or_none(at, "${step}") else if is_list(at) and step is int then item_or_none(at, step) else ø
+entry_or_none(m: map<text, V>, key: text): any := if m.has(key) then m[key] else ø
+item_or_none(xs: list<T>, at: int): any := if at >= 0 and at < #xs then xs[at] else ø
+
+# the data with value at the path, the data unchanged; a missing key on the way becomes a new map, a list's position
+# must be one it has
+set_path(data: any, path: list<T>, value: any): any := if path is empty then value else set_step(data, path[0], path.drop(1), value)
+set_step(data: any, step: any, rest: list<T>, value: any): any := {
+	if is_list(data) { return with_item(data, step, set_path(item_or_none(data, step), rest, value)) }
+	table: map<text, any> = {}
+	if is_map(data) { table = merge(table, any_valued(data)) }
+	key = "${step}"
+	inner = if table.has(key) then table[key] else ø
+	table[key] = set_path(inner, rest, value)
+	table
+}
+any_valued(m: map<text, V>): map<text, any> := {
+	out: map<text, any> = {}
+	for key in keys(m) { out[key] = m[key] }
+	out
+}
+with_item(xs: list<T>, at: int, value: any): list<any> := {
+	if at < 0 or at >= #xs { raise "set_path: no position ${at} in a list of ${#xs}" }
+	out: list<any> = []
+	for item in xs { out.add(item) }
+	out[at] = value
+	out
+}
