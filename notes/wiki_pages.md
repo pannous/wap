@@ -140,7 +140,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-dogfood-apps.md (51 lines):
 - library-fractions.md (39 lines):
 - library-functions.md (28 lines):
-- library-geometry.md (38 lines):
+- library-geometry.md (38 lines): wap-wiki-lib
 - library-graphs.md (40 lines):
 - library-intervals.md (36 lines):
 - library-json-tools.md (33 lines):
