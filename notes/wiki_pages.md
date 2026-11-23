@@ -191,50 +191,50 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - pattern-matching.md (297 lines): wap-wiki, tests test_pattern_matching_page.wap green, test_pattern_matching_wanted.wap the forms still to build
 - pattern.md (72 lines): wap-wiki, design essay: asked (move to notes, keep holes)
 - Perfect.md (12 lines): wap-wiki, prose; asked (path quotes)
-- Philosophy.md (80 lines):
-- pipe.md (70 lines):
-- plural.md (17 lines):
-- pointer.md (4 lines):
-- polymorphism.md (79 lines):
-- possessive.md (8 lines):
-- precedence.md (11 lines):
-- primitive.md (45 lines):
-- property.md (48 lines):
-- pure.md (34 lines):
+- Philosophy.md (80 lines): wap-wiki, prose
+- pipe.md (70 lines): wap-wiki, tests test_pipe_page.wap green, test_pipe_wanted.wap the forms still to build; asked (& as pipe, todos)
+- plural.md (17 lines): wap-wiki, tests test_plural_page.wap green; asked (loop name picks words)
+- pointer.md (4 lines): ✓ wap-wiki, links
+- polymorphism.md (79 lines): wap-wiki, tests test_polymorphism_page.wap green, test_polymorphism_wanted.wap the forms still to build; asked (C-style heads, first shadowing)
+- possessive.md (8 lines): wap-wiki, tests test_possessive_page.wap green, test_possessive_wanted.wap; asked ('s, [name:])
+- precedence.md (11 lines): wap-wiki, tests test_precedence_page.wap green; asked (superscript, todo)
+- primitive.md (45 lines): wap-wiki, tests test_primitive_wanted.wap the forms still to build
+- property.md (48 lines): wap-wiki, tests test_property_page.wap green, test_property_wanted.wap; asked (setter sketches)
+- pure.md (34 lines): ✓ wap-wiki, prose (effects of: test_effects_wanted)
 - purity.md (0 lines):
-- Purpose.md (644 lines):
-- questions.md (144 lines):
-- quote.md (3 lines):
+- Purpose.md (644 lines): wap-wiki, an essay: asked (move to notes)
+- questions.md (144 lines): wap-wiki, open questions: asked to hide
+- quote.md (3 lines): wap-wiki, prose; asked (wasp, import)
 - random.md (23 lines): ✓ feea51f (lib/random.wap, test/test_random.wap 10 ✓; die reading; secure random_bytes not yet, card host-random)
-- range.md (23 lines):
-- rant.md (15 lines):
+- range.md (23 lines): wap-wiki, tests test_range_page.wap green; asked (1…5 do)
+- rant.md (15 lines): wap-wiki, links; asked (wasp)
 - README.md (0 lines):
 - real.md (0 lines):
-- reference.md (69 lines):
-- reflection.md (127 lines):
-- repl.md (1 lines):
-- required.md (1 lines):
-- result.md (19 lines):
-- return.md (41 lines):
-- runtime.md (23 lines):
-- rust.md (74 lines):
-- scheme.md (31 lines):
-- script.md (84 lines):
-- serialization.md (5 lines):
-- serialize.md (1 lines):
-- shell.md (24 lines):
-- sigil.md (41 lines):
-- signal.md (134 lines):
-- signature.md (35 lines):
-- significant-whitespace.md (49 lines):
-- smart-pointer.md (170 lines):
+- reference.md (69 lines): wap-wiki, tests test_reference_page.wap green, test_reference_wanted.wap; asked (TODO section, inout)
+- reflection.md (127 lines): wap-wiki, tests test_reflection_wanted.wap the forms still to build (params/fields/methods/signature in test_keyword_wanted)
+- repl.md (1 lines): ✓ wap-wiki, prose
+- required.md (1 lines): ✓ wap-wiki, prose
+- result.md (19 lines): wap-wiki, `result` red in test_keyword_wanted; asked (planned marks, todos)
+- return.md (41 lines): wap-wiki, tests test_return_page.wap green, test_return_wanted.wap; asked (C-style and colon result forms)
+- runtime.md (23 lines): wap-wiki, tests test_runtime_page.wap green, test_runtime_wanted.wap; asked (internals to notes)
+- rust.md (74 lines): wap-wiki, a critique; asked (wasp, tone)
+- scheme.md (31 lines): wap-wiki, sketches: asked to hide
+- script.md (84 lines): wap-wiki, tests test_script_wanted.wap the forms still to build (use script fails: file_lines twice, to wap-wiki-lib)
+- serialization.md (5 lines): wap-wiki, prose; asked (wasp, todo)
+- serialize.md (1 lines): wap-wiki, prose; asked (wasp)
+- shell.md (24 lines): wap-wiki, symbolic mode: asked (planned)
+- sigil.md (41 lines): wap-wiki, tests test_sigil_page.wap green, test_sigil_wanted.wap; asked (untyped broadcasting, Angel, wasp)
+- signal.md (134 lines): wap-wiki, tests test_signal_wanted.wap the forms still to build (lib events: test_events.wap); asked (sketch, todos, wasp fences)
+- signature.md (35 lines): wap-wiki, tests test_signature_wanted.wap; asked (… and :: headers, number wrong value)
+- significant-whitespace.md (49 lines): wap-wiki, tests test_significant_whitespace_page.wap green, test_significant_whitespace_wanted.wap; asked (border cases, todos)
+- smart-pointer.md (170 lines): wap-wiki; asked (internals: move to notes)
 - sound.md (166 lines):
-- space.md (3 lines):
+- space.md (3 lines): wap-wiki, tests test_space_wanted.wap
 - SPECIFICATION.md (285 lines):
 - standalone.md (0 lines):
 - standard-library.md (567 lines):
-- strict.md (16 lines):
-- string.md (123 lines):
+- strict.md (16 lines): wap-wiki, tests test_strict_wanted.wap
+- string.md (123 lines): wap-wiki, tests test_string_page.wap green, test_string_wanted.wap; asked (graphemes, Cursor)
 - struct.md (271 lines):
 - style-guide.md (21 lines):
 - swift-is-the-better-rust.md (83 lines):
