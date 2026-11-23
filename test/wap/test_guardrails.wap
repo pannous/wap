@@ -1,0 +1,222 @@
+# wap's guardrails as checks (user decision via warp-lead, 2026-11-18), so they hold when nobody is looking:
+#   one-fit          core/analyze has one type relation, `conversion`: no other function answers "does this type fit"
+#                    (a yes/no or Conversion with a parameter `wanted`, two of given, held, these, those, or named same_type(s) or fits_type)
+#   emit-infers-type core/emit computes no type: it reads the TYPE and BINDING facts typing and binding wrote and may
+#                    choose by them, but calls no word of core/analyze and builds no type node (type_notation's builders)
+#   dynamic-prim     a dynamic call is kernel typing writes: no `prim dispatched` anywhere, no `prim cast` in the types module
+#   one-ranking      definitions are ordered only by `ranked` (analyze/calls.wap): no other sort in core/analyze or core/emit
+#   long-file        no wap file over 300 lines: its owner splits it along a real seam
+#   repeated-code    no line or list written twice in a file (scripts/repeated-code.sh)
+#   same-shape       no function body or { } block of SHAPE_FLOOR tokens or more with the shape of another, names,
+#                    numbers and texts erased (guardrail_shapes.awk): two such are one function or one table
+#   boxed-any        `any` written as a type in wap's own source, outside the types module and sugar/ (whose `any` is
+#                    the language's dynamic type, the Node enum's Data among them): each spot a debt, the list empty
+#                    before milestone 2 (notes/decisions.md wap-boxed-any-debt); a place typing infers as any is
+#                    ratchet_census.sh's
+#   emit-boxes       only typing decides what is boxed (types.wap writes `prim box`): no struct.new of a box in core/emit
+#                    outside that primitive; never allowlisted
+#   get-reads-places a call has one kernel spelling: typing writes `f(x)` for a dot read naming a function, so the
+#                    emitter's Get arm reads a place and calls nothing; never allowlisted
+#   one-owner        every wap file and test/wap script falls under exactly one row of notes/agents/wap-owner.md "Owners": a path or
+#                    folder in its files column (wap/'s own paths written without it), or a row's "<folder> … no other
+#                    row names"; a clause in words, a role row's "any file", owns nothing
+#   core-no-extension core uses no file of wap/extensions: compiler.wap hands extensions in (Language.readers)
+#   kernel-emitted   each pattern of kernel/forms.wap has its arm in emit/emitter.wap, but a pattern only another one uses
+#                    (Arm in Case): the file holds the emitter's input and nothing else; never allowlisted
+#   in-tree          every wap file has its line in notes/agents/wap-owner.md's tree, the block of "## The tree": a file `<name>.wap`
+#                    two spaces deeper than its folder's line `<folder>/`; never allowlisted
+#   copied-growth    a list or text is grown in place or built once, never copied whole for each part: no `xs += [x]`,
+#                    `xs = xs + [x]` or `t = t + "…"` (xs.add(x); types/texts.wap concatenated)
+#   no-warp          wap stands on its own: no script runs the warp binary (wap's modules run on the native wap, else on
+#                    wasmtime, scripts/lib/wap-host.sh); never allowlisted
+# Today's exceptions are in guardrails_allowed.txt, `<rule> <key> <count>`, key a function for one-fit and a file for
+# the others. The list only shrinks: a count above it fails naming file:line and the rule, a count below it fails
+# until the line is lowered or dropped. It compiles nothing
+
+use file
+use path
+use process
+use list
+# TODO (card use-root-first) `use regex` once lib/ is searched before lib/crates/
+use "../../lib/regex.wap"
+use "../check.wap"
+use "scripted.wap"
+
+# the rules no allowlist line excuses: a spot of theirs is a failure at once
+UNLISTED := ["emit-boxes", "get-reads-places", "in-tree", "core-no-extension", "kernel-emitted", "no-warp"]
+OWNERS := "notes/agents/wap-owner.md"
+KERNEL := "wap/kernel/forms.wap"
+EMITTER := "wap/core/emit/emitter.wap"
+ALLOWED := "test/wap/guardrails_allowed.txt"
+RELATION := "conversion"
+LONGEST := 300
+SHAPE_FLOOR := 20
+SHOWN_TEXT := 100
+# where a type is written: after `:`, `->`, `<`, `,` or `as`, or as an optional
+ANY_TYPE := "(:|->|<|,|[^a-z_]as)[ \t]*any([^a-z_?]|$)|[^a-z_.]any[?]"
+# the words that build a type node (core/type_notation.wap); taking one apart is reading it
+TYPE_BUILDERS := ["generic_type", "type_built", "function_type_of", "optional_type", "list_type", "map_type", "function_value_type"]
+SAME_TYPE_NAMES := "^(same|fits)_types?$"
+TYPE_PARAMETERS := ["given", "held", "these", "those"]
+# a line that runs warp: its binary named by a variable, looked up on PATH, picked by WARP_BINAR[Y] or called as a command
+RUNS_WARP := "[$][{]?warp([^a-z_]|$)|command -v \"?warp([^a-z_]|$)|WARP_BINAR[Y]|(^|[;&|({]|[$][(])\\s*\"?warp\"?\\s"
+
+# a rule broken at a place: the rule, its key (a function for one-fit, else a file), file:line and the line's text
+class Spot { rule: text, key: text, place: text, said: text }
+# a line of a file, numbered from 1
+class Line { file: text, number: int, text: text }
+
+# the tree's files a git pathspec names
+tracked(pathspec: text): list<text> := run(["git", "ls-files", pathspec], folder: script.tree).out.split("\n").filter(path => path != "")
+# the files of a folder that end in .wap, sorted, as a shell glob gives them
+wap_files_in(folder: text): list<text> := list_files(path_join(script.tree, folder)).filter(name => name.ends_with(".wap")).sorted.map(name => path_join(folder, name))
+lines_of(file: text): list<Line> := {
+	texts = file_lines(path_join(script.tree, file))
+	if #texts > 0 and texts.last == "" { texts = texts.take(#texts - 1) }
+	(0 upto #texts).map(i => Line(file, i + 1, texts[i]))
+}
+# the lines of these files a regular expression matches, as grep -n finds them
+grepped_lines(pattern: text, files: list<text>): list<Line> := files.flat_map(file => lines_of(file).filter(line => first_match(line.text, pattern) != ø))
+# a line as a spot of a rule keyed by its file
+filed(rule: text, line: Line): Spot := Spot(rule, line.file, "${line.file}:${line.number}", shown(replace_all(line.text, "^[ \t]+", "")))
+# a text cut to what a spot shows
+shown(t: text): text := t[0 .. min(SHOWN_TEXT, #t)]
+filed_all(rule: text, lines: list<Line>): list<Spot> := lines.map(line => filed(rule, line))
+# the names a file defines, `name(` at a line's start
+defined(files: list<text>): list<text> := files.flat_map(file => lines_of(file).map(line => first_match(line.text, "^[a-z_]+\\(") ?? "").filter(name => name != "").map(name => name[0 .. #name - 1])).unique()
+
+# --- the finders, one a rule, each giving its spots
+
+one_fit(): list<Spot> := wap_files_in("wap/core/analyze").flat_map(file => lines_of(file)).filter(line => first_match(line.text, "^[a-z_]+\\(.*\\) as (bool|Conversion\\??) ") != ø).filter(line => {
+	name = line.text.split("(")[0]
+	parameters = line.text[#name + 1 ..].split(") as ")[0].split(",").map(parameter => parameter.trim().split(":")[0])
+	typed = parameters.filter(parameter => parameter in TYPE_PARAMETERS)
+	name != RELATION and ("wanted" in parameters or #typed >= 2 or first_match(name, SAME_TYPE_NAMES) != ø)
+}).map(line => Spot("one-fit", line.text.split("(")[0], "${line.file}:${line.number}", shown(line.text)))
+# the words a line calls, `word(` with no letter, _ or . before it
+called(t: text): list<text> := find_all(t, "[a-z_.]+\\(").map(call => call[0 .. #call - 1]).filter(word => not word.contains("."))
+# a word core/analyze defines and neither the emitter's files nor the shared ones do, or a type builder, called in core/emit
+emit_infers_type(): list<Spot> := {
+	others = defined(wap_files_in("wap/core/emit") + wap_files_in("wap/core"))
+	words = defined(wap_files_in("wap/core/analyze")).filter(word => not (word in others)) + TYPE_BUILDERS
+	filed_all("emit-infers-type", wap_files_in("wap/core/emit").flat_map(file => lines_of(file)).filter(line => called(line.text).any(word => word in words)))
+}
+dynamic_prim(): list<Spot> := filed_all("dynamic-prim", grepped_lines("prim dispatched\\b", tracked("wap/*.wap")) + grepped_lines("prim cast\\b", wap_files_in("wap/types")))
+one_ranking(): list<Spot> := filed_all("one-ranking", grepped_lines("sorted|min_by|max_by", wap_files_in("wap/core/analyze") + wap_files_in("wap/core/emit")).filter(line => not line.text.starts_with("ranked(")))
+long_file(): list<Spot> := tracked("wap/*.wap").map(file => [file, text(#lines_of(file))]).filter(counted => int(counted[1]) > LONGEST).map(counted => Spot("long-file", counted[0], "${counted[0]}:${counted[1]}", "${counted[1]} lines"))
+repeated_code(): list<Spot> := run(["bash", "scripts/repeated-code.sh", script.tree, "--list"] + tracked("wap/*.wap"), folder: script.tree).out.split("\n").filter(line => line != "").map(line => {
+	place = line.split(" ")[0]
+	Spot("repeated-code", place.split(":")[0], place, line[#place + 1 ..])
+})
+same_shape(): list<Spot> := tabbed(run(["env", "LC_ALL=C", "awk", "-v", "least=${SHAPE_FLOOR}", "-f", "test/wap/guardrail_shapes.awk"] + tracked("wap/*.wap"), folder: script.tree).out)
+# the language every program gets: the types module's files, those its types.wap includes from elsewhere, and the sugar's
+types_files(): list<text> := {
+	included = lines_of("wap/types/types.wap").map(line => match_groups(line.text, "^include \"(.*)\"$") ?? []).filter(groups => groups is not empty).map(groups => replace_all("wap/types/" + groups[0], "[^/]+/\\.\\./", ""))
+	run(["find", "wap/types", "wap/sugar", "-name", "*.wap"], folder: script.tree).out.split("\n").filter(path => path != "") + included
+}
+boxed_any(): list<Spot> := {
+	language = types_files()
+	filed_all("boxed-any", grepped_lines(ANY_TYPE, tracked("wap/*.wap").filter(file => not (file in language))).filter(line => first_match(replace_all(line.text, "\"[^\"]*\"|#.*", ""), ANY_TYPE) != ø))
+}
+emit_boxes(): list<Spot> := filed_all("emit-boxes", grepped_lines("STRUCT_NEW.*\\bbox|\\bbox.*STRUCT_NEW", wap_files_in("wap/core/emit")).filter(line => not line.text.contains("name == BOXED_VALUE")))
+get_reads_places(): list<Spot> := filed_all("get-reads-places", grepped_lines("^\\s+Get\\(.*(DEFINED_AT|call_code)", wap_files_in("wap/core/emit")))
+core_no_extension(): list<Spot> := filed_all("core-no-extension", grepped_lines("^use \"[^\"]*extensions/", tracked("wap/core/*")))
+kernel_emitted(): list<Spot> := {
+	patterns = lines_of(KERNEL).filter(line => line.text.starts_with("pattern "))
+	emitted = lines_of(EMITTER)
+	patterns.filter(line => {
+		name = line.text.split(" ")[1]
+		not emitted.any(arm => first_match(arm.text, "^\\s+${name}\\(") != ø) and not patterns.any(other => other.text.split(" ")[1] != name and first_match(other.text, "\\b${name}\\b") != ø)
+	}).map(line => Spot("kernel-emitted", line.text.split(" ")[1], "${KERNEL}:${line.number}", "no arm in ${EMITTER}"))
+}
+# a list or text grown by copying it whole: `xs += [x]`, `xs = xs + [x]`, `t = t + …"`
+copied_growth(): list<Spot> := filed_all("copied-growth", tracked("wap/*.wap").flat_map(file => lines_of(file)).filter(copies))
+copies(line: Line): bool := first_match(line.text, "\\b[a-z_.]+ \\+= \\[") != ø or self_added(line.text, "\\b([a-z_.]+) = ([a-z_.]+) \\+ (\\[)") or self_added(line.text, "\\b([a-z_]+) = ([a-z_]+) \\+ (.*(\"|\\btext\\(|\\bshow\\())")
+# a name given itself plus more, the pattern's first two groups the name twice (groups count from 0)
+self_added(t: text, pattern: text): bool := find_all_groups(t, pattern).any(groups => groups[0] == groups[1])
+no_warp(): list<Spot> := filed_all("no-warp", grepped_lines(RUNS_WARP, tracked("*.sh")))
+# the owner rows' paths: `[row, path]`, a folder ending in /, and `[row, "*", folder]` for a row's catch-all
+owned_paths(): list<list<text>> := {
+	rows = lines_of(OWNERS).drop_while(line => not line.text.starts_with("| stage | owner")).drop(1).take_while(line => line.text.starts_with("|")).filter(line => first_match(line.text, "^\\|-+\\|") == ø)
+	(0 upto #rows).flat_map(row => rows[row].text.split("|")[3].split(",").flat_map(part => part.split(";")).map(entry => entry.trim()).flat_map(entry => {
+		folder = first_match(entry, "[^ ]+/")
+		if entry.contains("no other row names") and folder != ø then [[text(row + 1), "*", folder!]] else if entry != "" and not entry.contains(" ") then [[text(row + 1), if entry.starts_with("test/") or entry.starts_with("scripts/") then entry else "wap/" + entry]] else []
+	}))
+}
+one_owner(): list<Spot> := {
+	owned = owned_paths()
+	(tracked("wap/*.wap") + tracked("test/wap/*")).map(file => {
+		rows = owned.filter(o => o[1] != "*" and (file == o[1] or o[1].ends_with("/") and file.starts_with(o[1]))).map(o => o[0]).unique()
+		count = if rows is empty and owned.any(o => o[1] == "*" and file.starts_with(o[2])) then 1 else #rows
+		[file, text(count)]
+	}).filter(counted => counted[1] != "1").map(counted => Spot("one-owner", counted[0], "${counted[0]}:1", "under ${counted[1]} rows of ${OWNERS} \"Owners\", not one"))
+}
+# the wap files the tree of the owners' notes places: a line's indent its depth, a folder line ending in /
+tree_paths(): list<text> := {
+	block = lines_of(OWNERS).drop_while(line => not line.text.starts_with("## The tree")).drop_while(line => not line.text.starts_with("```")).drop(1).take_while(line => not line.text.starts_with("```"))
+	folders: map<int, text> = {}
+	placed: list<text> = []
+	for line in block.filter(line => line.text.trim() != "") {
+		indent = #(first_match(line.text, "^ *") ?? "")
+		depth = indent ÷ 2
+		if depth <= 6 and indent % 2 == 0 {
+			name = line.text.trim().split(" ")[0]
+			path = (0 upto depth).map(d => folders.get(d) ?? "").join("")
+			if name.ends_with("/") { folders[depth] = name } else if name.ends_with(".wap") { placed.add(path + name) }
+		}
+	}
+	placed
+}
+in_tree(): list<Spot> := {
+	placed = tree_paths()
+	tracked("wap/*.wap").filter(file => not (file in placed)).map(file => Spot("in-tree", file, "${file}:1", "no line in the tree of ${OWNERS}"))
+}
+# tab-separated spots, as the awk finder prints them
+tabbed(t: text): list<Spot> := t.split("\n").filter(line => line != "").map(line => line.split("\t")).map(fields => Spot(fields[0], fields[1], fields[2], fields[3]))
+
+# --- each rule's spots counted against the allowlist
+
+RULES := ["one-fit", "emit-infers-type", "dynamic-prim", "one-ranking", "long-file", "repeated-code", "same-shape", "boxed-any", "emit-boxes", "get-reads-places", "one-owner", "core-no-extension", "kernel-emitted", "in-tree", "copied-growth", "no-warp"]
+spots_of(rule: text): list<Spot> := match rule {
+	"one-fit" => one_fit()
+	"emit-infers-type" => emit_infers_type()
+	"dynamic-prim" => dynamic_prim()
+	"one-ranking" => one_ranking()
+	"long-file" => long_file()
+	"repeated-code" => repeated_code()
+	"same-shape" => same_shape()
+	"boxed-any" => boxed_any()
+	"emit-boxes" => emit_boxes()
+	"get-reads-places" => get_reads_places()
+	"one-owner" => one_owner()
+	"core-no-extension" => core_no_extension()
+	"kernel-emitted" => kernel_emitted()
+	"in-tree" => in_tree()
+	"copied-growth" => copied_growth()
+	_ => no_warp()
+}
+# the allowlist's lines, [rule, key, count]
+allowed = lines_of(ALLOWED).map(line => line.text).filter(t => t != "" and not t.starts_with("#")).map(t => t.split(" "))
+failures = 0
+for rule in RULES {
+	# a finder that fails, a file or folder it reads missing (a renamed folder), fails its rule rather than finding nothing
+	spots = try { spots_of(rule) } catch e { [Spot(rule, "finder-error", "-:0", "the finder failed: ${e.message}")] }
+	listed = if rule in UNLISTED then [] else allowed.filter(line => line[0] == rule)
+	keys = (spots.map(spot => spot.key) + listed.map(line => line[1])).unique().sorted
+	said: list<text> = []
+	for key in keys {
+		count = #spots.filter(spot => spot.key == key)
+		allows = listed.filter(line => line[1] == key).map(line => int(line[2])).sum
+		if count > allows {
+			for spot in spots.filter(spot => spot.key == key) { said.add("  ${spot.place}: ${spot.said}") }
+			said.add("  ${rule}: ${key} has ${count}, ${allows} allowed")
+		} else if count < allows {
+			said.add("  ${rule}: ${key} has ${count}, the allowlist still says ${allows}: lower it in ${ALLOWED}")
+		}
+	}
+	if rule in UNLISTED and allowed.any(line => line[0] == rule) { said.add("  ${rule} takes no allowlist lines: remove them from ${ALLOWED}") }
+	if said is empty then print("✓ ${rule}") else {
+		print("✗ ${rule}\n" + said.join("\n"))
+		failures += 1
+	}
+}
