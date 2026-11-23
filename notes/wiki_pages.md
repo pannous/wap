@@ -188,9 +188,9 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - packages.md (23 lines): wap-wiki, design chat: asked to move to notes
 - pair.md (32 lines): wap-wiki, tests test_pair_wanted.wap the forms still to build; asked (wasp prose)
 - partial-evaluation.md (8 lines): wap-wiki, a todo: asked
-- pattern-matching.md (297 lines):
-- pattern.md (72 lines):
-- Perfect.md (12 lines):
+- pattern-matching.md (297 lines): wap-wiki, tests test_pattern_matching_page.wap green, test_pattern_matching_wanted.wap the forms still to build
+- pattern.md (72 lines): wap-wiki, design essay: asked (move to notes, keep holes)
+- Perfect.md (12 lines): wap-wiki, prose; asked (path quotes)
 - Philosophy.md (80 lines):
 - pipe.md (70 lines):
 - plural.md (17 lines):
