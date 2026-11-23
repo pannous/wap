@@ -121,3 +121,59 @@ c_double(x: float32): float := prim f64.promote_f32(x)
 c_flag(b: bool): int := if b then 1 else 0
 c_bool(n: int): bool := n % BYTE_RANGE != 0
 BYTE_RANGE := 256
+
+# A node of the native host's words (`sound_played(pcm: node, rate: int, channels: int): int from host`, answered by
+# warp's native host module, which the native warp runs such a module with) as it crosses through the memory: its
+# kind, its count, then a text's bytes, a list's ints or floats, or a list's texts, each its byte count and bytes
+HOST_INTS := 1
+HOST_FLOATS := 2
+HOST_TEXT := 3
+HOST_TEXTS := 8
+HOST_HEADER := 16
+host_node(t: text): int32 := {
+	at = host_header(HOST_TEXT, byte_count(t), byte_count(t))
+	memory_placed(at + HOST_HEADER, t)
+	c_address(at)
+}
+host_node(xs: list<int>): int32 := host_words(HOST_INTS, xs)
+host_node(xs: list<float>): int32 := host_words(HOST_FLOATS, xs.map(float_bits))
+# a list of ints or of floats' bits as a node of that kind
+host_words(kind: int, words: list<int>): int32 := {
+	at = host_header(kind, #words, POINTER_BYTES * #words)
+	for i in 0 upto #words { set_memory_int(at + HOST_HEADER + POINTER_BYTES * i, words#(i + 1)) }
+	c_address(at)
+}
+host_node(ts: list<text>): int32 := {
+	at = host_header(HOST_TEXTS, #ts, ts.map(t => POINTER_BYTES + byte_count(t)).sum())
+	place = at + HOST_HEADER
+	for t in ts {
+		set_memory_int(place, byte_count(t))
+		memory_placed(place + POINTER_BYTES, t)
+		place += POINTER_BYTES + byte_count(t)
+	}
+	c_address(at)
+}
+host_node(x: any): int32 := raise("a native host word takes a text or a list of ints, floats or texts, not ${x}")
+# a node's header, its kind and count, after the call's others, room for its bytes after it: where it starts
+host_header(kind: int, count: int, bytes: int): int := {
+	at = c_reserved(HOST_HEADER + bytes)
+	set_memory_int(at, kind)
+	set_memory_int(at + POINTER_BYTES, count)
+	at
+}
+# the node a host word gave back, which the native warp wrote at that address
+host_node_read(at: int): any := {
+	kind = memory_int(at)
+	count = memory_int(at + POINTER_BYTES)
+	items = at + HOST_HEADER
+	if kind == HOST_TEXT { return memory_text(items, count) }
+	if kind == HOST_INTS { return (0 upto count).map(i => memory_int(items + POINTER_BYTES * i)) }
+	if kind == HOST_FLOATS { return (0 upto count).map(i => bits_float(memory_int(items + POINTER_BYTES * i))) }
+	texts: list<text> = []
+	place = items
+	for i in 0 upto count {
+		texts.add(memory_text(place + POINTER_BYTES, memory_int(place)))
+		place += POINTER_BYTES + memory_int(place)
+	}
+	texts
+}
