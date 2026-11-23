@@ -82,11 +82,11 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - FAQ.md (1 lines): ✓ wap-wiki, prose
 - fast.md (2 lines): wap-wiki, asked
 - Features.md (179 lines):
-- field.md (75 lines):
+- field.md (75 lines): wap-wiki, asked (old field syntax)
 - final.md (21 lines): wap-wiki
 - folding.md (9 lines): wap-wiki, asked
 - Footguns.md (876 lines):
-- for.md (70 lines):
+- for.md (70 lines): wap-wiki
 - full-evaluation.md (17 lines): wap-wiki, interpret asked
 - function-pointer.md (22 lines): wap-wiki
 - function.md (179 lines): (released by wap-wiki) tests 264f14d, wiki 70f163e (settled edits and not-yet marks done); waits: the types patch (~/Library/Logs/warp/wiki-b/function-types.patch: redo the pipe as `|>` plus `|`, BLANK_BYTES#1 for SPACE_BYTE, drop the round shadowing lines), the forms being built (`it`, `square(n)=n*n`, `g 2 {1}`)
