@@ -12,6 +12,11 @@ RUN_SECONDS=60
 RUN_MEMORY_GB=4
 RUNS_AT_ONCE=4
 COVERED_MARK=covered
+# wap has no headless mode yet: a sample that opens a window or plays sound never runs here (user 2026-11-23: no run
+# shows a window), by its folder, by a module it takes in or by its use of the window
+SHOWING_FOLDERS='graphics|gpu|sound'
+SHOWING_MODULES='raylib|SDL2|SDL3|draw|pga_draw|graphics|shown_frames|meshlets|forest|image|keys|sound|midi|webview|gpu'
+SHOWING_CODE="^[[:space:]]*(import|use)[[:space:]]+($SHOWING_MODULES)\\b|\\bwindow\\."
 tree="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 wap=$(command -v wap) || { echo "coverage.sh: no native wap on PATH: scripts/refresh-seed.sh installs it" >&2; exit 2; }
 out="$tree/data/wap-tests/coverage.txt"
@@ -50,7 +55,8 @@ commit=$(sed -n 's/^wap.wasm of \([0-9a-f]*\) .*/\1/p' <<<"$version")
 library="$(dirname "$(sed -n '1s/.*(\(.*\))$/\1/p' <<<"$version")")/lib"
 [ -d "$library" ] || { echo "coverage.sh: no library beside the installed wap's compiler ($library)" >&2; exit 2; }
 modules=$(find "$library" -maxdepth 1 \( -name '*.warp' -o -name '*.wap' \) | sort)
-samples=$(find -L "$tree/samples" -name '*.warp' | sort)
+samples=$(find -L "$tree/samples" -name '*.warp' | grep -vE "/samples/($SHOWING_FOLDERS)/" |
+	xargs grep -LE "$SHOWING_CODE" | sort)
 lines=$({
 	xargs -P "$RUNS_AT_ONCE" -I{} bash -c 'module_covered "$1"' _ {} <<<"$modules"
 	xargs -P "$RUNS_AT_ONCE" -I{} bash -c 'covered sample "$1"' _ {} <<<"$samples"
