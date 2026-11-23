@@ -249,6 +249,16 @@ After that, the test pass rate is a ballpark of how well the engine works, nothi
 interviewer go through the ugly forms the tests show: each is either standardised, because it arises from the
 principles, or dropped.
 
+## Guardrails, measured every day
+
+`scripts/vitals.py` gets a backbone section:
+- lines per layer (kernel, core, extensions, library);
+- the number of kernel forms and primitives;
+- how many non-kernel forms the emitter refused;
+- build cost.
+
+A kernel addition, a debt or a rise in core lines shows up there the day it happens.
+
 ## Theory and prior art for the design
 
 - **Spritely Hoot / Guile:** a small kernel (Tree-IL), then CPS, then wasm GC. The shape of this plan.
