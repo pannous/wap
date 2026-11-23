@@ -2,6 +2,7 @@
 # each bound when typing first reaches one, so a program binds only the library functions it calls. Input: the
 # types lowered; output: its statements, the functions unbound (UNBOUND), and the scope they bind in.
 use folder
+use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
 use "../../kernel/forms.wap"
@@ -19,6 +20,25 @@ identified_program(program: Block, types: list<Signature>, modules: list<Module>
 	identified = definers_identified(program, ids)
 	statements = statements_in(identified)
 	Identified(identified, statements, block_scope(identified, statements, scope_around(types, modules), PROGRAM_DEPTH), ids)
+}
+# A program adds to a function of the types module only for a type it declares (wiki/function.md): its function of
+# such a name takes one of the program's classes or enums; a class's maker belongs to the class, a rule's function to
+# the rule's form
+overloads_checked(modules: list<Module>, library: list<Signature>) := {
+	functions: map<text, bool> = {}
+	for word in library { if word.kind == DefinitionKind.Function { functions[word.name] = yes } }
+	signatures = modules.flat_map(module => module.signatures)
+	own = signatures.filter(signature => signature.kind == DefinitionKind.Record).map(signature => signature.name)
+	for signature in signatures.filter(signature => adds_to_library(signature, functions, own)) {
+		refused(signature.definer, "${signature.name} is a function every program has: a program adds to it only for a type it declares, `${signature.name}(s: Ship) := …`; give this one another name")
+	}
+}
+adds_to_library(signature: Signature, functions: map<text, bool>, own: list<text>) as bool := signature.kind == DefinitionKind.Function and functions.has(signature.name) and not own.contains(signature.name) and not has_fact(signature.definer, DERIVED) and not signature.parameters.any(type => names_type(type, own))
+# whether a written type names one of these types, inside list<…>, an optional or a function type too
+names_type(type: Node?, names: list<text>) as bool := match type {
+	Symbol(name) => names.contains(name)
+	Call(called, arguments) => ([called] + arguments).any(part => names_type(part, names))
+	_ => type != ø and direct_parts(type!).any(part => names_type(part, names))
 }
 # the program of these statements, its late reads checked, its definers counted
 finished(known: Identified, statements: list<Node>) as Node := with_definers(late_reads_checked(refitted(Block(statements), known.code)), known.ids)
