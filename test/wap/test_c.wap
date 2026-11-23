@@ -1,0 +1,35 @@
+# C functions as lib writes them (wiki/c.md; lib/c.warp, `strlen(s: text): i64 from 'c'`), lowered by
+# wap/extensions/c/foreign.wap and described for the native warp by wap/extensions/c/functions.wap: a program calls them, its
+# texts going to C and coming back
+use "../check.wap"
+use "scripted.wap"
+
+
+check("a program calls C functions written as C has them, texts going in and coming back", ran("c_lines", "strlen(s: text): i64 from 'c'\nsetenv(name: text, value: text, overwrite: i32): i32 from 'c'\ngetenv(name: text): text from 'c'\nprint(text(strlen(\"hello\")))\nprint(text(setenv(\"WAP_C_TEST\", \"set from wap\", 1)))\nprint(getenv(\"WAP_C_TEST\"))"), "5\n0\nset from wap")
+check("a C function of libm takes and gives a double", ran("libm_line", "fabs(x: f64): f64 from 'm'\nprint(text(fabs(-2.5)))"), "2.5")
+check("a C function of the library its module names, loaded by that name", ran("zlib_line", "crc32(crc: i64, bytes: text, count: i64): i64 from 'z'\nprint(text(crc32(0, \"hello\", 5)))"), "907060870")
+check("a C function takes and gives C's float", ran("float_line", "sqrtf(x: f32): f32 from 'm'\nprint(text(sqrtf(2.25)))"), "1.5")
+# div gives its div_t {quot, rem} by value, in one register: quot in the low half
+check("a C struct given back by value, packed in its register", ran("struct_line", "div(numerator: i32, denominator: i32): i64 from 'c'\nprint(text(div(7, 2)))"), "4294967299")
+check("a C truth value given back as a bool", ran("bool_line", "isatty(file: i32): bool from 'c'\nprint(text(isatty(-1)))"), "no")
+check("libm's C functions come from its own module, use m", ran("libm_module", "use m\nprint(text(ldexp(0.75, 2)) + \" \" + text(hypot(3.0, 4.0)))"), "3 5")
+check("an out-pointer is no argument, a slot C fills", ran("out_line", "strtod(s: text, end: out): f64 from 'c'\nprint(text(strtod(\"2.5kg\")))"), "2.5")
+check("a handle result is the pointer C put in the first out-pointer", ran("out_handle_line", "posix_memalign(memory: out, alignment: i64, size: i64): handle from 'c'\nfree(pointer: handle): void from 'c'\nmemory = posix_memalign(16, 64)\nprint(text(memory > 0))\nfree(memory)"), "yes")
+check("a list of texts crosses as C's NULL-ended array of strings", ran("texts_line", "posix_spawnp(process: out, file: text, actions: handle, attributes: handle, arguments: texts, environment: texts): handle from 'c'\nwaitpid(process: handle, status: handle, options: i32): void from 'c'\nchild = posix_spawnp(\"echo\", 0, 0, [\"echo\", \"spawned\", \"by C\"], [])\nwaitpid(child, 0, 0)"), "spawned by C")
+check("a list of bytes crosses as a pointer to their copy, NULs and all, its count the length after it", ran("bytes_line", "crc32(start: i64, data: bytes, size: length): i64 from 'z'\nprint(text(crc32(0, [97, 0, 98])))"), "367556721")
+check("a closure reads a program global beside a C function that takes a length", ran("closure_global", "crc32(start: i64, data: bytes, size: length): i64 from 'z'\ny = 1\nf = () => y\nprint(text(f() + crc32(0, [97])))"), "3904355908")
+# a function of the program reads a value of the library before any C call gave it one (warp-interviewer 2026-11-22)
+check("a function reads the library's value of the C calls' out-pointers", ran("library_value", "f() := c_outs\nprint(text(f()))"), "0")
+# wiki/c.md's examples: sqlite3 through its module, a number that is no handle refused, qsort calling back a lambda
+check("sqlite3 runs a query: a row, its int and its text", ran("sqlite_page", "use sqlite3\ndb = sqlite3_open(\":memory:\")\nstmt = sqlite3_prepare_v2(db, \"select 1+2, 'wap'\", -1)\nrow = text(sqlite3_step(stmt)) + \" \" + text(sqlite3_column_int(stmt, 0)) + \" \" + sqlite3_column_text(stmt, 1)\nsqlite3_finalize(stmt); sqlite3_close(db)\nprint(row)"), "100 3 wap")
+check("a number that is no handle of this run is an error", lines_with(ran("no_handle", "use sqlite3\nsqlite3_step(42)"), "no handle of this run"), 1)
+check("qsort calls back a lambda through c_callback", ran("qsort_page", "use c\nuse callbacks\nqsort(base: handle, count: i64, size: i64, compare: handle): void from 'c'\nm = calloc(4, 8)\nset_field_i64(m, 0, 3); set_field_i64(m, 8, 1); set_field_i64(m, 16, 4); set_field_i64(m, 24, 2)\nqsort(m, 4, 8, c_callback((a, b) => field_i64(a, 0) - field_i64(b, 0), [\"handle\", \"handle\"]))\nprint(text([0, 1, 2, 3].map(i => field_i64(m, 8 * i))))"), "[1, 2, 3, 4]")
+# an unsigned int and a text the caller owns cross (wap/extensions/c/foreign.wap)
+check("an unsigned int and an owned text cross", ran("c_words", "strdup(s: text): owned_text from 'c'\nhtonl(n: u32): u32 from 'c'\nprint(strdup(\"wap\") + \" \" + text(htonl(4278190080)))"), "wap 255")
+# a struct given by value, `bytes<40>` (wgpu's callback infos): C reads its copy, and the caller's stays as it was
+c_library("s40", ["#include <stdint.h>", "#include <stdlib.h>", "struct s40 { int64_t a[5]; };", "int64_t sum40(struct s40 s) { s.a[0] = 0; return s.a[1] + s.a[2] + s.a[3] + s.a[4]; }", "int64_t first40(struct s40 s) { return s.a[0]; }", "struct s40* made40(void) { struct s40* s = malloc(sizeof *s); for (int i = 0; i < 5; i++) s->a[i] = i + 1; return s; }"])
+check("a C struct given by value", ran("struct_by_value", "sum40(s: bytes<40>): i64 from '${script.stage}/libs40.dylib'\nfirst40(s: bytes<40>): i64 from '${script.stage}/libs40.dylib'\nmade40(): handle from '${script.stage}/libs40.dylib'\nm = made40()\nprint(text(sum40(m)) + \" \" + text(first40(m)))"), "14 1")
+check("the native wap tells its programs the library's folder", ran("library_folder", "wap_library_folder(): text from 'c'\nprint(text(exists(wap_library_folder() + \"/json.wap\")))"), "yes")
+# a typed list as C reads an array of its items (a GPU buffer's floats): C sums them and writes into them
+c_library("items", ["#include <stdint.h>", "double sum_f32(float* p, int64_t bytes) { double s = 0; for (int64_t i = 0; i < bytes / 4; i++) s += p[i]; return s; }", "void halved(float* p, int64_t bytes) { for (int64_t i = 0; i < bytes / 4; i++) p[i] /= 2; }", "int64_t sum_i32(int32_t* p, int64_t bytes) { int64_t s = 0; for (int64_t i = 0; i < bytes / 4; i++) s += p[i]; return s; }"])
+check("a list<float32> crosses as C's floats, and C's writes are seen", ran("typed_items", "sum_f32(xs: list<float32>, size: length): f64 from '${script.stage}/libitems.dylib'\nhalved(xs: list<float32>, size: length): ø from '${script.stage}/libitems.dylib'\nsum_i32(xs: list<int32>, size: length): i64 from '${script.stage}/libitems.dylib'\nxs: list<float32> = [float32(0.5), float32(1.25), float32(4.0)]\nhalved(xs)\nprint(text(sum_f32(xs)) + \" \" + text(float(xs#2)) + \" \" + text(sum_i32([int32(3), int32(-4)])))"), "2.875 0.625 -1")

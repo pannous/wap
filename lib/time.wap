@@ -301,3 +301,83 @@ relative_time(t: int, now: int): text := {
 	amount = counted(size ÷ unit.ms, unit.long)
 	if difference < 0 then "${amount} ago" else "in ${amount}"
 }
+
+# --- time zones (wiki/time.md "Time zones"): the offset a zone has at an instant under the European and United States
+# daylight saving rules, and the instant a wall time means there. Times here are whole seconds since 1970, offsets
+# seconds east of UTC.
+
+HOUR_SECONDS := 3600
+DAY_SECONDS := 86400
+
+# the daylight saving rule of a zone: none; the last Sunday of March to the last Sunday of October, switching at 01:00
+# UTC (since 1996); the second Sunday of March to the first Sunday of November, switching at 02:00 local time (since
+# 2007)
+enum Dst { Never, Europe, UnitedStates }
+# which instant a wall time means when a transition skips or repeats it
+enum Disambiguation { Reject, Earlier, Later }
+class Zone { name: text, standard: int, dst: Dst }
+
+# the embedded subset of the IANA database
+TIME_ZONES := [Zone("UTC", 0, Never), Zone("Etc/UTC", 0, Never), Zone("Europe/London", 0, Europe),
+	Zone("Europe/Dublin", 0, Europe), Zone("Europe/Lisbon", 0, Europe), Zone("Europe/Berlin", 3600, Europe),
+	Zone("Europe/Paris", 3600, Europe), Zone("Europe/Madrid", 3600, Europe), Zone("Europe/Rome", 3600, Europe),
+	Zone("Europe/Amsterdam", 3600, Europe), Zone("Europe/Brussels", 3600, Europe), Zone("Europe/Vienna", 3600, Europe),
+	Zone("Europe/Zurich", 3600, Europe), Zone("Europe/Stockholm", 3600, Europe), Zone("Europe/Oslo", 3600, Europe),
+	Zone("Europe/Copenhagen", 3600, Europe), Zone("Europe/Warsaw", 3600, Europe), Zone("Europe/Prague", 3600, Europe),
+	Zone("Europe/Budapest", 3600, Europe), Zone("Europe/Athens", 7200, Europe), Zone("Europe/Helsinki", 7200, Europe),
+	Zone("Europe/Kyiv", 7200, Europe), Zone("Europe/Bucharest", 7200, Europe), Zone("Europe/Istanbul", 10800, Never),
+	Zone("Europe/Moscow", 10800, Never), Zone("Asia/Dubai", 14400, Never), Zone("Asia/Kolkata", 19800, Never),
+	Zone("Asia/Shanghai", 28800, Never), Zone("Asia/Singapore", 28800, Never), Zone("Asia/Tokyo", 32400, Never),
+	Zone("Australia/Brisbane", 36000, Never), Zone("America/Sao_Paulo", -10800, Never),
+	Zone("America/New_York", -18000, UnitedStates), Zone("America/Chicago", -21600, UnitedStates),
+	Zone("America/Denver", -25200, UnitedStates), Zone("America/Phoenix", -25200, Never),
+	Zone("America/Los_Angeles", -28800, UnitedStates), Zone("America/Anchorage", -32400, UnitedStates),
+	Zone("Pacific/Honolulu", -36000, Never)]
+
+zone_named(name: text): Zone := {
+	for zone in TIME_ZONES { if zone.name == name { return zone } }
+	raise "unknown time zone ${name}: not in the time zone rules (lib/time.wap TIME_ZONES)"
+}
+# the day number of the last Sunday of a month, and of its n-th from 1
+last_sunday(year: int, month: int): int := {
+	last = days_from_civil(year, month, days_in_month(year, month))
+	last - ((last + 3) % 7 + 1) % 7
+}
+nth_sunday(year: int, month: int, n: int): int := {
+	first = days_from_civil(year, month, 1)
+	first + (7 - ((first + 3) % 7 + 1)) % 7 + 7 * (n - 1)
+}
+# whether seconds since 1970 fall in a zone's summer time of that year
+european_summer(year: int, seconds: int): bool :=
+	seconds >= last_sunday(year, 3) * DAY_SECONDS + HOUR_SECONDS and seconds < last_sunday(year, 10) * DAY_SECONDS + HOUR_SECONDS
+united_states_summer(year: int, seconds: int, standard: int): bool := {
+	start = nth_sunday(year, 3, 2) * DAY_SECONDS + 2 * HOUR_SECONDS - standard
+	end = nth_sunday(year, 11, 1) * DAY_SECONDS + HOUR_SECONDS - standard
+	seconds >= start and seconds < end
+}
+in_summer(zone: Zone, seconds: int): bool := {
+	year = date_of_day(seconds ÷ DAY_SECONDS).year
+	match zone.dst {
+		Never: no
+		Europe: european_summer(year, seconds)
+		UnitedStates: united_states_summer(year, seconds, zone.standard)
+	}
+}
+# seconds east of UTC in effect in a zone at seconds since 1970
+zone_offset(zone: Zone, seconds: int): int := if in_summer(zone, seconds) then zone.standard + HOUR_SECONDS else zone.standard
+# the instant (seconds since 1970) a wall time (seconds since 1970 on the zone's wall clock) means in a zone: of the
+# summer and the winter offset, those that hold at the instant they give; one is the answer, none (skipped by a
+# transition) or both (repeated) need the choice
+zone_instant(zone: Zone, wall: int, choice: Disambiguation = Reject): int := {
+	later = wall - zone.standard
+	if zone.dst == Never { return later }
+	earlier = later - HOUR_SECONDS
+	earlier_holds = zone_offset(zone, earlier) == zone.standard + HOUR_SECONDS
+	later_holds = zone_offset(zone, later) == zone.standard
+	if earlier_holds != later_holds { return if earlier_holds then earlier else later }
+	match choice {
+		Earlier: earlier
+		Later: later
+		Reject: raise(if earlier_holds then "that wall time is ambiguous in ${zone.name}: it occurs twice, the clocks are set back by a daylight saving transition; choose disambiguation: earlier or later" else "that wall time does not exist in ${zone.name}: it is skipped by a daylight saving transition; choose disambiguation: earlier or later")
+	}
+}

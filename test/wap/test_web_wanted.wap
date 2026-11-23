@@ -1,0 +1,45 @@
+# a program's routes (wiki/html.md "Routes", lib/router.wap), served over HTTP by lib/web.wap and answering a WAGI
+# request by lib/wagi.wap: what wap does not build yet, each red line a to-do
+use file
+use process
+# TODO (card use-root-first) `use regex` once lib/ is searched before lib/crates/
+use "../../lib/regex.wap"
+use "../check.wap"
+use "scripted.wap"
+
+# how long the server gets to say it is serving
+WAIT_STEPS := 40
+STEP_MS := 250
+
+# the routes of wiki/html.md and a few more, each answer a text
+routes = "use router\nget \"/teapot\" {\n\tstatus 418\n\theader \"X-Wap\" \"brewed\"\n\t\"short and stout\"\n}\nget \"/users/:id:int\" { \"user \" + (parameter(\"id\") ?? \"none\") + (request.query.get(\"tab\") ?? \"\") }\nget \"/files/:path*\" { parameter(\"path\") ?? \"\" }\npost \"/todos\" { \"got \" + (request.form.get(\"item\") ?? request.body) }\nget \"/data\" { {n: 1} }"
+
+# the server started once it says where it serves, what it said till then
+server_compiled = compiled("server", routes + "\nuse web\nserve(0)")
+server = start([script.wap, module_of("server")], merged: yes)
+said_so_far = ""
+step = 0
+while step < WAIT_STEPS and not said_so_far.contains("serving") and server_compiled.status == 0 {
+	sleep_ms(STEP_MS)
+	said_so_far = read(server.out)
+	step += 1
+}
+port = first_match(said_so_far, "localhost:[0-9]+") ?? ""
+# what the server answers to curl's request, its status line and headers too with -i, line ends as \n
+asked(words: list<text>): text := if port == "" then [server_compiled.out, said_so_far].join("\n").split("\n").take(3).join("\n") else run(["curl", "-s"] + words).out.replace("\r", "")
+at(path: text): text := "http://${port}${path}"
+
+check("a route's status, headers and text", asked(["-i", at("/teapot")]), "HTTP/1.1 418 I'm a teapot\nContent-Type: text/plain; charset=utf-8\nX-Wap: brewed\nContent-Length: 15\nConnection: close\n\nshort and stout")
+check("a typed parameter and the query", asked([at("/users/7?tab=x")]), "user 7x")
+check("a typed parameter takes only its type", asked([at("/users/ann")]), "no route answers GET /users/ann")
+check("a repeated parameter takes the rest of the path", asked([at("/files/a/b.txt")]), "a/b.txt")
+check("a form's POST answers by sending the browser back", grepped(asked(["-i", "-d", "item=tea", "-H", "Referer: /list", at("/todos")]), "^(HTTP|Location)"), "HTTP/1.1 303 See Other\nLocation: /list")
+check("a POST's body", asked(["-d", "raw", "-H", "Content-Type: text/plain", at("/todos")]), "got raw")
+check("an answer that is no text is JSON", grepped(asked(["-i", at("/data")]), "^(Content-Type|\\{)"), "Content-Type: application/json\n{\"n\":1}")
+stop(server)
+waited(server)
+
+# a WAGI request: the routes compiled once, run with a request's CGI variables
+wagi_compiled = compiled("wagi_routes", routes + "\nuse wagi\nroutes_wagi()")
+wagi(variables: list<text>): text := then_ran(wagi_compiled, () => said(["env"] + variables + [script.wap, module_of("wagi_routes")]))
+check("a WAGI request answered CGI-style", wagi(["REQUEST_METHOD=GET", "PATH_INFO=/users/7", "QUERY_STRING=tab=%21"]), "Status: 200\nContent-Type: text/plain; charset=utf-8\n\nuser 7!")
