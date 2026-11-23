@@ -20,13 +20,14 @@ written(name: text, program: text): text := {
 	write(file, program + "\n")
 	file
 }
-# a program compiled by the compiler under test and run, given these words: what the compiler said, its warnings or
-# its refusal, then what the program said
-ran(name: text, program: text, words: list<text> = []): text := {
-	compiled = run([script.wap, script.compiler, written(name, program), module_of(name)], merged: yes)
-	if compiled.status != 0 { return compiled.out }
-	[compiled.out, said([script.wap, module_of(name)] + words)].filter(t => t != "").join("\n")
-}
+# a program compiled by the compiler under test into module_of(name)
+compiled(name: text, program: text): Ran := run([script.wap, script.compiler, written(name, program), module_of(name)], merged: yes)
+# what compiling said, its warnings or its refusal, then, where it compiled, what the next step said: sh's `compile && next`
+then_ran(module: Ran, next: () -> text): text := if module.status != 0 then module.out else [module.out, next()].filter(t => t != "").join("\n")
+# a program compiled and run, given these words
+ran(name: text, program: text, words: list<text> = []): text := then_ran(compiled(name, program), () => said([script.wap, module_of(name)] + words))
+# a program compiled and one of its exports called by wasmtime, the host outside wap, given these words
+called_export(name: text, program: text, export: text, words: list<text>): text := then_ran(compiled(name, program), () => try { run(["wasmtime", "run", "-W", "gc=y,function-references=y,exceptions=y", "--invoke", export, module_of(name)] + words).out } catch e { "no wasmtime on PATH, the host these lines call exports with" })
 # where ran puts a program's module
 module_of(name: text): text := path_join(script.stage, name + ".wasm")
 # the path of a file in the script's folder
@@ -55,3 +56,5 @@ c_library(name: text, lines: list<text>) := {
 	built = run(["cc", "-shared", "-o", staged("lib${name}.dylib"), staged(name + ".c")], merged: yes)
 	if built.status != 0 { raise "cc ${name}.c: ${built.out}" }
 }
+# a program using a module compiled first, its `use` line naming the module's wasm, compiled and run
+ran_using(module: text, source: text, name: text, program: text): text := then_ran(compiled(module, source), () => ran(name, "use \"${module_of(module)}\"\n" + program))
