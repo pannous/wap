@@ -52,6 +52,8 @@ RELATION := "conversion"
 LONGEST := 300
 SHAPE_FLOOR := 20
 SHOWN_TEXT := 100
+# the deepest folder level the owners' tree places files at
+TREE_DEPTH := 6
 # where a type is written: after `:`, `->`, `<`, `,` or `as`, or as an optional
 ANY_TYPE := "(:|->|<|,|[^a-z_]as)[ \t]*any([^a-z_?]|$)|[^a-z_.]any[?]"
 # the words that build a type node (core/type_notation.wap); taking one apart is reading it
@@ -103,7 +105,9 @@ emit_infers_type(): list<Spot> := {
 }
 dynamic_prim(): list<Spot> := filed_all("dynamic-prim", grepped_lines("prim dispatched\\b", tracked("wap/*.wap")) + grepped_lines("prim cast\\b", wap_files_in("wap/types")))
 one_ranking(): list<Spot> := filed_all("one-ranking", grepped_lines("sorted|min_by|max_by", wap_files_in("wap/core/analyze") + wap_files_in("wap/core/emit")).filter(line => not line.text.starts_with("ranked(")))
-long_file(): list<Spot> := tracked("wap/*.wap").map(file => [file, text(#lines_of(file))]).filter(counted => int(counted[1]) > LONGEST).map(counted => Spot("long-file", counted[0], "${counted[0]}:${counted[1]}", "${counted[1]} lines"))
+# a file and a count of it
+class Counted { file: text, count: int }
+long_file(): list<Spot> := tracked("wap/*.wap").map(file => Counted(file, #lines_of(file))).filter(counted => counted.count > LONGEST).map(counted => Spot("long-file", counted.file, "${counted.file}:${counted.count}", "${counted.count} lines"))
 repeated_code(): list<Spot> := run(["bash", "scripts/repeated-code.sh", script.tree, "--list"] + tracked("wap/*.wap"), folder: script.tree).out.split("\n").filter(line => line != "").map(line => {
 	place = line.split(" ")[0]
 	Spot("repeated-code", place.split(":")[0], place, line[#place + 1 ..])
@@ -148,8 +152,8 @@ one_owner(): list<Spot> := {
 	(tracked("wap/*.wap") + tracked("test/wap/*")).map(file => {
 		rows = owned.filter(o => o[1] != "*" and (file == o[1] or o[1].ends_with("/") and file.starts_with(o[1]))).map(o => o[0]).unique()
 		count = if rows is empty and owned.any(o => o[1] == "*" and file.starts_with(o[2])) then 1 else #rows
-		[file, text(count)]
-	}).filter(counted => counted[1] != "1").map(counted => Spot("one-owner", counted[0], "${counted[0]}:1", "under ${counted[1]} rows of ${OWNERS} \"Owners\", not one"))
+		Counted(file, count)
+	}).filter(counted => counted.count != 1).map(counted => Spot("one-owner", counted.file, "${counted.file}:1", "under ${counted.count} rows of ${OWNERS} \"Owners\", not one"))
 }
 # the wap files the tree of the owners' notes places: a line's indent its depth, a folder line ending in /
 tree_paths(): list<text> := {
@@ -159,7 +163,7 @@ tree_paths(): list<text> := {
 	for line in block.filter(line => line.text.trim() != "") {
 		indent = #(first_match(line.text, "^ *") ?? "")
 		depth = indent ÷ 2
-		if depth <= 6 and indent % 2 == 0 {
+		if depth <= TREE_DEPTH and indent % 2 == 0 {
 			name = line.text.trim().split(" ")[0]
 			path = (0 upto depth).map(d => folders.get(d) ?? "").join("")
 			if name.ends_with("/") { folders[depth] = name } else if name.ends_with(".wap") { placed.add(path + name) }
@@ -176,31 +180,32 @@ tabbed(t: text): list<Spot> := t.split("\n").filter(line => line != "").map(line
 
 # --- each rule's spots counted against the allowlist
 
-RULES := ["one-fit", "emit-infers-type", "dynamic-prim", "one-ranking", "long-file", "repeated-code", "same-shape", "boxed-any", "emit-boxes", "get-reads-places", "one-owner", "core-no-extension", "kernel-emitted", "in-tree", "copied-growth", "no-warp"]
-spots_of(rule: text): list<Spot> := match rule {
-	"one-fit" => one_fit()
-	"emit-infers-type" => emit_infers_type()
-	"dynamic-prim" => dynamic_prim()
-	"one-ranking" => one_ranking()
-	"long-file" => long_file()
-	"repeated-code" => repeated_code()
-	"same-shape" => same_shape()
-	"boxed-any" => boxed_any()
-	"emit-boxes" => emit_boxes()
-	"get-reads-places" => get_reads_places()
-	"one-owner" => one_owner()
-	"core-no-extension" => core_no_extension()
-	"kernel-emitted" => kernel_emitted()
-	"in-tree" => in_tree()
-	"copied-growth" => copied_growth()
-	_ => no_warp()
-}
+# each rule by its name, the finder of its spots
+class Rule { name: text, finder: () -> list<Spot> }
+RULES := [
+	Rule("one-fit", one_fit),
+	Rule("emit-infers-type", emit_infers_type),
+	Rule("dynamic-prim", dynamic_prim),
+	Rule("one-ranking", one_ranking),
+	Rule("long-file", long_file),
+	Rule("repeated-code", repeated_code),
+	Rule("same-shape", same_shape),
+	Rule("boxed-any", boxed_any),
+	Rule("emit-boxes", emit_boxes),
+	Rule("get-reads-places", get_reads_places),
+	Rule("one-owner", one_owner),
+	Rule("core-no-extension", core_no_extension),
+	Rule("kernel-emitted", kernel_emitted),
+	Rule("in-tree", in_tree),
+	Rule("copied-growth", copied_growth),
+	Rule("no-warp", no_warp)
+]
 # the allowlist's lines, [rule, key, count]
 allowed = lines_of(ALLOWED).map(line => line.text).filter(t => t != "" and not t.starts_with("#")).map(t => t.split(" "))
-failures = 0
-for rule in RULES {
+for each in RULES {
+	rule = each.name
 	# a finder that fails, a file or folder it reads missing (a renamed folder), fails its rule rather than finding nothing
-	spots = try { spots_of(rule) } catch e { [Spot(rule, "finder-error", "-:0", "the finder failed: ${e.message}")] }
+	spots = try { each.finder() } catch e { [Spot(rule, "finder-error", "-:0", "the finder failed: ${e.message}")] }
 	listed = if rule in UNLISTED then [] else allowed.filter(line => line[0] == rule)
 	keys = (spots.map(spot => spot.key) + listed.map(line => line[1])).unique().sorted
 	said: list<text> = []
@@ -215,8 +220,5 @@ for rule in RULES {
 		}
 	}
 	if rule in UNLISTED and allowed.any(line => line[0] == rule) { said.add("  ${rule} takes no allowlist lines: remove them from ${ALLOWED}") }
-	if said is empty then print("✓ ${rule}") else {
-		print("✗ ${rule}\n" + said.join("\n"))
-		failures += 1
-	}
+	print(if said is empty then "✓ ${rule}" else "✗ ${rule}\n" + said.join("\n"))
 }
