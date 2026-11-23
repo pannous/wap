@@ -131,7 +131,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - LEB128.md (3 lines):
 - length.md (2 lines):
 - library-cli.md (232 lines):
-- library-collections.md (47 lines):
+- library-collections.md (47 lines): wap-wiki-lib
 - library-complex.md (36 lines):
 - library-compress.md (40 lines):
 - library-config-formats.md (67 lines):
