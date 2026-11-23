@@ -72,7 +72,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - elvis.md (5 lines):
 - enum.md (91 lines):
 - equality.md (62 lines):
-- Error.md (176 lines):
+- Error.md (176 lines): wap-wiki-b
 - evaluation.md (21 lines):
 - examples.md (90 lines):
 - Exception.md (37 lines):
@@ -89,7 +89,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - for.md (70 lines):
 - full-evaluation.md (17 lines):
 - function-pointer.md (22 lines):
-- function.md (179 lines): warp-wiki-b
+- function.md (179 lines): wap-wiki-b, tests 632486d (branch wiki-b), wiki 47bea94; waits: 22 gaps + a types patch (wap-lead → wap-reader, wap-binding), card should-argument (user)
 - functional.md (5 lines):
 - functor.md (18 lines):
 - gap-filling.md (14 lines):
