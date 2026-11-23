@@ -41,6 +41,12 @@ static void* epoch_ticking(void* engine) {
 	for (;;) { sleep(1); epoch_incremented(engine); }
 	return NULL;
 }
+// the library folder the native wap found beside its compiler (linking.wap), which the programs it runs read
+// (types/system.wap library_folder)
+#include <string.h>
+static const char* library_folder = "";
+void wap_library_folder_set(const char* folder) { library_folder = strdup(folder); }
+const char* wap_library_folder(void) { return library_folder; }
 // when this executable was built (commands.wap version)
 const char* wap_built(void) { return __DATE__ " " __TIME__; }
 void epoch_ticker_started(int64_t engine) {

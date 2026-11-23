@@ -23,6 +23,7 @@ b c
 $stage"
 check "write_bytes writes a file's bytes, read gives them back" "$(ran bytes_file "write_bytes(\"$stage/out.bin\", [104, 105])
 print read(\"$stage/out.bin\")")" "hi"
+check "library_folder is where the library the program uses lies" "$(ran library_folder 'print text(exists(library_folder() + "/json.wap"))')" "yes"
 check "read_bytes gives a file's bytes back, NULs and all" "$(ran bytes_read "write_bytes(\"$stage/zeros.bin\", [104, 0, 255])
 print text(read_bytes(\"$stage/zeros.bin\"))")" "[104, 0, 255]"
 check "wall_clock_ms is the wall clock's milliseconds since 1970" "$(ran clock 'start = wall_clock_ms()
