@@ -26,7 +26,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - as.md (25 lines): ✓ wap-wiki, tests test_as_page.wap green, test_as_wanted.wap typed variables still to build
 - aspect.md (2 lines):
 - assignment.md (41 lines): ✓ wap-wiki, tests test_assignment_page.wap green, test_assignment_wanted.wap (composition, comma names, <-) still to build
-- async.md (167 lines):
+- async.md (167 lines): wap-wiki
 - Bad.md (69 lines):
 - be.md (0 lines):
 - beauty.md (28 lines):
