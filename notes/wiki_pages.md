@@ -61,17 +61,17 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - constructor.md (60 lines): wap-wiki
 - conversion.md (153 lines): wap-wiki
 - crystal.md (39 lines): ✓ wap-wiki, tests test_crystal_page.wap green, test_crystal_wanted.wap number-keyed map still to build
-- danger.md (2 lines):
-- data.md (172 lines):
-- debug.md (25 lines):
-- declaration.md (18 lines):
+- danger.md (2 lines): ✓ wap-wiki, a link
+- data.md (172 lines): wap-wiki
+- debug.md (25 lines): wap-wiki, debugging notes, asked to hide
+- declaration.md (18 lines): wap-wiki
 - discouraged.md (0 lines):
-- do.md (9 lines):
-- each.md (2 lines):
+- do.md (9 lines): wap-wiki
+- each.md (2 lines): wap-wiki, asked
 - effects.md (110 lines):
-- elvis.md (5 lines):
-- enum.md (91 lines):
-- equality.md (62 lines):
+- elvis.md (5 lines): wap-wiki
+- enum.md (91 lines): wap-wiki
+- equality.md (62 lines): wap-wiki
 - Error.md (176 lines): (released by wap-wiki) tests d2b56ad, wiki a1ab2dc (÷ example, default/on error of/effects of not yet); waits: error values (`error "x"`, `r!`: draft on branch wiki-errors-2, unbuilt; bare `try X`, `failed` with wap-reader; the catch-type question parked), finally, assert … else, a catchable ÷ 0 (wap-reader)
 - evaluation.md (21 lines):
 - examples.md (90 lines):
