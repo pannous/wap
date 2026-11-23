@@ -21,11 +21,11 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - ambivalence.md (2 lines):
 - Angle.md (33 lines):
 - Applescript.md (58 lines):
-- argument.md (77 lines):
+- argument.md (77 lines): wap-wiki
 - array.md (26 lines): ✓ wap-wiki, tests test_array_wanted.wap (int[n] still to build); wiki cd63118
-- as.md (25 lines): wap-wiki
+- as.md (25 lines): ✓ wap-wiki, tests test_as_page.wap green, test_as_wanted.wap typed variables still to build
 - aspect.md (2 lines):
-- assignment.md (41 lines): wap-wiki
+- assignment.md (41 lines): ✓ wap-wiki, tests test_assignment_page.wap green, test_assignment_wanted.wap (composition, comma names, <-) still to build
 - async.md (167 lines):
 - Bad.md (69 lines):
 - be.md (0 lines):
