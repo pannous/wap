@@ -7,7 +7,7 @@ letter_ranges ordering ui uncertain unicode_data events.
 
 Ported to plain wap since that measurement, each lib/<module>.wap shadowing the .warp a row below names (the counts
 still include them until the next one): collections complex csv diff geometry graphs html intervals math matrix money
-numeric path random slugs tasks template text xml.
+numeric path random slugs tasks template text xml callbacks native/sqlite3.
 
 A module fails at the first module it uses that fails, so one root cause blocks many. Root causes, most modules
 blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** a form wap does not take yet.
