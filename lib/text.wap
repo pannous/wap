@@ -14,16 +14,21 @@ spelled_number(t: text): any := {
 	try int(plain) else try float(plain) else ø
 }
 # the escapes a backslash writes in a double-quoted text, and the character each stands for
-BACKSLASH_ESCAPES := [["\\\\", "\\"], ["\\\"", "\""], ["\\n", "\n"], ["\\t", "\t"], ["\\r", "\r"]]
+BACKSLASH_ESCAPES := [["\\\\", "\\"], ["\\\"", "\""], ["\\n", "\n"], ["\\t", "\t"], ["\\r", "\r"], ["\\/", "/"], ["\\b", text(char(8))], ["\\f", text(char(12))]]
+# \u and four hex digits, the character of that code point: `\u00e9` is é
+UNICODE_ESCAPE := "\\u"
 # the escapes written by the two characters, none or one
 escapes_written(two: text): list<list<text>> := BACKSLASH_ESCAPES.filter(escape => two == escape[0])
-# a double-quoted text's inside with its escapes read: `a\"b\n` is a"b and a line break
+# a double-quoted text's inside with its escapes read: `a\"b\n` is a"b and a line break, `\u00e9` é
 unescaped(t: text): text := {
 	out = ""
 	at = 0
 	while at < #t {
 		pair = escapes_written(t[at:at + 2])
-		if pair is empty {
+		if t[at:at + 2] == UNICODE_ESCAPE {
+			out += text(char(hex_value(t[at + 2:at + 6])))
+			at += 6
+		} else if pair is empty {
 			out += t[at:at + 1]
 			at += 1
 		} else {
@@ -67,18 +72,28 @@ without_comment(t: text, mark: text): text := {
 	if at < 0 then t else t[0:at]
 }
 
-# a text being read and the place reached
-class Scan { source: text, at: int }
+# a text being read and the place reached; a scan of C comments (JSON5's) takes // and /* */ comments for blanks
+class Scan { source: text, at: int, c_comments: bool = no }
 rest_of(s: Scan): text := s.source[s.at:]
 # the character at the scan, "" at the end
 next_of(s: Scan): text := s.source[s.at:s.at + 1]
 skip_blanks(s: Scan) := {
 	while s.at < #s.source and " \t\n\r".contains(next_of(s)) { s.at += 1 }
+	if s.c_comments and rest_of(s).starts_with("//") { skip_past(s, "\n") }
+	else if s.c_comments and rest_of(s).starts_with("/*") { skip_past(s, "*/") }
 }
-# the double-quoted text at the scan with its escapes read, the scan after its closing quote
-double_quoted_at(s: Scan): text := {
+# the scan after the next end, or at the text's end
+skip_past(s: Scan, end: text) := {
+	# find counts from 1, 0 for none
+	place = find(s.source[s.at + 2:], end)
+	s.at = if place == 0 then #s.source else s.at + 1 + place + #end
+	skip_blanks(s)
+}
+# the text quoted by the character at the scan, its escapes read, the scan after its closing quote
+quoted_at(s: Scan): text := {
+	quote = next_of(s)
 	closing = s.at + 1
-	while closing < #s.source and s.source[closing:closing + 1] != "\"" { closing += if s.source[closing:closing + 1] == "\\" then 2 else 1 }
+	while closing < #s.source and s.source[closing:closing + 1] != quote { closing += if s.source[closing:closing + 1] == "\\" then 2 else 1 }
 	inside = s.source[s.at + 1:closing]
 	s.at = closing + 1
 	unescaped(inside)
