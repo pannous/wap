@@ -211,6 +211,13 @@ print to_ini(a)')" "top = 1"
 # a used module's global is a name of the files using it, as its other variables (wiki/use.md)
 printf '%s\n' 'class Counter { n: int = 0 }' 'global counter = Counter()' >"$stage/counting.wap"
 printf '%s\n' 'use "counting.wap"' 'next_count(): int := counter.n + 1' >"$stage/next_count.wap"
+check "a global declared with its type is written and read" "$(ran typed_global 'global n: int = 0
+n = 3
+print n')" "3"
+printf '%s\n' 'global tally: int = 0' 'tallied() := { tally = tally + 3 }' >"$stage/tally.wap"
+check "a used module's global declared with its type is written and read" "$(ran use_typed_global 'use "tally.wap"
+tallied()
+print(tally)')" "3"
 check "a used module's global reads in the modules using it" "$(ran use_global 'use "counting.wap"
 use "next_count.wap"
 counter.n = 4
