@@ -1,0 +1,71 @@
+# Slugs and case conversions (wiki/library-slugs.md): `use slugs`. ASCII folding (with a German mode), URL slugs, the
+# case conversions that keep acronyms whole, word-aware truncation.
+#
+# The words of a case conversion are the runs of letters and digits, split again inside a run before an upper-case
+# letter that follows a lower-case letter or a digit ("parseURL" → parse URL, "v2Beta" → v2 Beta) and before the last
+# upper-case letter of an acronym that a lower-case letter follows ("HTTPServer" → HTTP Server). Digits stay with the
+# letters before them: "parseURL2Text" → parse URL2 Text.
+use "text.wap"
+
+# the letters that fold to one ASCII letter, and that letter, position for position
+FOLD_FROM := "ÀÁÂÃÄÅàáâãäåĀāĂăĄąÇçĆćĈĉĊċČčĎďĐđÈÉÊËèéêëĒēĔĕĖėĘęĚěĜĝĞğĠġĢģĤĥĦħÌÍÎÏìíîïĨĩĪīĬĭĮįİıĴĵĶķĹĺĻļĽľĿŀŁłÑñŃńŅņŇňÒÓÔÕÖØòóôõöøŌōŎŏŐőŔŕŖŗŘřŚśŜŝŞşŠšŢţŤťŦŧÙÚÛÜùúûüŨũŪūŬŭŮůŰűŲųŴŵÝýÿŶŷŸŹźŻżŽžÐð"
+FOLD_TO := "AAAAAAaaaaaaAaAaAaCcCcCcCcCcDdDdEEEEeeeeEeEeEeEeEeGgGgGgGgHhHhIIIIiiiiIiIiIiIiIiJjKkLlLlLlLlLlNnNnNnNnOOOOOOooooooOoOoOoRrRrRrSsSsSsSsTtTtTtUUUUuuuuUuUuUuUuUuUuWwYyyYyYZzZzZzDd"
+# the letters that fold to more than one, each with its folding
+FOLD_MANY := [["ß", "ss"], ["ẞ", "SS"], ["æ", "ae"], ["Æ", "AE"], ["œ", "oe"], ["Œ", "OE"], ["þ", "th"], ["Þ", "TH"], ["ĳ", "ij"], ["Ĳ", "IJ"]]
+# the German umlauts, folded before the rest
+GERMAN_FOLDS := [["ä", "ae"], ["ö", "oe"], ["ü", "ue"], ["Ä", "Ae"], ["Ö", "Oe"], ["Ü", "Ue"]]
+
+# a character folded by the foldings given first, then by the one-letter table; any other character kept
+letter_folded(letter: text, foldings: list<list<text>>): text := {
+	given = foldings.index_where(folding => folding#1 == letter)
+	if given > 0 { return foldings#given#2 }
+	at = find(FOLD_FROM, letter)
+	if at > 0 then "" + FOLD_TO#at else letter
+}
+folded(t: text, foldings: list<list<text>>): text := t.codepoints.map(c => letter_folded("" + c, foldings)).join("")
+
+# Latin letters folded to ASCII: diacritics stripped (é → e, ø → o), ß → ss, æ → ae, œ → oe, þ → th; the rest kept
+ascii_fold(t: text): text := folded(t, FOLD_MANY)
+# ascii_fold the German way: ä ö ü → ae oe ue, Ä Ö Ü → Ae Oe Ue
+ascii_fold_german(t: text): text := folded(t, GERMAN_FOLDS + FOLD_MANY)
+
+is_upper_letter(c: text): bool := upper(c) == c and lower(c) != c
+is_lower_letter(c: text): bool := lower(c) == c and upper(c) != c
+# the runs of letters and digits of t
+alphanumeric_runs(t: text): list<text> := words(t.codepoints.map(c => if is_alphanumeric("" + c) then "" + c else " ").join(""))
+
+# a URL-safe slug: folded, lower case, each run of other characters one separator, none at the ends
+slugify(t: text, separator: text = "-"): text := alphanumeric_runs(lower(ascii_fold(t))).join(separator)
+
+# whether a new word starts at the k-th letter of a run, by the rule above
+starts_word(letters: list<text>, k: int): bool := k > 1 and is_upper_letter(letters#k) and (not is_upper_letter(letters#(k - 1)) or (k < #letters and is_lower_letter(letters#(k + 1))))
+run_words(run: text): list<text> := {
+	letters = run.codepoints.map(c => "" + c)
+	words: list<text> = []
+	word = ""
+	for k in 1 to #letters {
+		if starts_word(letters, k) {
+			words.add(word)
+			word = ""
+		}
+		word = word + letters#k
+	}
+	words + [word]
+}
+# the words of an identifier or phrase, by the rule above
+case_words(t: text): list<text> := alphanumeric_runs(t).flat_map(run_words)
+capitalized(word: text): text := upper(word[0:1]) + lower(word[1:])
+
+# the words of t, each written by the given case, joined by the separator
+cased(t: text, written: (text) -> text, separator: text): text := case_words(t).map(written).join(separator)
+to_snake(t: text): text := cased(t, lower, "_")
+to_kebab(t: text): text := cased(t, lower, "-")
+to_constant(t: text): text := cased(t, upper, "_")
+to_pascal(t: text): text := cased(t, capitalized, "")
+to_camel(t: text): text := {
+	words = case_words(t)
+	if words is empty then "" else lower(words#1) + words.drop(1).map(capitalized).join("")
+}
+
+# the first n words, whitespace normalized, and "…" when words were cut; t itself when it has no more than n
+truncate_words(t: text, n: int): text := if #words(t) <= n then t else words(t).take(n).join(" ") + "…"
