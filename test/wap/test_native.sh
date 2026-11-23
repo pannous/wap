@@ -16,17 +16,14 @@ written = fd_write(1, 0, 1, 8)
 set_word(8, written)')" "Hello"
 # a C function the program imports, its pointer an address in the program's memory
 check "a native program calls C" "$(native_ran strlen 'strlen(s: int32): int := prim foreign("c", "strlen", s)
-exit(code: int) := prim proc_exit(code)
 name(): int32 := prim data_address("wap")
 exit(strlen(name()))' >/dev/null; echo $?)" "3"
 # a statement's value that is dropped is no value: an if or a match as a statement boxes nothing, so no GC type
-check "a native program with an if and a match as statements" "$(native_ran dropped 'exit(code: int) := prim proc_exit(code)
-c = yes
+check "a native program with an if and a match as statements" "$(native_ran dropped 'c = yes
 if c { 5 }
 match 3 { 3 => 1; _ => ø }
 exit(7)' >/dev/null; echo $?)" "7"
-check "a native program with an if as a while body's last statement" "$(native_ran dropped_loop 'exit(code: int) := prim proc_exit(code)
-k = 0
+check "a native program with an if as a while body's last statement" "$(native_ran dropped_loop 'k = 0
 n = 0
 while n < 5 {
 	n = n + 1
@@ -243,8 +240,7 @@ check "the console edits its line: arrows, Home/End, Ctrl+A/E, deletes, word mov
 24"
 # an enum of cases without fields in a native program, each case its tag (notes/native.md); an uncaught raise its text on
 # stderr and exit status 1
-check "a native program picks and compares an enum's cases" "$(native_ran coins 'exit(code: int) := prim proc_exit(code)
-enum Coin { Penny, Dime }
+check "a native program picks and compares an enum's cases" "$(native_ran coins 'enum Coin { Penny, Dime }
 pick(x: int): Coin := if x > 0 then Dime else Penny
 exit(if pick(1) == Dime then 3 else 4)' >/dev/null; echo $?)" "3"
 check "a native program's uncaught raise says its text and exits with 1" "$(native_ran raising 'raise "out of coins"'; echo "exit $?")" "out of coins
