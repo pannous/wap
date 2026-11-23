@@ -136,7 +136,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-compress.md (40 lines):
 - library-config-formats.md (67 lines):
 - library-csv.md (32 lines): ✓ 95f2e02 (lib/csv.wap, test/test_csv.wap 3 ✓; print of nested texts unquoted, with wap-interviewer)
-- library-diff.md (45 lines):
+- library-diff.md (45 lines): wap-wiki-lib
 - library-dogfood-apps.md (51 lines):
 - library-fractions.md (39 lines):
 - library-functions.md (28 lines):
@@ -149,7 +149,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-matrix.md (26 lines):
 - library-money.md (43 lines):
 - library-numeric.md (36 lines): ✓ 0fefa6f (lib/numeric.wap, lib/matrix.wap solve, test/test_numeric.wap 5 ✓; intro "highest power first" → constant first, with wap-interviewer)
-- library-path.md (46 lines): wap-wiki-lib
+- library-path.md (46 lines): ✓ 5e0b30d (lib/path.wap, test/test_path.wap 7 ✓)
 - library-primes.md (26 lines): ✓ 6b5ca30 (lib/math.wap primes words, test/test_primes.wap 3 ✓; without `use` not yet, with wap-binding)
 - library-reference.md (36 lines):
 - library-regex.md (107 lines):

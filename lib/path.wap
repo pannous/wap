@@ -1,0 +1,112 @@
+# The standard module path (wiki/library-path.md): file paths as plain text, POSIX style, no file system. A path's
+# parts are split at "/", a leading "/" makes it absolute.
+
+SLASH := "/"
+DOT := "."
+UP := ".."
+
+# a joined to b, one "/" between; an absolute b stands alone: path_join("a/", "b") is "a/b", path_join("a", "/b") "/b"
+path_join(a: text, b: text): text := if b.starts_with(SLASH) or a == "" then b else if a.ends_with(SLASH) then a + b else a + SLASH + b
+# the path without trailing slashes, "/" itself kept
+path_trimmed(p: text): text := if #p > 1 and p.ends_with(SLASH) then path_trimmed(p[0:#p - 1]) else p
+# where the last of a character stands in the text, counted from 0; -1 when it has none
+last_place(t: text, c: text): int := {
+	at = #t - 1
+	while at >= 0 and t[at:at + 1] != c { at -= 1 }
+	at
+}
+# where c first stands in the items from the place start on; their count when it stands nowhere there
+first_place(items: list<text>, start: int, c: text): int := if start == #items or items[start] == c then start else first_place(items, start + 1, c)
+# how many leading parts two paths share
+shared_count(a: list<text>, b: list<text>, k: int): int := if k < #a and k < #b and a[k] == b[k] then shared_count(a, b, k + 1) else k
+# the folder part: dirname("a/b/c") is "a/b", dirname("c") ".", dirname("/c") and dirname("/") "/"
+dirname(p: text): text := {
+	t = path_trimmed(p)
+	at = last_place(t, SLASH)
+	if at < 0 then DOT else if at == 0 then SLASH else path_trimmed(t[0:at])
+}
+# the last part: basename("a/b.txt") is "b.txt", basename("a/b/") "b", basename("/") ""
+basename(p: text): text := {
+	t = path_trimmed(p)
+	if t == SLASH then "" else t[last_place(t, SLASH) + 1:]
+}
+# where the name's extension starts, its last dot; -1 when it has none: a leading dot names a dotfile (".bashrc"),
+# a dot ending the name starts nothing ("a."), and ".." is no file name
+extension_place(name: text): int := {
+	at = last_place(name, DOT)
+	if at <= 0 or at == #name - 1 then -1 else at
+}
+# the last part's suffix from its last dot, the dot included: ".gz" of "a.tar.gz", "" of ".bashrc" and of "README"
+extension(p: text): text := {
+	name = basename(p)
+	at = extension_place(name)
+	if at < 0 then "" else name[at:]
+}
+# the last part without its extension: "a.tar" of "a.tar.gz"; stem + extension is basename
+stem(p: text): text := {
+	name = basename(p)
+	at = extension_place(name)
+	if at < 0 then name else name[0:at]
+}
+# "." parts and repeated or trailing slashes dropped, a ".." taking back the part before it; at the root of an absolute
+# path a ".." stays there, a relative path keeps the ".." it cannot take back: "a/./b//../c/" is "a/c", "/../x" "/x"
+normalize_path(p: text): text := {
+	absolute = p.starts_with(SLASH)
+	kept: list<text> = []
+	for part in p.split(SLASH) {
+		if part == UP {
+			if #kept > 0 and kept[#kept - 1] != UP { kept = kept.take(#kept - 1) }
+			else if not absolute { kept.add(UP) }
+		} else if part != "" and part != DOT { kept.add(part) }
+	}
+	joined = kept.join(SLASH)
+	if absolute then SLASH + joined else if joined == "" then DOT else joined
+}
+# the parts of the normalized path
+path_parts(p: text): list<text> := normalize_path(p).split(SLASH).filter(part => part != "" and part != DOT)
+# the path that leads from the folder from to to, both normalized first: relative_path("a/b", "a/c/d") is "../c/d",
+# "." for the same place; an absolute path and a relative one share no root, so that is refused
+relative_path(from: text, to: text): text := {
+	if from.starts_with(SLASH) != to.starts_with(SLASH) { raise "relative_path: ${from} and ${to} must both be absolute or both relative" }
+	a = path_parts(from)
+	b = path_parts(to)
+	shared = shared_count(a, b, 0)
+	steps = a.drop(shared).map(part => UP) + b.drop(shared)
+	if steps is empty then DOT else steps.join(SLASH)
+}
+
+# whether the path matches the glob pattern: * any run of characters within one part, ? one character but "/",
+# [abc] [a-z] one of them ([!…] or [^…] none of them), ** any number of whole parts ("**/" none too); everything else
+# is itself
+glob_match(pattern: text, path: text): bool := matches_from(pattern.codepoints.map(c => "" + c), 0, path.codepoints.map(c => "" + c), 0)
+matches_from(p: list<text>, i: int, s: list<text>, j: int): bool := {
+	if i == #p { return j == #s }
+	if p[i] == "*" and i + 1 < #p and p[i + 1] == "*" {
+		rest = i + 2
+		if rest < #p and p[rest] == SLASH and matches_from(p, rest + 1, s, j) { return yes }
+		return (j to #s).any(k => matches_from(p, rest, s, k))
+	}
+	if p[i] == "*" {
+		return (j to first_place(s, j, SLASH)).any(k => matches_from(p, i + 1, s, k))
+	}
+	if j == #s { return no }
+	if p[i] == "?" { return s[j] != SLASH and matches_from(p, i + 1, s, j + 1) }
+	if p[i] == "[" {
+		close = first_place(p, i + 1, "]")
+		if close < #p {
+			members = p[i + 1:close]
+			negated = #members > 0 and (members[0] == "!" or members[0] == "^")
+			if s[j] == SLASH or class_holds(if negated then members.drop(1) else members, s[j]) == negated { return no }
+			return matches_from(p, close + 1, s, j + 1)
+		}
+	}
+	p[i] == s[j] and matches_from(p, i + 1, s, j + 1)
+}
+# whether a class's members, single characters and ranges a-z, hold c
+class_holds(members: list<text>, c: text): bool := {
+	if members is empty then no
+	else if #members >= 3 and members[1] == "-" then (c >= members[0] and c <= members[2]) or class_holds(members.drop(3), c)
+	else members[0] == c or class_holds(members.drop(1), c)
+}
+# glob_match with the path first, as the other matchers take their subject
+path_matches(path: text, pattern: text): bool := glob_match(pattern, path)
