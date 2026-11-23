@@ -1,0 +1,143 @@
+# The standard module money (wiki/library-money.md): exact amounts of an ISO 4217 currency, never floats. A Money is
+# whole minor units (cents) and a currency code: money_of(12.34, "EUR") is Money(1234, "EUR"), its text "EUR 12.34". A
+# number given as an amount or a factor is read as the decimal it is written as (12.34 is 1234/100 exactly), one finer
+# than the currency's minor unit refused unless a rounding mode is given. `+` and `-` refuse two currencies.
+# money_allocate(m, ratios) and money_split(m, n) share an amount by largest remainders, the parts always summing back
+# (100 cents by [1, 1, 1] are 34, 33, 33). money_parse reads "€1.234,56" or "$1,234.56", money_format writes the "en"
+# style €1,234.56 or the "de" style 1.234,56 €. No exchange rates.
+use text
+
+# how an amount between two minor units is rounded: half to even (banker's), half away from zero, toward zero, away
+# from zero
+enum Rounding { HalfEven, HalfUp, Down, Up }
+# a currency: its ISO 4217 code, its count of minor-unit decimals, the symbol English writes (the code where none)
+class Currency { code: text, decimals: int, symbol: text }
+CURRENCIES := [Currency("AED", 2, "AED"), Currency("ARS", 2, "ARS"), Currency("AUD", 2, "A$"), Currency("BGN", 2, "BGN"), Currency("BHD", 3, "BHD"), Currency("BRL", 2, "R$"), Currency("CAD", 2, "CA$"), Currency("CHF", 2, "CHF"), Currency("CLF", 4, "CLF"), Currency("CLP", 0, "CLP"), Currency("CNY", 2, "CN¥"), Currency("COP", 2, "COP"), Currency("CZK", 2, "CZK"), Currency("DKK", 2, "DKK"), Currency("EGP", 2, "EGP"), Currency("EUR", 2, "€"), Currency("GBP", 2, "£"), Currency("HKD", 2, "HK$"), Currency("HUF", 2, "HUF"), Currency("IDR", 2, "IDR"), Currency("ILS", 2, "₪"), Currency("INR", 2, "₹"), Currency("IQD", 3, "IQD"), Currency("ISK", 0, "ISK"), Currency("JOD", 3, "JOD"), Currency("JPY", 0, "¥"), Currency("KRW", 0, "₩"), Currency("KWD", 3, "KWD"), Currency("LYD", 3, "LYD"), Currency("MXN", 2, "MX$"), Currency("MYR", 2, "MYR"), Currency("NGN", 2, "NGN"), Currency("NOK", 2, "NOK"), Currency("NZD", 2, "NZ$"), Currency("OMR", 3, "OMR"), Currency("PHP", 2, "PHP"), Currency("PKR", 2, "PKR"), Currency("PLN", 2, "PLN"), Currency("RON", 2, "RON"), Currency("RUB", 2, "RUB"), Currency("SAR", 2, "SAR"), Currency("SEK", 2, "SEK"), Currency("SGD", 2, "SGD"), Currency("THB", 2, "THB"), Currency("TND", 3, "TND"), Currency("TRY", 2, "TRY"), Currency("TWD", 2, "NT$"), Currency("UAH", 2, "UAH"), Currency("USD", 2, "$"), Currency("UYI", 0, "UYI"), Currency("UYW", 4, "UYW"), Currency("VND", 0, "₫"), Currency("XAF", 0, "FCFA"), Currency("XOF", 0, "F CFA"), Currency("ZAR", 2, "ZAR")]
+# the decimal point and the grouping mark of each style
+STYLE_MARKS := {en: [".", ","], de: [",", "."]}
+
+class Money { minor: int, currency: text }
+# an exact number, numerator over denominator (denominator > 0)
+class Exact { numerator: int, denominator: int }
+
+currency_of(code: text): Currency := {
+	found = CURRENCIES.filter(c => c.code == upper(code))
+	if found is empty { raise "money: ${code} is no ISO 4217 currency of lib/money.wap" }
+	found[0]
+}
+# a decimal text, "-12.345", as an exact number, -12345/1000
+decimal_exact(t: text): Exact := {
+	negative = t.starts_with("-")
+	parts = (if negative then t[1:] else t).split(".")
+	fraction = if #parts == 2 then parts[1] else ""
+	if #parts > 2 or not is_digits(parts[0] + fraction) { raise "money: ${t} is no decimal amount" }
+	digits = int(parts[0] + fraction)
+	Exact(if negative then -digits else digits, 10 ^ #fraction)
+}
+# n / d (d > 0) as a whole number, rounded by the mode
+divided(n: int, d: int, mode: Rounding): int := {
+	quotient = n ÷ d
+	twice = 2 * (n - quotient * d)
+	if twice == 0 then quotient else quotient + match mode {
+		Down => if n < 0 then 1 else 0
+		Up => if n > 0 then 1 else 0
+		HalfUp => if twice > d or (twice == d and n > 0) then 1 else 0
+		HalfEven => if twice > d or (twice == d and quotient % 2 != 0) then 1 else 0
+	}
+}
+
+# an amount in major units, an int or a number read as written: refused when finer than the currency's minor unit
+money_of(amount: number, code: text): Money := money_of(decimal_exact(text(amount)), currency_of(code))
+# an amount in major units rounded to the currency's minor unit by the mode
+money_of(amount: number, code: text, mode: Rounding): Money := {
+	currency = currency_of(code)
+	exact = decimal_exact(text(amount))
+	Money(divided(exact.numerator * 10 ^ currency.decimals, exact.denominator, mode), currency.code)
+}
+
+# the other amount when it is in the same currency, else refused: amounts in two currencies do not mix
+same_currency(a: Money, b: Money, operation: text): Money := if a.currency == b.currency then b else raise "money: ${a.currency} ${operation} ${b.currency} mixes currencies; convert one first"
++(a: Money, b: Money): Money := Money(a.minor + same_currency(a, b, "+").minor, a.currency)
+-(a: Money, b: Money): Money := Money(a.minor - same_currency(a, b, "-").minor, a.currency)
+-(m: Money): Money := Money(-m.minor, m.currency)
+# m times a factor read as written, rounded to minor units by the mode (half to even with *)
+money_times(m: Money, factor: number, mode: Rounding): Money := {
+	exact = decimal_exact(text(factor))
+	Money(divided(m.minor * exact.numerator, exact.denominator, mode), m.currency)
+}
+*(m: Money, factor: number): Money := money_times(m, factor, HalfEven)
+
+# the parts of m in proportion to the ratios, by largest remainders: each share's floor, then the minor units left one
+# each to the largest remainders, the earlier first on a tie
+money_allocate(m: Money, ratios: list<int>): list<Money> := {
+	total = ratios.sum
+	if total <= 0 { raise "money: the ratios ${ratios} sum to no positive number" }
+	sign = if m.minor < 0 then -1 else 1
+	amount = m.minor * sign
+	shares = ratios.map(ratio => amount * ratio ÷ total)
+	places = (0 upto #ratios).map(i => i)
+	favoured = places.sorted(by: i => -(amount * ratios[i] % total)).take(amount - shares.sum)
+	places.map(i => Money((shares[i] + (if favoured.contains(i) then 1 else 0)) * sign, m.currency))
+}
+money_split(m: Money, n: int): list<Money> := money_allocate(m, (0 upto n).map(i => 1))
+
+# minor units as a decimal: the whole part's digits grouped by threes with the grouping mark, the fraction after the
+# point
+decimal_text(minor: int, decimals: int, point: text, grouping: text): text := {
+	whole = text(abs(minor) ÷ 10 ^ decimals)
+	fraction = text(abs(minor) % 10 ^ decimals)
+	padded = (0 upto decimals - #fraction).map(i => "0").join("") + fraction
+	grouped = (0 upto #whole).map(i => (if i > 0 and (#whole - i) % 3 == 0 then grouping else "") + whole[i:i + 1]).join("")
+	(if minor < 0 then "-" else "") + grouped + (if decimals > 0 then point + padded else "")
+}
+text(m: Money): text := "${m.currency} ${decimal_text(m.minor, currency_of(m.currency).decimals, ".", "")}"
+# a symbol of capital letters (BHD, FCFA) stands apart from the number, a sign ($, CA$) right before it
+is_word_symbol(symbol: text): bool := symbol.codepoints.all(c => (c >= 'A' and c <= 'Z') or c == ' ')
+# "en": €1,234.56, -€1,234.56, BHD 1,234.567; "de": 1.234,56 €, -1.234,56 €
+money_format(m: Money, style: text): text := {
+	currency = currency_of(m.currency)
+	if not STYLE_MARKS.has(style) { raise "money_format: the style is en or de, not ${style}" }
+	marks = STYLE_MARKS[style]
+	if style == "de" then decimal_text(m.minor, currency.decimals, marks[0], marks[1]) + " " + currency.symbol
+	else (if m.minor < 0 then "-" else "") + currency.symbol + (if is_word_symbol(currency.symbol) then " " else "") + decimal_text(abs(m.minor), currency.decimals, marks[0], marks[1])
+}
+money_format(m: Money): text := money_format(m, "en")
+
+# the currency an amount text names, the longest symbol or code found in it
+currency_in(t: text): Currency := {
+	named = CURRENCIES.flat_map(c => [[c.symbol, c.code], [c.code, c.code]]).filter(pair => t.contains(pair[0]))
+	if named is empty { raise "money_parse: ${t} names no currency" }
+	# TODO (card method-call-index) one expression once the reader indexes a call's result
+	longest = named.sorted(by: pair => -#pair[0])
+	currency_of(longest[0][1])
+}
+# the style an amount's marks say: with both . and , the last is the point; one mark twice or more is a grouping;
+# once, followed by exactly three digits, a grouping unless the currency has three decimals
+style_of(digits: text, decimals: int): text := {
+	marks = digits.codepoints.filter(c => c == '.' or c == ',')
+	if marks is empty { return "en" }
+	last = marks.last
+	tail = #digits - 1 - last_mark_place(digits)
+	dots = marks.filter(c => c == '.').count
+	if dots > 0 and dots < #marks then (if last == ',' then "de" else "en")
+	else if #marks > 1 or (tail == 3 and decimals != 3) then (if dots > 0 then "de" else "en")
+	else if dots > 0 then "en" else "de"
+}
+last_mark_place(t: text): int := (0 upto #t).filter(at => t[at:at + 1] == "." or t[at:at + 1] == ",").last
+# "€1.234,56", "$1,234.56", "1.234,56 €", "-¥1,235": the currency by its symbol or code, the style by the marks
+money_parse(t: text): Money := {
+	currency = currency_in(t)
+	rest = trim(t.replace(currency.symbol, "").replace(currency.code, "").replace(" ", ""))
+	negative = rest.starts_with("-")
+	digits = if negative then rest[1:] else rest
+	marks = STYLE_MARKS[style_of(digits, currency.decimals)]
+	plain = digits.replace(marks[1], "").replace(marks[0], ".")
+	money = money_of(decimal_exact(plain), currency)
+	if negative then -money else money
+}
+# an exact amount in major units as Money, refused when finer than the currency's minor unit
+money_of(exact: Exact, currency: Currency): Money := {
+	scaled = exact.numerator * 10 ^ currency.decimals
+	if scaled % exact.denominator != 0 { raise "money: ${exact.numerator}/${exact.denominator} is finer than ${currency.code}'s ${currency.decimals} decimals; pass a rounding mode" }
+	Money(scaled ÷ exact.denominator, currency.code)
+}
