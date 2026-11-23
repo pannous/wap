@@ -6,6 +6,7 @@
 # (100 cents by [1, 1, 1] are 34, 33, 33). money_parse reads "€1.234,56" or "$1,234.56", money_format writes the "en"
 # style €1,234.56 or the "de" style 1.234,56 €. No exchange rates.
 use text
+use exact
 use fractions
 
 # how an amount between two minor units is rounded: half to even (banker's), half away from zero, toward zero, away
@@ -18,32 +19,33 @@ CURRENCIES := [Currency("AED", 2, "AED"), Currency("ARS", 2, "ARS"), Currency("A
 STYLE_MARKS := {en: [".", ","], de: [",", "."]}
 
 class Money { minor: int, currency: text }
-# an exact number, numerator over denominator (denominator > 0)
 
 currency_of(code: text): Currency := {
 	found = CURRENCIES.filter(c => c.code == upper(code))
 	if found is empty { raise "money: ${code} is no ISO 4217 currency of lib/money.wap" }
 	found[0]
 }
-# n / d (d > 0) as a whole number, rounded by the mode
-divided(n: int, d: int, mode: Rounding): int := {
-	quotient = n ÷ d
-	twice = 2 * (n - quotient * d)
-	if twice == 0 then quotient else quotient + match mode {
-		Down => if n < 0 then 1 else 0
-		Up => if n > 0 then 1 else 0
-		HalfUp => if twice > d or (twice == d and n > 0) then 1 else 0
-		HalfEven => if twice > d or (twice == d and quotient % 2 != 0) then 1 else 0
+# x as a whole number, rounded by the mode
+rounded(x: Exact, mode: Rounding): int := {
+	whole = floor(x)
+	twice = (x - whole) * 2
+	half = exact(1)
+	if twice == exact(0) then int(whole) else int(whole) + match mode {
+		Down => if x < exact(0) then 1 else 0
+		Up => if x > exact(0) then 1 else 0
+		HalfUp => if twice > half or (twice == half and x > exact(0)) then 1 else 0
+		HalfEven => if twice > half or (twice == half and int(whole) % 2 != 0) then 1 else 0
 	}
 }
+# an amount in major units counted in the currency's minor units
+in_minor_units(amount: Exact, currency: Currency): Exact := amount * exact(10) ^ currency.decimals
 
 # an amount in major units, an int or a number read as written: refused when finer than the currency's minor unit
 money_of(amount: number, code: text): Money := money_of(from_decimal(text(amount)), currency_of(code))
 # an amount in major units rounded to the currency's minor unit by the mode
 money_of(amount: number, code: text, mode: Rounding): Money := {
 	currency = currency_of(code)
-	exact = from_decimal(text(amount))
-	Money(divided(exact_product(exact.numerator, 10 ^ currency.decimals), exact.denominator, mode), currency.code)
+	Money(rounded(in_minor_units(from_decimal(text(amount)), currency), mode), currency.code)
 }
 
 # the other amount when it is in the same currency, else refused: amounts in two currencies do not mix
@@ -52,8 +54,8 @@ same_currency(a: Money, b: Money, operation: text): Money := if a.currency == b.
 -(a: Money, b: Money): Money := Money(a.minor - same_currency(a, b, "-").minor, a.currency)
 -(m: Money): Money := Money(-m.minor, m.currency)
 # m times an exact factor, rounded to minor units by the mode (half to even with *): `money_times(m, fraction(100, 119),
-# HalfEven)` takes the VAT out of a gross amount; a product past the 64-bit ints is refused
-money_times(m: Money, factor: Fraction, mode: Rounding): Money := Money(divided(exact_product(m.minor, factor.numerator), factor.denominator, mode), m.currency)
+# HalfEven)` takes the VAT out of a gross amount
+money_times(m: Money, factor: Exact, mode: Rounding): Money := Money(rounded(exact(m.minor) * factor, mode), m.currency)
 # m times a factor read as written
 money_times(m: Money, factor: number, mode: Rounding): Money := money_times(m, from_decimal(text(factor)), mode)
 *(m: Money, factor: number): Money := money_times(m, factor, HalfEven)
@@ -127,8 +129,8 @@ money_parse(t: text): Money := {
 	if negative then -money else money
 }
 # an exact amount in major units as Money, refused when finer than the currency's minor unit
-money_of(exact: Fraction, currency: Currency): Money := {
-	scaled = exact_product(exact.numerator, 10 ^ currency.decimals)
-	if scaled % exact.denominator != 0 { raise "money: ${exact.numerator}/${exact.denominator} is finer than ${currency.code}'s ${currency.decimals} decimals; pass a rounding mode" }
-	Money(scaled ÷ exact.denominator, currency.code)
+money_of(amount: Exact, currency: Currency): Money := {
+	scaled = in_minor_units(amount, currency)
+	if not is_whole(scaled) { raise "money: ${amount} is finer than ${currency.code}'s ${currency.decimals} decimals; pass a rounding mode" }
+	Money(int(scaled), currency.code)
 }
