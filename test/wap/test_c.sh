@@ -60,4 +60,11 @@ print(text([0, 1, 2, 3].map(i => field_i64(m, 8 * i))))')" "[1, 2, 3, 4]"
 check "an unsigned int and an owned text cross" "$(ran c_words "strdup(s: text): owned_text from 'c'
 htonl(n: u32): u32 from 'c'
 print(strdup(\"wap\") + \" \" + text(htonl(4278190080)))")" "wap 255"
+# a struct given by value, `bytes<40>` (wgpu's callback infos): C reads its copy, and the caller's stays as it was
+printf '%s\n' '#include <stdint.h>' '#include <stdlib.h>' 'struct s40 { int64_t a[5]; };' 'int64_t sum40(struct s40 s) { s.a[0] = 0; return s.a[1] + s.a[2] + s.a[3] + s.a[4]; }' 'int64_t first40(struct s40 s) { return s.a[0]; }' 'struct s40* made40(void) { struct s40* s = malloc(sizeof *s); for (int i = 0; i < 5; i++) s->a[i] = i + 1; return s; }' >"$stage/s40.c" && cc -shared -o "$stage/libs40.dylib" "$stage/s40.c"
+check "a C struct given by value" "$(ran struct_by_value "sum40(s: bytes<40>): i64 from '$stage/libs40.dylib'
+first40(s: bytes<40>): i64 from '$stage/libs40.dylib'
+made40(): handle from '$stage/libs40.dylib'
+m = made40()
+print(text(sum40(m)) + \" \" + text(first40(m)))")" "14 1"
 exit $((failures > 0))
