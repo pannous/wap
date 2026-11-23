@@ -16,8 +16,7 @@ How the fleet works while the user sleeps, until the user is back (usually 10:00
   (/Volumes/Build/compilers/build-slots/count; scripts/build-slot.sh re-reads it on every try) and removes it in the morning,
   back to the day's 3.
 - Watch the load each round (`uptime`, `sysctl -n hw.ncpu`): a build uses one core, so raise while the 1-minute load stays
-  below the core count, lower at once when it passes 1.5× the cores or a session stalls. Never above what the load allows
-  (5 slots once drove the load to ~460 under a game).
+  below the core count, lower at once when it passes 1.5× the cores or a session stalls. Never above what the load allows.
 
 ## Cloud
 - Use the cloud more at night than by day: cloud workers build and test in their own boxes, beside the Mac's slots, so

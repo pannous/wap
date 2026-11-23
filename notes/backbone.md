@@ -1,11 +1,8 @@
 # The new backbone: first principles and plan
 
-Preliminary draft, 2026-11-17, from the user's decisions in the supervisor session. The agent that builds the
-backbone starts from this file with fresh context. Read first: notes/first_principles.md. Inputs: wap/kernel/forms.wap (the kernel forms), notes/layers.md, wiki/Philosophy.md, wiki/guiding-principles.md, notes/taste.md.
+The design of wap, from the user's decisions (2026-11-17). Read first: notes/first_principles.md. Inputs: wap/kernel/forms.wap (the kernel forms), notes/layers.md, wiki/Philosophy.md, wiki/guiding-principles.md, notes/taste.md.
 
-**Names (user 2026-11-17):** **warp** is the old compiler (core/, frozen), **wap** the new one built here. The few
-language extensions wap needs to be written (named patterns that build, bind by place and read, see Layers) are built into warp first,
-and small parts of warp may be rewritten with them as a trial.
+**Names (user 2026-11-17):** **warp** is the old compiler (core/, frozen), **wap** the new one built here.
 
 ## Preamble: rules for every agent on this work
 
@@ -165,8 +162,6 @@ checked) and a line here when its language changed. The lead reviews it against 
   operator returning an immutable `Range`.
   - `for` walks anything that has `next()`.
   - A float range is an interval only, so `for` over it is refused by the general rule.
-  - The range pilot on the old compiler was stopped when the old compiler was frozen; its branch notes are input
-    here.
 
 ## What is reused and what is rewritten
 
@@ -181,24 +176,21 @@ checked) and a line here when its language changed. The lead reviews it against 
 - **The reader** comes first and gets special care: wap/core/parse/reader.wap, a data reader inspired by wasp's node parsing
   (not a copy). Three strictly separate steps: (1) the data reader parses any data into Node and knows no language;
   (2) then structural language matching (spelling rules); (3) then the analyzer (user 2026-11-17).
-- **The reader, settled:** wap has its own pure notation reader (core/parse/), knowing no keyword; the old reader's
-  keyword branches became spelling rules (sugar/).
-- **The old compiler** compiles the new backbone until the new backbone compiles itself, then retires.
+- **The reader, settled:** wap has its own pure notation reader (core/parse/), knowing no keyword; keywords are
+  spelling rules (sugar/).
+- **The old compiler** is a frozen fallback: wap builds itself from its seed.
 
 ## Milestones
 
-0. **Step 0, the first brick:** carve the emitter's lower half (wasm module builder, instruction encoding, type and
-   function sections, the value layout, runtime words) behind a clean interface that knows no surface forms
-   (`emit_instruction`, `declare_type`, `add_function` …). The old emitter keeps running on top of it until the
-   switch; the new kernel emitter is written on it. No other cleanup of the frozen compiler (user 2026-11-17).
-1. **Hello:** `print "Hello"` through the new stages, with the emitter accepting only the kernel. Reached
-   2026-11-17 (b5a5029b3d).
+0. **The emitter's lower half** (wasm module builder, instruction encoding, type and function sections, the value
+   layout, runtime words) behind a clean interface that knows no surface forms: met.
+1. **Hello:** `print "Hello"` through the new stages, with the emitter accepting only the kernel: met.
 2. **The new compiler builds itself.**
    Done when all of these hold, each measured by a script, never by eye (user 2026-11-18):
    1. the gauge, `warp scripts/wap-census.warp`, says every function of every wap file typed and emitted
       ("typed n of n functions" on each line, the total likewise); test/wap/test_census.sh holds that count and
       only lets it rise;
-   2. **met 2026-11-20** (self-loads-27): test/wap/test_self.sh has one line per wap file outside types/, "wap compiles <file> and the result loads",
+   2. **met:** test/wap/test_self.sh has one line per wap file outside types/, "wap compiles <file> and the result loads",
       all green; the types module is no program of its own but part of every program, so every test compiles it, and
       the gauge types its functions with the types module as their library;
    3. wap, run by the old compiler, compiles wap/compiler.wap to wap1.wasm; wap1 compiles it to wap2.wasm, and wap2
@@ -206,16 +198,16 @@ checked) and a line here when its language changed. The lead reviews it against 
    4. test/wap/run.sh passes with wap2 as the compiler;
    5. wap1 compiling wap/compiler.wap takes under a minute on the Mac;
    6. wap's source uses no word only the old compiler knows: compiled with no old-compiler library, it still builds;
-      **met 2026-11-20:** wap resolves names only against wap/types and the files a program uses, no `use` leaves
+      **met:** wap resolves names only against wap/types and the files a program uses, no `use` leaves
       wap/, and test_self.sh's "the compiler wap makes of itself compiles a program that runs" runs it from a folder
       holding only types/ and kernel/;
    7. no boxed `any` is left in wap's own source: the boxed-any allowlist of test/wap/test_guardrails.sh is empty.
-      **met 2026-11-20:** test/wap/guardrails_allowed.txt has no boxed-any line.
+      **met:** test/wap/guardrails_allowed.txt has no boxed-any line.
    Until then nothing lands that turns no function of wap green, unless it fixes a wrong value.
 
 ## Architecture changes, in order (user 2026-11-20)
 
-From data/review/architecture-review.md, adopted whole. They replace the census-only rule: wap work comes from these
+From data/review/architecture-review.md. wap work comes from these
 steps and the open milestone-2 points. A step starts when the one before it has landed; work in files the steps before
 don't touch may run beside them. One owner per file, as below; a part in another owner's file passes that owner's
 review.
@@ -283,13 +275,6 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 - **A-normal form (ANF):** a candidate for the kernel's internal shape. Every intermediate value gets a name, which
   makes the emitter trivial.
 
-## Open questions for the user
-
-1. ~~Layers~~: decided, four layers; kernel forms are named patterns of Node.
-2. ~~The reader~~: decided, wap's own pure notation reader in core/parse/.
-3. ~~Folder~~: decided, wap/ (kernel/, core/; types and library later).
-4. ~~The kernel list~~: decided, the forms of wap/kernel/forms.wap; a new one needs a written case and the user's OK.
-
 ## Open, not built yet
 
 - **Methods, the rest of wiki/class.md:** bare field names inside a method reading and writing the receiver
@@ -311,14 +296,14 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 open debts are `# DEBT:` comments at their code, `grep -rn 'DEBT:' wap/`
 
 - **`use "m.wasm"` is not read yet** (card wasm-module-import, wiki/wasm-representation.md): a compiled module can't
-  be used as its source is. Reason: paused for the self-build census (user 2026-11-19). Branch wasm-module-import has
+  be used as its source is. Paused (user 2026-11-19) until architecture step 4. Branch wasm-module-import has
   the exports and the `wap` section of header lines; the reader, the body-less `export` declaration and the import
-  are left (card note). Paid off once wap compiles itself.
+  are left (card note).
 - **Stage 3 serves only the rules programs write** (decision hole-types): no rewrite of wap's own moves into it. The
   char read as a text depends on the type its place wants (binding's conversion), `x is w` on what w means (scope);
   a typed rule sees only its hole's type.
 - **any compares other references by identity:** inside an `any`, refs other than boxes and texts compare by
   identity (a record compared directly compares by fields); by type via dispatch, as show does, when code needs it.
-- **A named function is refused where a function type is written for a variable** (found 2026-11-19, off-census):
+- **A named function is refused where a function type is written for a variable** :
   `g: (int) -> int = inc` says it gives fn<"… inc">, while the same `inc` in a `map<text, (int) -> int>` literal is
   taken. Paid off when a function's value fits a written function type wherever it is given.

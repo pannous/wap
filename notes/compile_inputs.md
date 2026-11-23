@@ -36,7 +36,7 @@ bodies and the program's new ones. Bodies stay compiled once; only the small dis
 program extends keeps the library's dispatcher. Open: whether some cases need run-time dispatch (values whose type is
 known only at run time), and how much of today's semi-typed code exists only for this.
 
-## Where it stands (2026-11-23)
+## Where it stands
 
 The library compiles once into types.wasm, which each compiler holds in its own bytes (compiler.wap LIBRARY, the
 build writes wap/types.wasm before it builds); a program reads its export names, never library source, and a program
