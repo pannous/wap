@@ -238,34 +238,34 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - struct.md (271 lines): wap-wiki, tests test_struct_wanted.wap; asked (internals to notes, WIT forms)
 - style-guide.md (21 lines): wap-wiki; asked (// comments, --flags)
 - swift-is-the-better-rust.md (83 lines): wap-wiki, essay, no forms
-- swift.md (4 lines):
+- swift.md (4 lines): wap-wiki, essay, no forms
 - switch.md (89 lines): ✓ wap-wiki-lib, tests test_switch_page.wap green, test_switch_wanted.wap red (branch switch-page 0105433)
-- symbol.md (67 lines):
-- symbolism.md (275 lines):
-- syntax.md (56 lines):
+- symbol.md (67 lines): wap-wiki; asked (:symbols, = declarations)
+- symbolism.md (275 lines): moved to notes/symbolism.md
+- syntax.md (56 lines): wap-wiki, tests test_syntax_wanted.wap (colon if in test_bad_wanted); asked (bare class fields)
 - task.md (31 lines): ✓ 7b3f116 (lib/tasks.wap, test/test_tasks.wap 8 ✓; go of a call and overlapping tasks not yet, red in test/wap/test_tasks.sh)
-- text.md (1 lines):
-- thread.md (49 lines):
-- time.md (51 lines):
-- Todo.md (232 lines):
-- trade-off.md (10 lines):
-- trait.md (155 lines):
-- tree.md (3 lines):
-- truthiness.md (63 lines):
-- try.md (38 lines):
-- tuple.md (19 lines):
-- type-inference.md (12 lines):
+- text.md (1 lines): wap-wiki, no forms
+- thread.md (49 lines): wap-wiki, tests test_thread_wanted.wap
+- time.md (51 lines): wap-wiki, tests test_time_wanted.wap; asked (date minus date)
+- Todo.md (232 lines): moved to notes/wasp-todo.md
+- trade-off.md (10 lines): wap-wiki, essay, no forms
+- trait.md (155 lines): wap-wiki, tests test_trait_page.wap green, test_trait_wanted.wap; asked (wrong values, table)
+- tree.md (3 lines): wap-wiki, no forms
+- truthiness.md (63 lines): wap-wiki, tests test_truthiness_page.wap green; asked (== across types, =!=)
+- try.md (38 lines): wap-wiki, tests test_try_wanted.wap (failed in test_keyword_wanted)
+- tuple.md (19 lines): wap-wiki, tests test_tuple_page.wap green; asked (element-wise +, x[0])
+- type-inference.md (12 lines): wap-wiki, tests test_type_inference_wanted.wap
 - type.md (331 lines):
-- typing.md (13 lines):
-- unicode.md (18 lines):
+- typing.md (13 lines): wap-wiki, tests test_typing_wanted.wap
+- unicode.md (18 lines): wap-wiki, tests test_unicode_wanted.wap
 - uniscript.md (471 lines):
 - unit.md (93 lines):
-- unknown.md (6 lines):
-- unsigned.md (14 lines):
+- unknown.md (6 lines): wap-wiki, tests test_unknown_wanted.wap
+- unsigned.md (14 lines): wap-wiki, tests test_unsigned_wanted.wap
 - use.md (121 lines):
 - value.md (67 lines):
 - variable.md (85 lines):
-- variant.md (16 lines):
+- variant.md (16 lines): wap-wiki, tests test_variant_page.wap green
 - W0.md (30 lines):
 - warning.md (45 lines):
 - wasm-representation.md (44 lines):
@@ -279,3 +279,4 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - world.md (27 lines):
 - xml.md (7 lines):
 - zig.md (18 lines):
+- dsl.md (new): wap-wiki, tests test_dsl_page.wap green, test_dsl_wanted.wap
