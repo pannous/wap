@@ -141,13 +141,13 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-fractions.md (39 lines):
 - library-functions.md (28 lines):
 - library-geometry.md (38 lines): ✓ 8e9bd76 (lib/geometry.wap, math.wap trig and round_to, test/test_geometry.wap 5 ✓; round_to without `use math` not yet, with wap-binding)
-- library-graphs.md (40 lines):
-- library-intervals.md (36 lines):
+- library-graphs.md (40 lines): wap-wiki-lib
+- library-intervals.md (36 lines): ✓ cf91cd6 (lib/intervals.wap, test/test_intervals.wap 5 ✓; Instants not yet)
 - library-json-tools.md (33 lines):
 - library-map-helpers.md (36 lines):
 - library-markdown.md (54 lines):
 - library-matrix.md (26 lines): ✓ 1845c85 (lib/matrix.wap determinant, inverse, solve; test/test_matrix.wap 3 ✓; the Matrix class of matrix.warp not ported yet)
-- library-money.md (43 lines): wap-wiki-lib
+- library-money.md (43 lines): ✓ 3c607e3 (lib/money.wap, Rounding an enum, test/test_money.wap 6 ✓)
 - library-numeric.md (36 lines): ✓ 0fefa6f (lib/numeric.wap, lib/matrix.wap solve, test/test_numeric.wap 5 ✓; intro "highest power first" → constant first, with wap-interviewer)
 - library-path.md (46 lines): ✓ 5e0b30d (lib/path.wap, test/test_path.wap 7 ✓)
 - library-primes.md (26 lines): ✓ 6b5ca30 (lib/math.wap primes words, test/test_primes.wap 3 ✓; without `use` not yet, with wap-binding)
@@ -243,7 +243,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - symbol.md (67 lines):
 - symbolism.md (275 lines):
 - syntax.md (56 lines):
-- task.md (31 lines):
+- task.md (31 lines): ✓ 7b3f116 (lib/tasks.wap, test/test_tasks.wap 8 ✓; go of a call and overlapping tasks not yet, red in test/wap/test_tasks.sh)
 - text.md (1 lines):
 - thread.md (49 lines):
 - time.md (51 lines):

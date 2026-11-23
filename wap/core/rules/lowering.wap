@@ -96,7 +96,7 @@ embedded_text(n: Node, group: Node) as Node := Text(read(beside(file_of(n) ?? ""
 
 # an operator call: the defining operators as their kernel forms, any other a call of the operator's function
 operator_lowered(language: Language, n: Node, spelling: text, arguments: list) as Node := match spelling {
-	"=" => assigned(language, arguments#1, lowered(language, arguments#2))
+	"=" => assigned(language, arguments#1, if is_code_block(arguments#2) and names_it(arguments#2) then it_function(language, arguments#2) else lowered(language, arguments#2))
 	":=" => defined(language, n, arguments#1, lowered(language, arguments#2))
 	"=>" => function_value(language, arguments)
 	"->" => function_value(language, arguments)
@@ -137,7 +137,7 @@ assigned(language: Language, place: Node, value: Node) as Node := match place {
 defined(language: Language, n: Node, head: Node, body: Node) as Node := match head {
 	Key(signature, Op.Colon, result) => with_result(defined(language, n, signature, body), result)
 	Key(name, Op.None, group) => if name is symbol then Define(name, parameter_list(language, group), body) else not_lowered(n)
-	Symbol(name) => Define(head, parameter_list(language, Empty), body)
+	Symbol(name) => Define(head, parameter_list(language, if names_it(body) then symbol(IT_WORD) else Empty), body)
 	_ => not_lowered(n)
 }
 with_result(definition: Define, result: Node) as Node := match definition { Define(name, parameters, body) => Define(Key(name, Op.Colon, result), parameters, body) }
@@ -154,16 +154,32 @@ is_fields(item: Node) as bool := match item {
 # an instance's field, `x: 1`, its value lowered
 # a call's argument lowered: a named one, `by: f`, its value
 # a call's arguments, a block where every definition of the word takes code there a function of no parameters, run by
-# its call: `twice { 4 }` of twice(body: block) (wiki/block.md "A block runs by a call")
-call_arguments_lowered(language: Language, head: Node, arguments: list) as list<Node> := (1 to #arguments).map(at => if is_code_block(arguments#at) and takes_code(language, head, at, #arguments) then Fn(parameter_list(language, Empty), lowered(language, arguments#at)) else argument_lowered(language, arguments#at))
+# its call: `twice { 4 }` of twice(body: block) (wiki/block.md "A block runs by a call"); code naming `it` where every
+# definition takes a function of one parameter there, a function of it: `filter(xs, it > 1)`
+call_arguments_lowered(language: Language, head: Node, arguments: list) as list<Node> := (1 to #arguments).map(at => {
+	argument = arguments#at
+	if is_code_block(argument) and takes_code(language, head, at, #arguments, 0) then Fn(parameter_list(language, Empty), lowered(language, argument)) else if names_it(argument) and takes_code(language, head, at, #arguments, 1) then it_function(language, argument) else argument_lowered(language, argument)
+})
 is_code_block(n: Node) as bool := match n { List(items, Bracket.Curly, separator) => not items.all(is_fields); _ => no }
-# whether every declaration of a word taking this many arguments takes code at this place: a block, or a function of no
-# parameters
-takes_code(language: Language, head: Node, at: int, count: int) as bool := {
+# whether every declaration of a word taking this many arguments takes code at this place: a block, or a function of
+# that many parameters
+takes_code(language: Language, head: Node, at: int, count: int, taking: int) as bool := {
 	declared = (if head is symbol and language.declarations.by_name.has(text(head)) then language.declarations.by_name[text(head)] else []).filter(signature => #signature.parameters == count)
-	declared is not empty and declared.all(signature => wants_code(signature.parameters#at))
+	declared is not empty and declared.all(signature => wants_code(signature.parameters#at, taking))
 }
-wants_code(type: Node?) as bool := type == symbol(BLOCK_WORD) or (function_parts(type) ?? return no).parameters is empty
+wants_code(type: Node?, taking: int) as bool := (taking == 0 and type == symbol(BLOCK_WORD)) or #((function_parts(type) ?? return no).parameters) == taking
+
+# `it`, the parameter code names without declaring it (wiki/function.md): `square := it * it` is square(it),
+# `square = {it * it}` a function of it, `filter(xs, it > 1)` filters by one
+IT_WORD = "it"
+FUNCTION_ARROWS = ["=>", "->"]
+names_it(n: Node) as bool := match n {
+	Symbol(name) => name == IT_WORD
+	# a function value's `it` is its own
+	Call(called, arguments) => not FUNCTION_ARROWS.contains(text(called)) and arguments.any(names_it)
+	_ => direct_parts(n).any(names_it)
+}
+it_function(language: Language, code: Node) as Node := Fn(parameter_list(language, symbol(IT_WORD)), lowered(language, code))
 argument_lowered(language: Language, argument: Node) as Node := match argument {
 	Key(name, Op.Colon, value) => if name is symbol then field_lowered(language, argument, argument) else lowered(language, argument)
 	_ => lowered(language, argument)
