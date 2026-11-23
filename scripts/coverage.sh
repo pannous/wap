@@ -6,6 +6,8 @@
 # (`wap version`), whatever this checkout holds. Each run is capped and goes through a job slot, niced; run hourly
 # by cron (user 2026-11-23)
 set -uo pipefail
+# ✓, ✗ and the runs' messages are UTF-8: counted and cut by characters, whatever locale cron gives (none)
+export LC_ALL=C.UTF-8
 RUN_SECONDS=60
 RUN_MEMORY_GB=4
 RUNS_AT_ONCE=4
