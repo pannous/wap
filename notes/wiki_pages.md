@@ -49,7 +49,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - charged.md (225 lines): ✓ wap-wiki, tests test_charged_page.wap green, test_charged_wanted.wap the forms still to build; wiki 736ab68, 8a952d3, 466b567, a6c9112
 - cheats.md (10 lines): wap-wiki, private links, asked to hide
 - choices.md (47 lines): wap-wiki
-- class.md (55 lines):
+- class.md (55 lines): wap-wiki
 - cli.md (112 lines):
 - closure.md (88 lines):
 - code.md (17 lines):
