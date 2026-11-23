@@ -137,7 +137,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-config-formats.md (67 lines): ✓ e28b84c (lib/yaml.wap, lib/toml.wap, test/test_config_formats.wap 15 ✓; YAML anchors and TOML multi-line strings cut)
 - library-csv.md (32 lines): ✓ 95f2e02 (lib/csv.wap, test/test_csv.wap 3 ✓; print of nested texts unquoted, with wap-interviewer)
 - library-diff.md (45 lines): ✓ e7eb7c7 (lib/diff.wap, edits the enum Edit, test/test_diff.wap 4 ✓; split(" ")[1] workaround until wap-reader fixes indexing a call)
-- library-dogfood-apps.md (51 lines): wap-wiki-lib
+- library-dogfood-apps.md (51 lines): ✓ e243766 (samples/apps: meeting_planner, name_matcher, comment_board; test/wap/test_apps.sh 3 ✓; recipe_scaler waits for fractions)
 - library-fractions.md (39 lines):
 - library-functions.md (28 lines): ✓ f2e9649 (lib/functions.wap, test/test_functions_library.wap 4 ✓; test_global_write red, retry spins until a host sleep)
 - library-geometry.md (38 lines): ✓ 8e9bd76 (lib/geometry.wap, math.wap trig and round_to, test/test_geometry.wap 5 ✓; round_to without `use math` not yet, with wap-binding)
