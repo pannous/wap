@@ -96,7 +96,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - go.md (0 lines):
 - goals.md (42 lines): wap-wiki, asked (wasp-era checklist)
 - good.md (8 lines): ✓ wap-wiki, prose
-- graphics.md (157 lines):
+- graphics.md (157 lines): wap-wiki, use draw does not compile in wap (lib/draw.warp C types): red in test_graphics_wanted, reported
 - group.md (10 lines): wap-wiki, asked (immutable groups clash with list.md)
 - grouping.md (46 lines): wap-wiki, asked (unbracketed commas, blocks as lists)
 - guiding-principles.md (13 lines): ✓ wap-wiki, prose
