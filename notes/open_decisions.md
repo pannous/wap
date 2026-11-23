@@ -16,3 +16,9 @@ show the user: the case against and why no library or hook does it (ask the bran
 - valueless-argument 3e46a738, about +5 core: an argument, name or result that gives no value gives ø; a function
   giving nothing, used as a C callback, answers 0.
 - is-equal 3b44e172, +3 core (analyze/names.wap): `x is y` with two variables compares their values (wiki/equality.md).
+
+## To present (keep or change, at 10:00)
+
+- template-shape: the approved "normalize templates at declare" wasn't needed. The fix is +2 lines in
+  core/rules/matcher.wap: a form pattern `rule q ($a + $b)` now fits the program's grouped `q (x + 1)`, while an
+  argument group `f(x + 1)` stays a group. `m() as T := body` now uses the same rule as `m(): T := body`.
