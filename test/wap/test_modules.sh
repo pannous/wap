@@ -208,6 +208,13 @@ print text(round(two_to(10.0)))')" "yes
 check "a library word takes an any holding its type" "$(ran use_any 'use ini
 a: any = parse_ini("top = 1")
 print to_ini(a)')" "top = 1"
+# a used module's global is a name of the files using it, as its other variables (wiki/use.md)
+printf '%s\n' 'class Counter { n: int = 0 }' 'global counter = Counter()' >"$stage/counting.wap"
+printf '%s\n' 'use "counting.wap"' 'next_count(): int := counter.n + 1' >"$stage/next_count.wap"
+check "a used module's global reads in the modules using it" "$(ran use_global 'use "counting.wap"
+use "next_count.wap"
+counter.n = 4
+print(next_count())')" "5"
 exit $((failures > 0))
 # a module's alias lines name its words other ways, in the module and in the files using it (wiki/alias.md)
 printf '%s\n' 'sine(x: int) := x * 2' 'alias sin => sine' 'alias magnitude <= mag' 'magnitude(x: int) := x + 1' 'twice_sin(x: int) := sin(x) * 2' >"$stage/trig.wap"
