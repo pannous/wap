@@ -89,4 +89,10 @@ check "a row of fields, then a method" "$(ran field_row 'class Cursor { s: text;
 print text(Cursor("x", 4).done())')" "yes"
 # a list of spaced values keeps its round brackets and blanks (user 2026-11-23)
 format_check 'x = (1 2)' 'x = (1 2)'
+# format keeps what a line says beside its code: comments above and after it, a run of blank lines as one, a block
+# written over lines on lines of its own, a tab per depth, `/* */` as `#` lines (card format-keeps-comments)
+format_check $'# first\nx = 1 # one\n\n\n// second\ny = 2\n# last' $'# first\nx = 1 # one\n\n# second\ny = 2\n# last'
+format_check $'f(a) := {\n\ty = a\n\tif y > 2 {\n\t\tprint y\n\t}\n}' $'f(a) := {\n\ty = a\n\tif y > 2 {\n\t\tprint y\n\t}\n}'
+format_check $'/* a\n   b */\nx = 1' $'# a\n# b\nx = 1'
+format_check 'if a { print y }' 'if a {print y}'
 exit $((failures > 0))
