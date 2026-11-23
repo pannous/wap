@@ -29,6 +29,23 @@ new_rules=$(git diff --unified=0 "$range" -- "${RULE_SOURCES[@]}" | awk '
 	}
 	END { for (i = 1; i <= count; i++) if (!(order[i] in removed)) print added[order[i]] }')
 new_files=$(git diff --name-only --diff-filter=A "$range" -- "${GUARDED_FILES[@]}")
+# a split or a move is no growth: a new file counts only when it holds a code line no file of the change gave up
+# (comments, blank lines and `use` lines are a split's own)
+fresh_in_new=$(git diff --unified=0 "$range" -- "${GUARDED_FILES[@]}" | awk -v new_files="$(tr '\n' ' ' <<<"$new_files")" '
+	BEGIN { split(new_files, names, " "); for (i in names) is_new["b/" names[i]] = 1 }
+	/^--- / { next }
+	/^\+\+\+ / { file = substr($0, 5); next }
+	/^-/ { removed[substr($0, 2)]++; next }
+	/^\+/ { if (file in is_new) added[++count] = substr($0, 2) }
+	END {
+		for (i = 1; i <= count; i++) {
+			line = added[i]; if (removed[line] > 0) { removed[line]--; continue }
+			code = line; sub(/^[[:space:]]+/, "", code)
+			if (code != "" && code !~ /^#/ && code !~ /^use /) fresh++
+		}
+		print fresh + 0
+	}')
+[ "$fresh_in_new" -eq 0 ] && new_files=""
 [ -z "$new_rules$new_files" ] && exit 0
 
 messages=$(git log --format=%B "$base..$tip")
