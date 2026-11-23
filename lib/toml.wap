@@ -8,12 +8,6 @@ use text
 
 # --- reading
 
-# a value's text being read and the place reached
-class Scan { source: text, at: int }
-rest_of(s: Scan): text := s.source[s.at:]
-skip_blanks(s: Scan) := {
-	while s.at < #s.source and " \t\n\r".contains(s.source[s.at:s.at + 1]) { s.at += 1 }
-}
 # where a token ends: at a comma, a closing bracket or brace, a blank, or the end
 TOKEN_ENDS := ",]} \t\n"
 
@@ -103,67 +97,47 @@ parse_toml(source: text): map<text, any> := {
 # the value at the scan, the scan after it
 value_of(s: Scan): any := {
 	skip_blanks(s)
-	c = s.source[s.at:s.at + 1]
-	if c == "\"" then string_of(s, "\"")
-	else if c == "'" then string_of(s, "'")
+	c = next_of(s)
+	if c == "\"" then double_quoted_at(s)
+	else if c == "'" then literal_at(s)
 	else if c == "[" then array_of(s)
 	else if c == "{" then inline_table_of(s)
 	else token_value(s)
 }
-# a "basic" string with its escapes read, or a 'literal' one as written
-string_of(s: Scan, quote: text): text := {
-	closing = if quote == "\"" then quoted_end(s.source, s.at + 1) else find(s.source[s.at + 1:], quote) + s.at
+# a 'literal' string as written
+literal_at(s: Scan): text := {
+	closing = find(s.source[s.at + 1:], "'") + s.at
 	inside = s.source[s.at + 1:closing]
 	s.at = closing + 1
-	if quote == "\"" then unescaped(inside) else inside
-}
-# where a "basic" string's closing quote stands, a backslash escaping the character after it
-quoted_end(t: text, from: int): int := {
-	at = from
-	while at < #t and t[at:at + 1] != "\"" { at += if t[at:at + 1] == "\\" then 2 else 1 }
-	at
+	inside
 }
 array_of(s: Scan): list<any> := {
 	items: list<any> = []
 	s.at += 1
-	skip_blanks(s)
-	while s.source[s.at:s.at + 1] != "]" {
-		items.add(value_of(s))
-		skip_blanks(s)
-		if s.source[s.at:s.at + 1] == "," { s.at += 1 }
-		skip_blanks(s)
-		if s.at >= #s.source { raise "toml: an array is not closed" }
-	}
-	s.at += 1
+	while more_items(s, "]") { items.add(value_of(s)) }
 	items
 }
 inline_table_of(s: Scan): map<text, any> := {
 	table: map<text, any> = {}
 	s.at += 1
-	skip_blanks(s)
-	while s.source[s.at:s.at + 1] != "}" {
+	while more_items(s, "}") {
 		equals = place_outside_quotes(s.source, "=", s.at)
 		if equals < 0 { raise "toml: an inline table entry without =" }
 		keys = keys_of(s.source[s.at:equals])
 		s.at = equals + 1
 		table_at(table, keys.take(#keys - 1))[keys.last] = value_of(s)
-		skip_blanks(s)
-		if s.source[s.at:s.at + 1] == "," { s.at += 1 }
-		skip_blanks(s)
-		if s.at >= #s.source { raise "toml: an inline table is not closed" }
 	}
-	s.at += 1
 	table
 }
 # true, false, a number, or a date or time kept as its text
 token_value(s: Scan): any := {
 	start = s.at
-	while s.at < #s.source and not TOKEN_ENDS.contains(s.source[s.at:s.at + 1]) { s.at += 1 }
+	while s.at < #s.source and not TOKEN_ENDS.contains(next_of(s)) { s.at += 1 }
 	token = s.source[start:s.at]
 	# a date and a time may be parted by one space
-	if is_date(token) and s.source[s.at:s.at + 1] == " " and "0123456789".contains(s.source[s.at + 1:s.at + 2]) {
+	if is_date(token) and next_of(s) == " " and "0123456789".contains(s.source[s.at + 1:s.at + 2]) {
 		s.at += 1
-		while s.at < #s.source and not TOKEN_ENDS.contains(s.source[s.at:s.at + 1]) { s.at += 1 }
+		while s.at < #s.source and not TOKEN_ENDS.contains(next_of(s)) { s.at += 1 }
 		return s.source[start:s.at]
 	}
 	number = spelled_number(token)
