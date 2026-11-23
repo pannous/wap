@@ -259,12 +259,12 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - typing.md (13 lines): wap-wiki, tests test_typing_wanted.wap
 - unicode.md (18 lines): wap-wiki, tests test_unicode_wanted.wap
 - uniscript.md (471 lines):
-- unit.md (93 lines):
+- unit.md (93 lines): wap-wiki, tests test_unit_page.wap green, test_unit_wanted.wap (rest in test_units.wap)
 - unknown.md (6 lines): wap-wiki, tests test_unknown_wanted.wap
 - unsigned.md (14 lines): wap-wiki, tests test_unsigned_wanted.wap
-- use.md (121 lines):
-- value.md (67 lines):
-- variable.md (85 lines):
+- use.md (121 lines): wap-wiki, tests test_use_page.wap green, test_use_wanted.wap; asked (own function replaces)
+- value.md (67 lines): wap-wiki; asked (internals to notes/value-layout.md)
+- variable.md (85 lines): wap-wiki, tests test_variable_page.wap green, test_variable_wanted.wap; asked (write-through lambdas)
 - variant.md (16 lines): wap-wiki, tests test_variant_page.wap green
 - W0.md (30 lines):
 - warning.md (45 lines):
