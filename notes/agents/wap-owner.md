@@ -84,6 +84,7 @@ wap/
                               topologically, the minus rule, aliases to canonical words; unrelated mixes refused
       operator_table.wap      the operator table as the operator stage reads it
       tokens.wap              a phrase's tokens as the operator stage reads them: what each touches
+      keys.wap                what a key the reader built becomes: the colon block, the choice, an infix call, an assignment
 
     rules/                    the rule engine
       patterns.wap            a rule's pattern declared and compiled to a Matcher: holes, typed holes, rests, guards
