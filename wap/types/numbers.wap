@@ -7,6 +7,15 @@ EXPONENT_BYTES := [69, 101]
 # the digits a float reads exactly into an int before the rest only scale it
 MANTISSA_LIMIT := 100000000000000000
 
+# the constants sin, cos, exp and ln reduce their argument by, and how many terms their series add after the first
+PI := 3.141592653589793
+LN2 := 0.6931471805599453
+# ln 2 split into a part whose multiples by small ints are exact and the rest, so exp's reduction loses no digit
+LN2_HIGH := 0.6931471803691238
+LN2_LOW := 0.00000000019082149292705877
+SQRT2 := 1.4142135623730951
+SERIES_TERMS := 14
+
 # the smaller and the larger of two values: `min(3, 2)` is 2, `max(1.5, 2.5)` 2.5
 min(a: T, b: T): T := if a < b then a else b
 max(a: T, b: T): T := if a > b then a else b
@@ -46,3 +55,56 @@ is_digit_byte(b: int): bool := b >= ZERO_BYTE and b < ZERO_BYTE + 10
 number(t: text): number := float(t)
 # the character of a code: `char(97)` is 'a'
 char(code: int): char := prim i32.wrap_i64(code)
+
+# The circle and growth functions in plain wap, as wasm has no instruction for them: each moves its argument into a
+# small range where a short series is right to the last digit or one off it
+# the sum of a series from its first term, each next term the one before times step(k), k counting from 0; the terms
+# are added smallest first, so their roundings do not pile up
+series(first: float, step: (int) -> float): float := {
+	terms = [first]
+	for k in 0 .. SERIES_TERMS { terms.add(terms.last * step(k)) }
+	terms.reverse.fold(0.0, (sum, term) => sum + term)
+}
+# x moved by whole turns into -π … π, where sin, cos and tan repeat
+within_turn(x: float): float := x - 2.0 * PI * floor((x + PI) / (2.0 * PI))
+# the sine and cosine series within π/4 of zero
+sine_near(t: float): float := series(t, k => -t * t / float((2 * k + 2) * (2 * k + 3)))
+cosine_near(t: float): float := series(1.0, k => -t * t / float((2 * k + 1) * (2 * k + 2)))
+# the sine of x radians: the turn's angle mirrored into 0 … π/2, its sign kept: `sin(PI / 2.0)` is 1
+sin(x: float): float := {
+	turned = within_turn(x)
+	sign = if turned < 0.0 then -1.0 else 1.0
+	folded = if abs(turned) > PI / 2.0 then PI - abs(turned) else abs(turned)
+	sign * (if folded > PI / 4.0 then cosine_near(PI / 2.0 - folded) else sine_near(folded))
+}
+# the cosine of x radians: the turn's angle mirrored into 0 … π/2, negative beyond π/2: `cos(0.0)` is 1
+cos(x: float): float := {
+	turned = abs(within_turn(x))
+	sign = if turned > PI / 2.0 then -1.0 else 1.0
+	folded = if turned > PI / 2.0 then PI - turned else turned
+	sign * (if folded > PI / 4.0 then sine_near(PI / 2.0 - folded) else cosine_near(folded))
+}
+tan(x: float): float := sin(x) / cos(x)
+# e to the power x, from e^r with r within half a ln 2 of zero, doubled back: `exp(1.0)` is e, 2.71828…
+exp(x: float): float := {
+	doublings = round(x / LN2)
+	rest = x - float(doublings) * LN2_HIGH - float(doublings) * LN2_LOW
+	series(1.0, k => rest / float(k + 1)) * 2.0 ^ doublings
+}
+# the natural logarithm of x above 0, from x halved or doubled into √½ … √2, where ln m is 2·atanh((m - 1)/(m + 1)):
+# `ln(8.0) / ln(2.0)` is 3
+ln(x: float): float := {
+	if x <= 0.0 { raise("ln takes a number above 0, not ${x}") }
+	m = x
+	doublings = 0
+	while m > SQRT2 {
+		m = m / 2.0
+		doublings += 1
+	}
+	while m < SQRT2 / 2.0 {
+		m = m * 2.0
+		doublings -= 1
+	}
+	u = (m - 1.0) / (m + 1.0)
+	float(doublings) * LN2 + 2.0 * series(u, k => u * u * float(2 * k + 1) / float(2 * k + 3))
+}
