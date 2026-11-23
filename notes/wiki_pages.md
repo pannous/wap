@@ -241,18 +241,18 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - swift.md (4 lines): wap-wiki, essay, no forms
 - switch.md (89 lines): ✓ wap-wiki-lib, tests test_switch_page.wap green, test_switch_wanted.wap red (branch switch-page 0105433)
 - symbol.md (67 lines): wap-wiki; asked (:symbols, = declarations)
-- symbolism.md (275 lines):
+- symbolism.md (275 lines): moved to notes/symbolism.md
 - syntax.md (56 lines): wap-wiki, tests test_syntax_wanted.wap (colon if in test_bad_wanted); asked (bare class fields)
 - task.md (31 lines): ✓ 7b3f116 (lib/tasks.wap, test/test_tasks.wap 8 ✓; go of a call and overlapping tasks not yet, red in test/wap/test_tasks.sh)
-- text.md (1 lines):
-- thread.md (49 lines):
-- time.md (51 lines):
+- text.md (1 lines): wap-wiki, no forms
+- thread.md (49 lines): wap-wiki, tests test_thread_wanted.wap
+- time.md (51 lines): wap-wiki, tests test_time_wanted.wap; asked (date minus date)
 - Todo.md (232 lines):
-- trade-off.md (10 lines):
-- trait.md (155 lines):
-- tree.md (3 lines):
-- truthiness.md (63 lines):
-- try.md (38 lines):
+- trade-off.md (10 lines): wap-wiki, essay, no forms
+- trait.md (155 lines): wap-wiki, tests test_trait_page.wap green, test_trait_wanted.wap; asked (wrong values, table)
+- tree.md (3 lines): wap-wiki, no forms
+- truthiness.md (63 lines): wap-wiki, tests test_truthiness_page.wap green; asked (== across types, =!=)
+- try.md (38 lines): wap-wiki, tests test_try_wanted.wap (failed in test_keyword_wanted)
 - tuple.md (19 lines):
 - type-inference.md (12 lines):
 - type.md (331 lines):
