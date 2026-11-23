@@ -110,9 +110,8 @@ print(text(-(3).squared) + " " + text(#(xs).next) + " " + text(#((xs).filter(x =
 format_check '2 * no + 1' '2 * no + 1'
 # a built-in operator overloaded by its operands' types, its built-in kept where they fit (wiki/operator.md "Operator
 # overloading"); a declared operator's result type written as a function's
-check "an operator overloaded for an int and a text, the built-in kept for two ints" "$(ran overloaded_plus $'+(a: int, b: text): text := if is_digit(b#1) then text(a) + b else raise "not a number: ${b}"\nprint(1 + "2")\nprint(text(1 + 2))\nprint(1 + "x")')" "12
-3
-not a number: x"
+check "an operator overloaded for two texts, the built-in kept for two ints" "$(ran overloaded_times $'*(a: text, b: text): int := 7\nprint(text("a" * "b"))\nprint(text(2 * 3))')" "7
+6"
 check "an operator overloaded for a class" "$(ran class_plus $'class P { x: int }\n+(a: P, b: P): P := P{x: a.x + b.x}\nprint(text((P{x: 1} + P{x: 2}).x))')" "3"
 check "a declared operator with its result type" "$(ran typed_operator $'infix operator ⇔(a: bool, b: bool): bool := a == b\nprint(text((1 > 0) ⇔ (2 > 0)))')" "yes"
 # a glyph nobody declared is a name like any other (wiki/operator.md): a function of that name, called glued to its arguments
