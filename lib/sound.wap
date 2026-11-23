@@ -383,3 +383,184 @@ through_effects(samples: list<int>): list<int> := {
 	if chain is empty { return samples }
 	clamped_samples(chain.fold(samples.map(s => float(s - SAMPLE_OFFSET)), (x, effect) => effected(x, effect)))
 }
+
+# A melody is a list of steps: notes, chords, rests, each tied longer or shorter with ~. euclid(C5, 3, 8) spreads three
+# C5 over eight steps, alternate([G4, A4]) takes one of them each time the melody plays, in turn, maybe(C5, 0.3) sounds
+# in about 30 % of the plays, chosen by melody_seed, the same each run; swing (0 to 1) delays every second step.
+class Alternate { options: list<any> }
+class Maybe { step: any, share: float }
+global swing = 0.0
+global melody_seed = 0
+# the melodies this voice played, by their text: an alternation takes turns by how often its melody played before
+global melodies_played: list<text> = []
+# a step's chance: a hash of the seed, the play and the place, squared a few rounds, modulo a prime
+CHANCE_PRIMES := [7919, 104729, 1299709]
+CHANCE_START := 12345
+CHANCE_STEP := 48271
+CHANCE_MODULUS := 2147483647
+CHANCE_ROUNDS := 3
+
+rest(): Rest := Rest()
+pause(): Rest := Rest()
+euclid(step: any, hits: int, steps: int): list<any> := (0 upto steps).map(i => if (i * hits) % steps < hits then step else Rest())
+alternate(options: list<any>): Alternate := Alternate(options)
+maybe(step: any, share: float = 0.5): Maybe := Maybe(step, share)
+text(a: Alternate): text := "alternate(${a.options})"
+text(m: Maybe): text := "maybe(${m.step}, ${m.share})"
+~(a: Alternate, factor: float): Alternate := Alternate(a.options.map(option => tied(option, factor)))
+~(m: Maybe, factor: float): Maybe := Maybe(tied(m.step, factor), m.share)
+tied(step: any, factor: float): any := step ~ factor
+# how many times the play's duration a step holds, 1 for a plain pitch
+held_length(n: Note): float := n.length
+held_length(c: Chord): float := c.length
+held_length(r: Rest): float := r.length
+held_length(step: any): float := 1.0
+# the frequencies a pitch sounds
+pitches_of(n: Note): list<float> := [hertz(n)]
+pitches_of(c: Chord): list<float> := c.notes.map(n => hertz(n))
+pitches_of(q: Quantity): list<float> := [q.si]
+pitches_of(frequency: float): list<float> := [frequency]
+pitches_of(pitches: list<any>): list<float> := pitches.flat_map(p => pitches_of(p))
+
+# the steps as this play of the melody sounds them: an alternation's option for this turn, a maybe's step or a rest as
+# long
+melody_steps(notes: list<any>, cycle: int): list<any> := (0 upto #notes).map(k => melody_step(notes[k], cycle, k))
+melody_step(a: Alternate, cycle: int, place: int): any := melody_step(a.options[cycle % #a.options], cycle ÷ #a.options, place)
+melody_step(m: Maybe, cycle: int, place: int): any :=
+	if melody_chance(cycle, place) < m.share then melody_step(m.step, cycle, place) else Rest(held_length(m.step))
+melody_step(step: any, cycle: int, place: int): any := step
+# 0 to 1, the same for the same seed, play and place in the melody
+melody_chance(cycle: int, place: int): float := {
+	h = ([melody_seed, cycle, place] .* CHANCE_PRIMES).sum() + CHANCE_START
+	for round in 0 upto CHANCE_ROUNDS { h = (h % CHANCE_MODULUS) ^ 2 + CHANCE_STEP }
+	float(h % CHANCE_MODULUS) / float(CHANCE_MODULUS)
+}
+# how often this voice played the melody before, counting this play
+melody_cycle(written: text): int := {
+	cycle = melodies_played.filter(seen => seen == written).count()
+	melodies_played.add(written)
+	cycle
+}
+melody_text(steps: list<any>): text := steps.map(step => text(step)).join(" ")
+silent_samples(n: int): list<int> := spread(SAMPLE_OFFSET, n)
+# the samples of a melody, each step its seconds times the length it is tied to
+melody_samples(notes: list<any>, seconds: float, shape: text): list<int> := {
+	steps = melody_steps(notes, melody_cycle(melody_text(notes)))
+	samples: list<int> = []
+	elapsed = 0.0
+	done = 0
+	for k in 0 upto #steps {
+		length = seconds * held_length(steps[k])
+		swung = if k % 2 == 1 then -1.0 else if k + 1 < #steps then 1.0 else 0.0
+		elapsed += length + swing * length / 3.0 * swung
+		target = round(samples_in(elapsed))
+		if target > done { samples += step_samples(steps[k], target - done, shape) }
+		done = target
+	}
+	samples
+}
+step_samples(r: Rest, n: int, shape: text): list<int> := silent_samples(n)
+step_samples(pitch: any, n: int, shape: text): list<int> := chord_samples(pitches_of(pitch), float(n) / float(sample_rate), shape)
+
+# A melody written as text in Tidal's mini-notation: `c4 e4 g4` three steps, `~` a rest, `[g4 b4]` a group sharing one
+# step, `c4*2` twice in its step, `c4,e4,g4` a chord, `c4(3,8)` euclid, `<c4 e4>` alternate, `c4?` (`c4?0.3`) maybe,
+# `c4 _ e4` or `c4@2 e4` c4 held two steps. Each item read is a group, a sound of frequencies (none: a rest) or a
+# choice, held weight steps, sounding in chance of the plays.
+enum ItemKind { Group, Sound, Choice }
+class WrittenItem { kind: ItemKind, items: list<WrittenItem> = [], sounds: list<float> = [], weight: int = 1, chance: float = 1.0 }
+STEP_STOPS := " []<>*(?@_"
+STEP_MARKS := "*(?@"
+GROUP_OPEN := "["
+CHOICE_OPEN := "<"
+CLOSINGS := "]>"
+REST_WORD := "~"
+HOLD_WORD := "_"
+CHORD_SEPARATOR := ","
+MAYBE_SHARE := 0.5
+# the marks between a melody's words, which tell nothing of whether they are notes
+WORD_MARKS := ["[", "]", "<", ">", ","]
+# the items read, and the place after their closing bracket or the end
+class ItemsRead { items: list<WrittenItem>, after: int }
+
+silence(): WrittenItem := WrittenItem(Sound)
+# a word's sound: ~ a rest, else its notes, c4 or c4,e4,g4, a note's letter in either case
+word_item(word: text): WrittenItem :=
+	if word == REST_WORD then silence() else WrittenItem(Sound, sounds: word.split(CHORD_SEPARATOR).map(name => note_hertz(capitalized(name))))
+capitalized(name: text): text := upper(name[0:1]) + name[1 ..]
+euclid_item(item: WrittenItem, hits: int, steps: int): WrittenItem :=
+	WrittenItem(Group, (0 upto steps).map(i => if (i * hits) % steps < hits then item else silence()))
+# where the word from `from` ends: the first of the stops, else the end
+step_end(written: text, from: int, stops: text): int := {
+	i = from
+	while i < #written and not stops.contains(written[i:i + 1]) { i += 1 }
+	i
+}
+written_items(written: text, from: int): ItemsRead := {
+	items: list<WrittenItem> = []
+	i = from
+	while i < #written {
+		c = written[i:i + 1]
+		if c == " " {
+			i += 1
+		} else if CLOSINGS.contains(c) {
+			return ItemsRead(items, i + 1)
+		} else if c == HOLD_WORD {
+			if items is not empty { items.last.weight += 1 }
+			i += 1
+		} else {
+			item = silence()
+			if c == GROUP_OPEN or c == CHOICE_OPEN {
+				inner = written_items(written, i + 1)
+				item = WrittenItem(if c == GROUP_OPEN then Group else Choice, inner.items)
+				i = inner.after
+			} else {
+				stop = step_end(written, i, STEP_STOPS)
+				item = word_item(written[i:stop])
+				i = stop
+			}
+			while i < #written and STEP_MARKS.contains(written[i:i + 1]) {
+				mark = written[i:i + 1]
+				stop = step_end(written, i + 1, if mark == "(" then ")" else STEP_STOPS)
+				argument = written[i + 1:stop]
+				if mark == "*" {
+					item = WrittenItem(Group, spread(item, int(argument)))
+				} else if mark == "(" {
+					numbers = argument.split(",")
+					item = euclid_item(item, int(numbers[0]), int(numbers[1]))
+					stop += 1
+				} else if mark == "@" {
+					item.weight = int(argument)
+				} else {
+					item.chance = if argument == "" then MAYBE_SHARE else float(argument)
+				}
+				i = stop
+			}
+			items.add(item)
+		}
+	}
+	ItemsRead(items, i)
+}
+# the steps a text writes, each tied to its share of one step: "c4 [e4 g4]" is [C4, E4 ~ ½, G4 ~ ½]
+notes_written(written: text): list<any> := melody_of(written_items(written, 0).items, 1.0)
+melody_of(items: list<WrittenItem>, length: float): list<any> := items.flat_map(item => item_steps(item, length * float(item.weight)))
+item_steps(item: WrittenItem, length: float): list<any> := {
+	steps = kind_steps(item, length)
+	if item.chance < 1.0 then steps.map(step => maybe(step, item.chance)) else steps
+}
+kind_steps(item: WrittenItem, length: float): list<any> := {
+	if item.kind == Group { return melody_of(item.items, length / float(item.items.map(inner => inner.weight).sum())) }
+	if item.kind == Choice { return [alternate(item.items.map(option => single_step(option, length)))] }
+	[tied(sounded_step(item.sounds), length)]
+}
+single_step(item: WrittenItem, length: float): any := {
+	steps = item_steps(item, length)
+	if #steps == 1 then steps[0] else alternate(steps)
+}
+sounded_step(frequencies: list<float>): any :=
+	if frequencies is empty then Rest() else if #frequencies == 1 then note(frequencies[0]) else Chord(frequencies.map(f => note(f)))
+# whether a text reads as steps (each word a note's name or ~): it plays as a melody; any other text names a sound file
+written_steps(written: text): bool := {
+	words = WORD_MARKS.fold(written, (spaced, mark) => spaced.replace(mark, " ")).split(" ").filter(word => word != "" and word != HOLD_WORD)
+	words is not empty and words.all(word => word == REST_WORD or note_word(word[0:step_end(word, 0, STEP_MARKS)]))
+}
+note_word(word: text): bool := word != "" and is_note_name(capitalized(word))
