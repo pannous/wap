@@ -55,7 +55,7 @@ folder_built() {
 # once for each state of wap/ and lib/ and shared by every script
 if [ "$1" = --compiler ]; then compiler="$2"; shift 2
 else
-	sources=$(cd "$tree" && { cat "$seed"; find wap "$WAP_LIBRARY" \( -name '*.wap' -o -name '*.warp' \) | sort | xargs cat; } | shasum | cut -c1-16)
+	sources=$(cd "$tree" && { cat "$seed"; find wap "$WAP_LIBRARY" \( -name '*.wap' -o -name '*.warp' -o -name '*.c' -o -name '*.h' \) | sort | xargs cat; } | shasum | cut -c1-16)
 	compiler=$(compiler_built "$data/wap1-$sources" 1) || { echo "wap1: $compiler" >&2; exit 1; }
 fi
 # native_wap_built <folder>: the tree's native wap (wap/extensions/native/driver.wap) built into the folder, bin/wap with

@@ -52,41 +52,54 @@ little_endian(n: int, size: int) as list := int_bytes(n, size * 8, "little")
 from_big_endian(bytes: list) as int := bytes_int(bytes, "big")
 from_little_endian(bytes: list) as int := bytes_int(bytes, "little")
 
-// an f64's bits rounded to an f32's, to nearest, ties to even; subnormals, ±0, ±infinity and NaN kept
-f32_bits(x: float) as int := {
+// a float's bits as a narrower IEEE 754 float's of so many exponent and fraction bits, rounded to nearest, ties to
+// even; subnormals, ±0, ±infinity and NaN kept, too large a magnitude infinity
+narrowed_bits(x: float, exponent_bits: int, fraction_bits: int) as int := {
 	b = float_bits(x)
-	sign = shift_right(b, 63) << 31
+	sign = shift_right(b, 63) << (exponent_bits + fraction_bits)
 	exponent = both_bits(shift_right(b, 52), 0x7ff)
 	fraction = low_bits(b, 52)
-	if exponent == 0x7ff { return sign + (0xff << 23) + (if fraction == 0 then 0 else 0x400000 + shift_right(low_bits(fraction, 51), 29)) }
+	top = (1 << exponent_bits) - 1
+	cut = 52 - fraction_bits
+	if exponent == 0x7ff { return sign + (top << fraction_bits) + (if fraction == 0 then 0 else (1 << (fraction_bits - 1)) + shift_right(low_bits(fraction, 51), cut)) }
 	if exponent == 0 and fraction == 0 { return sign }
 	significand = if exponent == 0 then fraction else fraction + (1 << 52)
-	field = (if exponent == 0 then 1 else exponent) - 1023 + 127
-	shift = if field >= 1 then 29 else 29 + 1 - field
+	field = (if exponent == 0 then 1 else exponent) - 1023 + exponent_bias(exponent_bits)
+	shift = if field >= 1 then cut else cut + 1 - field
 	if shift >= 54 { return sign }
 	q = shift_right(significand, shift)
 	rest = low_bits(significand, shift)
 	half = 1 << (shift - 1)
 	if rest > half or (rest == half and q % 2 == 1) { q = q + 1 }
 	if field < 1 { return sign + q }
-	if q == 1 << 24 { q = 1 << 23; field = field + 1 }
-	if field >= 0xff { return sign + (0xff << 23) }
-	sign + (field << 23) + q - (1 << 23)
+	if q == 1 << (fraction_bits + 1) { q = 1 << fraction_bits; field = field + 1 }
+	if field >= top { return sign + (top << fraction_bits) }
+	sign + (field << fraction_bits) + q - (1 << fraction_bits)
 }
-// an f32's bits as the f64 of the same value, exactly
-f32_float(bits: int) as float := {
-	sign = shift_right(both_bits(bits, 0xffffffff), 31)
-	field = both_bits(shift_right(bits, 23), 0xff)
-	fraction = low_bits(bits, 23)
-	if field == 0xff { return bits_float((sign << 63) + (0x7ff << 52) + (fraction << 29)) }
+// a narrower IEEE 754 float's bits as the float of the same value, exactly
+widened_float(bits: int, exponent_bits: int, fraction_bits: int) as float := {
+	sign = both_bits(shift_right(bits, exponent_bits + fraction_bits), 1) << 63
+	top = (1 << exponent_bits) - 1
+	field = both_bits(shift_right(bits, fraction_bits), top)
+	fraction = low_bits(bits, fraction_bits)
+	if field == top { return bits_float(sign + (0x7ff << 52) + (fraction << (52 - fraction_bits))) }
 	if field == 0 {
-		if fraction == 0 { return bits_float(sign << 63) }
-		// fraction * 2^-149, a normal f64: its top one bit becomes the implicit one
-		top = bit_length(fraction) - 1
-		return bits_float((sign << 63) + ((top - 149 + 1023) << 52) + low_bits(fraction << (52 - top), 52))
+		if fraction == 0 { return bits_float(sign) }
+		// a subnormal, fraction * 2^(1 - bias - fraction_bits), a normal float: its top one bit becomes the implicit one
+		highest = bit_length(fraction) - 1
+		return bits_float(sign + ((highest + 1 - exponent_bias(exponent_bits) - fraction_bits + 1023) << 52) + low_bits(fraction << (52 - highest), 52))
 	}
-	bits_float((sign << 63) + ((field - 127 + 1023) << 52) + (fraction << 29))
+	bits_float(sign + ((field - exponent_bias(exponent_bits) + 1023) << 52) + (fraction << (52 - fraction_bits)))
 }
+exponent_bias(exponent_bits: int) as int := (1 << (exponent_bits - 1)) - 1
+// the IEEE 754 binary32 (f32), binary16 (f16) and bfloat16 (bf16: an f32's exponent, 7 fraction bits) bits of a float,
+// and back
+f32_bits(x: float) as int := narrowed_bits(x, 8, 23)
+f32_float(bits: int) as float := widened_float(bits, 8, 23)
+f16_bits(x: float) as int := narrowed_bits(x, 5, 10)
+f16_float(bits: int) as float := widened_float(bits, 5, 10)
+bf16_bits(x: float) as int := narrowed_bits(x, 8, 7)
+bf16_float(bits: int) as float := widened_float(bits, 8, 7)
 // x as its IEEE 754 bytes: width 64 (binary64) or 32 (binary32, rounded to nearest)
 float_bytes(x: float, width: int, order: text) as list := int_bytes(if width == 32 then f32_bits(x) else float_bits(x), width, order)
 float_bytes(x: float, width: int) as list := float_bytes(x, width, "big")
