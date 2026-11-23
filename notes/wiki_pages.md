@@ -162,10 +162,10 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-xml.md (28 lines):
 - like.md (59 lines):
 - Lisp.md (19 lines):
-- list.md (279 lines): wap-wiki-a, tests 7789cd9, wiki 40e84a0; waits: list words in wap/types (wap-lead → wap-reader), the meaning of `(1 2)` (user), card list-page-forms
+- list.md (279 lines): wap-wiki, tests 7789cd9, wiki 1b0112f; waits: the types patch (/Volumes/Worktrees/wiki-a/data/wiki-list-types.patch, its checks pending_lists_page.wap) with wap-reader (`index` capture), the page's reader forms (wap-reader costing)
 - literal.md (34 lines):
 - macro.md (18 lines):
-- map.md (119 lines): wap-wiki-a
+- map.md (119 lines): wap-wiki, tests c32c163 (branch wiki-a-map); waits: count/first as map words (static rule, wap-interviewer OK pending), show(map) in the types patch, bare `map` (wap-binding)
 - mark.md (23 lines):
 - matching.md (143 lines):
 - math.md (32 lines):
