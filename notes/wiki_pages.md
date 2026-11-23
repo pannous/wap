@@ -3,6 +3,8 @@
 One wap/wiki page at a time per worker. Claim a page by writing your session name after it, commit and push this file
 before you start (a rejected push means someone else claimed: pull and pick another). When done: ✓ plus the commit;
 page needs no code: – plus why; edge cases parked: name the follow-up card.
+Wiki workers change lib/, samples/, test/ and the wiki; a need in wap/ (core, types, sugar, extensions) goes as one
+message to wap-lead (the example, what lib/ could not do), and the worker goes on with the rest of the page meanwhile.
 
 - ?.md (0 lines):
 - ❓.md (4 lines):
@@ -70,7 +72,7 @@ page needs no code: – plus why; edge cases parked: name the follow-up card.
 - elvis.md (5 lines):
 - enum.md (91 lines):
 - equality.md (62 lines):
-- Error.md (176 lines):
+- Error.md (176 lines): wap-wiki-b
 - evaluation.md (21 lines):
 - examples.md (90 lines):
 - Exception.md (37 lines):
@@ -87,7 +89,7 @@ page needs no code: – plus why; edge cases parked: name the follow-up card.
 - for.md (70 lines):
 - full-evaluation.md (17 lines):
 - function-pointer.md (22 lines):
-- function.md (179 lines): warp-wiki-b
+- function.md (179 lines): wap-wiki-b, tests 632486d (branch wiki-b), wiki 47bea94; waits: 22 gaps + a types patch (wap-lead → wap-reader, wap-binding), card should-argument (user)
 - functional.md (5 lines):
 - functor.md (18 lines):
 - gap-filling.md (14 lines):
@@ -160,10 +162,10 @@ page needs no code: – plus why; edge cases parked: name the follow-up card.
 - library-xml.md (28 lines):
 - like.md (59 lines):
 - Lisp.md (19 lines):
-- list.md (279 lines): warp-wiki-a
+- list.md (279 lines): wap-wiki-a, tests 7789cd9, wiki 40e84a0; waits: list words in wap/types (wap-lead → wap-reader), the meaning of `(1 2)` (user), card list-page-forms
 - literal.md (34 lines):
 - macro.md (18 lines):
-- map.md (119 lines):
+- map.md (119 lines): wap-wiki-a
 - mark.md (23 lines):
 - matching.md (143 lines):
 - math.md (32 lines):

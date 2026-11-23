@@ -2,8 +2,18 @@
 
 You are the owner of one stage of the new compiler wap: its files are listed against your name in "Owners"
 below (user 2026-11-18: one expert per file). The fleet rules are AGENTS.md; also read notes/first_principles.md,
-notes/backbone.md and wap/compiler.wap (the stages). Start or restart: `notes/agents/start.sh worker <your-name> "wap owner: <stage>"`,
+notes/backbone.md and wap/compiler.wap (the stages). Start or restart: `notes/agents/start.sh owner <stage>` (session wap-<stage>),
 then read this file and the Owners row with your name.
+
+## Idle by default (user 2026-11-23)
+- The language grows in lib/ and from the wiki pages; your files change only when that is really necessary. Most of
+  the day you sit idle, and that is the job done well.
+- Requests reach you only through wap-lead, never straight from a wiki worker or another owner: a wiki example that
+  needs your stage, with what was tried in lib/ first. Answer wap-lead once: "lib can do it: …", "needs N lines in
+  <file>: …" (then the user discussion runs through wap-interviewer before you build), or "the page is wrong: …".
+- Between requests you make your stage beautiful: fewer lines, one mechanism per job, the simplifier's findings in your
+  files. Pure shrinks land without discussion; anything else that changes behaviour waits for the user's OK.
+- Talk to the other owners only about a contract between your stages, and say the outcome to wap-lead in one line.
 
 ## What owning means
 - **You are the expert.** You know every function in your files, why it is there, and the stage contract: the input
@@ -127,14 +137,13 @@ wap/
     prelude.wap               the built-ins (print …), each a function whose body may be a Prim
     operators.wap             the operator table: precedence groups and their relations, operators, aliases
     list_items.wap            how a list holds its items, the one list file a build may swap (memory_lists.wap)
-    text_bytes.wap            how a text holds its bytes, the one text file a build may swap (memory_texts.wap)
+    text_bytes.wap            how a text holds its bytes (count, a byte, a slice, joined, compared), the one text file a build may swap (memory_texts.wap)
     lists.wap                 list words over function values: map, filter, contains …
     maps.wap                  map words: a key's value, set, has, remove; text keys found by their hash
     texts.wap                 text words over a text's UTF-8 bytes
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
     host.wap                  the host machinery the file and command-line words use, hidden from programs
-    text_bytes.wap            a text's bytes: count, a byte, a slice, made from bytes, joined, compared
     memory_texts.wap          a native build's texts in the module's memory, read by its build in the place of text_bytes.wap
     memory_lists.wap          a native build's lists in the module's memory, read by its build in the place of list_items.wap
     c.wap                     a C function's texts passed as NUL-terminated copies and given back; its out-pointers
@@ -165,11 +174,9 @@ wap/
       driver.wap              the native wap command: compiles a program with wap.wasm, runs it by wasmtime
       editing.wap             the console's line edited on a terminal: arrows, word moves, deletes, history
       host_words.wap          a program's C imports answered by the C functions of their names; C calling back into it
-      linking.wap             where a used module is found: beside its importer, its compiler's folder, wap.wasm's
+      linking.wap             where a module imported by name is: the path its compiler resolved, beside the importer unless rooted
       memory.wap              values in the memory, as wasm2c takes no GC type: layouts, literal words, the raise
       programs.wap            a program's machine code kept beside wap.wasm, program-<hash>.cwasm by its sources
-      linking.wap             where a module imported by a bare name is: beside the importer, in the compiler folder
-                              its wap.compiler section names, else in the installed wap-seed
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
     packed.wap                a Node as compact bytes and back, pack and unpack: each text and repeated subtree once
     warm.wap                  the compiler's warm state: the files it reads before a program, operated, packed
@@ -203,7 +210,7 @@ Anyone may edit any wap file on a branch; the owner of the file's stage reviews 
 language is (notes/backbone.md "Stage languages"). Breadth stops until milestone 2: wap gets only what its own
 source uses, and every landing names the functions of wap it turned green (scripts/wap-census.warp). Tests
 (test/wap/) and `# DEBT:` comments are append-only, open to all. A bug of the old compiler that blocks wap
-goes to warp-host-fixer as a repro; work around it or go on meanwhile. A new file belongs to the stage of its folder.
+goes to wap-native as a repro; work around it or go on meanwhile. A new file belongs to the stage of its folder.
 
 Since wap compiles itself (2026-11-20), wap work comes from notes/backbone.md "Architecture changes, in order" and the
 open milestone-2 points (user 2026-11-20); anything else is a `# DEBT:` comment at its code.
@@ -214,12 +221,11 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 
 | stage | owner | files (under wap/) |
 |---|---|---|
-| lead: the queue, the contracts | wap-lead | compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap, kernel/surface.wap; the test/wap/ scripts no other row names |
-| self-build: wap compiled by wap, file by file | wap-operators | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp; edits any file to write its types and `use` lines |
+| lead: the queue, the contracts, the self-build | wap-lead | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp, compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap, kernel/surface.wap; the test/wap/ scripts no other row names |
 | front: read, operators, rules, lowering | wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap, extensions/packed.wap, extensions/warm.wap |
 | types: declare, bind, type | wap-binding | core/analyze/, core/paths.wap |
 | back: emitter, runtime | wap-emitter | core/emit/, extensions/wasm/, extensions/c/; test/wap/test_guardrails.sh, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |
-| native: the wap command, programs built to executables | warp-host-fixer | extensions/native/; test/wap/test_native.sh |
+| native: the wap command, programs built to executables | wap-native | extensions/native/; test/wap/test_native.sh |
 | simplification: wap smaller by its Node count (Meta excluded) | wap-simplifier | any file, by review of its stage owner |
 
 Questions for the user go to wap-interviewer, never to the user.
