@@ -1,0 +1,176 @@
+# The standard module web (wiki/html.md "Routes"): a program's routes (lib/router) served over HTTP/1.1 through C's
+# sockets. serve() serves them on the port a built server is started with, `--port <n>`, else 8080; serve(0) on one the
+# system chooses, printed as it serves. One request at a time, each connection closed after its answer; a route answers
+# as router says, a text as text, anything else as JSON, with the status and headers it set; after a form's POST the
+# browser is sent back to the form's page.
+use router
+use url
+
+DEFAULT_PORT := 8080
+PORT_OPTION := "--port"
+BACKLOG := 64
+READ_BYTES := 65536
+LINE_END := "\r\n"
+HEAD_END := "\r\n\r\n"
+# the body of an HTML form's POST: its fields as a query's, `item=tea&n=2`
+FORM_TYPE := "application/x-www-form-urlencoded"
+SEE_OTHER := 303
+# AF_INET, SOCK_STREAM; SOL_SOCKET and SO_REUSEADDR, of Linux and of the BSDs (macOS)
+INTERNET := 2
+STREAM := 1
+LINUX := "Linux"
+LINUX_SOCKET_LEVEL := 1
+BSD_SOCKET_LEVEL := 65535
+LINUX_REUSE_ADDRESS := 2
+BSD_REUSE_ADDRESS := 4
+YES_OPTION := [1, 0, 0, 0]
+# struct utsname whole, its first field the system's name: uname writes all of it, 5 fields of 256 bytes on macOS
+# (6 of 65 on Linux)
+UTSNAME_BYTES := 1280
+SYSTEM_NAME_BYTES := 256
+# struct sockaddr_in: its bytes 2 and 3 the port, the high byte first; the BSDs start it with its length, Linux with a
+# 16-bit family; any address, zeros, after the port
+SOCKET_ADDRESS_BYTES := 16
+PORT_BYTE := 256
+ANY_ADDRESS := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+socket(domain: i32, kind: i32, protocol: i32): i32 from 'c'
+setsockopt(fd: i32, level: i32, name: i32, value: bytes, size: length): i32 from 'c'
+bind(fd: i32, address: bytes, size: length): i32 from 'c'
+listen(fd: i32, backlog: i32): i32 from 'c'
+accept(fd: i32, address: handle, size: handle): i32 from 'c'
+recv(fd: i32, buffer: handle, size: i64, flags: i32): i64 from 'c'
+send(fd: i32, data: bytes, size: length, flags: i32): i64 from 'c'
+close(fd: i32): i32 from 'c'
+calloc(count: i64, size: i64): handle from 'c'
+free(pointer: handle): ø from 'c'
+strndup(buffer: handle, size: i64): owned_text from 'c'
+uname(name: handle): i32 from 'c'
+getsockname(fd: i32, address: handle, size: bytes): i32 from 'c'
+fmemopen(buffer: handle, size: i64, mode: text): handle from 'c'
+fgetc(file: handle): i32 from 'c'
+fclose(file: handle): i32 from 'c'
+
+# an HTTP status's reason phrase
+class Reason { code: int, phrase: text }
+REASONS := [Reason(200, "OK"), Reason(201, "Created"), Reason(204, "No Content"), Reason(301, "Moved Permanently"),
+	Reason(302, "Found"), Reason(303, "See Other"), Reason(400, "Bad Request"), Reason(404, "Not Found"),
+	Reason(418, "I'm a teapot"), Reason(500, "Internal Server Error")]
+phrase(status: int): text := {
+	for reason in REASONS { if reason.code == status { return reason.phrase } }
+	""
+}
+
+# the program's routes served at the port until the process is stopped
+serve(port: int = port_given()) := {
+	listener = listening(port)
+	print "serving http://localhost:${bound_port(listener)}"
+	while yes {
+		client = accept(listener, 0, 0)
+		if client >= 0 {
+			send(client, http_served(received(client)).bytes, 0)
+			close(client)
+		}
+	}
+}
+# the port a built server is started with, `./app --port 9000`, else 8080
+port_given(): int := {
+	at = args.index_of(PORT_OPTION)
+	if at == 0 or at == #args then DEFAULT_PORT else int(args[at])
+}
+
+# the system's name, Darwin or Linux
+system_name(): text := {
+	buffer = calloc(1, UTSNAME_BYTES)
+	uname(buffer)
+	name = strndup(buffer, SYSTEM_NAME_BYTES)
+	free(buffer)
+	name
+}
+# a struct sockaddr_in of any address at the port
+internet_address(system: text, port: int): list<int> := {
+	start = if system == LINUX then [INTERNET, 0] else [SOCKET_ADDRESS_BYTES, INTERNET]
+	start + [port ÷ PORT_BYTE, port % PORT_BYTE] + ANY_ADDRESS
+}
+socket_level(system: text): int := if system == LINUX then LINUX_SOCKET_LEVEL else BSD_SOCKET_LEVEL
+reuse_address(system: text): int := if system == LINUX then LINUX_REUSE_ADDRESS else BSD_REUSE_ADDRESS
+# a listening socket at the port, else an error naming it
+listening(port: int): int := {
+	system = system_name()
+	fd = socket(INTERNET, STREAM, 0)
+	if fd < 0 { raise "web: no socket" }
+	setsockopt(fd, socket_level(system), reuse_address(system), YES_OPTION)
+	if bind(fd, internet_address(system, port)) != 0 { raise "web: port ${port} is taken or not allowed" }
+	if listen(fd, BACKLOG) != 0 { raise "web: cannot listen on port ${port}" }
+	fd
+}
+# the port a socket is bound to (one the system chose for port 0), read back from its address: a C stream over the
+# bytes reads them NULs and all
+bound_port(fd: int): int := {
+	address = calloc(1, SOCKET_ADDRESS_BYTES)
+	getsockname(fd, address, [SOCKET_ADDRESS_BYTES, 0, 0, 0])
+	bytes = fmemopen(address, SOCKET_ADDRESS_BYTES, "r")
+	fgetc(bytes)
+	fgetc(bytes)
+	port = fgetc(bytes) * PORT_BYTE + fgetc(bytes)
+	fclose(bytes)
+	free(address)
+	port
+}
+
+# what the client sent, its body read to the length its Content-Length says
+received(client: int): text := {
+	buffer = calloc(1, READ_BYTES + 1)
+	raw = ""
+	while not request_complete(raw) {
+		got = recv(client, buffer, READ_BYTES, 0)
+		if got <= 0 { break }
+		raw += strndup(buffer, got)
+	}
+	free(buffer)
+	raw
+}
+request_complete(raw: text): bool := raw.contains(HEAD_END) and byte_count(body_of(raw)) >= content_length(head_of(raw))
+# a request's head (its request line and header lines) and its body, apart at the first blank line
+head_of(raw: text): text := raw.split(HEAD_END)[0]
+body_of(raw: text): text := raw.split(HEAD_END).drop(1).join(HEAD_END)
+# the Content-Length of the head's header lines, 0 without one
+content_length(head: text): int := int(header_fields(head).get("content-length") ?? "0")
+# the header lines of a request's head by their lower-case names, `{"content-type": "text/plain"}`
+header_fields(head: text): map<text, text> := {
+	fields: map<text, text> = {}
+	for line in head.split(LINE_END).drop(1) {
+		colon = find(line, ":")
+		if colon > 0 { fields[lower(trim(line[0 .. colon - 1]))] = trim(line[colon ..]) }
+	}
+	fields
+}
+# the request as the routes read it, a form's fields as `request.form`
+request_of(raw: text): Request := {
+	words = head_of(raw).split(LINE_END)[0].split(" ")
+	target = if #words > 1 then words[1] else "/"
+	path = target.split("?")[0]
+	query = target.split("?").drop(1).join("?")
+	headers = header_fields(head_of(raw))
+	body = body_of(raw)
+	Request(words[0], path, query_map(query), headers, body, if is_form(headers) then query_map(body) else {})
+}
+is_form(headers: map<text, text>): bool := (headers.get("content-type") ?? "").starts_with(FORM_TYPE)
+
+# the HTTP answer of the program's routes to a request as the client sent it; after a form's POST whose route set no
+# status of its own, the browser's post/redirect/get: 303 See Other, back to the page the form was on (its Referer,
+# else "/")
+http_served(raw: text): text := {
+	asked = request_of(raw)
+	answer = answer_of(asked)
+	if asked.method == "POST" and is_form(asked.headers) and answer.status == OK {
+		back = asked.headers.get("referer") ?? "/"
+		return http_text(Answer(SEE_OTHER, answer.content_type, answer.header_lines + ["Location: ${back}"], ""))
+	}
+	http_text(answer)
+}
+http_text(answer: Answer): text := {
+	status_line = "HTTP/1.1 ${answer.status} ${phrase(answer.status)}"
+	sized = ["Content-Length: ${byte_count(answer.body)}", "Connection: close"]
+	([status_line, "Content-Type: ${answer.content_type}"] + answer.header_lines + sized).join(LINE_END) + HEAD_END + answer.body
+}
