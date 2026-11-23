@@ -1,7 +1,6 @@
 # Starting the warp agent team
 
-These role files came from warp (2026-11-22) and the fleet runs from this repo with wap-<role> names since 2026-11-23.
-A path or script a role file names that wap lacks lives in the warp repo, /Users/me/dev/angles/warp; adapting the rest
+The role files come from warp; the fleet runs from this repo with wap-<role> names. A path or script a role file names that wap lacks lives in the warp repo, /Users/me/dev/angles/warp; adapting the rest
 is card fleet-wap-names.
 
 The rules live in notes/roles.md; this folder holds the startup prompts, one per role, so a fresh day starts the same
