@@ -51,7 +51,7 @@ the team, crash resume), notes/roles.md (what the other roles do).
 - Idle worker: give it its area's cards from `todo pick` (the user's "(user)" drafts first, easy before big).
 - Red tests are the work list (user 2026-11-20): every red test line is already its own to-do and needs no card. Instead
   of picking cards, pick red tests and hand them out to workers. Not yet: the user's own priorities (now: wap's native binary) come before red tests.
-  At least one worker always works through the open cards (now wap-operators).
+  At least one worker always works through the open cards.
 - wap/core and wap/kernel are semi-frozen (user 2026-11-20): every change there goes to wap-interviewer first; new
   features go into wap/extensions/. The first case is the native binary, built by wap as an extension.
 - Talk to workers by SendMessage with `notify_when_idle: true`; tmux only to look at a screen.
@@ -68,7 +68,10 @@ the team, crash resume), notes/roles.md (what the other roles do).
   there (card fleet-wap-names on the wap board).
 - Wiki-driven development (user 2026-11-23): workers take wap/wiki pages one at a time from notes/wiki_pages.md, first
   check that the page makes sense and holds no unimportant edge cases (those later or to the Interviewer), then
-  implement it as specified. Workers keep to small problems; the full suite and the coverage run once an hour (cron).
+  implement it as specified. Workers keep to small problems; the full suite (cloud) and the coverage (Mac) run once an
+  hour. One or two wiki workers at a time; they touch lib/, samples/, test/ and the wiki only. Whatever their page needs
+  in wap/ goes to wap-lead, who routes it to the one stage owner (notes/agents/lead.md, wap-owner.md "Owners"); owners
+  sit idle until then. Communication stays sparse and runs through wap-lead.
 - Core and extension changes (user 2026-11-22, after the extension audit notes/reviews/2026-11-22-extensions.md): no rubber
   stamps. Each one is discussed with the user (shape, core lines, why no hook or lib would do) before it lands; an
   Interviewer OK alone does not land it.

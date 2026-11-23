@@ -3,6 +3,8 @@
 One wap/wiki page at a time per worker. Claim a page by writing your session name after it, commit and push this file
 before you start (a rejected push means someone else claimed: pull and pick another). When done: ✓ plus the commit;
 page needs no code: – plus why; edge cases parked: name the follow-up card.
+Wiki workers change lib/, samples/, test/ and the wiki; a need in wap/ (core, types, sugar, extensions) goes as one
+message to wap-lead (the example, what lib/ could not do), and the worker goes on with the rest of the page meanwhile.
 
 - ?.md (0 lines):
 - ❓.md (4 lines):
