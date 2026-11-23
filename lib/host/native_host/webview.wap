@@ -21,6 +21,7 @@ HTTP_FAILED := 500
 EMPTY_PAGE := "<!doctype html><meta charset=utf-8><title>wap</title>"
 ANSWER_MS := 10000
 SPIN_SECONDS := 0.005
+MS_PER_SECOND := 1000
 APP_WINDOW_WIDTH := 900.0
 APP_WINDOW_HEIGHT := 700.0
 APP_WINDOW_FRAME := [0.0, 0.0, APP_WINDOW_WIDTH, APP_WINDOW_HEIGHT]
@@ -55,10 +56,38 @@ BLOCK_FLAGS_AT := 8
 BLOCK_INVOKE_AT := 16
 BLOCK_DESCRIPTOR_AT := 24
 
+# the web view's state: the message registers, the page's loading and events, the answer awaited, the app's window
+class WebView {
+	message_function: int = 0
+	message_integers: int = 0
+	message_floats: int = 0
+	# AppKit's and WebKit's classes are there once their frameworks are loaded (a symbol of each asked for loads it)
+	frameworks_asked: bool = no
+	# a page's loading: the navigation delegate's two answers end it
+	page_loading_ended: bool = no
+	page_loading: int = 0
+	# the page's events not yet given to the program, each its {event, detail} as JSON
+	page_events: list<text> = []
+	# the run's hidden web view
+	hidden_view: int = 0
+	# whether a function of the program runs for js now
+	calling_back: bool = no
+	# the answer of a body run as an async function in the view: its text, or its failure
+	answer_block: int = 0
+	answer_heard: bool = no
+	answer_value: int = 0
+	answer_error: int = 0
+	# the run's window, the hidden view in it: open until it is closed
+	app_window: int = 0
+	app_window_open: bool = no
+}
+global web = WebView()
+
 # the Objective-C runtime
 use c
 use callbacks
 use json
+use text
 use "platform.wap"
 OBJC := "objc"
 objc_getClass(name: text): i64 from 'objc'
@@ -66,44 +95,36 @@ sel_registerName(name: text): i64 from 'objc'
 objc_allocateClassPair(superclass: i64, name: handle, extra: i64): i64 from 'objc'
 class_addMethod(made: i64, selector: i64, implementation: handle, types: handle): bool from 'objc'
 class_replaceMethod(made: i64, selector: i64, implementation: handle, types: handle): i64 from 'objc'
-# a C string that stays: the runtime keeps a class's name and its methods' types where they are given
-strdup(t: text): handle from 'c'
 objc_registerClassPair(made: i64): void from 'objc'
 objc_autoreleasePoolPush(): i64 from 'objc'
 objc_autoreleasePoolPop(pool: i64): void from 'objc'
-handle_pointer(id: i32): i64 from 'c'
 native_call(function: i64, integers: handle, floats: handle, float_result: i32): i64 from 'c'
 MESSAGE_REGISTERS := 8
 # a register's bytes, an integer's or a float's
 REGISTER_BYTES := 8
-global message_function = 0
-global message_integers = 0
-global message_floats = 0
 # `[receiver selector: arguments…]`: the receiver, the selector and the arguments in the integer registers, the floats
 # in the float ones (a CGRect by value is four, arm64's way); its result as a number (an object's address)
 sent(receiver: int, selector: text, arguments: list<int>): int := sent_with_floats(receiver, selector, arguments, [])
 sent_with_floats(receiver: int, selector: text, arguments: list<int>, floats: list<float>): int := {
-	if message_function == 0 {
-		message_function = handle_pointer(library_function(OBJC, "objc_msgSend"))
-		message_integers = calloc(MESSAGE_REGISTERS, REGISTER_BYTES)
-		message_floats = calloc(MESSAGE_REGISTERS, REGISTER_BYTES)
+	if web.message_function == 0 {
+		web.message_function = handle_pointer(library_function(OBJC, "objc_msgSend"))
+		web.message_integers = calloc(MESSAGE_REGISTERS, REGISTER_BYTES)
+		web.message_floats = calloc(MESSAGE_REGISTERS, REGISTER_BYTES)
 	}
-	set_field_i64(message_integers, 0, receiver)
-	set_field_i64(message_integers, REGISTER_BYTES, sel_registerName(selector))
-	for at in 0 ..< #arguments { set_field_i64(message_integers, (at + 2) * REGISTER_BYTES, arguments[at]) }
-	for at in 0 ..< #floats { set_field_f64(message_floats, at * REGISTER_BYTES, floats[at]) }
-	native_call(message_function, message_integers, message_floats, 0)
+	set_field_i64(web.message_integers, 0, receiver)
+	set_field_i64(web.message_integers, REGISTER_BYTES, sel_registerName(selector))
+	for at in 0 ..< #arguments { set_field_i64(web.message_integers, (at + 2) * REGISTER_BYTES, arguments[at]) }
+	for at in 0 ..< #floats { set_field_f64(web.message_floats, at * REGISTER_BYTES, floats[at]) }
+	native_call(web.message_function, web.message_integers, web.message_floats, 0)
 }
 told(receiver: int, selector: text): int := sent(receiver, selector, [])
 class_named(name: text): int := {
 	frameworks_loaded()
 	objc_getClass(name)
 }
-# AppKit's and WebKit's classes are there once their frameworks are loaded (a symbol of each asked for loads it)
-global frameworks_asked = no
 frameworks_loaded() := {
-	if not frameworks_asked {
-		frameworks_asked = yes
+	if not web.frameworks_asked {
+		web.frameworks_asked = yes
 		library_function("AppKit", "NSApp")
 		library_function("WebKit", "WKErrorDomain")
 	}
@@ -143,13 +164,13 @@ class_made(name: text, methods: list<ObjcMethod>): int := {
 instance_of(made: int): int := told(told(made, "alloc"), "init")
 
 # the run loop turned until done() or the milliseconds are over: no when they were
-spun(done: function, milliseconds: int): bool := turned(done, milliseconds, () => sent(told(class_named("NSRunLoop"), "currentRunLoop"), "runMode:beforeDate:", [framework_object("Foundation", "NSDefaultRunLoopMode"), soon()]))
+spun(done: () -> bool, milliseconds: int): bool := turned(done, milliseconds, () => sent(told(class_named("NSRunLoop"), "currentRunLoop"), "runMode:beforeDate:", [framework_object("Foundation", "NSDefaultRunLoopMode"), soon()]))
 # the app's events (clicks, keys) handed to its windows until done() or the milliseconds are over, as [NSApp run] would
-pumped(done: function, milliseconds: int): bool := turned(done, milliseconds, () => {
+pumped(done: () -> bool, milliseconds: int): bool := turned(done, milliseconds, () => {
 	app_event = sent(application(), "nextEventMatchingMask:untilDate:inMode:dequeue:", [ANY_EVENT, soon(), framework_object("Foundation", "NSDefaultRunLoopMode"), 1])
 	if app_event != 0 { sent(application(), "sendEvent:", [app_event]) }
 })
-turned(done: function, milliseconds: int, turn: function): bool := {
+turned(done: () -> bool, milliseconds: int, turn: () -> T): bool := {
 	deadline = wall_clock_ms() + milliseconds
 	while not done() and wall_clock_ms() < deadline { turn() }
 	done()
@@ -160,22 +181,12 @@ application_made(policy: int) := {
 	if told(application(), "activationPolicy") == POLICY_PROHIBITED or policy != POLICY_PROHIBITED { sent(application(), "setActivationPolicy:", [policy]) }
 }
 
-# a page's loading: the navigation delegate's two answers end it
-global page_loading_ended = no
-global page_loading = 0
-# (read through a word: a lambda reading the global would keep its value of when it was made, card prebuilt-module)
-loading_over(): bool := page_loading_ended
-loading_ended(receiver: int, selector: int, shown_in: int, navigation: int) := { page_loading_ended = yes }
-loading_failed(receiver: int, selector: int, shown_in: int, navigation: int, failure: int) := { page_loading_ended = yes }
-# the page's events not yet given to the program, each its {event, detail} as JSON
-global page_events: list<text> = []
+loading_ended(receiver: int, selector: int, shown_in: int, navigation: int) := { web.page_loading_ended = yes }
+loading_failed(receiver: int, selector: int, shown_in: int, navigation: int, failure: int) := { web.page_loading_ended = yes }
 page_message(receiver: int, selector: int, controller: int, message: int) := {
 	body = told(message, "body")
-	if is_kind(body, "NSString") { page_events.add(ns_text(body)) }
+	if is_kind(body, "NSString") { web.page_events.add(ns_text(body)) }
 }
-global web_view = 0
-# whether a function of the program runs for js now
-global calling_back = no
 page_released(receiver: int, selector: int, controller: int, message: int) := {
 	released = parse_json(ns_text(told(message, "body")))
 	js_released(released#1, released#2)
@@ -187,13 +198,16 @@ scheme_task_stopped(receiver: int, selector: int, view: int, task: int) := ø
 called_back(receiver: int, selector: int, shown_in: int, task: int) := {
 	url = told(told(task, "request"), "URL")
 	given = parse_json(ns_text(told(told(url, "query"), "stringByRemovingPercentEncoding")))
-	calling_back = yes
-	result = try js_called_back(int(ns_text(told(url, "lastPathComponent"))), given) catch failure { failure }
-	calling_back = no
-	failed = result is error
-	response = sent(told(class_named("NSHTTPURLResponse"), "alloc"), "initWithURL:statusCode:HTTPVersion:headerFields:", [url, if failed then HTTP_FAILED else HTTP_OK, 0, 0])
+	web.calling_back = yes
+	status = HTTP_OK
+	body = try { to_json(js_called_back(int(ns_text(told(url, "lastPathComponent"))), given)) } catch failure {
+		status = HTTP_FAILED
+		failure.message
+	}
+	web.calling_back = no
+	response = sent(told(class_named("NSHTTPURLResponse"), "alloc"), "initWithURL:statusCode:HTTPVersion:headerFields:", [url, status, 0, 0])
 	sent(task, "didReceiveResponse:", [response])
-	sent(task, "didReceiveData:", [sent(ns_string(if failed then text(result) else to_json(result)), "dataUsingEncoding:", [UTF8_ENCODING])])
+	sent(task, "didReceiveData:", [sent(ns_string(body), "dataUsingEncoding:", [UTF8_ENCODING])])
 	told(task, "didFinish")
 }
 # WebKit's helper processes never answer a process forked without exec (native_host/platform.wap own_process)
@@ -213,37 +227,31 @@ view_made(width: float, height: float): int := {
 }
 # the HTML shown in the view, waited for: no when it did not load in time
 page_loaded(shown_in: int, html: text): bool := {
-	if page_loading == 0 { page_loading = instance_of(class_made("WapHostLoading", [method_of("webView:didFinishNavigation:", loading_ended), method_of("webView:didFailNavigation:withError:", loading_failed)])) }
-	page_loading_ended = no
-	sent(shown_in, "setNavigationDelegate:", [page_loading])
+	if web.page_loading == 0 { web.page_loading = instance_of(class_made("WapHostLoading", [method_of("webView:didFinishNavigation:", loading_ended), method_of("webView:didFailNavigation:withError:", loading_failed)])) }
+	web.page_loading_ended = no
+	sent(shown_in, "setNavigationDelegate:", [web.page_loading])
 	sent(shown_in, "loadHTMLString:baseURL:", [ns_string(html), sent(class_named("NSURL"), "URLWithString:", [ns_string(PAGE_ORIGIN)])])
-	loaded = spun(() => loading_over(), ANSWER_MS)
+	loaded = spun(() => web.page_loading_ended, ANSWER_MS)
 	sent(shown_in, "setNavigationDelegate:", [0])
 	loaded
 }
 # the run's hidden web view, made at its first use: the process never becomes an app on screen for it
 hidden_view(): int := {
-	if web_view != 0 { return web_view }
+	if web.hidden_view != 0 { return web.hidden_view }
 	application_made(POLICY_PROHIBITED)
-	web_view = view_made(1.0, 1.0)
-	if not page_loaded(web_view, EMPTY_PAGE) { eprint("the hidden web view did not load") }
-	web_view
+	web.hidden_view = view_made(1.0, 1.0)
+	if not page_loaded(web.hidden_view, EMPTY_PAGE) { eprint("the hidden web view did not load") }
+	web.hidden_view
 }
 
-# the answer of a body run as an async function in the view: [its text, ø] or [ø, the failure]
-global answer_block = 0
-global answer_heard = no
-global answer_value = 0
-global answer_error = 0
-answer_over(): bool := answer_heard
 answer_given(block: int, result: int, failure: int) := {
-	answer_value = if result == 0 then 0 else told(result, "retain")
-	answer_error = if failure == 0 then 0 else told(failure, "retain")
-	answer_heard = yes
+	web.answer_value = if result == 0 then 0 else told(result, "retain")
+	web.answer_error = if failure == 0 then 0 else told(failure, "retain")
+	web.answer_heard = yes
 }
 # the block callAsyncJavaScript calls back, one a run (a global block: never copied, never freed)
 answering_block(): int := {
-	if answer_block == 0 {
+	if web.answer_block == 0 {
 		block = calloc(1, BLOCK_BYTES)
 		descriptor = calloc(2, 8)
 		set_field_i64(descriptor, 8, BLOCK_BYTES)
@@ -251,28 +259,29 @@ answering_block(): int := {
 		set_field_i32(block, BLOCK_FLAGS_AT, BLOCK_IS_GLOBAL)
 		set_field_pointer(block, BLOCK_INVOKE_AT, c_callback(answer_given, ["i64", "i64", "i64"]))
 		set_field_pointer(block, BLOCK_DESCRIPTOR_AT, descriptor)
-		answer_block = handle_pointer(block)
+		web.answer_block = handle_pointer(block)
 	}
-	answer_block
+	web.answer_block
 }
-answered(shown_in: int, body: text, name: text, value: text): list := {
-	answer_heard = no
+# the text a body run as an async function in the view gives back; raises the view's failure
+answered(shown_in: int, body: text, name: text, value: text): text := {
+	web.answer_heard = no
 	given = if name == "" then told(class_named("NSDictionary"), "dictionary") else sent(class_named("NSDictionary"), "dictionaryWithObject:forKey:", [ns_string(value), ns_string(name)])
 	world = told(class_named("WKContentWorld"), "pageWorld")
 	sent(shown_in, "callAsyncJavaScript:arguments:inFrame:inContentWorld:completionHandler:", [ns_string(body), given, 0, world, answering_block()])
-	if not spun(() => answer_over(), ANSWER_MS) { return [ø, "no answer in " + (ANSWER_MS / 1000) + " s (a promise that never settles?)"] }
-	if answer_error != 0 {
-		said = sent(told(answer_error, "userInfo"), "objectForKey:", [ns_string("WKJavaScriptExceptionMessage")])
-		failure = ns_text(if said != 0 then said else told(answer_error, "localizedDescription"))
-		told(answer_error, "release")
-		return [ø, failure]
+	if not spun(() => web.answer_heard, ANSWER_MS) { raise "no answer in ${ANSWER_MS ÷ MS_PER_SECOND} s (a promise that never settles?)" }
+	if web.answer_error != 0 {
+		said = sent(told(web.answer_error, "userInfo"), "objectForKey:", [ns_string("WKJavaScriptExceptionMessage")])
+		failure = ns_text(if said != 0 then said else told(web.answer_error, "localizedDescription"))
+		told(web.answer_error, "release")
+		raise failure
 	}
-	text = if answer_value == 0 then "" else ns_text(if is_kind(answer_value, "NSString") then answer_value else told(answer_value, "description"))
-	if answer_value != 0 { told(answer_value, "release") }
-	[text, ø]
+	given_back = if web.answer_value == 0 then "" else ns_text(if is_kind(web.answer_value, "NSString") then web.answer_value else told(web.answer_value, "description"))
+	if web.answer_value != 0 { told(web.answer_value, "release") }
+	given_back
 }
 
-is_name(name: text): bool := #name > 0 and NAME_STARTS.contains(name[0]) and name.chars().all(c => NAME_GOES_ON.contains(c))
+is_name(name: text): bool := #name > 0 and NAME_STARTS.contains(name[0 .. 1]) and name.codepoints().all(c => NAME_GOES_ON.contains(text(c)))
 # a member `use js` may name: an identifier, or as js-members.js reads it "" (construct), "set x", "a.b"
 member_named(member: text): bool := {
 	name = member.remove_prefix("set ")
@@ -284,12 +293,8 @@ failure_said(called: text, failure: text): text := {
 	if plain.starts_with(called) then plain else called + ": " + plain
 }
 
-# the run's window, the hidden view in it: open until it is closed
-global app_window = 0
-global app_window_open = no
-window_closing(receiver: int, selector: int, notification: int) := { app_window_open = no }
-# (each state a lambda waits for read through a word: a lambda reading a global keeps its value of when it was made, card prebuilt-module)
-window_event_over(): bool := #page_events > 0 or not app_window_open
+window_closing(receiver: int, selector: int, notification: int) := { web.app_window_open = no }
+window_event_over(): bool := #web.page_events > 0 or not web.app_window_open
 app_window_made(title: text): int := {
 	made = sent_with_floats(told(class_named("NSWindow"), "alloc"), "initWithContentRect:styleMask:backing:defer:", [WINDOW_STYLE, BUFFERED, 0], APP_WINDOW_FRAME)
 	sent(made, "setReleasedWhenClosed:", [0])
@@ -310,26 +315,26 @@ window_shown(shown: int, shown_view: int) := {
 # the local wall clock's milliseconds since 1970 (lib/timers.warp); ø once the window is closed
 window_answered(called: text, member: text, arguments: any): any? := {
 	if member == "show" {
-		if windowless() { return error(called + ": no window under --no-window or CI") }
-		if app_window == 0 {
+		if windowless() { raise called + ": no window under --no-window" }
+		if web.app_window == 0 {
 			shown_view = hidden_view()
 			application_made(POLICY_ACCESSORY)
 			told(application(), "finishLaunching")
-			app_window = app_window_made(run_option("app-window") ?? "warp")
-			app_window_open = yes
-			window_shown(app_window, shown_view)
+			web.app_window = app_window_made(run_option("app-window") ?? "warp")
+			web.app_window_open = yes
+			window_shown(web.app_window, shown_view)
 		}
 		return ø
 	}
-	if member != "next" { return error(called + ": the window has no " + member + ": show or next") }
-	if app_window == 0 { return error(called + ": no window shown: warpWindow.show(title) first") }
+	if member != "next" { raise called + ": the window has no " + member + ": show or next" }
+	if web.app_window == 0 { raise called + ": no window shown: warpWindow.show(title) first" }
 	waited = if arguments is list and #arguments > 0 and arguments#1 is int then arguments#1 else -1
-	pumped(() => window_event_over(), if waited >= 0 then waited else FOREVER_MS)
-	if not app_window_open { return ø }
+	pumped(window_event_over, if waited >= 0 then waited else FOREVER_MS)
+	if not web.app_window_open { return ø }
 	happened = {event: TICK_EVENT}
-	if #page_events > 0 {
-		happened = parse_json(page_events#1)
-		page_events = page_events[1 ..]
+	if #web.page_events > 0 {
+		happened = parse_json(web.page_events#1)
+		web.page_events = web.page_events[1 ..]
 	}
 	happened["wall"] = wall_clock_ms() + sent(told(class_named("NSTimeZone"), "localTimeZone"), "secondsFromGMT", []) * 1000
 	happened
@@ -337,37 +342,39 @@ window_answered(called: text, member: text, arguments: any): any? := {
 
 # a promise the view gave is awaited there (callAsyncJavaScript), so none is ever pending for the program to wait for
 # (lib/prelude.warp foreign_settled; the page keeps one: host-foreign.js)
-host_foreign_pending(): int := 0
-host_foreign_await(): any? := ø
+foreign_pending(): int := 0
+foreign_await(): any? := ø
 # foreign_call(runtime, module, member, call, arguments), as the page's host-foreign.js foreignCall answers it
-host_foreign_call(runtime, module, member, call, arguments): any? := {
+foreign_call(runtime: text, module: any, member: text, call: int, arguments: any): any? := {
 	pool = objc_autoreleasePoolPush()
 	# (a failure is the call's Error, a value the program may catch, as the page's foreignCall gives it)
-	answer: any? = foreign_answered(text(runtime), module, text(member), call == 1, arguments)
+	answer: any? = foreign_answered(runtime, module, member, call == 1, arguments)
 	objc_autoreleasePoolPop(pool)
 	answer
 }
 foreign_answered(runtime: text, module: any, member: text, call: bool, arguments: any): any? := {
 	named_module = module is text
-	module_name = if named_module then module else "value"
+	module_name = if named_module then text(module) else "value"
 	called = runtime + " " + module_name + "." + member
-	if runtime != JS_RUNTIME { return error(called + ": " + runtime + " is not in the native warp yet") }
-	if (named_module and not is_name(module)) or not member_named(member) { return error(called + ": not a name js has") }
+	if runtime != JS_RUNTIME { raise called + ": " + runtime + " is not in the native wap yet" }
+	if (named_module and not is_name(module)) or not member_named(member) { raise called + ": not a name js has" }
 	if named_module and module == APP_WINDOW { return window_answered(called, member, arguments) }
-	if calling_back { return error(called + ": " + NESTED_CALL) }
-	if call and arguments.any(argument => argument is function) { return error(called + ": " + UNSEEN_ARITY) }
+	if web.calling_back { raise called + ": " + NESTED_CALL }
+	if call and arguments.any(argument => argument is function) { raise called + ": " + UNSEEN_ARITY }
 	request = to_json({module: module, member: member, arguments: if call then arguments else ø})
-	answer = answered(hidden_view(), "return await warpForeignCall(request)", "request", request)
-	if answer#2 != ø { return error(failure_said(called, answer#2)) }
-	parse_json(answer#1)
+	answer = try answered(hidden_view(), "return await warpForeignCall(request)", "request", request) catch failure { raise failure_said(called, failure.message) }
+	parse_json(answer)
 }
 
-# `warp app check`: the text the page shows, read in the hidden web view
-host_webview_page_text(html): any := {
+# `wap app check`: the text the page shows, read in the hidden web view; "" for a page that did not load, said
+webview_page_text(html: text): text := {
 	pool = objc_autoreleasePoolPush()
 	shown_in = hidden_view()
-	answer = if page_loaded(shown_in, text(html)) then answered(shown_in, "return document.body?.innerText ?? ''", "", "") else [ø, ""]
-	if answer#1 == ø { eprint("the page did not load" + (if answer#2 != "" then ": " + answer#2 else "")) }
+	shown = if page_loaded(shown_in, html) then try answered(shown_in, "return document.body?.innerText ?? ''", "", "") catch failure { not_loaded(": " + failure.message) } else not_loaded("")
 	objc_autoreleasePoolPop(pool)
-	answer#1 ?? ""
+	shown
+}
+not_loaded(why: text): text := {
+	eprint("the page did not load" + why)
+	""
 }
