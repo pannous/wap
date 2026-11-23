@@ -92,7 +92,7 @@ source_commit=$(git -C "$tree" rev-parse HEAD)
 cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && echo "refresh-seed: replaced $seed"
 # (the old compiler's machine code goes with it, and every program's it compiled: the native wap writes the new
 # compiler's at its first run, below)
-rm -f "$(dirname "$seed")"/*.cwasm
+rm -f "$(dirname "$seed")"/*.cwasm "$(dirname "$seed")"/*.cwasm.notes
 # the native wap, the command that runs the seed (wap/extensions/native/driver.wap), built by it
 native=$(dirname "$(dirname "$seed")")
 "$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" \

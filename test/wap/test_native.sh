@@ -84,6 +84,9 @@ check "the native wap keeps the compiler's machine code beside it" "$(ls "$stage
 check "a program runs again from its kept machine code, compiled anew when a file it uses changes" "$(cd "$stage" && printf '%s\n' 'word() as text := "hi"' >used.wap && printf '%s\n' 'use "used.wap"' 'print word()' >using.wap && "$native_wap" using.wap && "$native_wap" using.wap && printf '%s\n' 'word() as text := "ho"' >used.wap && "$native_wap" using.wap 2>&1)" "hi
 hi
 ho"
+# what the compile said is said on every run, the first from the compile, the next from beside the kept machine code
+check "a program's compile hint is said again when it runs from its kept machine code" "$(cd "$stage" && printf '%s\n' 'x = 1' 'x = "ab"' 'print x' >retyped.wap && "$native_wap" retyped.wap 2>&1 >/dev/null | grep -c '^hint: ' && "$native_wap" retyped.wap 2>&1 >/dev/null | grep -c '^hint: ')" "1
+1"
 # a compiled module given in place of a program runs as it is, with its arguments (as the compiler runs)
 check "wap runs a compiled module with its arguments" "$(printf '%s\n' 'print args#2' >"$stage/arguments.wap" && "$native_wap" "$compiler" "$stage/arguments.wap" "$stage/arguments.wasm" && "$native_wap" "$stage/arguments.wasm" first second 2>&1)" "second"
 # a module rebuilt without a word a program it runs imports: the run names that word and the module
