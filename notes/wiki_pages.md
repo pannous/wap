@@ -29,9 +29,9 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - async.md (167 lines): wap-wiki
 - Bad.md (69 lines): wap-wiki
 - be.md (0 lines):
-- beauty.md (28 lines):
-- bignum.md (5 lines):
-- binding.md (15 lines):
+- beauty.md (28 lines): ✓ wap-wiki, prose, no forms to test
+- bignum.md (5 lines): ✓ wap-wiki, prose, no forms to test
+- binding.md (15 lines): wap-wiki, waits on the wording answer (block names, superscripts)
 - block.md (43 lines): ✓ wap-wiki, tests test_block_page.wap green, test_block_wanted.wap the forms still to build; wiki 3744c49
 - bool.md (33 lines): ✓ wap-wiki, tests test_bool_page.wap green; words bool-words (even, odd, a list's has); wiki df1b9b8
 - broadcast.md (2 lines):
