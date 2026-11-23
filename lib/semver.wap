@@ -1,0 +1,111 @@
+# The standard module semver (wiki/library-semver.md, semver.org 2.0.0): `use semver`. semver("1.2.3-rc.1+b5") reads a
+# Version: its major, minor and patch, its prerelease ["rc", "1"] and its build ["b5"]. Versions compare by the
+# precedence of section 11, the build ignored: semver_compare(a, b) is -1, 0 or 1, and `<`, semver_sort follow it.
+# satisfies(version, range) with npm's ranges: ^ ~ >= > <= < =, the wildcards x X *, comparators joined by spaces (and)
+# and || (or); a prerelease satisfies only a range naming a prerelease of its own major.minor.patch.
+
+class Version { major: int, minor: int, patch: int, prerelease: list<text>, build: list<text> }
+WILDCARDS := ["x", "X", "*", ""]
+# the operators a comparator may start with, the longer first
+OPERATORS := [">=", "<=", ">", "<", "=", "^", "~"]
+INEQUALITIES := [">=", "<=", ">", "<"]
+
+# [the text before the first mark, the text after it]; ["t", ""] without a mark
+split_off(t: text, mark: text): list<text> := {
+	at = find(t, mark)
+	if at == 0 then [t, ""] else [t[0:at - 1], t[at:]]
+}
+identifiers(t: text): list<text> := if t == "" then [] else t.split(".")
+semver(t: text): Version := {
+	written = trim(t)
+	plain = if written.starts_with("v") then written[1:] else written
+	with_build = split_off(plain, "+")
+	with_prerelease = split_off(with_build[0], "-")
+	numbers = with_prerelease[0].split(".")
+	if #numbers != 3 { raise "not a semantic version: ${t}" }
+	Version(int(numbers[0]), int(numbers[1]), int(numbers[2]), identifiers(with_prerelease[1]), identifiers(with_build[1]))
+}
+# the mark and the identifiers, nothing for none
+suffix(mark: text, ids: list<text>): text := if ids is empty then "" else mark + ids.join(".")
+text(v: Version): text := "${v.major}.${v.minor}.${v.patch}" + suffix("-", v.prerelease) + suffix("+", v.build)
+
+order_of(a: T, b: T): int := if a < b then -1 else if a > b then 1 else 0
+# one prerelease identifier: numbers by value and below words, words by their characters
+identifier_compare(a: text, b: text): int := {
+	if is_digits(a) and is_digits(b) then order_of(int(a), int(b))
+	else if is_digits(a) then -1
+	else if is_digits(b) then 1
+	else order_of(a, b)
+}
+# -1, 0 or 1 by precedence (section 11): 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-beta < 1.0.0
+semver_compare(x: Version, y: Version): int := {
+	for part in [order_of(x.major, y.major), order_of(x.minor, y.minor), order_of(x.patch, y.patch)] { if part != 0 { return part } }
+	if x.prerelease is empty or y.prerelease is empty { return order_of(#y.prerelease, #x.prerelease) }
+	for i in 0 upto min(#x.prerelease, #y.prerelease) {
+		c = identifier_compare(x.prerelease[i], y.prerelease[i])
+		if c != 0 { return c }
+	}
+	order_of(#x.prerelease, #y.prerelease)
+}
+semver_compare(a: text, b: text): int := semver_compare(semver(a), semver(b))
+<(a: Version, b: Version): bool := semver_compare(a, b) < 0
+semver_sort(versions: list<text>): list<text> := versions.sorted(before: (a, b) => semver_compare(a, b) < 0)
+
+# the numbers a partial version of a range gives before its first wildcard or its end: "1.2" and "1.2.x" give [1, 2],
+# "*" gives []
+range_parts(t: text): list<int> := {
+	parts = split_off(trim(t), "-")[0].split(".")
+	given: list<int> = []
+	while #given < #parts and #given < 3 and not WILDCARDS.contains(parts[#given]) { given.add(int(parts[#given])) }
+	given
+}
+# the lowest version of a partial one, the missing numbers 0, with its prerelease if it names one
+range_low(t: text): text := {
+	p = range_parts(t)
+	low = (0 upto 3).map(i => if i < #p then "${p[i]}" else "0").join(".")
+	prerelease = split_off(t, "-")[1]
+	if prerelease != "" and #p == 3 then "${low}-${prerelease}" else low
+}
+# the first version past ^ of the numbers: the next one of the first number that isn't 0
+caret_high(p: list<int>): text := {
+	if p[0] > 0 or #p == 1 then "${p[0] + 1}.0.0-0"
+	else if p[1] > 0 or #p == 2 then "0.${p[1] + 1}.0-0"
+	else "0.0.${p[2] + 1}-0"
+}
+# the first version past the ones a caret, a tilde or a partial version allows from its low one on; "" for an exact
+# version, which allows only itself
+range_high(operator: text, t: text): text := {
+	p = range_parts(t)
+	if operator == "^" then caret_high(p)
+	else if #p == 1 then "${p[0] + 1}.0.0-0"
+	else if operator == "~" or #p == 2 then "${p[0]}.${p[1] + 1}.0-0"
+	else ""
+}
+# the operator a comparator starts with, "" for none
+operator_of(comparator: text): text := {
+	found = OPERATORS.filter(o => comparator.starts_with(o))
+	if found is empty then "" else found[0]
+}
+# one comparator, ">=1.2.0", "^1.2", "1.x", "=1.2.3"
+comparator_holds(v: Version, comparator: text): bool := {
+	operator = operator_of(comparator)
+	t = trim(comparator[#operator:])
+	if INEQUALITIES.contains(operator) {
+		c = semver_compare(v, semver(range_low(t)))
+		return if operator == ">=" then c >= 0 else if operator == "<=" then c <= 0 else if operator == ">" then c > 0 else c < 0
+	}
+	if range_parts(t) is empty { return yes }
+	low = semver(range_low(t))
+	high = range_high(operator, t)
+	if high == "" then semver_compare(v, low) == 0 else semver_compare(v, low) >= 0 and semver_compare(v, semver(high)) < 0
+}
+# a prerelease version satisfies only comparators that name a prerelease of its major.minor.patch (npm)
+prerelease_allowed(v: Version, comparators: list<text>): bool := v.prerelease is empty or comparators.any(c => c.contains("-") and range_parts(c[#operator_of(c):]) == [v.major, v.minor, v.patch])
+# one set of comparators joined by spaces, all of which hold; an empty set is *
+set_holds(v: Version, alternative: text): bool := {
+	comparators = if words(alternative) is empty then ["*"] else words(alternative)
+	prerelease_allowed(v, comparators) and comparators.all(c => comparator_holds(v, c))
+}
+# satisfies("1.4.0", "^1.2.3") is yes; "1.2.7 || >=2.0.0 <3.0.0" holds when one of its sets holds wholly
+satisfies(v: Version, wanted: text): bool := wanted.split("||").any(alternative => set_holds(v, alternative))
+satisfies(version: text, wanted: text): bool := satisfies(semver(version), wanted)
