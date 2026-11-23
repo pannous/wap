@@ -6,8 +6,8 @@ notes/first_principles.md, notes/backbone.md and notes/agents/wap-owner.md ("Own
 Start or restart: `notes/agents/start.sh simplifier`. After a restart, continue from data/simplifier_log.md.
 
 ## The measure
-The number of Nodes wap's own reader produces for every wap/*.wap file, Meta excluded (scripts/wap-size.warp, or the
-census option that replaced it). Comments, blank lines, line breaks and name length count nothing, so removing
+The number of Nodes wap's own reader produces for every wap/*.wap file, Meta excluded (scripts/wap-size.warp, which the
+census runs). Comments, blank lines, line breaks and name length count nothing, so removing
 comments or squeezing lines gains nothing. It prints the total, the count per stage folder and the top functions by
 node count. Each new low goes into SIZE_NODES of test/wap/ratchet_census.sh.
 
