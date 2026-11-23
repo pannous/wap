@@ -68,6 +68,8 @@ first40(s: bytes<40>): i64 from '$stage/libs40.dylib'
 made40(): handle from '$stage/libs40.dylib'
 m = made40()
 print(text(sum40(m)) + \" \" + text(first40(m)))")" "14 1"
+check "the native wap tells its programs the library's folder" "$(ran library_folder "wap_library_folder(): text from 'c'
+print(text(exists(wap_library_folder() + \"/json.wap\")))")" "yes"
 # a typed list as C reads an array of its items (a GPU buffer's floats): C sums them and writes into them
 printf '%s\n' '#include <stdint.h>' 'double sum_f32(float* p, int64_t bytes) { double s = 0; for (int64_t i = 0; i < bytes / 4; i++) s += p[i]; return s; }' 'void halved(float* p, int64_t bytes) { for (int64_t i = 0; i < bytes / 4; i++) p[i] /= 2; }' 'int64_t sum_i32(int32_t* p, int64_t bytes) { int64_t s = 0; for (int64_t i = 0; i < bytes / 4; i++) s += p[i]; return s; }' >"$stage/items.c" && cc -shared -o "$stage/libitems.dylib" "$stage/items.c"
 check "a list<float32> crosses as C's floats, and C's writes are seen" "$(ran typed_items "sum_f32(xs: list<float32>, size: length): f64 from '$stage/libitems.dylib'

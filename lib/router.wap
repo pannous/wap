@@ -1,0 +1,136 @@
+# The standard module router (wiki/html.md "Routes"): a program's routes, `get "/users/:id" { … }`, and the request
+# each one answers. A route pattern "/users/:id" matches the path "/users/7", the parameter id being 7; "*" matches any
+# path (the not-found page). A parameter may declare its type: ":id:int" matches digits only, ":price:float" a decimal
+# number, ":name:text" any part. The last part may be optional (":tab?", ø when absent) or take the rest of the path
+# (":path*" zero or more parts, ":path+" one or more, joined by "/"). A route's body sets the answer's status and
+# headers, `status 418` and `header "X-Wap" "brewed"`; its value is the answer, a text as text, anything else as JSON.
+# web serves the routes over HTTP, wagi answers one request a WAGI host hands over.
+use json
+use text
+use url
+
+OK := 200
+NOT_FOUND := 404
+FAILED := 500
+PLAIN_TYPE := "text/plain; charset=utf-8"
+JSON_TYPE := "application/json"
+ANY_PATH := "*"
+PARAMETER_MARK := ":"
+# how often the last part of a pattern comes: at most once, any number of times, at least once
+OPTIONAL := "?"
+ANY_NUMBER := "*"
+AT_LEAST_ONE := "+"
+# what ends a parameter's name: its type, a regular expression's group, a mark
+NAME_ENDS := ":(?*+"
+DIGITS := "0123456789"
+NO_ROUTE := "no route answers "
+
+# a request as the routes read it: its method, path, query fields, headers by lower-case name and body, an HTML form's
+# fields too
+class Request { method: text, path: text, query: map<text, text> = {}, headers: map<text, text> = {}, body: text = "",
+	form: map<text, text> = {} }
+# a route: the requests of a method whose path matches its pattern, and its body, which answers them
+class Route { method: text, pattern: text, answer: () -> any }
+# what a route answered: its status, its header lines and its body
+class Answer { status: int, content_type: text, header_lines: list<text>, body: text }
+
+global routes: list<Route> = []
+# the request being answered and the route that answers it
+global asked_now = Request("GET", "/")
+global answering = Route("GET", ANY_PATH, () => "")
+# the answer's status and headers as the route's body sets them; the next request starts without them
+global answer_status = OK
+global answer_content_type = ""
+global answer_header_lines: list<text> = []
+
+# `get "/hi" { "hello" }`: the route answering GET requests of the path; post, put, delete and patch alike
+get(pattern: text, answer: block) := routes.add(Route("GET", pattern, answer))
+post(pattern: text, answer: block) := routes.add(Route("POST", pattern, answer))
+put(pattern: text, answer: block) := routes.add(Route("PUT", pattern, answer))
+delete(pattern: text, answer: block) := routes.add(Route("DELETE", pattern, answer))
+patch(pattern: text, answer: block) := routes.add(Route("PATCH", pattern, answer))
+
+# `status 418`: the answer's status
+status(code: int) := { answer_status = code }
+# `header "X-Wap" "brewed"`: a header of the answer; a Content-Type replaces the answer's own
+header(name: text, value: text) := {
+	if lower(name) == "content-type" { answer_content_type = value } else { answer_header_lines.add("${name}: ${value}") }
+}
+
+# the answer of the program's routes to a request: the route of exactly its path, else the first whose pattern matches;
+# a request no route takes is answered 404, a route that fails 500, saying why
+answer_of(asked: Request): Answer := {
+	answer_status = OK
+	answer_content_type = ""
+	answer_header_lines = []
+	asked_now = asked
+	taking = routes.filter(route => route.method == asked.method and route.pattern == asked.path)
+	matching = if taking is empty then routes.filter(route => route.method == asked.method and route_matches(route.pattern, asked.path)) else taking
+	if matching is empty { return failed(NOT_FOUND, NO_ROUTE + asked.method + " " + asked.path) }
+	answering = matching[0]
+	try answered(answering.answer()) catch e { failed(FAILED, e.message) }
+}
+# a route's value as its answer, with the status and headers its body set
+answered(value: any): Answer := {
+	own_type = if value is text then PLAIN_TYPE else JSON_TYPE
+	content_type = if answer_content_type is empty then own_type else answer_content_type
+	Answer(answer_status, content_type, answer_header_lines, if value is text then "${value}" else to_json(value))
+}
+failed(code: int, message: text): Answer := Answer(code, PLAIN_TYPE, [], message)
+
+# `parameter("id")` inside a route of "/users/:id": the path's part the parameter stands for, ø when it has none
+parameter(name: text): text? := route_segment(answering.pattern, asked_now.path, name)
+# the request a route answers, `request.path`, `request.form.get("item")`
+request(): Request := asked_now
+
+route_segments(path: text): list<text> := path.split("/").filter(segment => segment != "")
+# whether a pattern matches a path
+route_matches(pattern: text, path: text): bool := {
+	if pattern == ANY_PATH { return yes }
+	wanted = route_segments(pattern)
+	given = route_segments(path)
+	if wanted is empty { return given is empty }
+	mark = route_part_mark(wanted.last)
+	fixed = if mark is empty then #wanted else #wanted - 1
+	if #given < fixed { return no }
+	if mark is empty and #given != fixed { return no }
+	if mark == OPTIONAL and #given > fixed + 1 { return no }
+	if mark == AT_LEAST_ONE and #given == fixed { return no }
+	(0 upto fixed).all(i => if wanted[i].starts_with(PARAMETER_MARK) then route_fits(route_part_type(wanted[i]), given[i]) else wanted[i] == given[i])
+}
+# the part of the path the parameter `:name` of the pattern stands for; the rest of the path for a repeated one
+route_segment(pattern: text, path: text, name: text): text? := {
+	wanted = route_segments(pattern)
+	given = route_segments(path)
+	for i in 0 upto #wanted {
+		if route_part_name(wanted[i]) == name and i < #given {
+			mark = route_part_mark(wanted[i])
+			return if mark == ANY_NUMBER or mark == AT_LEAST_ONE then given.drop(i).join("/") else given[i]
+		}
+	}
+	ø
+}
+# the name of the parameter a pattern part declares (":id:int", ":id(\\d+)", ":id?" give "id"), "" for a fixed part
+route_part_name(part: text): text := {
+	if not part.starts_with(PARAMETER_MARK) { return "" }
+	name = part[1 ..]
+	ends = name.codepoints.map(c => NAME_ENDS.contains("${c}"))
+	at = ends.index_of(yes)
+	if at == 0 then name else name[0 .. at - 1]
+}
+# the type a parameter declares (":id:int" gives "int"), "" when it declares none
+route_part_type(part: text): text := {
+	declared = part.split(PARAMETER_MARK)
+	if #declared > 2 and route_part_mark(part) is empty and not part.contains("(") then declared[2] else ""
+}
+# how often the last part of a pattern may come: "?", "*", "+", or "" for exactly once
+route_part_mark(part: text): text := {
+	if part == ANY_PATH { return ANY_NUMBER }
+	last = part[#part - 1 ..]
+	if part.starts_with(PARAMETER_MARK) and (last == OPTIONAL or last == ANY_NUMBER or last == AT_LEAST_ONE) then last else ""
+}
+# whether a path part is all digits, with at most `dots` decimal points among them
+route_number(segment: text, dots: int): bool :=
+	segment != "" and segment.codepoints.all(c => c == '.' or DIGITS.contains("${c}")) and #segment.split(".") - 1 <= dots
+# whether a path part fits the declared type of its parameter
+route_fits(kind: text, segment: text): bool := if kind == "int" then route_number(segment, 0) else if kind == "float" then route_number(segment, 1) else yes
