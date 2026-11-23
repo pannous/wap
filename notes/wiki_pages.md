@@ -202,12 +202,12 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - property.md (48 lines): wap-wiki, tests test_property_page.wap green, test_property_wanted.wap; asked (setter sketches)
 - pure.md (34 lines): ✓ wap-wiki, prose (effects of: test_effects_wanted)
 - purity.md (0 lines):
-- Purpose.md (644 lines):
-- questions.md (144 lines):
-- quote.md (3 lines):
+- Purpose.md (644 lines): wap-wiki, an essay: asked (move to notes)
+- questions.md (144 lines): wap-wiki, open questions: asked to hide
+- quote.md (3 lines): wap-wiki, prose; asked (wasp, import)
 - random.md (23 lines): ✓ feea51f (lib/random.wap, test/test_random.wap 10 ✓; die reading; secure random_bytes not yet, card host-random)
-- range.md (23 lines):
-- rant.md (15 lines):
+- range.md (23 lines): wap-wiki, tests test_range_page.wap green; asked (1…5 do)
+- rant.md (15 lines): wap-wiki, links; asked (wasp)
 - README.md (0 lines):
 - real.md (0 lines):
 - reference.md (69 lines):
