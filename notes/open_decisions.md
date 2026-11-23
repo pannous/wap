@@ -4,8 +4,7 @@ Shapes waiting for the user's discussion, each with its core lines, the case aga
 does it. Line counts are estimates from reading the code, marked as such; the measured size comes with the branch.
 An entry goes once decided (its decision then lives in the wiki or notes/debts.md).
 
-## The top debts (notes/debts.md), 2026-11-22, warp-fixer; 1 and 3 decided 2026-11-23 (cards signature-function-values,
-own-type-overloads), the "5" + 3 warning parked (digit-text-compile-warning)
+## The top debts still open (notes/debts.md); the "5" + 3 warning is parked (card digit-text-compile-warning)
 
 ### 2. Op comes from the operator table: each spelling once
 
@@ -33,7 +32,7 @@ own-type-overloads), the "5" + 3 warning parked (digit-text-compile-warning)
 - Debt: sugar/records.wap:15, rules/templates.wap:27. A template writing `($head: $type := $body)` builds a Define,
   while the same text in a program reaches the rules as its phrase. So a rule's output never fits another rule
   written for the source text: a method's `as` and `:` forms are two rules, and the operator `as` result type
-  (dropped from general-overload-mechanism) could not be written as one rule.
+  cannot be written as one rule.
 - Shape: a template is built by the reader and operator stage from its text, as the program is, and fires the rules
   again (the termination check already guards that). The template builder's own Define and Set construction goes.
 - Core: estimate −10 to +10 lines: the builder's special cases go, a re-reading of the built phrase comes in.
