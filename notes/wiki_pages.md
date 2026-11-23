@@ -96,20 +96,20 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - go.md (0 lines):
 - goals.md (42 lines):
 - good.md (8 lines):
-- graphics.md (157 lines):
+- graphics.md (157 lines): wap-wiki, waits on draw loading (wap-host-bridge); test_graphics_wanted red
 - group.md (10 lines):
 - grouping.md (46 lines):
 - guiding-principles.md (13 lines):
 - haskell.md (49 lines):
-- hex.md (11 lines):
+- hex.md (11 lines): wap-wiki
 - Home.md (47 lines):
 - html.md (159 lines):
 - hyperreals.md (980 lines):
 - ideas.md (15 lines):
 - immutable.md (0 lines):
-- import.md (8 lines):
-- in.md (17 lines):
-- include.md (10 lines):
+- import.md (8 lines): wap-wiki, asked
+- in.md (17 lines): wap-wiki
+- include.md (10 lines): wap-wiki, asked
 - indexing.md (45 lines):
 - inspiration.md (10 lines):
 - int.md (26 lines):
