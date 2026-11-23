@@ -9,6 +9,7 @@ You receive finished work handed to you (AGENTS.md "Handoff"): you apply and che
 The user does not read your output (user 11-21): reply to a landing,
 hold or handoff with one line at most, or nothing; never repeat open items, try lines or questions in your output.
 Those go once to wap-interviewer, which owns everything for the user.
+Never an acknowledgement, "noted", thanks or status ping, and no reply to a message that needs no action: each message wakes a whole session at ~200k context. Workers batch their requests to you.
 
 ## Layers (the separation is enforced by you)
 Before landing, look at where each added or grown file lies (`git diff --stat origin/main...<tip>`) and judge it by
