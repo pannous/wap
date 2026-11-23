@@ -136,33 +136,33 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-compress.md (40 lines):
 - library-config-formats.md (67 lines):
 - library-csv.md (32 lines): ✓ 95f2e02 (lib/csv.wap, test/test_csv.wap 3 ✓; print of nested texts unquoted, with wap-interviewer)
-- library-diff.md (45 lines):
+- library-diff.md (45 lines): ✓ e7eb7c7 (lib/diff.wap, edits the enum Edit, test/test_diff.wap 4 ✓; split(" ")[1] workaround until wap-reader fixes indexing a call)
 - library-dogfood-apps.md (51 lines):
 - library-fractions.md (39 lines):
 - library-functions.md (28 lines):
 - library-geometry.md (38 lines): ✓ 8e9bd76 (lib/geometry.wap, math.wap trig and round_to, test/test_geometry.wap 5 ✓; round_to without `use math` not yet, with wap-binding)
 - library-graphs.md (40 lines):
-- library-intervals.md (36 lines):
+- library-intervals.md (36 lines): ✓ cf91cd6 (lib/intervals.wap, test/test_intervals.wap 5 ✓; Instants not yet)
 - library-json-tools.md (33 lines):
 - library-map-helpers.md (36 lines):
 - library-markdown.md (54 lines):
-- library-matrix.md (26 lines):
-- library-money.md (43 lines):
+- library-matrix.md (26 lines): ✓ 1845c85 (lib/matrix.wap determinant, inverse, solve; test/test_matrix.wap 3 ✓; the Matrix class of matrix.warp not ported yet)
+- library-money.md (43 lines): ✓ 3c607e3 (lib/money.wap, Rounding an enum, test/test_money.wap 6 ✓)
 - library-numeric.md (36 lines): ✓ 0fefa6f (lib/numeric.wap, lib/matrix.wap solve, test/test_numeric.wap 5 ✓; intro "highest power first" → constant first, with wap-interviewer)
-- library-path.md (46 lines): wap-wiki-lib
+- library-path.md (46 lines): ✓ 5e0b30d (lib/path.wap, test/test_path.wap 7 ✓)
 - library-primes.md (26 lines): ✓ 6b5ca30 (lib/math.wap primes words, test/test_primes.wap 3 ✓; without `use` not yet, with wap-binding)
 - library-reference.md (36 lines):
 - library-regex.md (107 lines):
 - library-slugs.md (36 lines): ✓ 45356f7 (lib/slugs.wap, test/test_slugs.wap 8 ✓; lib/text.wap holds upper and words until types has them)
 - library-tables.md (47 lines):
-- library-template.md (37 lines):
+- library-template.md (37 lines): ✓ 26959ef (lib/template.wap, lib/html.wap html_escape, test/test_template.wap 3 ✓; `{items: []}` not yet (card any-values), nested-map sections wait for any-truth-crash)
 - library-time-patterns-durations.md (42 lines):
 - library-unicode.md (33 lines):
 - library-uuid.md (31 lines):
 - library-xml.md (28 lines):
 - like.md (59 lines):
 - Lisp.md (19 lines):
-- list.md (279 lines): wap-wiki, tests 7789cd9, wiki 4b7316a; its list words land with map.md's branch wiki-types; waits: `xs.index(x)` (after the template-parameters fix), the forms being built (`(1 2)`, `it`, `x -1`, spread, `3 times`, `person{…}`)
+- list.md (279 lines): wap-wiki, tests 7789cd9 + list-spaced, list words 504a102 + a09c988, wiki 8ff17c6; waits: how `(1 2)` prints (user), `{1 2 3}` (wap-reader), the forms being built (`3 times [1]`, `it`, `x -1`)
 - literal.md (34 lines):
 - macro.md (18 lines):
 - map.md (119 lines): (released by wap-wiki) tests 63835a0, wiki a1ab2dc; branch wiki-types d849c72 (show, count, first, Python's words) in its landing checks; waits: bare `a: map` (being built)
@@ -243,7 +243,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - symbol.md (67 lines):
 - symbolism.md (275 lines):
 - syntax.md (56 lines):
-- task.md (31 lines):
+- task.md (31 lines): wap-wiki-lib
 - text.md (1 lines):
 - thread.md (49 lines):
 - time.md (51 lines):
