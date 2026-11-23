@@ -141,7 +141,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-fractions.md (39 lines):
 - library-functions.md (28 lines):
 - library-geometry.md (38 lines): ✓ 8e9bd76 (lib/geometry.wap, math.wap trig and round_to, test/test_geometry.wap 5 ✓; round_to without `use math` not yet, with wap-binding)
-- library-graphs.md (40 lines): wap-wiki-lib
+- library-graphs.md (40 lines): ✓ 4435869 (lib/graphs.wap, test/test_graphs.wap 10 ✓; the path alone, path_cost)
 - library-intervals.md (36 lines): ✓ cf91cd6 (lib/intervals.wap, test/test_intervals.wap 5 ✓; Instants not yet)
 - library-json-tools.md (33 lines):
 - library-map-helpers.md (36 lines):
@@ -159,7 +159,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-time-patterns-durations.md (42 lines):
 - library-unicode.md (33 lines):
 - library-uuid.md (31 lines):
-- library-xml.md (28 lines):
+- library-xml.md (28 lines): wap-wiki-lib
 - like.md (59 lines):
 - Lisp.md (19 lines):
 - list.md (279 lines): wap-wiki, tests 7789cd9 + list-spaced, list words 504a102 + a09c988, wiki 8ff17c6; waits: how `(1 2)` prints (user), `{1 2 3}` (wap-reader), the forms being built (`3 times [1]`, `it`, `x -1`)
@@ -205,7 +205,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - Purpose.md (644 lines):
 - questions.md (144 lines):
 - quote.md (3 lines):
-- random.md (23 lines):
+- random.md (23 lines): waits: xor/shift (5bb73f5, queued), a seeded Random in plain wap
 - range.md (23 lines):
 - rant.md (15 lines):
 - README.md (0 lines):
