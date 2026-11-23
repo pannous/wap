@@ -54,11 +54,16 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	scopes = with_last_scope(scopes, own_words(called, given, s))
 	made = made_from_map(n, called, candidates, given, s)
 	if made != ø { return typed_form(made, s, f, expected) }
+	call_chosen(n, called, scopes, given, expected, s, f)
+}
+# A call of the definition chosen among these scopes for typed arguments, each fitted as its parameter takes it, a
+# left-out one given its default; a call made without a frame, word_called, types its defaults on their own
+call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Node?, s: TypingState, f: TypeFrame?) as Node := {
 	meant = chosen_definition(n, called, scopes, given, expected, s)
-	taken = arguments_fitted(meant, given, s) + defaults_given(meant, #given, s, f)
+	taken = arguments_fitted(meant, given, s) + defaults_given(meant, #given, s, f ?? TypeFrame())
 	chosen = function_typed(meant, taken.map(argument => value_type(argument)), s, n)
-	called_reads(chosen, n, s, f)
-	result_of(refitted(Call(with_fact(called, DEFINED_AT, declared_name(signed_name(chosen, s))), taken), n), chosen)
+	if f != ø { called_reads(chosen, n, s, f!) }
+	result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
 }
 # a list literal given alone where no definition takes one argument, its items the arguments: `no_comma (1, 2)` is
 # no_comma(1, 2) (wiki/function.md); a map `{…}` stays one argument
@@ -70,7 +75,8 @@ spread_alone(arguments: list, candidates: list<Signature>, s: TypingState) as li
 result_wanted(argument: Node, at: int, outer: list<Signature>, s: TypingState) as Node? := {
 	results = results_written(argument, s)
 	if #results < 2 { return ø }
-	taking = outer.filter(definition => results.any(result => wants_at(definition, at, result)))
+	# a generic parameter there takes any of them, so no one definition is meant
+	taking = outer.filter(definition => results.any(result => wants_at(definition, at, result)) or has_letters(parameter_type_at(definition, at) ?? EMPTY_SYMBOL, s.records))
 	giving = taking.filter(definition => wants_at(definition, at, definition.result))
 	chosen = if #giving == 1 then giving else taking
 	if #chosen == 1 then parameter_type_at(chosen#1, at) else ø
@@ -80,8 +86,11 @@ wants_at(definition: Signature, at: int, type: Node?) as bool := {
 	wanted = parameter_type_at(definition, at) ?? return no
 	type != ø and same_type(type, wanted)
 }
-# the results a call's definitions write, of those taking as many arguments
-results_written(argument: Node, s: TypingState) as list := match argument {
+# the types an argument may be read as: the results a call's definitions write, of those taking as many arguments; a
+# one-character literal a char or a text, a list of them a list of either
+results_written(argument: Node, s: TypingState) as list<Node> := match argument {
+	Char(value) => [symbol(CHAR_TYPE), TEXT_SYMBOL]
+	List(items, Bracket.Square, separator) => if items is empty then [] else results_written(items#1, s).map(list_type)
 	Call(called, parts) => if fact_of(called, CANDIDATES) == ø and fact_of(called, DEFINED_AT) == ø or holds_value(called) then [] else candidate_scopes(called).flat_map(scope => scope).map(definer => definition_at(definer, s)).filter(definition => takes_count(definition, #parts, s)).map(definition => definition.result).compact()
 	_ => []
 }
@@ -144,9 +153,8 @@ part_typed(n: Node, typed: Node, key: Node, s: TypingState, f: TypeFrame, expect
 	if named is empty { refused(n, "nothing defines ${key}, neither as a function nor as a field of ${value_type(typed) ?? "none"}") }
 	# a call of a function only a module this file does not use defines: name that module
 	if fact_of(n, WRITTEN_CALL) != ø { refused(n, "${key} is defined in ${named#1.module}, which this file does not use: add use \"${named#1.module}\"") }
-	chosen = function_typed(chosen_definition(n, word, word_scopes(text(word), s), [typed], expected, s), [value_type(typed)], s, n)
-	called_reads(chosen, n, s, f)
-	result_of(refitted(Call(calling(refitted(symbol(text(key)), n), chosen, s), [typed]), n), chosen)
+	# the value taken as a call takes its argument: converted, `[1, 2].f` boxing the list where f takes any
+	call_chosen(n, refitted(symbol(text(key)), n), word_scopes(text(word), s), [typed], expected, s, f)
 }
 # a value where the type it reads as is wanted, by that type's word: a written character where a text is wanted is
 # its text, any other value the call text(c), a range list(r), an atom Node('a')
@@ -173,12 +181,7 @@ arguments_fitted(definition: Signature, given: list, s: TypingState) as list := 
 	(1 to #given).map(at => as_wanted(given#at, wanted#at, s))
 }
 # the call of a word with these typed arguments, the definition chosen among all of the word's
-word_called(n: Node, word: text, given: list, expected: Node?, s: TypingState) as Node := {
-	meant = chosen_definition(n, symbol(word), word_scopes(word, s), given, expected, s)
-	taken = arguments_fitted(meant, given, s)
-	chosen = function_typed(meant, taken.map(value_type), s, n)
-	result_of(refitted(Call(calling(symbol(word), chosen, s), taken), n), chosen)
-}
+word_called(n: Node, word: text, given: list, expected: Node?, s: TypingState) as Node := call_chosen(n, symbol(word), word_scopes(word, s), given, expected, s, ø)
 # a word's definitions layer by layer, as a call written at the program's top finds them, the program's hiding the
 # library's; then those typing wrote itself
 word_scopes(word: text, s: TypingState) as list := {
@@ -418,7 +421,7 @@ names_bare_kind(type: Node?) as bool := {
 # the type a refusal asks to write in full: `list<…>` for a bare list, else an example
 full_type_hint(written: Node?) as text := if names_bare_kind(written) then text(base_or_self(written)) + "<…>" else "int"
 # types as a message names them, `int, text?`
-candidates_text(definitions: list<Signature>, s: TypingState) as text := definitions.map(definition => "${written_name(define_of(definition, s))}(${parameters_in(definition, s).join(", ")}), ${written_at(definition, s)}").join("; ")
+candidates_text(definitions: list<Signature>, s: TypingState) as text := definitions.map(definition => "${signature_text(declared_name(written_name(define_of(definition, s))), parameters_in(definition, s), definition.result, RESULT_WORD)}, ${written_at(definition, s)}").join("; ")
 # where a function is written, as a message names it: `line 18 of equality.wap`
 written_at(definition: Signature, s: TypingState) as text := "line ${line_of(define_of(definition, s))} of ${definition.module.split("/").last}"
 # a function as a refusal names it, its place telling apart the functions of one name and the function values, each a λ

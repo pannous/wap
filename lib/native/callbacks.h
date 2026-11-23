@@ -1,13 +1,13 @@
-// C functions a program's function is handed to C as (lib/callbacks.warp c_callback): included behind lib/native/wasi.c
+// C functions a program's function is handed to C as (lib/callbacks.wap c_callback): included behind lib/native/wasi.c
 // (running_wasi) and libraries.h, by foreign.c and the native wap (wap/extensions/native/main.c), whose own
 // c_callback_answered each trampoline calls
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-// a pointer C passed to a callback (lib/callbacks.warp), returned as a handle, which the driver makes its id
+// a pointer C passed to a callback (lib/callbacks.wap), returned as a handle, which the driver makes its id
 void* pointer_handle(int64_t address) { return (void*)(intptr_t)address; }
-// The C functions a warp function behind lib/callbacks.warp c_callback is passed to C as, one a slot: each calls the
+// The C functions a warp function behind lib/callbacks.wap c_callback is passed to C as, one a slot: each calls the
 // driver's c_callback_answered(slot, its six integer arguments), which calls the program's c_callback_fired; float
 // arguments never reach one (they come in other registers)
 typedef uint64_t (*callback_answer_t)(w2c_program*, u64, u64, u64, u64, u64, u64, u64);
