@@ -1,0 +1,339 @@
+# The standard module draw (wiki/graphics.md): `use draw`, a canvas of colored pixels shown by paint, in the window.
+# A color is color.wap's Color; the canvas keeps its pixels as 0xAARRGGBB numbers, as paint shows them. Where a GPU
+# draws (the window's gpu_drawing), the shapes are drawn there instead: no pixels here, show() hands it the shapes
+# drawn since the last show, each a quad of SHAPE_SHADER
+use math
+use color
+use png
+use "host/native_host/window.wap"
+use "host/native_host/gpu.wap"
+use "host/native_host/paint.wap"
+
+# the paper and the ink of the system's theme as the program starts: `clear(paper)` clears to the paper, `ink` draws
+# what stands out on it. The light paper is what paint shows 0 as
+PALE := 0xFFFAFAFA
+DARK := 0xFF1D1D1D
+# the device pixels a canvas pixel spans across: the display's density over the 96 dpi a CSS pixel has (a Retina
+# display 2). Shapes and words are drawn at the screen's own pixels while a program keeps its sizes and coordinates
+PIXEL_DPI := 96
+# a frame drawn slower than FRAME_BUDGET_MS from clear to show at more than one pixel a point, SLOW_FRAMES in a row,
+# and the canvas is drawn at one pixel a point from then on (said once): 30 frames a second over sharpness
+FRAME_BUDGET_MS := 33
+SLOW_FRAMES := 3
+# a channel's brightest value, and the bits a channel starts at
+BRIGHTEST := 255
+CHANNEL_SHIFTS := [16, 8, 0]
+OPAQUE := 0xFF000000
+
+# --- on the GPU: each shape three vec4s, [kind, a, b, c] [d, e, f, 0] [r, g, b, alpha], drawn one quad each in
+# order, blended over the ones before. A shape covers the pixels the CPU's draws cover, edges smoothed alike
+enum Shape { Previous, Fill, Rect, Circle, Segment, Words }
+# (a storage array needs more than 4 numbers: the words' coverage starts with that many zeros)
+COVERAGE_START := [0.0, 0.0, 0.0, 0.0, 0.0]
+SHAPE_SHADER := "
+struct Shaded { @builtin(position) at: vec4f, @location(0) @interpolate(flat) drawn: u32 }
+fn edge(inside: f32) -> f32 { return clamp(inside + 0.5, 0.0, 1.0); }
+// the quad around the shape, a device pixel more where an edge is smoothed
+@vertex fn shape_box(@builtin(vertex_index) corner: u32, @builtin(instance_index) drawn: u32) -> Shaded {
+	let head = $shapes[drawn * 3u];
+	let more = $shapes[drawn * 3u + 1u];
+	let kind = u32(head.x);
+	let pixel = $canvas.x / $size.x;
+	let end = vec2f(head.w, more.x);
+	var low = vec2f(0.0);
+	var high = $canvas;
+	if kind == 2u { low = head.yz; high = end; }
+	if kind == 3u { low = head.yz - vec2f(head.w + pixel); high = head.yz + vec2f(head.w + pixel); }
+	if kind == 4u { low = min(head.yz, end) - vec2f(more.y + pixel); high = max(head.yz, end) + vec2f(more.y + pixel); }
+	if kind == 5u { low = head.yz; high = head.yz + end / more.z; }
+	let place = mix(low, high, vec2f(f32(corner & 1u), f32(corner >> 1u)));
+	return Shaded(vec4f(place.x / $canvas.x * 2.0 - 1.0, 1.0 - place.y / $canvas.y * 2.0, 0.0, 1.0), drawn);
+}
+@fragment fn main(shaded: Shaded) -> @location(0) vec4f {
+	let head = $shapes[shaded.drawn * 3u];
+	let more = $shapes[shaded.drawn * 3u + 1u];
+	let color = $shapes[shaded.drawn * 3u + 2u];
+	let kind = u32(head.x);
+	if kind == 0u { return $previous(shaded.at.xy); }
+	// device pixels a canvas pixel; this pixel's center on the canvas
+	let scale = $size.x / $canvas.x;
+	let at = shaded.at.xy / scale;
+	var covered = 1.0;
+	if kind == 3u { covered = edge((head.w - distance(at, head.yz)) * scale); }
+	if kind == 4u {
+		let way = vec2f(head.w, more.x) - head.yz;
+		let projected = dot(at - head.yz, way) / max(dot(way, way), 0.000001);
+		if projected < 0.0 && more.z == 0.0 { discard; }
+		covered = edge((more.y - length(at - head.yz - clamp(projected, 0.0, 1.0) * way)) * scale);
+	}
+	if kind == 5u {
+		let cell = vec2i(floor((at - head.yz) * more.z));
+		if cell.x < 0 || cell.y < 0 || cell.x >= i32(head.w) || cell.y >= i32(more.x) { discard; }
+		// (paint's list of numbers, four to a vec4f)
+		let n = u32(i32(more.y) + cell.y * i32(head.w) + cell.x);
+		covered = $coverage[n / 4u][n % 4u];
+	}
+	if covered <= 0.0 { discard; }
+	return vec4f(color.rgb, color.a * covered);
+}
+"
+
+theme_dark := dark_mode()
+blank_argb := if theme_dark then DARK else PALE
+paper := Color(blank_argb)
+ink := Color(if theme_dark then PALE else DARK)
+
+# the canvas: its size in canvas pixels, the device pixels a canvas pixel spans across, and what it holds: its pixels
+# here, or on the GPU the shapes drawn since the last show and since the last clear (save draws those again)
+class Canvas {
+	width: int
+	height: int
+	scale: int
+	on_gpu: bool
+	pixels: list<int> = []
+	drawn: list<list<float>> = []
+	kept: list<list<float>> = []
+	coverage: list<float> = COVERAGE_START
+	cleared_at: int = -1
+	slow_frames: int = 0
+	size_difference_said: bool = no
+	device_width(): int := width * scale
+	device_height(): int := height * scale
+	# canvas.resize(width, height): a blank canvas of that size, the window too, which then shows it pixel for pixel
+	resize(new_width: int, new_height: int) := {
+		width = new_width
+		height = new_height
+		scale = display_scale()
+		blanked()
+		window_size_set(new_width, new_height)
+	}
+	# its pixels before anything is drawn: the paper
+	blanked() := cleared(blank_argb)
+	# all one color; on the GPU a shape covering the shapes before, which are dropped
+	cleared(color: int) := {
+		if on_gpu {
+			drawn = []
+			kept = []
+			coverage = COVERAGE_START
+			shape(Fill, 0, 0, 0, 0, 0, 0, color)
+		} else { pixels = [color for i in 0 .. device_width() * device_height()] }
+	}
+	# a shape drawn on the GPU (SHAPE_SHADER): its kind, its six numbers, its color
+	shape(kind: Shape, a: float, b: float, c: float, d: float, e: float, f: float, color: int) := {
+		vectors = [[kind as int, a, b, c], [d, e, f, 0.0], CHANNEL_SHIFTS.map(shift => channel(color, shift) / BRIGHTEST) + [alpha(color) / BRIGHTEST]]
+		drawn.extend(vectors)
+		kept.extend(vectors)
+	}
+	format(): text := "canvas ${width}×${height}"
+}
+display_scale(): int := max(1, round(display_now().dpi / PIXEL_DPI))
+# the canvas until canvas(width, height) sizes it: show() alone paints this one, at the window's size
+global drawn_canvas: Canvas = canvas_made(window_width(), window_height())
+canvas_made(width: int, height: int): Canvas := {
+	made = Canvas(width, height, display_scale(), gpu_drawing())
+	made.blanked()
+	made
+}
+# the canvas as drawn so far: `canvas.width`, `canvas.resize(…)`, `save(canvas, ./painting.png)`
+canvas(): Canvas := drawn_canvas
+canvas(width: int, height: int) := drawn_canvas.resize(width, height)
+# the pixel a coordinate falls in
+cell(v: float): int := floor(v) as int
+
+channel(color: int, shift: int): int := (color >> shift) % (BRIGHTEST + 1)
+alpha(color: int): int := channel(color, 24)
+# the shapes and the words' coverage as paint's values, the shader reading them
+shapes_values(drawn: list<list<float>>, coverage: list<float>): map<text, any> := {shapes: drawn, coverage: coverage, canvas: [drawn_canvas.width, drawn_canvas.height], instances: #drawn /! 3}
+
+# clear(red) fills the canvas with red; clear(paper) clears it to its blank color
+clear(color: Color) := {
+	drawn_canvas.cleared_at = wall_clock_ms()
+	drawn_canvas.cleared(color.argb)
+}
+
+# the color over what is there by alpha a from 0 to 255 (its own, or a share of it at a shape's edge)
+blended(below: int, color: int, a: int): int := {
+	under = if below == 0 then blank_argb else below
+	if a >= BRIGHTEST { return color }
+	if a <= 0 { return under }
+	OPAQUE + CHANNEL_SHIFTS.map(shift => channel_mix(color, under, a, shift) << shift).sum()
+}
+# one channel of color over under, by alpha a from 0 to 255
+channel_mix(color: int, under: int, a: int, shift: int): int := (channel(color, shift) * a + channel(under, shift) * (BRIGHTEST - a)) /! BRIGHTEST
+
+# the device pixel col, row covered by `coverage` (0 to 1) of a shape of color: an edge's pixel takes that share of it
+shade(col: int, row: int, color: int, coverage: float) := {
+	a = if coverage >= 1 then alpha(color) else round(alpha(color) * coverage)
+	if coverage > 0 and col >= 0 and row >= 0 and col < drawn_canvas.device_width() and row < drawn_canvas.device_height() {
+		at = row * drawn_canvas.device_width() + col
+		drawn_canvas.pixels[at] = blended(drawn_canvas.pixels[at], color, a)
+	}
+}
+# how much of a pixel an edge `inside` pixels away from its center covers (negative: outside), smoothed over one pixel
+edge(inside: float): float := clamp(inside + 0.5, 0.0, 1.0)
+# the device pixels from col, row, `across` by `down` of them, one color
+block(col: int, row: int, across: int, down: int, color: int) := {
+	for r in row .. row + down { for c in col .. col + across { shade(c, r, color, 1.0) } }
+}
+# the device pixel a canvas coordinate falls in
+device_cell(v: float): int := cell(v * drawn_canvas.scale)
+
+# the canvas pixel x, y: the device pixels it spans
+dot(x: float, y: float, color: Color) := rect(cell(x), cell(y), 1, 1, color)
+rect(x: float, y: float, width: float, height: float, color: Color) := {
+	if drawn_canvas.on_gpu { drawn_canvas.shape(Rect, cell(x), cell(y), cell(x + width), cell(y + height), 0, 0, color.argb) }
+	else { block(device_cell(x), device_cell(y), device_cell(x + width) - device_cell(x), device_cell(y + height) - device_cell(y), color.argb) }
+}
+# a filled circle around x, y
+circle(x: float, y: float, radius: float, color: Color) := {
+	if drawn_canvas.on_gpu then drawn_canvas.shape(Circle, x, y, radius, 0, 0, 0, color.argb) else circle_pixels(x, y, radius, color.argb)
+}
+# the device pixels a circle covers, its rim smoothed
+circle_pixels(x: float, y: float, radius: float, color: int) := {
+	scale = drawn_canvas.scale
+	center_x = x * scale
+	center_y = y * scale
+	rim = radius * scale
+	for row in cell(center_y - rim - 0.5) .. cell(center_y + rim + 0.5) + 1 {
+		for col in cell(center_x - rim - 0.5) .. cell(center_x + rim + 0.5) + 1 { shade(col, row, color, edge(rim - hypotenuse(col + 0.5 - center_x, row + 0.5 - center_y))) }
+	}
+}
+
+# a line from the canvas pixel x1, y1 to x2, y2 as dot names them, `width` pixels wide, round ends, edges smoothed
+line(x1: float, y1: float, x2: float, y2: float, color: Color, width: float = 1.0) := segment(x1, y1, x2, y2, color.argb, width, yes)
+# lines `width` pixels wide through the canvas places [x, y] one after the other, joined smoothly: no joint covered
+# twice, so a translucent color shows no dots where they meet
+polyline(corners: list<list<float>>, color: Color, width: float = 1.0) := {
+	# a closed one (its last corner its first, within a hundredth of a pixel) has no start: its last line ends there
+	closed = abs(corners[0][0] - corners.last()[0]) + abs(corners[0][1] - corners.last()[1]) < 0.01
+	for i in 0 .. #corners - 1 { segment(corners[i][0], corners[i][1], corners[i + 1][0], corners[i + 1][1], color.argb, width, i == 0 and not closed) }
+}
+# a function's graph from start to stop, `plot(siren, 0, π)`, its lowest and highest value fitting the canvas within a
+# PLOT_MARGIN share of its smaller side, on cleared paper in ink, the zero line pale where the graph crosses it, and
+# shown. Each canvas column is sampled PLOT_SAMPLES times, as a sound's waveform is shown: a column whose samples
+# spread wider than the line covers their whole span, so a wave too fast for the canvas shows its envelope
+PLOT_MARGIN := 0.05
+PLOT_WIDTH := 2.0
+PLOT_SAMPLES := 16
+ZERO_LINE_ALPHA := 0.3
+plot(f: (float) -> float, start: float, stop: float) := {
+	width = drawn_canvas.width
+	height = drawn_canvas.height
+	margin = max(1, round(min(width, height) * PLOT_MARGIN))
+	columns = width - 2 * margin
+	samples = columns * PLOT_SAMPLES
+	ys = [f(start + (stop - start) * at / samples) for at in 0 .. samples + 1]
+	low = ys.min
+	high = ys.max
+	span = if high == low then 1.0 else high - low
+	row = (y: float) => margin + (high - y) * (height - 2 * margin) / span
+	clear(paper)
+	if low < 0 and high > 0 { line(margin, row(0.0), width - margin, row(0.0), with_alpha(ink, ZERO_LINE_ALPHA)) }
+	polyline([[margin + column, row(ys[column * PLOT_SAMPLES])] for column in 0 .. columns + 1], ink, PLOT_WIDTH)
+	for column in 0 .. columns {
+		within = ys[column * PLOT_SAMPLES .. (column + 1) * PLOT_SAMPLES + 1]
+		top = row(within.max)
+		bottom = row(within.min)
+		if bottom - top > PLOT_WIDTH { line(margin + column + 0.5, top, margin + column + 0.5, bottom, ink) }
+	}
+	show()
+}
+# a line of a polyline: its start's round end only where `started` (the first), else the line before covered it
+segment(x1: float, y1: float, x2: float, y2: float, color: int, width: float, started: bool) := {
+	if drawn_canvas.on_gpu { drawn_canvas.shape(Segment, x1 + 0.5, y1 + 0.5, x2 + 0.5, y2 + 0.5, width / 2, if started then 1 else 0, color) }
+	else { segment_walked(x1, y1, x2, y2, color, width, started) }
+}
+# its pixels here, walked along its longer side, the pixels across it within reach; steep: x and y swapped while walking
+segment_walked(x1: float, y1: float, x2: float, y2: float, color: int, width: float, started: bool) := {
+	scale = drawn_canvas.scale
+	steep = abs(y2 - y1) > abs(x2 - x1)
+	# its start in device pixels, at the center of the pixel it names, along the walk and across it; the way to its end
+	from_along = ((if steep then y1 else x1) + 0.5) * scale
+	from_across = ((if steep then x1 else y1) + 0.5) * scale
+	ahead = ((if steep then y2 else x2) + 0.5) * scale - from_along
+	aside = ((if steep then x2 else y2) + 0.5) * scale - from_across
+	length_squared = ahead * ahead + aside * aside
+	per_length_squared = if length_squared == 0 then 0.0 else 1 / length_squared
+	slope = if ahead == 0 then 0.0 else aside / ahead
+	half = width * scale / 2
+	# a pixel is touched within half the width and half a pixel of the line: across the walk, that over its cosine
+	touching = half + 0.5
+	band = touching * hypotenuse(1.0, slope)
+	low = min(from_along, from_along + ahead)
+	high = max(from_along, from_along + ahead)
+	for major in cell(low - touching - 0.5) .. cell(high + touching - 0.5) + 1 {
+		x = major + 0.5 - from_along
+		middle = (clamp(major + 0.5, low, high) - from_along) * slope
+		for minor in cell(from_across + middle - band - 0.5) .. cell(from_across + middle + band - 0.5) + 1 {
+			# the pixel's center from the start, and the share of the line to its nearest point
+			y = minor + 0.5 - from_across
+			projected = (x * ahead + y * aside) * per_length_squared
+			if projected < 0 and not started { continue }
+			share = clamp(projected, 0.0, 1.0)
+			coverage = edge(half - hypotenuse(x - share * ahead, y - share * aside))
+			if steep then shade(minor, major, color, coverage) else shade(major, minor, color, coverage)
+		}
+	}
+}
+
+# the canvas shown: the shapes drawn since the last show on the GPU, else its pixels
+show() := {
+	size_difference_told()
+	paint_scale_set(drawn_canvas.scale)
+	if drawn_canvas.on_gpu {
+		paint(SHAPE_SHADER, drawn_canvas.device_width(), drawn_canvas.device_height(), shapes_values(drawn_canvas.drawn, drawn_canvas.coverage))
+		drawn_canvas.drawn = []
+		drawn_canvas.shape(Previous, 0, 0, 0, 0, 0, 0, 0)
+	} else {
+		paint(drawn_canvas.pixels, drawn_canvas.device_width(), drawn_canvas.device_height())
+		frame_timed()
+	}
+}
+# a window sized apart from the canvas (`window.width = 800` after canvas(200, 100)) shows it scaled: said once
+size_difference_told() := {
+	shown = drawn_canvas
+	if shown.size_difference_said or (window_width() == shown.width and window_height() == shown.height) { return }
+	shown.size_difference_said = yes
+	hint("the canvas is ${shown.width}×${shown.height}, the window ${window_width()}×${window_height()}: the canvas is shown scaled; canvas.resize(w, h) sizes both")
+}
+# the frame's time from clear to show; a slow one at more than one pixel a point counted
+frame_timed() := {
+	shown = drawn_canvas
+	took = wall_clock_ms() - shown.cleared_at
+	if shown.cleared_at >= 0 and shown.scale > 1 {
+		shown.slow_frames = if took > FRAME_BUDGET_MS then shown.slow_frames + 1 else 0
+		if shown.slow_frames >= SLOW_FRAMES { coarsened(took) }
+	}
+	shown.cleared_at = -1
+}
+# the canvas at one pixel a point, what it shows kept (each block's first pixel)
+coarsened(took: int) := {
+	shown = drawn_canvas
+	hint("frames took ${took} ms at ${shown.scale} pixels a point: the canvas is drawn at one pixel a point from now on, for 30 frames a second")
+	shown.pixels = [shown.pixels[row * shown.scale * shown.device_width() + col * shown.scale] for row in 0 .. shown.height for col in 0 .. shown.width]
+	shown.scale = 1
+}
+
+# save(canvas, "painting.png"): the canvas as drawn so far as a PNG file. On the GPU the pixels are there: drawn again
+save(made: Canvas, file: text) := {
+	pixels = if made.on_gpu then gpu_render(SHAPE_SHADER, made.device_width(), made.device_height(), shapes_values(made.kept, made.coverage)) else made.pixels
+	write_bytes(file, png_bytes(Picture(made.device_width(), made.device_height(), pixels.map(pixel => Color(pixel)))))
+}
+
+# label(x, y, words, color, size): words set in the system's sans-serif font `size` pixels high from their top left
+# corner, smooth edges mixed with what is below; `font: ./my.ttf` names a font file instead
+label(x: float, y: float, words: text, color: Color, size: int = 12, font: text = "") := {
+	covered = text_coverage(words, size * drawn_canvas.scale, font)
+	if drawn_canvas.on_gpu then words_shape(x, y, covered, color.argb) else words_shaded(x, y, covered, color.argb)
+}
+# words' coverage, [columns, rows, coverage …], mixed into the pixels here
+words_shaded(x: float, y: float, covered: list<int>, color: int) := {
+	columns = covered[0]
+	for at in 0 .. columns * covered[1] { shade(device_cell(x) + at % columns, device_cell(y) + at /! columns, color, covered[at + 2] / BRIGHTEST) }
+}
+# words on the GPU: their coverage among the shapes' (0 to 1), a shape reading it
+words_shape(x: float, y: float, covered: list<int>, color: int) := {
+	at = #drawn_canvas.coverage
+	drawn_canvas.coverage.extend([covered[i + 2] / BRIGHTEST for i in 0 .. covered[0] * covered[1]])
+	drawn_canvas.shape(Words, cell(x), cell(y), covered[0], covered[1], at, drawn_canvas.scale, color)
+}

@@ -1,0 +1,184 @@
+# The standard module pga_draw: the objects of pga drawn in perspective on draw's canvas. sketch(x, color) draws a
+# point, a line or a plane of space (a Multivector of grade 3, 2 or 1), a Sphere, a Circle, or each one of a list;
+# show() then paints the canvas as draw's words do.
+# Spheres and circles are not PGA objects (pga is R(3,0,1), which has no round ones): a Sphere is a center point and a
+# radius, a Circle a center point, the plane it lies in and a radius. meet gives the intersections PGA has (line ⋏ plane
+# a point, plane ⋏ plane a line) and the round ones as lists, empty where nothing meets: sphere ⋏ plane [the circle],
+# sphere ⋏ line [the two points], one where they touch.
+# coplanar(l, m) says whether two lines meet or are parallel, closest(l, m) gives their nearest points, distance(p, x)
+# a point's from a line or plane, place(p) its coordinates rounded to three places; caption writes the legend or names
+# a point on the picture. The camera orbits the origin: orbit(yaw, pitch) turns it, zoom(pixels_per_unit) scales the
+# picture; z is up.
+use math
+use geometry
+use color
+use pga
+use draw
+
+class Sphere { center: Multivector, radius: float }
+class Circle { center: Multivector, plane: Multivector, radius: float }
+sphere(center: Multivector, radius: float): Sphere := Sphere(center, radius)
+
+# the camera: turned by yaw around the z axis, tilted by pitch toward looking down, distance units from the origin,
+# pixels_per_unit the picture's scale at the origin
+class Camera { yaw: float, pitch: float, distance: float, pixels_per_unit: float }
+global camera: Camera = Camera(0.6, 0.45, 12.0, 60.0)
+orbit(yaw: float, pitch: float) := {
+	camera.yaw = yaw
+	camera.pitch = pitch
+}
+zoom(pixels_per_unit: float) := { camera.pixels_per_unit = pixels_per_unit }
+# how far a line or a plane is drawn from where it comes nearest the origin
+global reach: float = 3.0
+
+# the steps of a drawn ring and of a sphere's outline; a point's dot; a plane's grid lines each side; faint strokes
+RING_STEPS := 48
+CIRCLE_STEPS := 64
+POINT_RADIUS := 4.0
+GRID_LINES := 4
+PLANE_ALPHA := 0.45
+SPHERE_ALPHA := 0.5
+# two numbers this near count as equal: coplanar lines, parallel lines
+NEAR := 0.000000001
+PARALLEL := 0.000000000001
+
+# where [x, y, z] falls on the canvas: [column, row, depth], depth growing away from the camera
+seen(at: list<float>): list<float> := {
+	turn_x = at[0] * cos(camera.yaw) - at[1] * sin(camera.yaw)
+	turn_y = at[0] * sin(camera.yaw) + at[1] * cos(camera.yaw)
+	up = at[2] * cos(camera.pitch) - turn_y * sin(camera.pitch)
+	depth = turn_y * cos(camera.pitch) + at[2] * sin(camera.pitch)
+	scale = camera.pixels_per_unit * shrink(depth)
+	[canvas().width / 2 + turn_x * scale, canvas().height / 2 - up * scale, depth]
+}
+# how much smaller a thing at that depth looks than at the origin
+shrink(depth: float): float := camera.distance / (camera.distance + depth)
+# a segment of space drawn on the canvas
+stroke(start: list<float>, end: list<float>, color: Color) := {
+	a = seen(start)
+	b = seen(end)
+	line(a[0], a[1], b[0], b[1], color)
+}
+# a polyline of space
+strokes(corners: list<list<float>>, color: Color) := polyline(corners.map(seen), color)
+
+# the grade of a Multivector of space: 3 a point, 2 a line, 1 a plane (its highest nonzero part)
+grade(x: Multivector): int := (0 .. #x.parts).filter(m => x.parts[m] != 0).map(blade_grade).max
+# [x, y, z] scaled and summed: a + k·d
+along(a: list<float>, d: list<float>, k: float): list<float> := vec_add(a, vec_scale(d, k))
+# the way the plane faces, its normal [a, b, c] of a·x + b·y + c·z + d = 0
+facing(p: Multivector): list<float> := [p.parts[2], p.parts[4], p.parts[8]]
+# the direction of a line of space, the ideal point where it meets the plane at infinity
+direction(l: Multivector): list<float> := {
+	ideal = meet(l, e0)
+	vec_unit([ideal.parts[13], -ideal.parts[11], ideal.parts[7]])
+}
+# the point of x nearest the point p: the foot of the perpendicular from p (inner(p, x) is the line or plane through
+# p square to x, which meets x there)
+foot(x: Multivector, p: Multivector): list<float> := coordinates(meet(inner(p, x), x))
+# two directions square to each other and to n
+across(n: list<float>): list<list<float>> := {
+	u = vec_unit(vec_cross(n, if abs(n[2]) < 0.9 then [0.0, 0.0, 1.0] else [1.0, 0.0, 0.0]))
+	[u, vec_unit(vec_cross(n, u))]
+}
+# the points of a circle around c, square to n, closed
+ring(c: list<float>, n: list<float>, radius: float, steps: int): list<list<float>> := {
+	sides = across(n)
+	[along(along(c, sides[0], radius * cos(2 * pi * i / steps)), sides[1], radius * sin(2 * pi * i / steps)) for i in 0 .. steps + 1]
+}
+
+# a point a dot, a line `reach` either side of its point nearest the origin, a plane a square grid of side 2·reach
+sketch(x: Multivector, color: Color) := match grade(x) {
+	3 => sketch_point(x, color)
+	2 => sketch_line(x, color)
+	1 => sketch_plane(x, color)
+	other => raise "pga_draw: only points, lines and planes of space are drawn, not " + text(x)
+}
+sketch_point(p: Multivector, color: Color) := {
+	at = seen(coordinates(p))
+	circle(at[0], at[1], POINT_RADIUS, color)
+}
+sketch_line(l: Multivector, color: Color) := {
+	d = direction(l)
+	c = foot(l, origin)
+	stroke(along(c, d, -reach), along(c, d, reach), color)
+}
+sketch_plane(plane: Multivector, color: Color) := {
+	sides = across(facing(plane))
+	c = foot(plane, origin)
+	faint = with_alpha(color, PLANE_ALPHA)
+	for i in -GRID_LINES .. GRID_LINES + 1 {
+		k = reach * i / GRID_LINES
+		grid_line(c, sides[0], sides[1], k, faint)
+		grid_line(c, sides[1], sides[0], k, faint)
+	}
+}
+# the grid's line k along `toward`, from -reach to reach along `span`
+grid_line(c: list<float>, toward: list<float>, span: list<float>, k: float, color: Color) := stroke(along(along(c, toward, k), span, -reach), along(along(c, toward, k), span, reach), color)
+# a sphere: its outline as seen and three great circles
+sketch(s: Sphere, color: Color) := {
+	c = coordinates(s.center)
+	at = seen(c)
+	faint = with_alpha(color, SPHERE_ALPHA)
+	for n in [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] { strokes(ring(c, n, s.radius, RING_STEPS), faint) }
+	outline = shrink(at[2]) * camera.pixels_per_unit * s.radius
+	polyline([[at[0] + outline * cos(2 * pi * i / CIRCLE_STEPS), at[1] + outline * sin(2 * pi * i / CIRCLE_STEPS)] for i in 0 .. CIRCLE_STEPS + 1], color)
+}
+# the segment from point a to point b
+sketch(a: Multivector, b: Multivector, color: Color) := stroke(coordinates(a), coordinates(b), color)
+sketch(c: Circle, color: Color) := strokes(ring(coordinates(c.center), facing(c.plane), c.radius, CIRCLE_STEPS), color)
+sketch(all: list<Multivector>, color: Color) := { for x in all { sketch(x, color) } }
+
+# half the chord the line or plane through `at`, its point nearest the center, cuts from the sphere; -1 if it misses
+half_chord(s: Sphere, at: list<float>): float := {
+	gap = geo_distance(at, coordinates(s.center))
+	if gap > s.radius then -1.0 else sqrt(s.radius * s.radius - gap * gap)
+}
+# the round meets, the sphere first, each a list of what there is: a plane's circle, a line's two points (one where it
+# touches)
+meet(s: Sphere, x: Multivector): list<any> := {
+	base = foot(x, s.center)
+	half = half_chord(s, base)
+	if half < 0 { return [] }
+	if grade(x) == 1 { return [Circle(point(base), x, half)] }
+	d = direction(x)
+	if half == 0 then [point(base)] else [point(along(base, d, -half)), point(along(base, d, half))]
+}
+infix operator ⋏(s: Sphere, x: Multivector): list<any> := meet(s, x)
+
+# the coordinates of a point rounded to three places, to print
+place(p: Multivector): list<float> := coordinates(p).map(c => round(c, 3))
+# whether two lines of space lie in one plane, so meet or are parallel: the scalar of their join, their distance times
+# the sine of their angle times their norms, is 0; skew lines have none
+coplanar(l: Multivector, m: Multivector): bool := abs(scalar(join(l, m))) < NEAR
+# the points of lines l and m nearest each other, [on l, on m]: one point twice where they meet; parallel lines have
+# many, then l's nearest the origin and its foot on m
+closest(l: Multivector, m: Multivector): list<Multivector> := {
+	a = foot(l, origin)
+	b = foot(m, origin)
+	u = direction(l)
+	v = direction(m)
+	r = vec_sub(a, b)
+	k = vec_dot(u, v)
+	square = 1 - k * k
+	if square < PARALLEL { return [point(a), point(foot(m, point(a)))] }
+	s = (k * vec_dot(v, r) - vec_dot(u, r)) / square
+	t = (vec_dot(v, r) - k * vec_dot(u, r)) / square
+	[point(along(a, u, s)), point(along(b, v, t))]
+}
+# how far the point p is from the line or plane x: from p to its foot on x
+distance(p: Multivector, x: Multivector): float := geo_distance(coordinates(p), foot(x, p))
+
+# the legend's line n at the canvas's top left
+LEGEND_LEFT := 12.0
+LEGEND_TOP := 10.0
+LEGEND_LINE := 18.0
+LEGEND_SIZE := 14
+CAPTION_GAP := 7.0
+CAPTION_SIZE := 13
+caption(n: int, words: text, color: Color) := label(LEGEND_LEFT, LEGEND_TOP + LEGEND_LINE * n, words, color, LEGEND_SIZE)
+# words beside the point p as seen
+caption(p: Multivector, words: text, color: Color) := {
+	at = seen(coordinates(p))
+	label(at[0] + CAPTION_GAP, at[1] - CAPTION_GAP, words, color, CAPTION_SIZE)
+}

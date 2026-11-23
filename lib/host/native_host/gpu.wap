@@ -10,6 +10,7 @@
 # callback is a wap function (lib/callbacks.wap)
 use c
 use bits
+use color
 use callbacks
 use "platform.wap"
 use "window.wap"
@@ -176,7 +177,7 @@ class Stride { element: text, bytes: int }
 FIELD_STRIDES := [Stride("f32", 4), Stride("i32", 4), Stride("u32", 4), Stride("atomic<", 4), Stride("vec2", 8), Stride("vec3", 16), Stride("vec4", 16)]
 FIELD_KEY := "field "
 
-# wgpu-native's functions, and C's copies: memcpy of a list's int32 cells, memmove of C memory
+# wgpu-native's functions, and C's copy of a list's int32 cells
 # A callback info is 40 bytes given by value (`bytes<40>`), as C takes the struct.
 wgpuCreateInstance(descriptor: handle): handle from 'wgpu_native'
 wgpuInstanceRequestAdapter(instance: handle, options: handle, info: bytes<40>): i64 from 'wgpu_native'
@@ -245,11 +246,8 @@ wgpuSurfacePresent(surface: handle): i32 from 'wgpu_native'
 wgpuSurfaceRelease(surface: handle): ø from 'wgpu_native'
 wgpuDeviceCreateSampler(device: handle, descriptor: handle): handle from 'wgpu_native'
 wgpuSamplerRelease(sampler: handle): ø from 'wgpu_native'
-memcpy(into: handle, source: cells<i32>, size: length): handle from 'c'
-memmove(into: handle, source: handle, size: i64): handle from 'c'
-fopen(path: text, mode: text): handle from 'c'
+memcpy(into: handle, source: list<int32>, size: length): handle from 'c'
 fread(into: handle, size: i64, n: i64, file: handle): i64 from 'c'
-fclose(file: handle): i32 from 'c'
 fseek(file: handle, offset: i64, whence: i32): i32 from 'c'
 uncompress(dest: handle, destLen: handle, source: handle, sourceLen: i64): i32 from 'z'
 
@@ -450,10 +448,9 @@ leading(t: text, allowed: text): text := {
 	start
 }
 
-# --- pictures: an image among paint's values (anything with width, height and pixels, 0xAARRGGBB each, a pixel
-# without an alpha byte opaque) is a texture_2d<f32> the shader reads as `values.<name>`: textureSampleLevel(
-# values.channel0, bilinear_repeat, uv, 0.0), textureDimensions(values.channel0)
-class Picture { width: int, height: int, pixels: list<int> }
+# --- pictures: a Picture among paint's values (color.wap's, a pixel without an alpha byte opaque) is a texture_2d<f32>
+# the shader reads as `values.<name>`: textureSampleLevel(values.channel0, bilinear_repeat, uv, 0.0),
+# textureDimensions(values.channel0)
 # bgra8unorm: a 0xAARRGGBB word is its bytes B, G, R, A in memory, so the pixels go in as they are
 PICTURE_FORMAT := FORMAT_BGRA8
 ALPHA_FROM := 16777216
@@ -463,7 +460,7 @@ class KeptPicture { texture: int, width: int, height: int }
 picture_texture(name: text, picture: Picture): int := {
 	picture_width = picture.width
 	picture_height = picture.height
-	pixels = picture.pixels
+	pixels = picture.pixels.map(pixel => pixel.argb)
 	if picture_width < 1 or picture_height < 1 or #pixels != picture_width * picture_height {
 		failed(VALUES_NAME + "." + name + " is a picture of width × height pixels")
 		return 0
@@ -616,9 +613,9 @@ uniform_member(layout: Layout, name: text, numbers: list<float>): text := {
 padded(numbers: list<float>, alignment: int) := { while #numbers % alignment != 0 { numbers.add(0.0) } }
 # the program's values with the built-in holes its shader reads and it gave none
 # scale: the pixels a point of the painting spans, more than 1 only while a window shades it fitted
-values_copied(shader: text, given: any, width: int, height: int, scale: float = 1.0): map<text, any> := {
+values_copied(shader: text, given: map<text, any>, width: int, height: int, scale: float = 1.0): map<text, any> := {
 	values: map<text, any> = {}
-	if given is map<text, any> { for name in given.keys { values[name] = given[name] } }
+	for name in given.keys { values[name] = given[name] }
 	if gpu.first_painting_ms == 0 { gpu.first_painting_ms = wall_clock_ms() }
 	for hole in BUILTIN_HOLES {
 		if not names(shader, VALUES_NAME + "." + hole) or values.has(hole) { continue }
@@ -626,7 +623,7 @@ values_copied(shader: text, given: any, width: int, height: int, scale: float = 
 	}
 	values
 }
-values_filled(shader: text, given: any, width: int, height: int, scale: float = 1.0): map<text, any> := {
+values_filled(shader: text, given: map<text, any>, width: int, height: int, scale: float = 1.0): map<text, any> := {
 	filled = values_copied(shader, given, width, height, scale)
 	gpu.paintings += 1
 	filled
@@ -668,7 +665,7 @@ names(shader: text, name: text): bool := {
 	for i in 1 .. #parts { if whole_between(parts[i - 1], parts[i]) { return yes } }
 	no
 }
-whole_between(before: text, after: text): bool := (before == "" or not is_name_char(before[-1])) and (after == "" or not is_name_char(after[0]))
+whole_between(before: text, after: text): bool := (before == "" or not is_name_char(before[#before - 1])) and (after == "" or not is_name_char(after[0]))
 # the shader with each whole `old` written `new`
 renamed(shader: text, old: text, new: text): text := {
 	parts = shader.split(old)
@@ -795,7 +792,7 @@ cells_kept(name: text, cells: list<int>, usage: int): int := cells_written(kept_
 cells_written(buffer: int, cells: list<int>): int := {
 	size = #cells * 4
 	staged = calloc(1, size)
-	memcpy(staged, cells)
+	memcpy(staged, cells.map(cell => int32(cell)))
 	wgpuQueueWriteBuffer(gpu.queue, buffer, 0, staged, size)
 	free(staged)
 	buffer
@@ -1155,7 +1152,7 @@ compute_fields(compute: text, values: map<text, any>): list<Field>? := {
 # the length of a fixed-length array type, `array<f32, 64>` 64; 0 for one sized at run time
 field_length(type: text): int := {
 	parts = type.split(",")
-	digits = if #parts < 2 then "" else leading(parts[-1].trim(), "0123456789")
+	digits = if #parts < 2 then "" else leading(parts.last.trim(), "0123456789")
 	if digits == "" then 0 else int(digits)
 }
 # how the draw declares an array it reads: a field its own type, an atomic read as its plain number; a value's vec4fs
@@ -1353,7 +1350,7 @@ image_drawn(encoder: int, drawing: Drawing, width: int, height: int): int := {
 	}
 	image
 }
-drawing_of(shader: text, values: any, width: int, height: int, scale: float = 1.0): Drawing? := drawing_made(shader, values_filled(shader, values, width, height, scale), width, height)
+drawing_of(shader: text, values: map<text, any>, width: int, height: int, scale: float = 1.0): Drawing? := drawing_made(shader, values_filled(shader, values, width, height, scale), width, height)
 # the image kept as the drawing's previous frame, else let go
 image_done(drawing: Drawing, image: int) := if drawing.reads_previous then previous_kept(image) else wgpuTextureRelease(image)
 extent_of(width: int, height: int): int := {
@@ -1376,20 +1373,12 @@ buffer_mapped(buffer: int, size: int): int := {
 	mapped
 }
 
-# host_shader_painted(shader, width, height, values, pixels): the shader painted on the GPU, its pixels RGBA, a byte
-# each, row by row into `pixels` (the driver's, width × height × 4 bytes); 0, else -1 and why on standard error
-host_shader_painted(shader: text, width: int, height: int, values: any, pixels: int): int :=
-	if shader_painted(shader, width, height, values, pixels) then 0 else said_failed("paint of a shader")
 # gpu_render(shader, width, height, values): the shader's pixels, each a color word as `red` is one (alpha, red, green,
 # blue from the highest byte, as the page gives them); a shader that fails raises with why
-host_gpu_render(shader: text, width: int, height: int, values: any): list<int> := {
+gpu_render(shader: text, width: int, height: int, values: map<text, any>): list<int> := {
 	gpu.failure = ""
-	size = width * height * PIXEL_BYTES
-	pixels = struct_of(size)
-	painted = shader_painted(shader, width, height, values, pixels)
-	words = if painted then pixel_words(pixels, width, height, width * PIXEL_BYTES) else []
-	free(pixels)
-	if not painted { raise gpu.failure }
+	words = shader_painted(shader, width, height, values)
+	if words == ø { raise gpu.failure }
 	words
 }
 # the color words of RGBA pixels in memory, rows `stride` bytes apart, one C read a pixel
@@ -1418,34 +1407,26 @@ pixels_mapped(encoder: int, image: int, width: int, height: int): Readback := {
 }
 # upload and draw, in milliseconds, when the program asked (--times)
 paint_frame_noted(upload: int, draw: int) := { if window.paint_timing { eprint("splat-frame upload " + upload + " draw " + draw) } }
-# the shader painted into `pixels` as host_shader_painted says; no and gpu.failure where it fails
-shader_painted(shader: text, width: int, height: int, values: any, pixels: int): bool := {
+# the shader painted on the GPU, its color words row by row; ø and gpu.failure where it fails
+shader_painted(shader: text, width: int, height: int, values: map<text, any>): list<int>? := {
 	t0 = wall_clock_ms()
 	drawing = drawing_of(shader, values, width, height)
 	t1 = wall_clock_ms()
-	if drawing == ø { return no }
+	if drawing == ø { return ø }
 	encoder = wgpuDeviceCreateCommandEncoder(gpu.device, 0)
 	image = image_drawn(encoder, drawing, width, height)
 	if image == 0 {
 		drawing_released(drawing)
 		wgpuCommandEncoderRelease(encoder)
-		return no
+		return ø
 	}
 	read = pixels_mapped(encoder, image, width, height)
-	mapped = read.mapped
-	if mapped != 0 {
-		stride = copy_stride(width)
-		for row in 0 .. height { memmove(pointer_moved(pixels, row * width * PIXEL_BYTES), pointer_moved(mapped, row * stride), width * PIXEL_BYTES) }
-		wgpuBufferUnmap(read.buffer)
-	}
+	words = if read.mapped == 0 then ø else pixel_words(read.mapped, width, height, copy_stride(width))
+	if read.mapped != 0 { wgpuBufferUnmap(read.buffer) }
 	drawing_released(drawing)
 	image_done(drawing, image)
 	paint_frame_noted(t1 - t0, wall_clock_ms() - t1)
-	mapped != 0
-}
-said_failed(what: text): int := {
-	eprint(what + ": " + gpu.failure)
-	-1
+	words
 }
 
 # what a surface is made for: the window's Metal layer on macOS; on Windows its HWND, with the program's module
@@ -1560,42 +1541,45 @@ shown_kept(picture: int, layer: int, width: int, height: int) := {
 # the window's layer for a painting of width × height, the window opened by the first; 0 where none shows it
 painting_layer(width: int, height: int): int := if device_ready() then window_layer(width, height) else 0
 
-# what a failed painting in the window says it was
-WINDOW_PAINT := "paint into the window"
-# host_shader_shown(shader, width, height, values): the shader shown in the window: 1, 0 with no window open (the
-# driver paints its PNG), -1 failed, why on standard error. It draws into an image of the painting's size first (kept
+# a painting the window could not show, raised with the device's reason
+window_paint_failed() := raise "paint into the window: " + gpu.failure
+# shader_shown(shader, width, height, values): the shader shown in the window, no with no window open; a failure
+# raises why. It draws into an image of the painting's size first (kept
 # for the next frame by a shader reading its previous one), then shown scaled
-host_shader_shown(shader: text, width: int, height: int, values: any): int := {
+shader_shown(shader: text, width: int, height: int, values: map<text, any>): bool := {
 	layer = painting_layer(width, height)
-	if layer == 0 { return 0 }
+	if layer == 0 { return no }
 	sides = window_sides(layer, width, height)
 	t0 = wall_clock_ms()
 	drawing = drawing_of(shader, values, sides[0], sides[1], sides[0] / width)
 	t1 = wall_clock_ms()
-	if drawing == ø { return said_failed(WINDOW_PAINT) }
+	if drawing == ø { window_paint_failed() }
 	encoder = wgpuDeviceCreateCommandEncoder(gpu.device, 0)
 	image = image_drawn(encoder, drawing, sides[0], sides[1])
 	if image == 0 {
 		drawing_released(drawing)
 		wgpuCommandEncoderRelease(encoder)
-		return said_failed(WINDOW_PAINT)
+		window_paint_failed()
 	}
 	shown = picture_presented(encoder, image, layer, sides[0], sides[1])
 	image_done(drawing, image)
 	drawing_released(drawing)
 	paint_frame_noted(t1 - t0, wall_clock_ms() - t1)
-	if shown then 1 else said_failed(WINDOW_PAINT)
+	if not shown { window_paint_failed() }
+	yes
 }
-# host_pixels_shown(pixels, width, height): pixels (RGBA, a byte each, row by row, the driver's) shown in the
-# window: 1, 0 with no window open, -1 failed
-host_pixels_shown(pixels: int, width: int, height: int): int := {
+# pixels_shown(pixels, width, height): the color words shown in the window, no with no window open; a failure raises
+pixels_shown(pixels: list<int>, width: int, height: int): bool := {
 	layer = painting_layer(width, height)
-	if layer == 0 { return 0 }
-	picture = texture_of(width, height, TEXTURE_BINDING + TEXTURE_COPY_DST)
-	pixels_written(picture, pixels, width, height)
+	if layer == 0 { return no }
+	picture = texture_made(width, height, TEXTURE_BINDING + TEXTURE_COPY_DST, PICTURE_FORMAT)
+	staged = picture_staged(pixels)
+	pixels_written(picture, staged, width, height)
+	free(staged)
 	shown = picture_presented(wgpuDeviceCreateCommandEncoder(gpu.device, 0), picture, layer, width, height)
 	wgpuTextureRelease(picture)
-	if shown then 1 else said_failed(WINDOW_PAINT)
+	if not shown { window_paint_failed() }
+	yes
 }
 # the last painting shown again, at the window's size now, as the window comes into sight or changes size
 shown_again() := {
@@ -1616,7 +1600,7 @@ storage_arrays(shader: text): list<StorageArray> := {
 	for i in 1 .. #parts {
 		before = parts[i - 1]
 		if not before.contains("@binding(") { continue }
-		binding = int(leading(before.split("@binding(")[-1], "0123456789"))
+		binding = int(leading(before.split("@binding(").last, "0123456789"))
 		if not parts[i].contains(">") { continue }
 		declaration = parts[i].split(">")[1 ..].join(">").trim()
 		name = leading(declaration, NAME_BYTES)
@@ -1650,8 +1634,6 @@ arrays_named(given: map<text, list<any>>, declared: list<StorageArray>): list<St
 	for array in declared { if #array.given == 0 { raise "the shader's array " + array.name + " has no numbers" } }
 	order
 }
-# a C pointer `by` bytes on
-pointer_moved(pointer: int, by: int): int := pointer_handle(handle_pointer(pointer) + by)
 # the numbers a storage array holds, by the element word the shader declares; a vector's lanes are f32
 enum Cell { F32 = "f32", I32 = "i32", U32 = "u32", F16 = "f16" }
 cell_of(word: text): Cell := match word {
@@ -1725,7 +1707,7 @@ arrays_computed(shader: text, order: list<StorageArray>, workgroups: int): list<
 	wgpuComputePipelineRelease(pipeline)
 	left
 }
-host_gpu_computed(shader: text, arrays: any, workgroups: int): any := {
+gpu_computed(shader: text, arrays: any, workgroups: int): any := {
 	gpu.failure = ""
 	order = arrays_given(arrays, storage_arrays(shader))
 	if not device_ready() { raise gpu.failure }
@@ -1910,7 +1892,7 @@ frame_closed() := {
 	gpu.paintings += 1
 	gpu.pass_frame_open = no
 }
-pass_drawn(shader: text, given: any, width: int, height: int, reads: list<FluidField>, target: int, format: int, scale: float = 1.0): bool := {
+pass_drawn(shader: text, given: map<text, any>, width: int, height: int, reads: list<FluidField>, target: int, format: int, scale: float = 1.0): bool := {
 	frame_opened()
 	values = values_copied(shader, given, width, height, scale)
 	layout = values_laid_out(values)
@@ -1957,11 +1939,11 @@ fields_set(id: int): FieldSet := {
 	gpu.field_sets[id - 1]
 }
 fields_read(shader: text, set: FieldSet): list<FluidField> := set.fields.filter(field => names(shader, FIELD_PREFIX + field.name))
-host_gpu_fields_format(): text := {
+gpu_fields_format(): text := {
 	if not fields_format_chosen() { raise gpu.failure }
 	gpu.fields_format_name
 }
-host_gpu_fields(width: int, height: int, given: list<text>): int := {
+gpu_fields(width: int, height: int, given: list<text>): int := {
 	if width < 1 or height < 1 { raise "gpu_fields needs a positive width and height" }
 	names = field_names(given)
 	label = names.join(",")
@@ -1986,7 +1968,7 @@ field_texture(width: int, height: int): int := {
 	texture
 }
 # -1 where `name` names no field: the library word raises that, so a program can catch it
-host_gpu_pass_recorded(shader: text, id: int, name: text, given: any): int := {
+gpu_pass_recorded(shader: text, id: int, name: text, given: map<text, any>): int := {
 	started = wall_clock_ms()
 	set = fields_set(id)
 	found = set.fields.filter(field => field.name == name)
@@ -1999,7 +1981,7 @@ host_gpu_pass_recorded(shader: text, id: int, name: text, given: any): int := {
 }
 # the shading pass into an RGBA8 image of width × height, after the passes already encoded. 0 where it fails.
 # The fields stay at their own size: the shader samples them in 0..1, so the picture can be larger than the grid
-shade_image(shader: text, set: FieldSet, given: any, width: int, height: int, scale: float = 1.0): int := {
+shade_image(shader: text, set: FieldSet, given: map<text, any>, width: int, height: int, scale: float = 1.0): int := {
 	reads = fields_read(shader, set)
 	image = rgba_target(width, height)
 	if not pass_drawn(shader, given, width, height, reads, image, FORMAT_RGBA8, scale) {
@@ -2030,17 +2012,17 @@ fitted_timed(scale: float) := {
 	gpu.slow_fitted = 0
 	eprint("hint: frames come slower than 30 a second, so the window shades " + text(gpu.shade_ceiling) + " pixels a point")
 }
-host_gpu_show(shader: text, id: int, given: any): int := {
+gpu_show(shader: text, id: int, given: map<text, any>): int := {
 	set = fields_set(id)
 	fields_shown(shader, set, given, set.width, set.height, no)
 }
-host_gpu_show_sized(shader: text, id: int, width: int, height: int, given: any): int := {
+gpu_show_sized(shader: text, id: int, width: int, height: int, given: map<text, any>): int := {
 	if width < 1 or height < 1 { raise "gpu_show needs a positive width and height" }
 	fields_shown(shader, fields_set(id), given, width, height, yes)
 }
 # the fields' shading pass shown in the window as a painting of width × height, after the passes already encoded: 1,
 # 0 with no window open. fitted: shaded at the window's own pixels (shade_fitted)
-fields_shown(shader: text, set: FieldSet, given: any, width: int, height: int, fitted: bool): int := {
+fields_shown(shader: text, set: FieldSet, given: map<text, any>, width: int, height: int, fitted: bool): int := {
 	layer = painting_layer(width, height)
 	upload = gpu.pass_ms
 	gpu.pass_ms = 0
@@ -2067,11 +2049,11 @@ fields_shown(shader: text, set: FieldSet, given: any, width: int, height: int, f
 	if not shown { raise gpu.failure }
 	1
 }
-host_gpu_picture(shader: text, id: int, given: any): list<int> := {
+gpu_picture(shader: text, id: int, given: map<text, any>): list<int> := {
 	set = fields_set(id)
-	host_gpu_picture_sized(shader, id, set.width, set.height, given)
+	gpu_picture_sized(shader, id, set.width, set.height, given)
 }
-host_gpu_picture_sized(shader: text, id: int, width: int, height: int, given: any): list<int> := {
+gpu_picture_sized(shader: text, id: int, width: int, height: int, given: map<text, any>): list<int> := {
 	if width < 1 or height < 1 { raise "gpu_picture needs a positive width and height" }
 	set = fields_set(id)
 	image = shade_image(shader, set, given, width, height)
