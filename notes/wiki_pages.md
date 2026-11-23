@@ -60,7 +60,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - constant.md (21 lines): ✓ wap-wiki, tests test_constant_page.wap green, test_constant_wanted.wap var still to build
 - constructor.md (60 lines):
 - conversion.md (153 lines):
-- crystal.md (39 lines):
+- crystal.md (39 lines): ✓ wap-wiki, tests test_crystal_page.wap green, test_crystal_wanted.wap number-keyed map still to build
 - danger.md (2 lines):
 - data.md (172 lines):
 - debug.md (25 lines):
