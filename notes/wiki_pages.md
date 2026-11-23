@@ -126,7 +126,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - keyword.md (308 lines):
 - kind.md (31 lines):
 - kotlin.md (18 lines):
-- lambda.md (43 lines):
+- lambda.md (43 lines): wap-wiki
 - laws.md (76 lines):
 - LEB128.md (3 lines):
 - length.md (2 lines):
