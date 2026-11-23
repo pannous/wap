@@ -5,6 +5,10 @@ scripts/coverage.sh measures it hourly (cron), with the samples, into data/wap-t
 16 of 121 modules pass: bits case_table case_tables csv exact_values host_io html_entities ini integers intervals
 letter_ranges ordering ui uncertain unicode_data events.
 
+Ported to plain wap since that measurement, each lib/<module>.wap shadowing the .warp a row below names (the counts
+still include them until the next one): collections complex csv diff geometry graphs html intervals math matrix money
+numeric path random slugs tasks template text xml.
+
 A module fails at the first module it uses that fails, so one root cause blocks many. Root causes, most modules
 blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** a form wap does not take yet.
 
@@ -26,7 +30,6 @@ blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** 
 | 2: hyperreal reals | reals.warp:264 | no `denominator(number)` |
 | 2: R extrema | R.warp:6, extrema.warp:32 | rest parameters, `c(xs...)` |
 | 1 each | interpret.warp:6 | a labelled parameter, `with names: map` |
-| | complex.warp:46 | a type alias, `type complex = Complex` |
 | | english.warp:12 | a rule phrase with a keyword hole, `increase $x by: $n` |
 | | frames.warp:17 | `data exit` |
 | | memory.warp:8 | a range written `start until end` |
