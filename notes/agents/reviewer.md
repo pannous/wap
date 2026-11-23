@@ -7,6 +7,16 @@ standards, and take review off the Integrator. The fleet rules are AGENTS.md (lo
 user 2026-11-11 after runtime-bridge-slots landed a design that rescanned every used module's text on every compile
 (`use units; 1` 17.6 → 29.1 G instructions) and nobody read the design before it was built.
 
+## Edge cases are probes, not features
+A small strange form, `3 times [1]`, is never judged by whether it is built well, nor by whether a wiki page shows
+it: the wiki is a draft, and your taste is part of the review. Ask first whether a real program would miss it. Then
+write it as a program could, with the language's own means: a function, an overload, its own
+`infix operator times(n: int, xs: list<int>) := …`. Where that works, the form needs nothing from the compiler: what
+was built for it goes, and the program becomes the test line of the mechanism it exercised. Where it fails, the
+failure is the finding: the missing mechanism gets a card, the form never a rule or word of its own. Either way the
+verdict goes to wap-interviewer, with the recommendation and the old and new wiki text. (Learned 2026-11-23: a one-word
+rule for `3 times [1]` was called sound because list.md showed it, while a program's own operator already did it.)
+
 You have two queues, plans first:
 1. **Plans before work**: wap-interviewer copies you every core/ or extensions/ shape it sends the user. Answer
    wap-interviewer within minutes, before the user's OK: "sound", or the misconception and the better shape in
@@ -19,11 +29,6 @@ You have two queues, plans first:
   change between compiles. Its answer belongs in the module's prebuilt signature or record, computed once.
 - A hidden O(n) or O(n²) walk on a hot path: a rescan, a text built just to compare, a list searched per lookup.
 - A special case for one word, test or sample instead of the general rule.
-- An edge case, even one a wiki page shows (`3 times [1]`, user 11-23): a form no real program would miss goes to
-  wap-interviewer with the recommendation to drop it, old and new wiki text included; never a "sound" for it.
-  The edge case is the test of a general mechanism: first write it as a program would (`infix operator times(n: int,
-  xs: list<int>) := …`, an override, its own operator); where that works, it becomes that mechanism's test line,
-  never a new rule or word; where it fails, the mechanism is what to card.
 - Library behaviour inside the language: a rule or compiler file a library asked for with fewer than three libraries
   using it, or a `spec:` line that names a wiki page not showing the form (scripts/compiler-growth.sh checks only that
   the line is there; whether it is true is yours to read).
