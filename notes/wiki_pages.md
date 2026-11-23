@@ -68,7 +68,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - discouraged.md (0 lines):
 - do.md (9 lines): wap-wiki
 - each.md (2 lines): wap-wiki, asked
-- effects.md (110 lines):
+- effects.md (110 lines): wap-wiki
 - elvis.md (5 lines): wap-wiki
 - enum.md (91 lines): wap-wiki
 - equality.md (62 lines): wap-wiki
