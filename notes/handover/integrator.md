@@ -20,11 +20,11 @@
 - compile-library-programs remote branch: kept, its owner still works on it.
 - No land/ queue, nothing merged-but-unpushed.
 
-## Rules learned tonight
+## Rules
 - wap has no after-push: only scripts/refresh-seed.sh <tree> installs ~/dev/bin/wap; run one after every landing
   the user should see, then push the lock commit it makes.
 - wap core/extension landings need a "discussed with the user" card note (user rule 11-22); pure shrinks need a
-  warp-reviewer OK note. The census also guards "functions typed alone ≤ 0": any-values first broke it.
+  warp-reviewer OK note. The census also guards "functions typed alone ≤ 0".
 - Remote branch deletes are hook-blocked for the integrator: send merged names to the supervisor.
 
 ## Leftovers in /Volumes/Worktrees/wap-land

@@ -17,7 +17,7 @@ Role: notes/agents/reviewer.md rules, applied to pannous/wap. Log: ~/Library/Log
   fields natively; refuse a native optional of a memory value (box index -1 today); writing_function takes a memory text;
   native `print [1, 2]` emits a GC type.
 - overload-lib 90eb4a2: text joins only int (a general `+(t: text, x: T)` pair would cover float/char/bool); the
-  digit hint is still a run-time eprint (once per run since 1a83fc0), better at compile time for literals.
+  digit hint is a run-time eprint (once per run), better at compile time for literals.
 - waiting in the user's morning queue, already reviewed sound: any-name-silent d2f6259 (written `any` retypes
   silently), dispatch-rounds f3ba13f (boxed_known once a round + DEBT for precompiled-module dispatchers).
 - simplify-28 parked until card enum-index-constant-time (enum ↔ int via sugar's indexed rule builds a list per call).
@@ -26,8 +26,8 @@ Role: notes/agents/reviewer.md rules, applied to pannous/wap. Log: ~/Library/Log
 - map-print fbce670: text(m) looks up m#key per key (quadratic for non-text keys).
 - lib-coverage: cumulative_sum lost scan() for a hand loop.
 
-## Architecture (answered to the user 11-22)
+## Architecture (user 11-22)
 Libraries should not write their own extensions: 126 rules in lib/ stand in for missing features (block
 parameters, lazy parameters, labelled phrase calls, call-site names, names from the expected type, overloadable
 as/in/juxtaposition, observable places, member hook, definition annotations, tasks as a compiler mechanism).
-native-hooks and any-values' block arguments have since delivered two of them.
+native-hooks and any-values' block arguments provide two of them.
