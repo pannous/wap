@@ -49,11 +49,11 @@ format_check '1 - -3' '1 - -3'
 format_check 'x=-1' 'x = -1'
 format_check 'a=1' 'a = 1'
 # indentation: a deeper line opens a block glued to the line before; inside brackets it means nothing
-format_check $'a{\n  b,c}' 'a{b, c}'
-format_check $'a\n  b\n  c\nd\ne' $'a{b\nc}\nd\ne'
-format_check $'a:\n  b\n  c\n\nd\ne' $'a: {b\nc}\nd\ne'
-format_check $'a\n  b\n    c\nd' $'a{b{c}}\nd'
-format_check $'  a\n    b\n  c' $'a{b}\nc'
+format_check $'a{\n  b,c}' $'a{\n\tb, c\n}'
+format_check $'a\n  b\n  c\nd\ne' $'a{\n\tb\n\tc\n}\nd\ne'
+format_check $'a:\n  b\n  c\n\nd\ne' $'a: {\n\tb\n\tc\n}\n\nd\ne'
+format_check $'a\n  b\n    c\nd' $'a{\n\tb{\n\t\tc\n\t}\n}\nd'
+format_check $'  a\n    b\n  c' $'a{\n\tb\n}\nc'
 # typed declarations and type lists
 format_check 'x:int=3' 'x: int = 3'
 format_check 'xs:list<int>' 'xs: list<int>'
@@ -62,12 +62,12 @@ format_check 'n: list<list<int>>' 'n: list<list<int>>'
 format_check 'x<y and y>z' 'x < y and y > z'
 format_check 'f(x):int:=x' 'f(x) as int := x'
 format_check 'sample: int := 7' 'sample: int := 7'
-# comments are no code
-format_check $'blah a b c # note\ny/* c */=0 // c' $'blah a b c\ny = 0'
+# comments are no code, and format keeps them: a block comment within a line on a line of its own
+format_check $'blah a b c # note\ny/* c */=0 // c' $'blah a b c # note\n# c\ny = 0 # c'
 # a glyph run takes the `=`s glued after it: `!==` is one operator, not `!=` then a key
 format_check '1 !== 2' '1 !== 2'
 # a block indented after a key at the line's end is the key's value: a definition's body on the next line
-format_check $'f(x: int): int :=\n\tx + 1' 'f(x: int) as int := {x + 1}'
+format_check $'f(x: int): int :=\n\tx + 1' $'f(x: int) as int := {\n\tx + 1\n}'
 # an operator ending its line continues the phrase onto the lines indented below it
 format_check $'y = 1 +\n\t2 +\n\t3\nz = 4' $'y = 1 + 2 + 3\nz = 4'
 check "a comma at a line's end continues the row, a line without one starts a new row" "$(ran comma_rows 'xs = [
@@ -89,4 +89,10 @@ check "a row of fields, then a method" "$(ran field_row 'class Cursor { s: text;
 print text(Cursor("x", 4).done())')" "yes"
 # a list of spaced values keeps its round brackets and blanks (user 2026-11-23)
 format_check 'x = (1 2)' 'x = (1 2)'
+# format keeps what a line says beside its code: comments above and after it, a run of blank lines as one, a block
+# written over lines on lines of its own, a tab per depth, `/* */` as `#` lines (card format-keeps-comments)
+format_check $'# first\nx = 1 # one\n\n\n// second\ny = 2\n# last' $'# first\nx = 1 # one\n\n# second\ny = 2\n# last'
+format_check $'f(a) := {\n\ty = a\n\tif y > 2 {\n\t\tprint y\n\t}\n}' $'f(a) := {\n\ty = a\n\tif y > 2 {\n\t\tprint y\n\t}\n}'
+format_check $'/* a\n   b */\nx = 1' $'# a\n# b\nx = 1'
+format_check 'if a { print y }' 'if a {print y}'
 exit $((failures > 0))
