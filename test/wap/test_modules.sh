@@ -213,7 +213,6 @@ printf '%s\n' 'html(page: raw): text := page.trim()' >"$stage/pages.wap"
 check "a used file's raw word takes its block verbatim" "$(ran raw_used 'use "pages.wap"
 page = html { <p>it'"'"'s {here}</p> }
 print page')" "<p>it's {here}</p>"
-exit $((failures > 0))
 # a module's alias lines name its words other ways, in the module and in the files using it (wiki/alias.md)
 printf '%s\n' 'sine(x: int) := x * 2' 'alias sin => sine' 'alias magnitude <= mag' 'magnitude(x: int) := x + 1' 'twice_sin(x: int) := sin(x) * 2' >"$stage/trig.wap"
 check "a module's alias reads in the module and the file using it" "$(ran use_alias 'use "trig.wap"
@@ -226,3 +225,4 @@ print(twice_sin(1))')" "6
 check "an alias of a rule's word starts its phrase" "$(ran alias_rule 'alias fun => def
 fun halved(n: float) { n / 2 }
 print halved(3.0)')" "1.5"
+exit $((failures > 0))
