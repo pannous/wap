@@ -20,6 +20,7 @@ done
 restart_one() {
 	local session=$1 args; args=$(plan_of "$1")
 	tmux rename-session -t "=$session" "$session-old-$STAMP"
+	tmux set-option -w -t "=$session-old-$STAMP:" remain-on-exit on # the screen stays after Claude exits
 	tmux send-keys -t "=$session-old-$STAMP:" -l "/exit"; sleep 0.5; tmux send-keys -t "=$session-old-$STAMP:" Enter
 	[ "$args" = retire ] && { echo "$(date +%T) $session retired"; return; }
 	sleep 5
