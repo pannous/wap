@@ -17,107 +17,6 @@ print(x: T) := print(text(x))
 eprint(t: text) := write(t, STANDARD_ERROR, yes)
 # a got-it note on the standard error: `hint "write a + b for a plus b"` prints "hint: write a + b for a plus b"
 hint(message: text) := eprint("hint: " + message)
-# the text of the file at a path, relative to the current folder or from the root (/…)
-read(path: text): text := {
-	file = opened(path, 0, READ_AND_SEEK, "cannot read ")
-	fd_seek(file, 0, FROM_END, MOVED_AT)
-	size = memory_word(MOVED_AT)
-	fd_seek(file, 0, FROM_START, MOVED_AT)
-	at = scratch(size)
-	got = bytes_read(file, at, size)
-	fd_close(file)
-	memory_text(at, got)
-}
-# the names in the folder at a path, as the host lists them, its own `.` and `..` left out; read again from the entry a
-# read cut off
-# whether a file or folder is at the path; "" names none (python's os.path.exists)
-exists(path: text): bool := {
-	if path == "" { return no }
-	file = opened_at(path, 0, 0) ?? return no
-	fd_close(file)
-	yes
-}
-list_files(folder: text): list<text> := {
-	listed = opened(folder, FOLDER_FLAG, READ_ENTRIES, "cannot list ")
-	names = []
-	cookie = 0
-	entries = scratch(ENTRIES_READ)
-	while yes {
-		fd_readdir(listed, entries, ENTRIES_READ, cookie, MOVED_AT)
-		end = entries + memory_word(MOVED_AT)
-		at = entries
-		while at + ENTRY_HEADER <= end {
-			length = memory_word(at + NAME_LENGTH_AT)
-			if at + ENTRY_HEADER + length > end { break }
-			name = memory_text(at + ENTRY_HEADER, length)
-			if name != "." and name != ".." { names += [name] }
-			cookie = memory_word(at)
-			at += ENTRY_HEADER + length
-		}
-		if end < entries + ENTRIES_READ {
-			fd_close(listed)
-			return names
-		}
-	}
-	names
-}
-# the command line: the program's file as it was named, then its arguments. WASI's args_sizes_get puts the count at 0
-# and the bytes' size at 4, args_get each one's address into scratch and their zero-ended bytes after them
-arguments(): list<text> := {
-	args_sizes_get(0, 4)
-	count = memory_word(0)
-	addresses = scratch(4 * count + memory_word(4))
-	args_get(addresses, addresses + 4 * count)
-	(0 upto count).map(at => zero_ended(memory_word(addresses + 4 * at)))
-}
-# the run's environment, each `NAME=value` entry zero-ended, as WASI's environ_get writes them after their addresses
-wasi_environment(): text := {
-	environ_sizes_get(0, 4)
-	addresses = 4 * memory_word(0)
-	size = memory_word(4)
-	at = scratch(addresses + size)
-	environ_get(at, at + addresses)
-	memory_text(at + addresses, size)
-}
-# an environment variable as the run started with it, ø when unset: `started_env("HOME")`
-started_env(name: text): text? := {
-	entry = name + "="
-	for line in wasi_environment().split(text_made(1)) { if line.starts_with(entry) { return line[#entry ..] } }
-	ø
-}
-# `~/notes.txt`: a path's leading ~ is the home folder ($HOME), expanded where the path is used (wiki/script.md), so a
-# quoted "~/x" works too; a run without one is told so, never handed "ø/…"
-home_expanded(path: text): text := if path == "~" or path.starts_with("~/") then home_folder() + path[1 ..] else path
-home_folder(): text := started_env("HOME") ?? raise("~ is the home folder, and this run has none ($HOME is unset)")
-# milliseconds since 1970 by the wall clock: WASI's clock_time_get puts the nanoseconds at 0, as two words
-wall_clock_ms(): int := {
-	clock_time_get(WALL_CLOCK, NANOS_PER_MILLI, 0)
-	(memory_word(0) + memory_word(4) * WORD_RANGE) ÷ NANOS_PER_MILLI
-}
-# the arguments after the program's file: `warp prog.wasm a b` gives ["a", "b"]
-args := arguments().drop(1)
-# the running program: its file, as the command line names it, and that file's folder
-class Program { file: text; folder: text }
-program := Program(arguments()#1, folder_of(arguments()#1))
-# a file's folder, "." for a file named without one: "core/stage.wap" is in "core"
-folder_of(file: text): text := {
-	parts = file.split("/")
-	if #parts == 1 then "." else parts[.. #parts - 1].join("/")
-}
-# a text written to the file at a path, made anew or emptied first
-write(path: text, content: text) := {
-	file = opened(path, CREATED_OR_EMPTIED, WRITE_RIGHT, "write: cannot open ")
-	write(content, file, no)
-	fd_close(file)
-	# TODO (card void-function-result) the return goes once a function without a written result type gives nothing
-	return
-}
-# bytes written to the file at a path, made anew or emptied first: what a compiler writes its module with
-write_bytes(path: text, bytes: list<int>) := {
-	write(path, bytes_text(bytes))
-	# TODO (card void-function-result) the return goes once a function without a written result type gives nothing
-	return
-}
 # the program stopped with a message on the standard error, then a line end; it never finishes
 raise(message: text): never := prim raise_text(message)
 
@@ -134,6 +33,12 @@ raise(message: text): never := prim raise_text(message)
 # a shift right keeps the sign; >>> shifts zeros in, the bits read as unsigned: `-1 >>> 60` is 15
 >>(a: int, b: int): int := prim i64.shr_s(a, b)
 >>>(a: int, b: int): int := prim i64.shr_u(a, b)
+# the bits of two ints combined (wiki/function.md): `5 | 3` is 7, `5 & 3` is 1
+|(a: int, b: int): int := prim i64.or(a, b)
+&(a: int, b: int): int := prim i64.and(a, b)
+# a value piped into a function: `x |> f` and `x | f` are `f(x)`, so `2.0 | square | sqrt` is 2.0
+|>(x: T, f: (T) -> R): R := f(x)
+|(x: T, f: (T) -> R): R := x |> f
 # exclusive or: of two ints bit by bit, `5 xor 3` is 6; of two bools yes when they differ
 xor(a: int, b: int): int := prim i64.xor(a, b)
 xor(a: bool, b: bool): bool := a != b
@@ -264,6 +169,15 @@ sqrt(x: float): float := prim f64.sqrt(x)
 trunc(x: float): int := prim i64.trunc_f64_s(x)
 # x's nearest whole number, a half away from zero: `round(2.5)` is 3, `round(-2.5)` is -3
 round(x: float): int := if x < 0 then 0 - trunc(0.5 - x) else trunc(x + 0.5)
+# x rounded to some places after the point, a half away from zero: `round_to(2.345, 2)` is 2.35. Of x's two
+# neighbours on that grid the nearer one wins, measured against x itself: x * 100 is 234.49999999999997
+round_to(x: float, places: int): float := if x < 0 then 0.0 - round_to(0.0 - x, places) else nearest_on_grid(x, 10.0 ^ places)
+nearest_on_grid(x: float, scale: float): float := {
+	steps = floor(x * scale)
+	below = steps / scale
+	above = (steps + 1.0) / scale
+	if above - x <= x - below then above else below
+}
 float(n: int): float := prim f64.convert_i64_s(n)
 # a float's whole part, toward zero: `int(2.7)` and `2.7 as int` are 2, `int(-2.7)` is -2
 int(x: float): int := trunc(x)
@@ -292,5 +206,5 @@ missing(x: T?): bool := prim ref.is_null(x)
 
 
 # a value no show takes by its type, an any whose value none takes at run time (a call of show on an any tests each
-# show first, core/analyze/dispatch.wap) or a map: raised, naming the word
-show(x: any): text := raise("show: no show takes this value's type")
+# show first, core/analyze/dispatch.wap) or a map: raised, naming the word; ø, which no type's show takes, as text shows it
+show(x: any): text := if x is ø then text(x) else raise("show: no show takes this value's type")

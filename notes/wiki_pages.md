@@ -133,7 +133,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-cli.md (232 lines): ✓ 9f35dd1 (lib/cli.wap replacing cli.warp, test/test_cli.wap 14 ✓)
 - library-collections.md (47 lines): ✓ c354c23 (lib/collections.wap, test/test_collections.wap 6 ✓ + Counter/LRU red until any-char-equality)
 - library-complex.md (36 lines): ✓ b85dcc3 (lib/complex.wap, test/test_complex.wap 8 ✓; numbers on either side, exp and log in math)
-- library-compress.md (40 lines):
+- library-compress.md (40 lines): ✓ b2217da (lib/compress.wap replacing compress.warp, crc32 in lib/hash.wap; test/test_compress.wap 9 ✓; 62 KB deflate 70 ms, inflate 14 ms)
 - library-config-formats.md (67 lines): ✓ e28b84c (lib/yaml.wap, lib/toml.wap, test/test_config_formats.wap 15 ✓; YAML anchors and TOML multi-line strings cut)
 - library-csv.md (32 lines): ✓ 95f2e02 (lib/csv.wap, test/test_csv.wap 3 ✓; print of nested texts unquoted, with wap-interviewer)
 - library-diff.md (45 lines): ✓ e7eb7c7 (lib/diff.wap, edits the enum Edit, test/test_diff.wap 4 ✓; split(" ")[1] workaround until wap-reader fixes indexing a call)
@@ -151,7 +151,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - library-numeric.md (36 lines): ✓ 0fefa6f (lib/numeric.wap, lib/matrix.wap solve, test/test_numeric.wap 5 ✓; intro "highest power first" → constant first, with wap-interviewer)
 - library-path.md (46 lines): ✓ 5e0b30d (lib/path.wap, test/test_path.wap 7 ✓)
 - library-primes.md (26 lines): ✓ 6b5ca30 (lib/math.wap primes words, test/test_primes.wap 3 ✓; without `use` not yet, with wap-binding)
-- library-reference.md (36 lines): wap-wiki-lib
+- library-reference.md (36 lines): ✓ e2fc64c (lib/file.wap replacing file.warp, test/test_file.wap 6 ✓; write(path, text) and home_expanded are types words; card cwd-word)
 - library-regex.md (107 lines): ✓ 8253c4c (lib/regex.wap, test/test_regex.wap 13 ✓; test_regex_infix red; use by path until the root-first module search)
 - library-slugs.md (36 lines): ✓ 45356f7 (lib/slugs.wap, test/test_slugs.wap 8 ✓; lib/text.wap holds upper and words until types has them)
 - library-tables.md (47 lines): ✓ 4aba14d (lib/tables.wap, test/test_tables.wap 8 ✓; named options, enum styles)
