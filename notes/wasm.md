@@ -562,3 +562,6 @@ and the optimal path will be chosen.
 )
 (rethrow $label1)
 )  
+# WebGPU
+On a lower level imperative wap looks into implementing a direct sub/superset of webgpu:
+https://gpuweb.github.io/gpuweb/wgsl/#matrix-types. Mixing and emitting webgpu binaries would be challenging.
