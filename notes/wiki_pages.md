@@ -243,7 +243,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - symbol.md (67 lines):
 - symbolism.md (275 lines):
 - syntax.md (56 lines):
-- task.md (31 lines):
+- task.md (31 lines): wap-wiki-lib
 - text.md (1 lines):
 - thread.md (49 lines):
 - time.md (51 lines):
