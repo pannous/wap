@@ -1,0 +1,243 @@
+# The standard module pga (wiki/3d.md "Algebra"): Clifford algebras of any metric and the projective geometric
+# algebras of the plane and of space built on them. A Multivector holds the squares of its basis vectors (metric, e0
+# first) and one coefficient per basis blade (parts), the blade of index m being the product of the basis vectors whose
+# bits m sets, in ascending order: in 2D PGA, metric [0, 1, 1], parts[3] is e01.
+# + - * (the geometric product) and == take a Multivector or a plain number on either side; the other products are
+# words: wedge (outer, a meet in PGA), regressive (a join in PGA), inner (the symmetric inner product), contract (the
+# left contraction).
+# The PGA words are one verb with overloads: point, line, plane, join, meet, reflect, rotor, translator, motor, apply,
+# coordinates, arrow, ray, span, collection. The glyphs ⋏ ⋎ ↦ ↣ ⟇ ⊔ spell meet, join, arrow, ray, span and collection.
+# English aliases: intersect, intersection and crossing for meet; connect for join; segment and path for arrow;
+# halfline for ray; subspace for span; assembly for collection.
+# Conventions those of bivector.net: the plane's point (x, y) is x·e20 + y·e01 + e12, its line a·x + b·y + c = 0 is
+# a·e1 + b·e2 + c·e0; space's point is e123 + x·e032 + y·e013 + z·e021, its plane a·e1 + b·e2 + c·e3 + d·e0.
+# The dual is the right complement, e_m ∧ dual(e_m) = I (the pseudoscalar), which needs no metric and so works in the
+# degenerate PGA metrics; undual undoes it.
+use math
+
+class Multivector { metric: list<int>, parts: list<float> }
+
+# which products a pair of blades adds to: all of them (geometric), those sharing no vector (outer), those where the
+# first lies within the second (left contraction), those where either lies within the other (symmetric inner)
+enum Product { geometric, outer, contraction, inner }
+
+# the grade of the blade of index m: how many basis vectors it is the product of
+blade_grade(m: int): int := {
+	grade = 0
+	rest = m
+	while rest != 0 {
+		grade += rest & 1
+		rest = rest >> 1
+	}
+	grade
+}
+blades(metric: list<int>): int := 1 << #metric
+
+# the zero of the algebra of that metric
+zero_of(metric: list<int>): Multivector := Multivector(metric, [0.0 for m in 0 .. blades(metric)])
+# coefficient times the blade of index m
+blade(metric: list<int>, m: int, coefficient: float): Multivector := {
+	if m < 0 or m >= blades(metric) { raise "pga: no blade " + m + " in an algebra of " + #metric + " basis vectors" }
+	Multivector(metric, [if i == m then coefficient else 0.0 for i in 0 .. blades(metric)])
+}
+# the basis vector e_i (e0 is the first)
+basis(metric: list<int>, i: int): Multivector := blade(metric, 1 << i, 1.0)
+# the pseudoscalar, the product of all basis vectors
+pseudoscalar(metric: list<int>): Multivector := blade(metric, blades(metric) - 1, 1.0)
+# a plain number as the scalar of the algebra of that metric
+scalar_of(x: float, metric: list<int>): Multivector := blade(metric, 0, x)
+
+same_algebra(a: Multivector, b: Multivector) := { if #a.parts != #b.parts { raise "pga: multivectors of different algebras" } }
+combined(a: Multivector, b: Multivector, sign: float): Multivector := {
+	same_algebra(a, b)
+	Multivector(a.metric, [a.parts[i] + sign * b.parts[i] for i in 0 .. #a.parts])
+}
+
++(a: Multivector, b: Multivector): Multivector := combined(a, b, 1.0)
+-(a: Multivector, b: Multivector): Multivector := combined(a, b, -1.0)
+*(a: Multivector, b: Multivector): Multivector := product(a, b, Product.geometric)
+==(a: Multivector, b: Multivector): bool := a.parts == b.parts
+-(a: Multivector): Multivector := Multivector(a.metric, a.parts.map(x => -x))
+# a plain number on either side is the scalar of the other's algebra
++(a: Multivector, b: float): Multivector := a + scalar_of(b, a.metric)
++(a: float, b: Multivector): Multivector := scalar_of(a, b.metric) + b
+-(a: Multivector, b: float): Multivector := a - scalar_of(b, a.metric)
+-(a: float, b: Multivector): Multivector := scalar_of(a, b.metric) - b
+*(a: Multivector, b: float): Multivector := a * scalar_of(b, a.metric)
+*(a: float, b: Multivector): Multivector := scalar_of(a, b.metric) * b
+==(a: Multivector, b: float): bool := a == scalar_of(b, a.metric)
+
+# the sign e_a·e_b takes to become e_(a xor b): -1 for each swap that orders the basis vectors, times the square of
+# each one both share
+blade_sign(a: int, b: int, metric: list<int>): float := {
+	swaps = 0
+	s = a >> 1
+	while s != 0 {
+		swaps += blade_grade(s & b)
+		s = s >> 1
+	}
+	sign = if swaps % 2 == 0 then 1.0 else -1.0
+	shared = a & b
+	for i in 0 .. #metric {
+		if (shared & (1 << i)) != 0 { sign = sign * metric[i] }
+	}
+	sign
+}
+
+# whether e_a·e_b adds to the product of that kind
+blade_kept(a: int, b: int, kind: Product): bool := match kind {
+	geometric => yes
+	outer => (a & b) == 0
+	contraction => (a & b) == a
+	inner => (a & b) == a or (a & b) == b
+}
+
+product(a: Multivector, b: Multivector, kind: Product): Multivector := {
+	same_algebra(a, b)
+	out = [0.0 for m in 0 .. #a.parts]
+	for i in 0 .. #a.parts {
+		for j in 0 .. #b.parts {
+			if a.parts[i] != 0 and b.parts[j] != 0 and blade_kept(i, j, kind) {
+				out[i xor j] += a.parts[i] * b.parts[j] * blade_sign(i, j, a.metric)
+			}
+		}
+	}
+	Multivector(a.metric, out)
+}
+
+# the products other than the geometric one (a * b)
+wedge(a: Multivector, b: Multivector): Multivector := product(a, b, Product.outer)
+contract(a: Multivector, b: Multivector): Multivector := product(a, b, Product.contraction)
+inner(a: Multivector, b: Multivector): Multivector := product(a, b, Product.inner)
+
+# the reverse: each blade's vectors in the opposite order, the sign (-1)^(k(k-1)/2) of grade k
+reverse(a: Multivector): Multivector := Multivector(a.metric, [if (blade_grade(m) * (blade_grade(m) - 1) /! 2) % 2 == 0 then a.parts[m] else -a.parts[m] for m in 0 .. #a.parts])
+# the part of grade k
+grade_part(a: Multivector, k: int): Multivector := Multivector(a.metric, [if blade_grade(m) == k then a.parts[m] else 0.0 for m in 0 .. #a.parts])
+# the scalar part
+scalar(a: Multivector): float := a.parts[0]
+# the right complement: e_m becomes ±e_(not m) with e_m ∧ dual(e_m) = I; undual undoes it
+dual(a: Multivector): Multivector := complemented(a, (m, full) => blade_sign(m, full - m, []))
+undual(a: Multivector): Multivector := complemented(a, (m, full) => blade_sign(full - m, m, []))
+complemented(a: Multivector, sign: (int, int) -> float): Multivector := {
+	full = #a.parts - 1
+	Multivector(a.metric, [a.parts[full - c] * sign(full - c, full) for c in 0 .. #a.parts])
+}
+# the regressive product, the dual of the outer product of the duals: in PGA the join of points
+regressive(a: Multivector, b: Multivector): Multivector := undual(wedge(dual(a), dual(b)))
+# the norm, √|⟨a·ã⟩₀|
+norm(a: Multivector): float := sqrt(abs(scalar(a * reverse(a))))
+# a divided by its norm; a null multivector is refused
+normalized(a: Multivector): Multivector := {
+	n = norm(a)
+	if n == 0 { raise "pga: a null multivector has no direction to keep" }
+	Multivector(a.metric, a.parts.map(x => x / n))
+}
+# x transformed by the versor r: r·x·r̃ (a rotor rotates, a motor moves)
+sandwich(r: Multivector, x: Multivector): Multivector := r * x * reverse(r)
+
+# The projective geometric algebra of the plane, R(2,0,1): e0² = 0, e1² = e2² = 1
+PGA2 := [0, 1, 1]
+# The projective geometric algebra of space, R(3,0,1): e0² = 0, e1² = e2² = e3² = 1
+PGA3 := [0, 1, 1, 1]
+# where a point's weight and coordinates sit, with their signs: the plane's e12, -e20 and e01; space's e123, -e032,
+# e013 and -e021
+PLANE_WEIGHT := 6
+SPACE_WEIGHT := 14
+PLANE_PLACES := [[5, -1.0], [3, 1.0]]
+SPACE_PLACES := [[13, -1.0], [11, 1.0], [7, -1.0]]
+
+# a point of the plane or of space: its weight 1, its coordinates in their blades
+point(x: float, y: float): Multivector := placed(PGA2, PLANE_WEIGHT, PLANE_PLACES, [x, y])
+point(x: float, y: float, z: float): Multivector := placed(PGA3, SPACE_WEIGHT, SPACE_PLACES, [x, y, z])
+point(at: list<float>): Multivector := if #at == 2 then point(at[0], at[1]) else point(at[0], at[1], at[2])
+placed(metric: list<int>, weight: int, places: list<list<float>>, at: list<float>): Multivector := (0 .. #at).fold(blade(metric, weight, 1.0), (sum, k) => sum + blade(metric, int(places[k][0]), places[k][1] * at[k]))
+# a point's coordinates; an ideal point (a direction, weight 0) has none
+coordinates(p: Multivector): list<float> := {
+	weight = if #p.metric == 3 then PLANE_WEIGHT else SPACE_WEIGHT
+	places = if #p.metric == 3 then PLANE_PLACES else SPACE_PLACES
+	w = p.parts[weight]
+	if w == 0 { raise "pga: an ideal point (a direction) has no coordinates" }
+	places.map(place => place[1] * p.parts[int(place[0])] / w)
+}
+# the line a·x + b·y + c = 0 in the plane; a line in space is the join of two points or the meet of two planes
+line(a: float, b: float, c: float): Multivector := blade(PGA2, 2, a) + blade(PGA2, 4, b) + blade(PGA2, 1, c)
+# the plane a·x + b·y + c·z + d = 0
+plane(a: float, b: float, c: float, d: float): Multivector := blade(PGA3, 2, a) + blade(PGA3, 4, b) + blade(PGA3, 8, c) + blade(PGA3, 1, d)
+
+# space's basis blades by their bivector.net names (blade m with a sign where the name orders its vectors otherwise)
+e0 := blade(PGA3, 1, 1.0)
+e1 := blade(PGA3, 2, 1.0)
+e2 := blade(PGA3, 4, 1.0)
+e3 := blade(PGA3, 8, 1.0)
+e01 := blade(PGA3, 3, 1.0)
+e02 := blade(PGA3, 5, 1.0)
+e03 := blade(PGA3, 9, 1.0)
+e12 := blade(PGA3, 6, 1.0)
+e31 := blade(PGA3, 10, -1.0)
+e23 := blade(PGA3, 12, 1.0)
+e021 := blade(PGA3, 7, -1.0)
+e013 := blade(PGA3, 11, 1.0)
+e032 := blade(PGA3, 13, -1.0)
+e123 := blade(PGA3, 14, 1.0)
+e0123 := blade(PGA3, 15, 1.0)
+# the same blades named by what they are: the directions (ideal points), so that
+# point(x, y, z) == origin + x·ẋ + y·ẏ + z·ż; the origin; the pseudoscalar
+ẋ := e032
+ẏ := e013
+ż := e021
+origin := e123
+I := e0123
+
+# the meet (outer product) and the join (regressive product); a mirror reflects, a versor applies
+meet(a: Multivector, b: Multivector): Multivector := wedge(a, b)
+join(a: Multivector, b: Multivector): Multivector := regressive(a, b)
+reflect(mirror: Multivector, x: Multivector): Multivector := sandwich(mirror, x)
+apply(versor: Multivector, x: Multivector): Multivector := sandwich(versor, x)
+# an arrow from a to b, anchored at a; a ray from a through b, a line with one source; the span of two objects; an
+# assembly of two objects, not their sum or product (wiki/algebra.md)
+arrow(start: Multivector, end: Multivector): list<Multivector> := [start, end - start]
+ray(start: Multivector, through: Multivector): list<Multivector> := [start, join(start, through)]
+span(a: Multivector, b: Multivector): list<Multivector> := [a, b]
+collection(a: any, b: any): list<any> := [a, b]
+infix operator ⋏(a: Multivector, b: Multivector): Multivector := meet(a, b)
+infix operator ⋎(a: Multivector, b: Multivector): Multivector := join(a, b)
+infix operator ↦(a: Multivector, b: Multivector): list<Multivector> := arrow(a, b)
+infix operator ↣(a: Multivector, b: Multivector): list<Multivector> := ray(a, b)
+infix operator ⟇(a: Multivector, b: Multivector): list<Multivector> := span(a, b)
+infix operator ⊔(a: any, b: any): list<any> := collection(a, b)
+alias intersect => meet
+alias intersection => meet
+alias crossing => meet
+alias connect => join
+alias segment => arrow
+alias path => arrow
+alias halfline => ray
+alias subspace => span
+alias assembly => collection
+operator ⋏ has precedence above ⋎
+
+# a rotor around the point (x, y) in the plane, around the line axis in space, or around the direction (x, y, z)
+# through the origin: rotor.apply(p)
+rotor(angle: float, x: float, y: float): Multivector := point(x, y) * -sin(angle / 2) + cos(angle / 2)
+rotor(angle: float, axis: Multivector): Multivector := normalized(axis) * -sin(angle / 2) + cos(angle / 2)
+rotor(angle: float, x: float, y: float, z: float): Multivector := rotor(angle, join(point(0.0, 0.0, 0.0), point(x, y, z)))
+# the translator moving by (dx, dy) or (dx, dy, dz)
+translator(dx: float, dy: float): Multivector := blade(PGA2, 0, 1.0) + blade(PGA2, 3, -dx / 2) + blade(PGA2, 5, -dy / 2)
+translator(dx: float, dy: float, dz: float): Multivector := blade(PGA3, 0, 1.0) + blade(PGA3, 3, -dx / 2) + blade(PGA3, 5, -dy / 2) + blade(PGA3, 9, -dz / 2)
+# a motor: the translator after the rotor
+motor(r: Multivector, t: Multivector): Multivector := t * r
+
+# the name of the blade of index m: e, then the indices of its vectors, e013; the scalar's is empty
+blade_name(m: int): text := if m == 0 then "" else "e" + (0 .. 64).filter(i => ((m >> i) & 1) == 1).map(i => "${i}").join("")
+part_text(x: float): text := if x == floor(x) and abs(x) < 1e15 then "${int(x)}" else "${x}"
+# "1 + 2e1 - e12": the nonzero parts by blade index, a coefficient of ±1 left out before a blade; "0" for zero
+text(a: Multivector): text := {
+	terms = (0 .. #a.parts).filter(m => a.parts[m] != 0).map(m => {
+		size = abs(a.parts[m])
+		(if a.parts[m] < 0 then "-" else "+") + (if m > 0 and size == 1 then "" else part_text(size)) + blade_name(m)
+	})
+	if #terms == 0 { return "0" }
+	signed = terms.map(term => " " + term[0 .. 1] + " " + term[1 ..]).join("")
+	(if terms[0][0 .. 1] == "-" then "-" else "") + signed[3 ..]
+}
