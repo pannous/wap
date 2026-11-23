@@ -99,8 +99,8 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - graphics.md (157 lines):
 - group.md (10 lines): wap-wiki, asked (immutable groups clash with list.md)
 - grouping.md (46 lines): wap-wiki, asked (unbracketed commas, blocks as lists)
-- guiding-principles.md (13 lines):
-- haskell.md (49 lines):
+- guiding-principles.md (13 lines): ✓ wap-wiki, prose
+- haskell.md (49 lines): ✓ wap-wiki, prose (it as the last result: test_it_wanted)
 - hex.md (11 lines):
 - Home.md (47 lines):
 - html.md (159 lines):
