@@ -67,4 +67,6 @@ first40(s: bytes<40>): i64 from '$stage/libs40.dylib'
 made40(): handle from '$stage/libs40.dylib'
 m = made40()
 print(text(sum40(m)) + \" \" + text(first40(m)))")" "14 1"
+check "a C struct of 16 bytes or less is refused, as it crosses in registers" "$(ran small_struct "first40(s: bytes<16>): i64 from '$stage/libs40.dylib'
+first40(0)" 2>&1 | grep -c 'crosses in registers')" "1"
 exit $((failures > 0))
