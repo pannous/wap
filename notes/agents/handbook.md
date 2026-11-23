@@ -12,6 +12,9 @@ differ and holds every rule; this file holds only the procedures behind them.
 - A new root .warp data file (components.warp …): tell the Integrator the commit, tests read it.
 - Worktrees: never touch /Volumes/Worktrees/warp (cowtree's donor) nor the Integrator's trees. A new worktree's files
   get their last commit's time (~/.git-hooks/post-checkout runs ~/dev/bin/restore-mtimes), not the checkout time.
+- Wiki worktrees come from the wiki's donor clone on the worktree volume (cowtree needs a checkout there to clone
+  from): `cd /Volumes/Worktrees/wap-wiki && git fetch origin && cowtree add -b <card> /Volumes/Worktrees/<card>
+  origin/master`, then push the branch to origin as usual. Never work in /Volumes/Worktrees/wap-wiki itself.
 - Moving on demand: a change in the main checkout that grows (more than a few files, many build/test rounds, or
   another session's files) moves into a worktree while still uncommitted: `cowtree add -b <task> <worktree> HEAD`,
   `git diff -- <own paths> | git -C <worktree> apply`, then undo only your own paths in the main checkout.
