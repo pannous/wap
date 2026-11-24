@@ -18,6 +18,7 @@ use "state.wap"
 use "unify.wap"
 use "match.wap"
 use "recursion.wap"
+use "instances.wap"
 
 # the elaborator's own rules, which a refusal names
 OVERLOAD := "overload"
@@ -30,16 +31,18 @@ HOLE_WORD := "_"
 LETTER_LENGTH := 1
 
 # The program elaborated so far: the kernel's environment, and what the kernel does not keep: how many found binders
-# each declaration takes before its written ones, the declarations an overloaded name stands for, and the laws stated
-# without a proof: hints, tested where they can be, never a proof of anything
+# each declaration takes before its written ones, the declarations an overloaded name stands for, the laws stated
+# without a proof (hints, tested where they can be, never a proof of anything), and each trait's operations
 class Theory {
 	environment: Environment = Environment()
 	found: map<text, int> = {}
 	overloads: map<text, list<text>> = {}
 	unproved_laws: map<text, Term> = {}
+	traits: map<text, list<text>> = {}
 }
 # The reading of one declaration: its elaboration, which holds the binders in scope, the level names written
-# (explicit.wap's Reading); while its header is read, the letters found, as their variables
+# (explicit.wap's Reading); while its header is read, the letters found, as their variables; the holes for
+# instances of traits, which a search fills (instances.wap)
 class Elaborating {
 	theory: Theory
 	el: Elaboration
@@ -48,6 +51,7 @@ class Elaborating {
 	letters: list<Term> = []
 	recursing: Recursion? = ø
 	below: list<Below> = []
+	instances: list<Term> = []
 }
 elaborating(p: Theory): Elaborating := Elaborating(p, elaboration(p.environment, []), Reading(p.environment))
 
@@ -99,7 +103,9 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 	if x.recursing is not ø and name == x.recursing!.name { return recursive_call_elaborated(x, arguments, wanted) }
 	if arguments is empty and name == PROP_WORD { return PROP }
 	if arguments is empty and name == TYPE_WORD { return type_at(Zero) }
-	candidates = x.theory.overloads.get(name) ?? (if declaration(x.theory.environment, name) is not ø then [name] else [])
+	candidates = declarations_named(x.theory, name)
+	operation = trait_operation(x, name, candidates, arguments, wanted)
+	if operation is not ø { return operation! }
 	if #candidates == 1 { return declared_given(x, candidates#1, arguments, wanted) }
 	if #candidates > 1 { return overload_elaborated(x, name, candidates, arguments, wanted) }
 	if x.header and #name == LETTER_LENGTH {
@@ -122,6 +128,7 @@ declared_given(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?)
 	for at in 1 to (x.theory.found.get(name) ?? 0) {
 		parts = pi_parts(x, type) ?? refused(NOT_A_FUNCTION, "${name} has fewer binders than it finds")
 		found = hole(x.el, "the ${parts.binder} of ${name}", parts.domain)
+		instance_noted(x, found)
 		function = apply(function, found)
 		type = instantiated(parts.body, found)
 	}
@@ -160,16 +167,27 @@ pi_parts(x: Elaborating, type: Term): PiParts? := match computed(x.el.c, filled(
 	_ => ø
 }
 
+# the declarations a name stands for: an overloaded name's, else its own, else none
+declarations_named(p: Theory, name: text): list<text> := p.overloads.get(name) ?? (if declaration(p.environment, name) is not ø then [name] else [])
+
 # The declarations of an overloaded name tried in turn: exactly one must fit its arguments and the type wanted
 overload_elaborated(x: Elaborating, name: text, candidates: list<text>, arguments: list<Node>, wanted: Term?): Term := {
+	fitting = fitting_declarations(x, candidates, arguments, wanted)
+	if #fitting != 1 { refused(OVERLOAD, "${name} is ${if fitting is empty then "none" else fitting.join(" and ")} of ${candidates.join(", ")} here") }
+	declared_given(x, fitting#1, arguments, wanted)
+}
+# the declarations that fit the arguments and the type wanted, each tried and taken back
+fitting_declarations(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<text> := {
 	kept = found_so_far(x.el)
-	fitting = candidates.filter(candidate => {
-		fits = try { declared_given(x, candidate, arguments, wanted); yes } catch e { mismatch(e) }
+	candidates.filter(candidate => {
+		fits = try {
+			given = declared_given(x, candidate, arguments, wanted)
+			if wanted is not ø { made_of(x, given, wanted!) }
+			yes
+		} catch e { mismatch(e) }
 		back_to(x.el, kept)
 		fits
 	})
-	if #fitting != 1 { refused(OVERLOAD, "${name} is ${if fitting is empty then "none" else fitting.join(" and ")} of ${candidates.join(", ")} here") }
-	declared_given(x, fitting#1, arguments, wanted)
 }
 
 # --- binders
