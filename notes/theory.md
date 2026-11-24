@@ -140,6 +140,50 @@ A level name in a declaration that nothing binds is a level parameter of it, in 
 name is looked up among the binders around it, innermost first, then among the declarations; anything else is the
 refusal "unknown name".
 
+## The declarations that bind names
+
+The kernel names no type of the prelude (plan 5.4). Three statements of the explicit corner bind the ones a
+mechanism needs. Each is checked, and `quotients` and `numbers` stand once.
+
+**`quotients(Equal)`** (K5, plan 6.6). `Equal` must have the shape of equality: a block of one type with one level
+parameter `u`, the parameters `T: Sort(u)` and `a: T`, one index of type `T`, in `Prop`, and one case without
+fields whose result is `Equal(T, a, a)`. The statement adds four constants:
+
+| constant | type |
+|---|---|
+| `quotient[u]` | `(T: Sort(u)) -> (r: T -> T -> Prop) -> Sort(u)` |
+| `quotient.of[u]` | `(T: Sort(u)) -> (r: T -> T -> Prop) -> T -> quotient[u](T, r)` |
+| `quotient.lift[u, v]` | `(T: Sort(u)) -> (r: T -> T -> Prop) -> (B: Sort(v)) -> (f: T -> B) -> ((a: T) -> (b: T) -> r(a, b) -> Equal[v](B, f(a), f(b))) -> quotient[u](T, r) -> B` |
+| `quotient.induct[u]` | `(T: Sort(u)) -> (r: T -> T -> Prop) -> (motive: quotient[u](T, r) -> Prop) -> ((a: T) -> motive(quotient.of[u](T, r, a))) -> (q: quotient[u](T, r)) -> motive(q)` |
+
+Computing (6.4), the last argument computed first: `quotient.lift[u, v](T, r, B, f, h, quotient.of[u](T, r, a))` is
+`f(a)`, and `quotient.induct[u](T, r, motive, h, quotient.of[u](T, r, a))` is `h(a)`. That joined values are equal is
+an axiom of the prelude, written like any other: `axiom quotient_sound(T: Sort(u), r: T -> T -> Prop, a: T, b: T):
+r(a, b) -> Equal[u](quotient[u](T, r), quotient.of[u](T, r, a), quotient.of[u](T, r, b))`.
+
+**`numbers(nat, bool.yes, Equal)`** (K3, plan 6.7). `nat` must be a block of one type without parameters, indices
+or level parameters, in `Type`, with a case without fields and then a case with one field of `nat`; `bool.yes` a
+case of a block of one type with two cases without fields, in `Type`; `Equal` as above. From then on a number has
+the type `nat`, and where a rule asks for a case, 0 is the first case and n + 1 the second applied to the number n.
+
+**`shortcut(kind, function, theorems…)`**, one per shortcut, in the order of this table. `N` is the number type, `Z`
+and `S` its cases, `yes` and `no` the truth values. The kernel builds each statement as written here, for all `m`
+and `n` of `N`, the `==` being `Equal[1]` at `N` or at the truth values' type:
+
+| statement | function | the theorems, in order |
+|---|---|---|
+| `shortcut(add, f, …)` | `f: N -> N -> N` | `f(m, Z) == m`; `f(m, S(n)) == S(f(m, n))` |
+| `shortcut(subtract, f, …)` | `f: N -> N -> N` | `f(m, Z) == m`; `f(Z, n) == Z`; `f(S(m), S(n)) == f(m, n)` |
+| `shortcut(multiply, f, …)` | `f: N -> N -> N`, after add `g` | `f(m, Z) == Z`; `f(m, S(n)) == g(f(m, n), m)` |
+| `shortcut(equal, f, …)` | `f: N -> N -> bool` | `f(Z, Z) == yes`; `f(S(m), Z) == no`; `f(Z, S(n)) == no`; `f(S(m), S(n)) == f(m, n)` |
+| `shortcut(at_most, f, …)` | `f: N -> N -> bool` | `f(Z, n) == yes`; `f(S(m), Z) == no`; `f(S(m), S(n)) == f(m, n)` |
+| `shortcut(divide, d, r, …)` | `d`, `r: N -> N -> N`, after add `g`, multiply `p`, at most `l` | `g(p(d(m, n), n), r(m, n)) == m`; `d(m, Z) == Z`; `l(r(m, S(n)), n) == yes` |
+
+A theorem licenses its shortcut when it is a declared theorem whose type is the built statement (`same`, so binder
+names aside) and neither it nor the function rests on an axiom (`axioms_of` is empty for both). A shortcut fires
+only on its bound constant, without levels, applied to two numbers, and gives what the arithmetic of numbers
+without a bound gives: a number, or a truth value.
+
 ## The door
 
 `check.wap` reads a program and takes its statements in order. A declaration is checked and added; nothing is said
