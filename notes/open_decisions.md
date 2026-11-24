@@ -40,11 +40,6 @@ show the user: the case against and why no library or hook does it (ask the bran
   (same core plus an option). Leave as is: the temp path stays in messages. Supervisor recommends stdin.
   wap-reviewer: sound (serves pipes, no quoting, the temp file goes); nit: driver and console run the compiler in
   the user's folder so `use "x.wap"` resolves there.
-- data-link (setup, only the user: needs sudo): /Users/me/dev/angles/wap/data is a root-owned absolute link to
-  /Volumes/Junk/warp/data; wasmtime never follows absolute links, so programs and compilers under data/ get "cannot
-  read". Fix: a relative link, `sudo ln -sfn ../../../../../Volumes/Junk/warp/data /Users/me/dev/angles/wap/data`
-  (five levels up; the supervisor's draft had four). No compiler change. Unproven until wap-fixer shows a relative
-  link that leaves the folder the program was given is read. Other users' absolute links: card absolute-links.
 
 ## To present (keep or change, at 10:00)
 
