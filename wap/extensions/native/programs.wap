@@ -1,6 +1,6 @@
 # The native wap's compiled programs (driver.wap): a program's machine code kept beside wap.wasm (compiler.wap),
 # program-<hash>.cwasm by the hash of the compiler, the program's source and each file it uses or includes by a quoted
-# path, so a program run again unchanged runs at once, never compiled; a library module the compiler finds by its name
+# path or by `use folder`, so a program run again unchanged runs at once, never compiled; a library module the compiler finds by its name
 # changes only with an install, which removes every machine code (scripts/refresh-seed.sh)
 use "c.wap"
 use "run.wap"
@@ -11,14 +11,13 @@ USE_MARK := "use \""
 INCLUDE_MARK := "include \""
 QUOTE := 34
 PROGRAM_CACHE := "program"
-# how deep files using files are followed (a cycle of uses is hashed that many times over, the same each run)
-USE_DEPTH := 8
+FOLDER_USE := "use folder"
 
 # the program's module, its machine code read from beside the compiler, else compiled by it (wap.wasm of this hash) to
 # the run's module file and its machine code kept; 0 where it was not, said
 program_module(program: text, compiler_hash: int): int := {
 	global module_file
-	cache = cache_named(folder_part(compiler_path) + PROGRAM_CACHE, sources_hashed(compiler_hash, program_path(program), 0))
+	cache = cache_named(folder_part(compiler_path) + PROGRAM_CACHE, sources_hashed(compiler_hash, program_path(program)))
 	cached = deserialized(cache)
 	if cached != 0 { return cached }
 	if not compiled(module_loaded(compiler_path), program, module_file) { return 0 }
@@ -26,25 +25,47 @@ program_module(program: text, compiler_hash: int): int := {
 	if module != 0 then cache_written(module, cache) else 0
 	module
 }
-# the hash gone on over the bytes of the file at the path and over each file they name after a use or an include
-sources_hashed(hash: int, path: text, depth: int): int := {
+# the hash gone on over the bytes of each file the program reads, each once
+sources_hashed(hash: int, path: text): int := {
+	reached = [realpath(path, 0)]
 	size_at = host_block(8)
-	bytes = file_read(path, size_at)
-	if bytes == 0 or depth > USE_DEPTH { return hash }
-	size = long_at(size_at)
-	used = named_hashed(hash_of(hash, bytes, size), path, bytes, size, USE_MARK, depth)
-	named_hashed(used, path, bytes, size, INCLUDE_MARK, depth)
-}
-# the hash gone on over each file the bytes name in quotes after the mark, its path beside the file's
-named_hashed(hash: int, path: text, bytes: int, size: int, mark: text, depth: int): int := {
 	gone_on = hash
+	at = 1
+	while at <= #reached {
+		bytes = file_read(reached#at, size_at)
+		if bytes != 0 {
+			size = long_at(size_at)
+			gone_on = hash_of(gone_on, bytes, size)
+			for source in sources_named(reached#at, bytes, size) { if source != "" and not is_among(source, reached) { reached += [source] } }
+		}
+		at += 1
+	}
+	gone_on
+}
+# the files the bytes of the file at the path read, by their real paths: each a use or an include names in quotes,
+# and the sources beside it where it reads its folder
+sources_named(path: text, bytes: int, size: int): list<text> := {
+	quoted = quoted_after(path, bytes, size, USE_MARK) + quoted_after(path, bytes, size, INCLUDE_MARK)
+	if memmem(bytes, size, c_text(FOLDER_USE), byte_count(FOLDER_USE)) == 0 { return quoted }
+	for name in wap_folder_names(folder_of(path)).split("\n") { if is_source(name) { quoted += [realpath(beside(path, name), 0)] } }
+	quoted
+}
+# whether the texts hold the text; contains takes a function, which a build keeping values in the memory cannot hold
+is_among(wanted: text, texts: list<text>): bool := {
+	for text in texts { if text == wanted { return yes } }
+	no
+}
+is_source(name: text): bool := name.ends_with(".wap") or name.ends_with(".warp")
+# each path the bytes name in quotes after the mark, as a real path beside the file's
+quoted_after(path: text, bytes: int, size: int, mark: text): list<text> := {
+	named: list<text> = []
 	found = memmem(bytes, size, c_text(mark), byte_count(mark))
 	while found != 0 {
 		name = found + byte_count(mark)
 		quote = memchr(name, QUOTE, bytes + size - name)
-		if quote == 0 { return gone_on }
-		gone_on = sources_hashed(gone_on, beside(path, c_copied(name, quote - name)), depth + 1)
+		if quote == 0 { return named }
+		named += [realpath(beside(path, c_copied(name, quote - name)), 0)]
 		found = memmem(quote, bytes + size - quote, c_text(mark), byte_count(mark))
 	}
-	gone_on
+	named
 }

@@ -40,6 +40,22 @@ static void* epoch_ticking(void* engine) {
 static const char* library_folder = NULL;
 void wap_library_folder_set(const char* folder) { library_folder = strdup(folder); }
 const char* wap_library_folder(void) { return library_folder; }
+// the names in a folder in sorted order, each ended by a newline, "" for a folder it cannot open (programs.wap: what `use folder` reads)
+#include <dirent.h>
+char* wap_folder_names(const char* path) {
+	char* names = NULL;
+	size_t size = 0;
+	FILE* written = open_memstream(&names, &size);
+	struct dirent** entries = NULL;
+	int count = scandir(path, &entries, NULL, alphasort);
+	for (int at = 0; at < count; at++) {
+		fprintf(written, "%s\n", entries[at]->d_name);
+		free(entries[at]);
+	}
+	free(entries);
+	fclose(written);
+	return names;
+}
 // when this executable was built (commands.wap version)
 const char* wap_built(void) { return __DATE__ " " __TIME__; }
 void epoch_ticker_started(int64_t engine) {
