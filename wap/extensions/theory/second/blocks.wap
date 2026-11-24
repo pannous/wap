@@ -5,6 +5,7 @@ use "expressions.wap"
 use "read.wap"
 use "judge.wap"
 use "bindings.wap"
+use "nested.wap"
 
 RECURSOR := ".recursor"
 # the level a recursor's motives lie in when they may lie in any universe, first of its levels
@@ -25,9 +26,10 @@ telescope(j: Judge, type: Expr, count: int): Telescope := {
 	}
 	Telescope(locals, rest)
 }
-# a function type's first binders given these values, as written
+# a function type's or a function's first binders given these values, as written
 given(type: Expr, values: list<Expr>): Expr := values.fold(type, (t, value) => match t {
 	Pi(domain, body) => instantiate(body, value)
+	Lam(domain, body) => instantiate(body, value)
 	_ => raise "a type has fewer binders than it is given values"
 })
 local_id(t: Expr): int := match t {
@@ -101,15 +103,14 @@ recursive(j: Judge, block: Block, field: Expr, parameters: list<Expr>): bool := 
 
 # --- admission
 
-block_admitted(e: Environment, block: Block) := {
-	j = Judge(e, block.levels)
+block_admitted(e: Environment, written: Block) := {
+	j = Judge(e, written.levels)
+	for family in written.families { family_typed(j, written, family) }
+	parameters = telescope(j, written.families#1.type, written.parameters).locals
+	block = unnested(j, written, parameters)
+	for family in added_families(block) { family_typed(j, block, family) }
 	place = #e.blocks + 1
 	e.blocks += [block]
-	for family in block.families {
-		if loose(family.type, 0) { raise "${family.name}'s type holds a variable bound nowhere" }
-		sort_of(j, family.type)
-	}
-	parameters = telescope(j, block.families#1.type, block.parameters).locals
 	level = family_level(j, block.families#1)
 	for family in block.families {
 		if not parameters_alike(j, family.type, parameters) { raise "${family.name}'s parameters are not its block's" }
@@ -117,16 +118,28 @@ block_admitted(e: Environment, block: Block) := {
 		added(e, family.name, block.levels, family.type, ø, FamilyOf(place))
 	}
 	minor = 0
+	# each case is checked plain, and typed as written, its containers and their arguments too
+	written_cases: list<Expr> = []
 	for family in block.families {
 		for case in family.cases {
 			minor += 1
-			added(e, case.name, block.levels, case.type, ø, CaseOf(family.name, minor, case_checked(j, block, case, family.name, parameters, level)))
+			fields = case_checked(j, block, case, family.name, parameters, level)
+			type = contained(e, block, case.type)
+			sort_of(j, type)
+			written_cases += [type]
+			added(e, case.name, block.levels, type, ø, CaseOf(family.name, minor, fields))
 		}
 	}
 	large = surely_above_zero(settled(level)) or (#block.families == 1 and (#cases_of(block) == 0 or (#cases_of(block) == 1 and small(j, block, cases_of(block)#1, parameters))))
 	recursors = family_names(block).map(name => name + RECURSOR)
-	for k in 1 to #block.families { added(e, recursors#k, (if large then [MOTIVE_LEVEL] else []) + block.levels, recursor_type(j, block, k, parameters, large), ø, RecursorOf(place, k)) }
-	rests_on(e, family_names(block) + cases_of(block).map(c => c.name) + recursors, resting(e, block.families.map(f => f.type) + cases_of(block).map(c => c.type)))
+	for k in 1 to #block.families { added(e, recursors#k, (if large then [MOTIVE_LEVEL] else []) + block.levels, contained(e, block, recursor_type(j, block, k, parameters, large)), ø, RecursorOf(place, k)) }
+	rests_on(e, family_names(block) + cases_of(block).map(c => c.name) + recursors, resting(e, block.families.map(f => f.type) + written_cases))
+}
+# a family's type: closed, holding no family of its block, and typed
+family_typed(j: Judge, block: Block, family: Family) := {
+	if loose(family.type, 0) { raise "${family.name}'s type holds a variable bound nowhere" }
+	if mentions(family.type, family_names(block)) { raise "a type of the block holds a family of the block" }
+	sort_of(j, family.type)
 }
 # a case: typed, its fields in universes the block allows and holding the block strictly positively, and its result
 # its own family at the parameters; its count of fields
@@ -189,7 +202,7 @@ recursor_step(j: Judge, block: Block, k: int, us: list<Universe>, xs: list<Expr>
 	major_at = shared + indices_of(block, k) + 1
 	if #xs < major_at { return ø }
 	levels = us.drop(#us - #block.levels)
-	major = case_made(j, block, k, levels, whnf(j, xs#major_at)) ?? return ø
+	major = case_made(j, block, k, levels, uncontained(j, block, k, levels, xs.take(n), whnf(j, xs#major_at))) ?? return ø
 	name = head_name(major) ?? return ø
 	if not block.families#k.cases.map(c => c.name).contains(name) { return ø }
 	place = cases_of(block).map(c => c.name).index_of(name)
