@@ -1,7 +1,7 @@
 # Proof by linear arithmetic over the whole numbers (wiki/proof.md "Ways to prove"): a goal `t <= u` or `t == u` over
 # sums of numbers and unknowns (variables, and any other term taken as one) that holds wherever the hypotheses do.
 # Each hypothesis `a <= b` or `a == b` is a row `b - a >= 0` with a proof that `a + d == b`, the goal's negation
-# `t - u - 1 >= 0` another, and every unknown is at least 0. Eliminating the unknowns one by one (Fourier and
+# `t - u - 1 >= 0` another, and every atom is at least 0. Eliminating the unknowns one by one (Fourier and
 # Motzkin), each row keeping how many of the first rows it sums, ends in a sum of rows that is a negative number:
 # it says how many of each hypothesis prove the goal. The proof is built of the prelude's laws on sums: both sides
 # brought to one order, the hypotheses' sides cancelled, and `t <= t + k` carried to the goal. A goal outside these
@@ -15,6 +15,8 @@ use "../theory/numbers.wap"
 use "../theory/recursors.wap"
 use "../theory/elaborate/state.wap"
 use "../theory/elaborate/unify.wap"
+use "../theory/elaborate/match.wap"
+use magnitude
 use "goals.wap"
 use "rewriting.wap"
 
@@ -36,6 +38,7 @@ ONE_LEVEL := Successor(Zero)
 ROW_LIMIT := 400
 # the binder of the place in a sum a congruence rewrites
 PLACE := "z"
+NO_TERMS: list<Term> := []
 
 # the numbers and the checker the sums are read and proved with, and the functions they are written by
 class Sums { c: Checker; n: Numbers; nat: Term; add: Term; at_most: Term; equals: Term; subtract: Term }
@@ -47,7 +50,7 @@ class Ordered { unknowns: list<Term>; equated: Equated }
 class Normal { unknowns: list<Term>; number: int; equated: Equated }
 # a hypothesis read as `left + difference == right`
 class Bound { left: Term; difference: Term; right: Term; proof: Term }
-# a row `Σ coefficient·unknown + number >= 0`, and how many of each first row it sums
+# a row `Σ coefficient·atom + number >= 0`, and how many of each first row it sums
 class Row { coefficients: list<int>; number: int; sources: list<int> }
 # what makes t at least u: `t + gap == u`
 class Gap { gap: Term; equated: Equated }
@@ -86,7 +89,7 @@ at_most_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Term? := {
 	start = law(AT_MOST_ADD, [], [t, gap.gap])
 	carried(s.c, equation(s, s.nat, gap.equated.left, u), gap.equated.proof, start, v => truth_stated(s, apply_all(s.at_most, [t, v])))
 }
-# `t == u`: `t + gap == u` where the gap is no unknown and no number
+# `t == u`: `t + gap == u` where the gap is no atom and no number
 equal_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Term? := {
 	gap = gap_proof(s, bounds, t, u) ?? return ø
 	closed = normal(s, gap.gap)
@@ -106,12 +109,12 @@ chosen_proof(s: Sums, bounds: list<Bound>, wanted: Term): Term? := {
 	given = arguments(choice)
 	if facts.of != s.n.truth or #given != before_major(facts) + 1 { return ø }
 	decided = given.last()
-	yes = constant(s.n.yes_case, [])
+	affirmed = constant(s.n.yes_case, [])
 	truth = constant(s.n.truth, [])
 	sure = proved(s, bounds, truth_stated(s, decided)) ?? return ø
 	at_yes = proved(s, bounds, given#(facts.parameters + facts.motives + facts.cases.index_where(case => case == s.n.yes_case))) ?? return ø
 	chooser = apply_all(head(choice), given.take(#given - 1))
-	carried(s.c, equation(s, truth, yes, decided), law(SYMMETRIC, [ONE_LEVEL], [truth, decided, yes, sure]), at_yes, v => apply(chooser, v))
+	carried(s.c, equation(s, truth, affirmed, decided), law(SYMMETRIC, [ONE_LEVEL], [truth, decided, affirmed, sure]), at_yes, v => apply(chooser, v))
 }
 
 # --- the hypotheses
@@ -141,18 +144,13 @@ equal_bounds(s: Sums, a: Term, b: Term, proof: Term): list<Bound> := {
 gap_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := {
 	lefts = bounds.map(bound => normal(s, bound.left))
 	rights = bounds.map(bound => normal(s, bound.right))
-	first = normal(s, t)
-	second = normal(s, u)
-	unknowns: list<Term> = []
-	for read in lefts + rights + [first, second] {
-		for unknown in read.unknowns { if not unknowns.any(known => same(known, unknown)) { unknowns += [unknown] } }
-	}
-	rows = (0 upto #bounds).map(at => difference_row(unknowns, rights[at], lefts[at]))
-	goal_row = difference_row(unknowns, first, second)
-	rows += [Row(goal_row.coefficients, goal_row.number - 1, [])]
-	rows += (0 upto #unknowns).map(at => Row(unit(at, #unknowns), 0, []))
-	total = #rows
-	rows = (0 upto total).map(at => Row(rows[at].coefficients, rows[at].number, unit(at, total)))
+	lower = normal(s, t)
+	upper = normal(s, u)
+	unknowns = (lefts + rights + [lower, upper]).flat_map(found => found.unknowns).fold(NO_TERMS, with_new)
+	goal_row = difference_row(unknowns, lower, upper)
+	unsourced = (0 upto #bounds).map(at => difference_row(unknowns, rights[at], lefts[at])) + [Row(goal_row.coefficients, goal_row.number - 1, [])] + (0 upto #unknowns).map(at => Row(unit(at, #unknowns), 0, []))
+	total = #unsourced
+	rows = (0 upto total).map(at => Row(unsourced[at].coefficients, unsourced[at].number, unit(at, total)))
 	sources = refuted(rows, #unknowns) ?? return ø
 	common = sources.fold(0, divisor)
 	times = sources.map(source => source ÷ common)
@@ -169,9 +167,11 @@ gap_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := {
 	chain = chained(s, chained(s, reordered, along), ended)
 	Gap(gap, Equated(added(s, t, gap), u, law(ADD_CANCEL, [], [added(s, t, gap), u, summed(s, used.map(bound => bound.left)), chain.proof])))
 }
+# the unknowns, the term added where none is the same
+with_new(unknowns: list<Term>, term: Term): list<Term> := if unknowns.any(known => same(known, term)) then unknowns else unknowns + [term]
 # the row `a - b`, over the unknowns found
-difference_row(unknowns: list<Term>, a: Normal, b: Normal): Row := Row(unknowns.map(unknown => counted(a, unknown) - counted(b, unknown)), a.number - b.number, [])
-counted(read: Normal, unknown: Term): int := read.unknowns.filter(x => same(x, unknown)).fold(0, (count, x) => count + 1)
+difference_row(unknowns: list<Term>, a: Normal, b: Normal): Row := Row(unknowns.map(atom => counted(a, atom) - counted(b, atom)), a.number - b.number, [])
+counted(found: Normal, atom: Term): int := found.unknowns.filter(x => same(x, atom)).fold(0, (count, x) => count + 1)
 unit(at: int, size: int): list<int> := (0 upto size).map(place => if place == at then 1 else 0)
 copies(item: T, times: int): list<T> := (0 upto times).map(place => item)
 divisor(a: int, b: int): int := if b == 0 then a else divisor(b, a % b)
@@ -195,16 +195,16 @@ row_sum(p: Row, a: int, q: Row, b: int): Row := {
 
 # the proof that two sums are equal, both brought to one order; ø where their orders differ
 same_sum(s: Sums, a: Term, b: Term): Equated? := {
-	first = normal(s, a)
-	second = normal(s, b)
-	if not same(first.equated.right, second.equated.right) { return ø }
-	chained(s, first.equated, symmetric(s, second.equated))
+	one = normal(s, a)
+	other = normal(s, b)
+	if not same(one.equated.right, other.equated.right) { return ø }
+	chained(s, one.equated, symmetric(s, other.equated))
 }
 # t read as a sum and brought to one order
 normal(s: Sums, t: Term): Normal := {
-	read = unfolded_until(s, t, part => is_sum_part(s, part)) ?? return unknown_normal(s, t, computed(s.c, t))
-	given = arguments(read)
-	match head(read).shape {
+	found = unfolded_until(s, t, part => is_sum_part(s, part)) ?? return unknown_normal(s, t, computed(s.c, t))
+	given = arguments(found)
+	match head(found).shape {
 		Numeral(value) => number_normal(s, t, small(value)!)
 		Constant(name, levels) => {
 			if name == s.n.zero { return number_normal(s, t, 0) }
@@ -222,9 +222,9 @@ is_sum_part(s: Sums, t: Term): bool := match head(t).shape {
 }
 # a number held in one int, ø for a larger one
 small(value: Magnitude): int? := if #value.limbs > 1 then ø else limb(value, 0)
-unknown_normal(s: Sums, t: Term, unknown: Term): Normal := {
-	first = symmetric(s, Equated(added(s, zero_of(s), unknown), unknown, law(ZERO_ADD, [], [unknown])))
-	Normal([unknown], 0, Equated(t, normal_term(s, [unknown], 0), first.proof))
+unknown_normal(s: Sums, t: Term, atom: Term): Normal := {
+	reversed_law = symmetric(s, Equated(added(s, zero_of(s), atom), atom, law(ZERO_ADD, [], [atom])))
+	Normal([atom], 0, Equated(t, normal_term(s, [atom], 0), reversed_law.proof))
 }
 number_normal(s: Sums, t: Term, number: int): Normal := Normal([], number, Equated(t, normal_term(s, [], number), refl(s, t).proof))
 next_normal(s: Sums, t: Term, inner: Normal): Normal := {
@@ -233,11 +233,11 @@ next_normal(s: Sums, t: Term, inner: Normal): Normal := {
 }
 # `x + y`, each in order, `((F + c) + G) + d` swapped to `((F + G) + c) + d` and F + G merged
 sum_normal(s: Sums, t: Term, x: Normal, y: Normal): Normal := {
-	first = sum_term(s, x.unknowns)
-	second = sum_term(s, y.unknowns)
+	left_sum = sum_term(s, x.unknowns)
+	right_sum = sum_term(s, y.unknowns)
 	both = inside(s, place => added(s, place, y.equated.left), x.equated)
 	both = chained(s, both, inside(s, place => added(s, x.equated.right, place), y.equated))
-	swapped = Equated(added(s, added(s, first, number(x.number)), second), added(s, added(s, first, second), number(x.number)), law(ADD_SWAPPED, [], [first, number(x.number), second]))
+	swapped = Equated(added(s, added(s, left_sum, number(x.number)), right_sum), added(s, added(s, left_sum, right_sum), number(x.number)), law(ADD_SWAPPED, [], [left_sum, number(x.number), right_sum]))
 	both = chained(s, both, inside(s, place => added(s, place, number(y.number)), swapped))
 	merged_sum = merged(s, x.unknowns, y.unknowns)
 	value = x.number + y.number
@@ -255,14 +255,14 @@ merged(s: Sums, xs: list<Term>, ys: list<Term>): Ordered := {
 	further = inserted(s, inner.unknowns, top)
 	Ordered(further.unknowns, chained(s, chained(s, regrouped, inside(s, place => added(s, place, top), inner.equated)), further.equated))
 }
-# a sum in order plus one more unknown, in order: the unknown swapped down past each that goes after it
-inserted(s: Sums, xs: list<Term>, unknown: Term): Ordered := {
-	start = added(s, sum_term(s, xs), unknown)
-	if xs is empty or xs.last().hash <= unknown.hash { return Ordered(xs + [unknown], refl(s, start)) }
+# a sum in order plus one more atom, in order: the atom swapped down past each that goes after it
+inserted(s: Sums, xs: list<Term>, atom: Term): Ordered := {
+	start = added(s, sum_term(s, xs), atom)
+	if xs is empty or xs.last().hash <= atom.hash { return Ordered(xs + [atom], refl(s, start)) }
 	rest = xs.take(#xs - 1)
 	top = xs.last()
-	swapped = Equated(start, added(s, added(s, sum_term(s, rest), unknown), top), law(ADD_SWAPPED, [], [sum_term(s, rest), top, unknown]))
-	inner = inserted(s, rest, unknown)
+	swapped = Equated(start, added(s, added(s, sum_term(s, rest), atom), top), law(ADD_SWAPPED, [], [sum_term(s, rest), top, atom]))
+	inner = inserted(s, rest, atom)
 	Ordered(inner.unknowns + [top], chained(s, swapped, inside(s, place => added(s, place, top), inner.equated)))
 }
 # the proof that two sums are equal where each part is
@@ -289,11 +289,11 @@ inside(s: Sums, place: (Term) -> Term, e: Equated): Equated := Equated(place(e.l
 # whether a term computes to the constant of a name, without arguments
 is_named(s: Sums, t: Term, name: text): bool := same(computed(s.c, t), constant(name, []))
 # the arguments of the two-number call of a function that t unfolds to, ø where it unfolds to none
-called(s: Sums, t: Term, function: Term): list<Term>? := arguments(unfolded_until(s, t, read => calls(read, function)) ?? return ø)
+called(s: Sums, t: Term, function: Term): list<Term>? := arguments(unfolded_until(s, t, found => calls(found, function)) ?? return ø)
 calls(t: Term, function: Term): bool := #arguments(t) == 2 and same(head(t), function)
 # t unfolded, one step at a time, until it fits; ø where it unfolds no further first
 unfolded_until(s: Sums, t: Term, fits: (Term) -> bool): Term? := {
-	read = computed_folded(s.c, t)
-	while not fits(read) { read = computed_folded(s.c, unfolded(s.c, read) ?? return ø) }
-	read
+	found = computed_folded(s.c, t)
+	while not fits(found) { found = computed_folded(s.c, unfolded(s.c, found) ?? return ø) }
+	found
 }
