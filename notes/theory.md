@@ -11,13 +11,14 @@ all of them keep. The plan says what the rules are; this note says where they li
 | `terms.wap` | levels and terms, building them, substitution, sameness | 6.1 | theory-terms |
 | `levels.wap` | levels compared: equal, at most, the level of a function type | 6.2 | theory-terms |
 | `environment.wap` | declarations, the environment, the state of a check, refusals | 6.6 | theory-terms |
-| `compute.wap` | a term computed to its head: beta, zeta, delta | 6.4 | theory-computing |
+| `compute.wap` | a term computed to its head: beta, zeta, delta, iota (with K) | 6.4, 7 | theory-computing |
 | `equal.wap` | definitional equality | 6.5 | theory-equality |
 | `typing.wap` | a term's type; a declaration checked and added | 6.3, 6.6 | theory-typing |
 | `explicit.wap` | a program in the explicit spellings read into terms and declarations | below | theory-explicit |
 | `show.wap` | a term shown in wap notation | below | theory-explicit |
 | `check.wap` | the door: a program checked statement by statement | below | theory-explicit |
 | `inductive.wap` | an inductive block checked | 7, checks 1 to 5 | theory-inductive-checks |
+| `nested.wap` | a block nested in another inductive type made plain | 7, nested types | theory-inductive-checks |
 | `recursors.wap` | recursors made, their computation rules | 7, checks 6 and 7 | theory-recursors |
 
 The files use each other freely: computing, equality and typing call one another.
@@ -50,8 +51,10 @@ The files use each other freely: computing, equality and typing call one another
 - `Environment`, `declaration(e, name)`, `place(e, name)` (later declared, larger), `added(e, d)`, `copied(e)`.
 - `names_new(e, names)`, `levels_distinct(levels)`, `closed(t, name)`: the checks before a declaration's type is read.
 - `InductiveBlock` (its levels, its count of parameters, its `BlockType`s, each with its `WrittenCase`s) as written,
-  and `InductiveFacts`, what checks 1 to 5 found of it: its level, each type's indices, each case's fields and
-  recursive fields, whether it is taken apart into any universe, whether it is a structure, whether K holds.
+  and `InductiveFacts`, what checks 1 to 5 found of it: the block made plain (its types first, then one `Name#k`
+  for each container), each container as a function of the block's parameters (`nested`), its level, each type's
+  indices, each case's fields and recursive fields, whether it is taken apart into any universe, whether it is a
+  structure, whether K holds.
 - `Checker`: the state of one check, made by `checker(e, levels)`. `hypothesis(c, binder, type)` gives the free
   variable of a binder gone into, `hypothesis_of(c, id)` its name and type. `stepped(c)` counts a step of computing.
   `Memory`, `remembered`, `remember`: results kept by term.
@@ -63,7 +66,9 @@ The files use each other freely: computing, equality and typing call one another
 
 **compute.wap**
 - `computed(c, t)`: t computed until its head is no beta, zeta or delta step (6.4).
-- `computed_folded(c, t)`: the same without delta, so the caller chooses what unfolds.
+- `computed_folded(c, t)`: the same without delta, so the caller chooses what unfolds. Iota is part of it: a
+  recursor whose major premise computes to a case of its type takes that case's rule; with K, a proof of its
+  proposition that is no case stands for the case when their types are equal.
 - `unfolded(c, t)`: t with its head constant replaced by its value at its levels, ø when the head unfolds to nothing;
   a head constant nothing declares is the refusal `unknown name`.
 
@@ -81,8 +86,25 @@ The files use each other freely: computing, equality and typing call one another
 
 **inductive.wap**
 - `inductive_declared(e, block)`: the block checked (7, checks 1 to 5), its types and cases added, its facts given
-  for the recursors. Its rules: `enum header`, `case type`, `parameters`, `case result`, `field universe`,
-  `strict positivity`. A type of the block nested in another inductive type is refused by strict positivity.
+  for the recursors; each type and case rests on the axioms its type names. Binders are entered as written: a header
+  or case type written as no function type where one is wanted is refused. Its rules: `enum header`, `case type`,
+  `parameters`, `case result`, `field universe`, `strict positivity`.
+
+**nested.wap**
+- `unnested(c, block, parameters)`: each container a type of the block is nested in, `list(Tree)`, becomes one more
+  type of the block, with the container's cases copied in at its levels and parameters, and every occurrence of it is
+  replaced by that type; the plain block goes through checks 1 to 5 unchanged. A container holding a type of the
+  block in an index, or a variable of the case in a parameter, is refused by `strict positivity`; so is one that uses
+  its parameter negatively, when the plain block is checked.
+
+**recursors.wap**
+- `recursors_made(e, facts)`: one recursor per type of a declared block, `<type>.recursor`, each one's type checked
+  by typing; inductive_declared adds them. Its level parameters: a level for the motives first where the block may
+  be taken apart into any universe (named so no program can write it), then the block's. Its binders: the
+  parameters, one motive per type, one minor premise per case of the block (a case's fields, then an induction
+  hypothesis per field of a type of the block), the type's indices, the major premise. Its `Recursor` facts hold one
+  closed rule per case for iota. The types nested.wap added for containers are turned back into the containers, in
+  every type, rule and case name.
 
 **explicit.wap, show.wap, check.wap**
 - `statement_read(e, statement)`: one statement of an explicit program as a `Statement`: `Declares(declaration)` or
@@ -139,6 +161,50 @@ of the language, and each is read as its term directly.
 A level name in a declaration that nothing binds is a level parameter of it, in the order of first appearance. A
 name is looked up among the binders around it, innermost first, then among the declarations; anything else is the
 refusal "unknown name".
+
+## The declarations that bind names
+
+The kernel names no type of the prelude (plan 5.4). Three statements of the explicit corner bind the ones a
+mechanism needs. Each is checked, and `quotients` and `numbers` stand once.
+
+**`quotients(Equal)`** (K5, plan 6.6). `Equal` must have the shape of equality: a block of one type with one level
+parameter `u`, the parameters `T: Sort(u)` and `a: T`, one index of type `T`, in `Prop`, and one case without
+fields whose result is `Equal(T, a, a)`. The statement adds four constants:
+
+| constant | type |
+|---|---|
+| `quotient[u]` | `(T: Sort(u)) -> (r: T -> T -> Prop) -> Sort(u)` |
+| `quotient.of[u]` | `(T: Sort(u)) -> (r: T -> T -> Prop) -> T -> quotient[u](T, r)` |
+| `quotient.lift[u, v]` | `(T: Sort(u)) -> (r: T -> T -> Prop) -> (B: Sort(v)) -> (f: T -> B) -> ((a: T) -> (b: T) -> r(a, b) -> Equal[v](B, f(a), f(b))) -> quotient[u](T, r) -> B` |
+| `quotient.induct[u]` | `(T: Sort(u)) -> (r: T -> T -> Prop) -> (motive: quotient[u](T, r) -> Prop) -> ((a: T) -> motive(quotient.of[u](T, r, a))) -> (q: quotient[u](T, r)) -> motive(q)` |
+
+Computing (6.4), the last argument computed first: `quotient.lift[u, v](T, r, B, f, h, quotient.of[u](T, r, a))` is
+`f(a)`, and `quotient.induct[u](T, r, motive, h, quotient.of[u](T, r, a))` is `h(a)`. That joined values are equal is
+an axiom of the prelude, written like any other: `axiom quotient_sound(T: Sort(u), r: T -> T -> Prop, a: T, b: T):
+r(a, b) -> Equal[u](quotient[u](T, r), quotient.of[u](T, r, a), quotient.of[u](T, r, b))`.
+
+**`numbers(nat, bool.yes, Equal)`** (K3, plan 6.7). `nat` must be a block of one type without parameters, indices
+or level parameters, in `Type`, with a case without fields and then a case with one field of `nat`; `bool.yes` a
+case of a block of one type with two cases without fields, in `Type`; `Equal` as above. From then on a number has
+the type `nat`, and where a rule asks for a case, 0 is the first case and n + 1 the second applied to the number n.
+
+**`shortcut(kind, function, theorems…)`**, one per shortcut, in the order of this table. `N` is the number type, `Z`
+and `S` its cases, `yes` and `no` the truth values. The kernel builds each statement as written here, for all `m`
+and `n` of `N`, the `==` being `Equal[1]` at `N` or at the truth values' type:
+
+| statement | function | the theorems, in order |
+|---|---|---|
+| `shortcut(add, f, …)` | `f: N -> N -> N` | `f(m, Z) == m`; `f(m, S(n)) == S(f(m, n))` |
+| `shortcut(subtract, f, …)` | `f: N -> N -> N` | `f(m, Z) == m`; `f(Z, n) == Z`; `f(S(m), S(n)) == f(m, n)` |
+| `shortcut(multiply, f, …)` | `f: N -> N -> N`, after add `g` | `f(m, Z) == Z`; `f(m, S(n)) == g(f(m, n), m)` |
+| `shortcut(equal, f, …)` | `f: N -> N -> bool` | `f(Z, Z) == yes`; `f(S(m), Z) == no`; `f(Z, S(n)) == no`; `f(S(m), S(n)) == f(m, n)` |
+| `shortcut(at_most, f, …)` | `f: N -> N -> bool` | `f(Z, n) == yes`; `f(S(m), Z) == no`; `f(S(m), S(n)) == f(m, n)` |
+| `shortcut(divide, d, r, …)` | `d`, `r: N -> N -> N`, after add `g`, multiply `p`, at most `l` | `g(p(d(m, n), n), r(m, n)) == m`; `d(m, Z) == Z`; `l(r(m, S(n)), n) == yes` |
+
+A theorem licenses its shortcut when it is a declared theorem whose type is the built statement (`same`, so binder
+names aside) and neither it nor the function rests on an axiom (`axioms_of` is empty for both). A shortcut fires
+only on its bound constant, without levels, applied to two numbers, and gives what the arithmetic of numbers
+without a bound gives: a number, or a truth value.
 
 ## The door
 

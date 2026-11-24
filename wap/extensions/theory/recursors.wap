@@ -7,6 +7,9 @@ use "terms.wap"
 use "levels.wap"
 use "environment.wap"
 use "typing.wap"
+use "compute.wap"
+use "inductive.wap"
+use "nested.wap"
 
 # the suffix of a recursor's name: `nat.recursor`
 RECURSOR := ".recursor"
@@ -55,8 +58,9 @@ binders_written(t: Term): int := match t.shape {
 # A recursive field's induction hypothesis: the binders of the field's function type, the type of the block it ends
 # in (by place) and that type's indices there, the field, and the binder of the hypothesis in the minor premise
 class Induction { binders: list<Local>; of: int; indices: list<Term>; field: Term; hypothesis: Local }
-# a case as its recursor takes it: its fields, their induction hypotheses, and the minor premise for it
-class CaseMade { fields: list<Local>; inductions: list<Induction>; minor: Local }
+# a case as its recursor takes it: the case applied to the parameters and its fields, its fields, their induction
+# hypotheses, and the minor premise for it
+class CaseMade { value: Term; fields: list<Local>; inductions: list<Induction>; minor: Local }
 
 # The recursors of a block being made: its facts, the checker the binders are made in, the recursors' level
 # parameters, and the binders all its recursors share: the parameters, the motives, and the cases by type
@@ -67,22 +71,28 @@ class Making {
 	parameters: list<Local> = []
 	motives: list<Local> = []
 	cases: list<list<CaseMade>> = []
+	turned: map<text, Turned> = {}
 }
 
-# The recursors of a declared block declared (checks 6 and 7), each one's type checked by typing first
-recursors_declared(e: Environment, facts: InductiveFacts) := {
+# The recursors of a declared block (checks 6 and 7), each one's type checked by typing
+recursors_made(e: Environment, facts: InductiveFacts): list<Declaration> := {
 	block = facts.block
 	levels = if facts.any_motive then [MOTIVE_LEVEL] + block.levels else block.levels
 	m = Making(facts, checker(e, levels), levels)
 	m.parameters = opened(m.c, block.types#1.type, block.parameters).binders
+	written = #block.types - #facts.nested
+	for added in 1 to #facts.nested {
+		type = block.types#(written + added)
+		m.turned[type.name] = Turned(facts.nested#added, 0)
+		for place in 1 to #type.cases { m.turned[type.cases#place.name] = Turned(facts.nested#added, place) }
+	}
 	m.motives = (1 to #block.types).map(at => motive_made(m, at))
 	m.cases = (1 to #block.types).map(at => (1 to #block.types#at.cases).map(place => case_made(m, at, place)))
-	for at in 1 to #block.types {
+	(1 to #block.types).map(at => {
 		d = recursor_made(m, at)
 		level_of(checker(e, d.levels), d.type)
-		added(e, d)
-		rests_on(e, d.name, [d.type], no)
-	}
+		d
+	})
 }
 
 # --- the binders all recursors of the block share
@@ -118,7 +128,7 @@ case_made(m: Making, at: int, place: int): CaseMade := {
 	inductions = m.facts.recursive#at#place.map(field => induction_made(m, inside.binders#field))
 	value = apply_all(constant(written.name, block_levels(m)), variables(m.parameters) + variables(inside.binders))
 	premise = pis(inside.binders + inductions.map(induction => induction.hypothesis), motive_applied(m, at, arguments(inside.rest).drop(#m.parameters), value))
-	CaseMade(inside.binders, inductions, entered(m.c, MINOR, premise))
+	CaseMade(value, inside.binders, inductions, entered(m.c, MINOR, premise))
 }
 
 # The hypothesis of a field `(x_1: D_1) -> … -> I_l(P, indices)`: `(x_1: D_1) -> … -> C_l(indices, b(x_1, …))`
@@ -145,11 +155,12 @@ recursor_at(m: Making, at: int): Term := constant(recursor_name(m.facts.block.ty
 recursor_made(m: Making, at: int): Declaration := {
 	indices = indices_entered(m, at)
 	major = entered(m.c, MAJOR, type_applied(m, at, variables(indices)))
-	type = pis(shared(m) + indices + [major], motive_applied(m, at, variables(indices), major.variable))
-	written = m.facts.block.types#at
-	rules = m.cases#at.map(case => rule_made(m, case))
-	facts = RecursorFacts(written.name, written.cases.map(case => case.name), #m.parameters, #m.motives, #shared(m) - #m.parameters - #m.motives, #indices, rules, m.facts.k)
-	Declaration(recursor_name(written.name), m.levels, type, Recursor(facts))
+	type = contained(m, pis(shared(m) + indices + [major], motive_applied(m, at, variables(indices), major.variable)))
+	cases = m.cases#at
+	rules = cases.map(case => contained(m, rule_made(m, case)))
+	of = constant_name(head(contained(m, major.domain)))
+	facts = RecursorFacts(of, cases.map(case => constant_name(head(contained(m, case.value)))), cases.map(case => #case.fields), #m.parameters, #m.motives, #shared(m) - #m.parameters - #m.motives, #indices, rules, m.facts.k)
+	Declaration(recursor_name(m.facts.block.types#at.name), m.levels, type, Recursor(facts))
 }
 
 # A case's computation rule, a closed function of the shared binders and the case's fields: its minor premise
@@ -157,4 +168,34 @@ recursor_made(m: Making, at: int): Declaration := {
 rule_made(m: Making, case: CaseMade): Term := {
 	hypotheses = case.inductions.map(induction => lambdas(induction.binders, apply_all(recursor_at(m, induction.of), variables(shared(m)) + induction.indices + [apply_all(induction.field, variables(induction.binders))])))
 	lambdas(shared(m) + case.fields, apply_all(case.minor.variable, variables(case.fields) + hypotheses))
+}
+
+# --- nested types (nested.wap): the types added for containers, and their cases, turned back into the containers
+
+# a type added for a container or one of its cases: the container as a function of the block's parameters, and the
+# place of the case among the container's cases, 0 for the type
+class Turned { container: Term; place: int }
+
+# A term with each type added for a container, and each of its cases, turned back into the container's own
+contained(m: Making, t: Term): Term := {
+	if not mentions(t, m.turned.keys()) { return t }
+	turned = m.turned.get(constant_name(head(t)))
+	if turned is not ø { return turned_back(m, turned!, arguments(t).map(argument => contained(m, argument))) }
+	match t.shape {
+		Apply(function, argument) => apply(contained(m, function), contained(m, argument))
+		Pi(binder, domain, body) => pi(binder, contained(m, domain), contained_under(m, binder, domain, body))
+		Lambda(binder, domain, body) => lambda(binder, contained(m, domain), contained_under(m, binder, domain, body))
+		_ => t
+	}
+}
+contained_under(m: Making, binder: text, domain: Term, body: Term): Term := {
+	inside = entered(m.c, binder, domain)
+	abstracted(contained(m, instantiated(body, inside.variable)), variable_id(inside.variable))
+}
+# an added type or case applied to the block's parameters and its own arguments: the container's, applied to the
+# container's parameters and those arguments
+turned_back(m: Making, turned: Turned, given: list<Term>): Term := {
+	container = beta(turned.container, given.take(#m.parameters))
+	leading = if turned.place == 0 then head(container) else case_constant(m.c, head(container), turned.place)
+	apply_all(leading, arguments(container) + given.drop(#m.parameters))
 }
