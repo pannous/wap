@@ -90,9 +90,10 @@ proved(s: Sums, bounds: list<Bound>, wanted: Term): Term? := {
 # `t <= u`: `t <= t + gap` carried along `t + gap == u`
 at_most_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Term? := {
 	gap = gap_proof(s, bounds, t, u) ?? return ø
-	start = law(AT_MOST_ADD, [], [t, gap.gap])
-	carried(s.c, equation(s, s.nat, gap.equated.left, u), gap.equated.proof, start, v => truth_stated(s, apply_all(s.at_most, [t, v])))
+	at_most_from(s, t, u, gap)
 }
+at_most_from(s: Sums, t: Term, u: Term, gap: Gap): Term :=
+	carried(s.c, equation(s, s.nat, gap.equated.left, u), gap.equated.proof, law(AT_MOST_ADD, [], [t, gap.gap]), v => truth_stated(s, apply_all(s.at_most, [t, v])))
 # `t == u`: `t + gap == u` where the gap is no atom and no number
 equal_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Term? := {
 	gap = gap_proof(s, bounds, t, u) ?? return ø
@@ -156,8 +157,28 @@ equal_bounds(s: Sums, a: Term, b: Term, proof: Term): list<Bound> := {
 
 # --- the elimination
 
-# `t + gap == u` from the hypotheses, ø where no sum of rows refutes `t > u`
-gap_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := {
+# `t + gap == u` from the hypotheses and the differences they bound, ø where no sum of rows refutes `t > u`
+gap_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := eliminated(s, with_differences(s, bounds, [t, u]), t, u)
+# The bounds and, for each difference `a - b` in their sides or in the terms (the inner ones first) whose `b <= a`
+# they prove, `b + (a - b) == a`: subtraction stops at 0, so a difference is a sum only where it does not reach it
+with_differences(s: Sums, bounds: list<Bound>, terms: list<Term>): list<Bound> := {
+	sides = bounds.flat_map(bound => [bound.left, bound.right]) + terms
+	differences = sides.flat_map(side => differences_in(s, side)).fold(NO_TERMS, with_new)
+	differences.fold(bounds, (so_far, difference) => so_far + difference_bounds(s, so_far, difference))
+}
+differences_in(s: Sums, t: Term): list<Term> := normal(s, t).unknowns.flat_map(atom => differences_of(s, atom))
+differences_of(s: Sums, atom: Term): list<Term> := {
+	sides = called(s, atom, s.subtract) ?? return []
+	differences_in(s, sides#1) + differences_in(s, sides#2) + [atom]
+}
+difference_bounds(s: Sums, bounds: list<Bound>, difference: Term): list<Bound> := {
+	sides = called(s, difference, s.subtract)!
+	gap = eliminated(s, bounds, sides#2, sides#1) ?? return []
+	reached = law(AT_MOST_DIFFERENCE, [], [sides#2, sides#1, at_most_from(s, sides#2, sides#1, gap)])
+	equal_bounds(s, added(s, sides#2, difference), sides#1, reached)
+}
+# `t + gap == u` from the hypotheses alone, ø where no sum of rows refutes `t > u`
+eliminated(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := {
 	lefts = bounds.map(bound => normal(s, bound.left))
 	rights = bounds.map(bound => normal(s, bound.right))
 	lower = normal(s, t)
@@ -218,7 +239,7 @@ same_sum(s: Sums, a: Term, b: Term): Equated? := {
 }
 # t read as a sum and brought to one order
 normal(s: Sums, t: Term): Normal := {
-	found = unfolded_until(s, t, part => is_sum_part(s, part)) ?? return unknown_normal(s, t, computed(s.c, t))
+	found = unfolded_until(s, t, part => is_sum_part(s, part)) ?? return unknown_normal(s, t, atom_of(s, t))
 	given = arguments(found)
 	match head(found).shape {
 		Numeral(value) => number_normal(s, t, small(value)!)
@@ -230,6 +251,8 @@ normal(s: Sums, t: Term): Normal := {
 		_ => raise "${t} is read as no sum"
 	}
 }
+# t as one unknown: a difference kept as one, so the bounds of differences name it, anything else computed
+atom_of(s: Sums, t: Term): Term := unfolded_until(s, t, part => calls(part, s.subtract)) ?? computed(s.c, t)
 # a number, the zero case, a successor, or a sum: what a sum is read of
 is_sum_part(s: Sums, t: Term): bool := match head(t).shape {
 	Numeral(value) => small(value) is not ø
