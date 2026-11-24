@@ -102,10 +102,8 @@ definition_elaborated(p: Theory, word: text, named: Node, parameters: list<Node>
 	proof = if body is not ø then terms#2 else if provable and (by_laws is not ø or (word == LAW_WORD and not assumed)) then proof_found(elaboration(p.environment, x.reading.levels), terms#1, by_laws ?? []) else ø
 	if by_laws is not ø and proof is ø { refused(UNPROVED_BY, "${name} is not proved by ${by_laws!.map(law => law.name).join(", ")}: name in `by` the laws its steps need") }
 	if word == LAW_WORD and proof is ø and not assumed { p.unproved_laws[name] = terms#1 } else {
-		key = overload_key(x, name, written, type)
 		if given is not ø { within_bound(x, name, terms#1, given!.bound) }
-		declared(p.environment, Declaration(key, x.reading.levels, terms#1, declaration_kind(if diverged then OPAQUE_WORD else word, proof)))
-		p.found[key] = #x.letters
+		declared(p.environment, overloaded(p, Declaration(name, x.reading.levels, terms#1, declaration_kind(if diverged then OPAQUE_WORD else word, proof)), #x.letters, #variables))
 	}
 }
 
@@ -116,10 +114,17 @@ laws_named(p: Theory, value: Node): list<Declaration>? := match value {
 }
 named_law(p: Theory, name: text): Declaration := declaration(p.environment, kernel_name(p, name)) ?? refused(if p.unproved_laws.has(name) then UNPROVED_BY else UNKNOWN_NAME, "`by` names ${name}, which is no law proved before")
 
-# The name a declaration is declared by: its kernel name (`declared_name`), or for a second declaration of a name, the
-# name and its parameters' types, an overload of the name; one taking the same types as another, its result too, as
-# `convert(bool): any` beside `convert(bool): Prop`, the overloads told apart by the type wanted
-overload_key(x: Elaborating, name: text, written: list<Term>, result: Term): text := keyed(x.theory, name, written.map(variable => shown(filled(x.el, type_of(x.el.c, variable)))), shown(filled(x.el, result)))
+# A declaration under the name it is declared by, its kernel name (`declared_name`), or for a second declaration of a
+# name, the name and its own binders' types after the found ones, an overload of the name; one taking the same types
+# as another, its result too, as `convert(bool): any` beside `convert(bool): Prop`, the overloads told apart by the
+# type wanted. What a call of it finds is kept: its first `found` binders, of the `own` its header writes or finds
+overloaded(p: Theory, d: Declaration, found: int, own: int): Declaration := {
+	parts = binders_written(d.type, [], own)
+	key = keyed(p, d.name, parts.taken.drop(found), parts.result)
+	p.found[key] = found
+	p.binders[key] = own
+	Declaration(key, d.levels, d.type, d.kind)
+}
 keyed(p: Theory, name: text, taken: list<text>, result: text): text := {
 	kernel = declared_name(p, name)
 	if declaration(p.environment, kernel) is ø { return kernel }
@@ -128,24 +133,20 @@ keyed(p: Theory, name: text, taken: list<text>, result: text): text := {
 	p.overloads[kernel] = (p.overloads.get(kernel) ?? [kernel]) + [key]
 	key
 }
-# An explicit declaration by the same key: its binders' types and its result as its type writes them; the binders
-# it finds, the leading sorts a later binder's type names (the letters of an elaborated header)
-explicit_keyed(p: Theory, d: Declaration): Declaration := {
-	parts = binders_written(d.type, [])
-	key = keyed(p, d.name, parts.taken, parts.result)
-	p.found[key] = found_written(d.type)
-	Declaration(key, d.levels, d.type, d.kind)
-}
+# a type's first `own` binders' types and what is left, its result, as written
 class Written { taken: list<text>; result: text }
-binders_written(type: Term, names: list<text>): Written := match type.shape {
-	Pi(binder, domain, body) => {
-		inner = binders_written(body, names + [binder])
+binders_written(type: Term, names: list<text>, own: int): Written := match type.shape {
+	Pi(binder, domain, body) => if own == 0 then Written([], shown_in(type, names, no_free_names())) else {
+		inner = binders_written(body, names + [binder], own - 1)
 		Written([shown_in(domain, names, no_free_names())] + inner.taken, inner.result)
 	}
 	_ => Written([], shown_in(type, names, no_free_names()))
 }
-found_written(type: Term): int := match type.shape {
-	Pi(binder, domain, body) => if is_sort(domain) and named_later(body, 0) then 1 + found_written(body) else 0
+# An explicit declaration's found binders, which its header writes as it writes every binder: the leading sorts a
+# later binder's type names, the letters an elaborated header would leave unwritten (`count(T: Sort(u), xs: list(T))`
+# is `count(xs: list(T))`)
+explicit_found(type: Term): int := match type.shape {
+	Pi(binder, domain, body) => if is_sort(domain) and named_later(body, 0) then 1 + explicit_found(body) else 0
 	_ => 0
 }
 # whether a binder is named by the type of a binder after it

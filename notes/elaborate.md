@@ -37,7 +37,7 @@ obligations) and E8 (conditions lifted).
   checked, `operators.wap`, `conversions.wap` and `any.wap` among them: the operators declared by their spellings as
   wap's types module declares them (`+(m: nat, n: nat): nat := add(m, n)`), and `any`, the enum holding every value,
   with the conversions into it. An explicit declaration of a name taken is an overload of it by the elaborator's key
-  (`explicit_keyed`), and its found binders are its leading sorts a later binder's type names. It elaborates the program statement by statement, and prints as the kernel's door does: nothing for an accepted declaration, the
+  (`overloaded`, the one key both paths use), and its found binders are its leading sorts a later binder's type names. It elaborates the program statement by statement, and prints as the kernel's door does: nothing for an accepted declaration, the
   value's type for `type of e`, a refusal as `refused by <rule>: …`. The kernel's own door, `check.wap`, stays the
   door of the explicit programs.
 

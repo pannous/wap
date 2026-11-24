@@ -218,9 +218,10 @@ name is looked up among the binders around it, innermost first, then among the d
 refusal "unknown name".
 
 Read by the elaborator's door, a prelude file's declaration of a name taken is an overload of it, by the key the
-elaborator gives its own (the name and its binders' types). The binders an elaborated program's call finds of an
+elaborator gives its own (the name and its own binders' types after the found ones). The binders an elaborated program's call finds of an
 explicit declaration are its leading sorts that a later binder's type names (the letters of an elaborated header);
-a call giving every binder, as an explicit program does, finds none.
+a call giving every binder its header has, as an explicit program does, finds none, and a result that is itself a
+function type takes no part in that count.
 
 ## The declarations that bind names
 
