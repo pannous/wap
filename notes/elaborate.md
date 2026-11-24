@@ -122,6 +122,7 @@ wanted before its later arguments are read, so they are read with more known.
 | `Fn(parameters, body)` | a function; a binder type not written is a hole |
 | a function type, `Prop`, `Type`, `Sort(u)` | as in the explicit corner |
 | `_` | a hole |
+| `[a, b]` | `list.item(a, list.item(b, list.empty))`, the list where the program reads, a hole for each parameter its cases do not find |
 | `Case(subject, arms)` | a recursor applied (below) |
 
 ## Declarations
