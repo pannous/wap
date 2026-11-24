@@ -1,18 +1,20 @@
 # Arguments read unparsed (wiki/dsl.md): a word whose definition takes a `raw` parameter, `shader(wgsl: raw) := …`,
 # takes the braced block after it as text, kept verbatim: another language's operators, comments and lines as
-# written; a word of a `phrase` parameter, `sql(command: phrase)`, takes the rest of its argument as text. The reader knows no language, so it is told these words (core/pipeline.wap reads them out of the sources).
+# written; a word of a `phrase` parameter, `sql(command: phrase)`, takes the rest of its argument as text, and one of a
+# `word` parameter, `version(v: word)`, the blank-free word after it. The reader knows no language, so it is told these words (core/pipeline.wap reads them out of the sources).
 
 use folder
 use "../stage.wap"
 
 RAW_TYPE = "raw"
 PHRASE_TYPE = "phrase"
-UNPARSED_TYPES = [RAW_TYPE, PHRASE_TYPE]
+WORD_TYPE = "word"
+UNPARSED_TYPES = [RAW_TYPE, PHRASE_TYPE, WORD_TYPE]
 BLANKS = " \t"
 # what ends a phrase besides the separators and closers: a line's end, a tab between columns, a block
 PHRASE_STOPS = "\n\t{"
 
-# the words a source defines with a raw or phrase parameter, each with that type: a line `shader(wgsl: raw, …) …`,
+# the words a source defines with a raw, phrase or word parameter, each with that type: a line `shader(wgsl: raw, …) …`,
 # the word before its one `(` up to the first `)`
 unparsed_written(source: text) as map<text, text> := {
 	words: map<text, text> = {}
@@ -54,11 +56,12 @@ bracket_end(r: Reader, open: int) as int := {
 	-1
 }
 
-# A phrase parameter's argument as one Text, unread. Glued, `shout(a b)`, it is what the parentheses hold,
+# A phrase or word parameter's argument as one Text, unread. Glued, `shout(a b)`, it is what the parentheses hold,
 # unless a `:` after them makes them the definition's parameters. After a blank, a phrase is the rest of what a spaced
-# call's argument holds, up to a separator, a line comment, a bracket it did not open or a block's `{`. Format writes
-# it back as it was written. A phrase at its item's end is plain.
-phrase_text(r: Reader) := {
+# call's argument holds, up to a separator, a line comment, a bracket it did not open or a block's `{`; a word ends
+# at a blank too, its call closed as a glued one is: `version 1.9 < version 1.10.0` compares two versions. Format
+# writes it back as it was written. A word at its item's end is plain.
+phrase_text(r: Reader, blank_ends: bool) := {
 	if peek_at(r, r.at) == '(' {
 		close = bracket_end(r, r.at)
 		if close >= 0 and peek_at(r, past_blank(r, close + 1)) != ':' { bracketed_text(r, r.at) }
@@ -68,18 +71,19 @@ phrase_text(r: Reader) := {
 	while start < r.n and BLANKS.contains(r.code[start]) { start += 1 }
 	end = start
 	depth = 0
-	while end < r.n and not (depth == 0 and phrase_ends(r, end)) {
+	while end < r.n and not (depth == 0 and phrase_ends(r, end, blank_ends)) {
 		if OPENERS.contains(r.code[end]) { depth += 1 } else if CLOSERS.contains(r.code[end]) { depth -= 1 }
 		end += 1
 	}
 	while end > start and BLANKS.contains(r.code[end - 1]) { end -= 1 }
 	if start == r.at or end == start { return ø }
-	r.at = start
-	r.blank = yes
 	words = Text(slice_of(r, start, end))
-	atom_token(r, with_fact(words, WRITTEN, words), end)
+	written = if blank_ends then Text(slice_of(r, r.at, end)) else words
+	r.blank = not blank_ends
+	r.at = start
+	atom_token(r, with_fact(words, WRITTEN, written), end)
 }
-phrase_ends(r: Reader, at: int) as bool := {
+phrase_ends(r: Reader, at: int, blank_ends: bool) as bool := {
 	c = r.code[at]
-	SEPARATOR_CHARS.contains(c) or PHRASE_STOPS.contains(c) or CLOSERS.contains(c) or hash_comment_at(r, at, BLANKS.contains(r.code[at - 1]))
+	SEPARATOR_CHARS.contains(c) or PHRASE_STOPS.contains(c) or CLOSERS.contains(c) or blank_ends and BLANKS.contains(c) or hash_comment_at(r, at, BLANKS.contains(r.code[at - 1]))
 }
