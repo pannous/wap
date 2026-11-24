@@ -7,7 +7,9 @@ WAP_WARM=wap/warm.packed
 WAP_LIBRARY_MODULE=wap/types.wasm
 # everything in wap/ but what the compiled compiler holds, its own source and its warm state, and the modules compiled
 # there (its library, and the copy a compiler run from source writes beside itself): a new folder there goes along
-WAP_COMPILED=(core compiler.wap "${WAP_WARM##*/}")
+# the compiler's own source in wap/, which a build copies into the folder it builds in (test/wap/compile.sh)
+WAP_SOURCE=(core compiler.wap)
+WAP_COMPILED=("${WAP_SOURCE[@]}" "${WAP_WARM##*/}")
 WAP_BESIDE=($(cd "$(dirname "${BASH_SOURCE[0]}")/../../wap" && ls | grep -vxF "${WAP_COMPILED[@]/#/-e}" | grep -v '\.wasm$'))
 WAP_LIBRARY=lib
 # the tools the native wap runs beside its compiler, each a program of wap/ compiled once wherever a seed folder is made:
