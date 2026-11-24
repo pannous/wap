@@ -159,6 +159,7 @@ of the language, and each is read as its term directly.
 | `opaque name(x: A): B := value` | an opaque constant |
 | `enum Name(p: A): I -> Sort(u) { case(x: B): Name(p, i) }` | a type of an inductive block: what stands after the name are the parameters, the same in every case; the result type holds the indices; each case writes its fields and its result in full. Inside its own block a type stands without levels. Enum statements that stand next to each other and name one another are one block |
 | `Name.recursor[v, u](parameters, motive, one minor premise per case, indices, major premise)` | the recursor: the motive's level first, where the type may compute into any universe; a minor premise takes the case's fields and then the induction hypothesis of each field of the type itself |
+| `projection(Pair, 1, p)` | `Projection`: the first field of p, a value of the structure Pair (K4) |
 | `type of e` | the question for e's type |
 
 A level name in a declaration that nothing binds is a level parameter of it, in the order of first appearance. A
