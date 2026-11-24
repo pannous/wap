@@ -8,6 +8,7 @@ use "../compute.wap"
 use "../typing.wap"
 use "../show.wap"
 use "../recursors.wap"
+use "../below.wap"
 use "../explicit.wap"
 use "../../../kernel/forms.wap"
 use "../../../core/type_notation.wap"
@@ -31,9 +32,14 @@ class ArmWritten { pattern: Node; result: Node }
 # premise per case, the indices and the subject
 match_elaborated(x: Elaborating, subject_written: Node, arms: list<ArmWritten>, wanted: Term?): Term := {
 	if wanted is ø { refused(CANNOT_FIND, "the type of a match is found from what is around it: write the type it gives") }
-	subject = elaborated(x, subject_written, ø)
+	match_on(x, elaborated(x, subject_written, ø), arms, wanted!)
+}
+match_on(x: Elaborating, subject: Term, arms: list<ArmWritten>, wanted: Term): Term := {
 	ridden = riding(x, filled(x.el, subject))
-	e = eliminating(x, subject, closed_filled(x.el, filled(x.el, wanted!), ridden, no))
+	standing = closed_filled(x.el, filled(x.el, wanted), ridden, no)
+	course = course_asked(x, subject)
+	if course is not ø { return course_elaborated(x, eliminating(x, subject, standing, course!), subject, arms, ridden) }
+	e = eliminating(x, subject, standing, recursor_name(type_name_of(x, subject)))
 	stray = arms.filter(arm => not is_any(arm.pattern) and not e.facts.cases.any(case => names_case(arm.pattern, case)))
 	if stray is not empty { refused(PATTERN, "${stray.map(arm => text(arm.pattern)).join(", ")} is no case of ${e.facts.of}") }
 	named = arms.map(arm => if is_any(arm.pattern) then ANY_CASE#1 else e.facts.cases.find(case => names_case(arm.pattern, case))!)
@@ -44,7 +50,8 @@ match_elaborated(x: Elaborating, subject_written: Node, arms: list<ArmWritten>, 
 	for place in 1 to #e.facts.cases {
 		minor_parts = pi_parts(x, rest)!
 		arm = arm_of(arms, e.facts.cases#place) ?? refused(COVERING, "match on ${e.facts.of} misses ${e.facts.cases#place}")
-		minor = minor_elaborated(x, arm, e.facts.fields#place, minor_parts.domain, Matched(filled(x.el, subject), e.facts.of, ridden))
+		case = apply_all(constant(e.facts.cases#place, e.levels), e.parameters)
+		minor = minor_elaborated(x, arm, e.facts.fields#place, minor_parts.domain, Matched(filled(x.el, subject), e.facts.of, ridden, case))
 		function = apply(function, minor)
 		rest = instantiated(minor_parts.body, minor)
 	}
@@ -54,20 +61,19 @@ match_elaborated(x: Elaborating, subject_written: Node, arms: list<ArmWritten>, 
 # writes the minor premises, the indices and the value: `nat.recursor(0, (k, below) => k, n)`
 recursor_given(x: Elaborating, name: text, arguments: list<Node>, wanted: Term): Term := {
 	if arguments is empty { refused(PATTERN, "${name} takes the value it takes apart last") }
-	e = eliminating(x, elaborated(x, arguments.last, ø), wanted)
+	subject = elaborated(x, arguments.last, ø)
+	e = eliminating(x, subject, wanted, recursor_name(type_name_of(x, subject)))
 	if recursor_name(e.facts.of) != name { refused(PATTERN, "${name} takes apart no ${e.facts.of}") }
 	given_arguments(x, e.function, e.rest, arguments, wanted)
 }
 
-# A value's recursor applied to the parameters of the value's type and to the motive: the type wanted with the value
-# and its indices made binders; what it takes next, the minor premises, and the value's indices
-class Eliminating { facts: RecursorFacts; function: Term; rest: Term; indices: list<Term> }
-eliminating(x: Elaborating, subject: Term, wanted: Term): Eliminating := {
-	type = computed(x.el.c, filled(x.el, type_of(x.el.c, filled(x.el, subject))))
-	name = match head(type).shape {
-		Constant(name, levels) => name
-		_ => refused(PATTERN, "${shown(filled(x.el, subject))} is a ${shown(type)}, no enum, so it has no cases to take apart")
-	}
+# A value's recursor, or its course, applied to the parameters of the value's type and to the motive: the type wanted
+# with the value and its indices made binders; what it takes next, the minor premises or the step, the value's
+# indices, and its type's levels and parameters
+class Eliminating { facts: RecursorFacts; function: Term; rest: Term; indices: list<Term>; levels: list<Level>; parameters: list<Term> }
+eliminating(x: Elaborating, subject: Term, wanted: Term, eliminator: text): Eliminating := {
+	type = subject_type(x, subject)
+	name = type_name_of(x, subject)
 	recursor = declaration(x.theory.environment, recursor_name(name)) ?? refused(PATTERN, "${name} is no enum, so it has no cases to take apart")
 	facts = match recursor.kind {
 		Recursor(facts) => facts
@@ -76,9 +82,10 @@ eliminating(x: Elaborating, subject: Term, wanted: Term): Eliminating := {
 	if facts.motives != 1 { refused(PATTERN, "${name} is one of several enums that name each other, whose values are not taken apart one by one") }
 	parameters = arguments(type).take(facts.parameters)
 	indices = arguments(type).drop(facts.parameters)
-	levels = recursor.levels.map(level => level_hole(x.el))
-	function = constant(recursor.name, levels)
-	rest = with_levels(recursor.type, recursor.levels, levels)
+	used = declaration(x.theory.environment, eliminator)!
+	levels = used.levels.map(level => level_hole(x.el))
+	function = constant(used.name, levels)
+	rest = with_levels(used.type, used.levels, levels)
 	for parameter in parameters {
 		function = apply(function, parameter)
 		rest = instantiated(pi_parts(x, rest)!.body, parameter)
@@ -86,10 +93,47 @@ eliminating(x: Elaborating, subject: Term, wanted: Term): Eliminating := {
 	motive_parts = pi_parts(x, rest)!
 	motive = motive_made(x, motive_parts.domain, indices + [subject], wanted)
 	made_of(x, motive, motive_parts.domain)
-	Eliminating(facts, apply(function, motive), instantiated(motive_parts.body, motive), indices)
+	Eliminating(facts, apply(function, motive), instantiated(motive_parts.body, motive), indices, type_levels(type), parameters)
 }
-# what an arm is read under: the value matched, its type's name, and the parameters the motive takes
-class Matched { subject: Term; type_name: text; ridden: list<Term> }
+# the course a match on this subject goes through: a parameter of the recursion being read, outside any course
+course_asked(x: Elaborating, subject: Term): text? := {
+	if x.course is not ø or place_of(x, subject) == 0 { return ø }
+	course_of(x.theory.environment, type_name_of(x, subject))
+}
+# the type of a value matched, computed; the name of its type, refused for a value of no enum
+subject_type(x: Elaborating, subject: Term): Term := computed(x.el.c, filled(x.el, type_of(x.el.c, filled(x.el, subject))))
+type_name_of(x: Elaborating, subject: Term): text := {
+	type = subject_type(x, subject)
+	match head(type).shape {
+		Constant(name, levels) => name
+		_ => refused(PATTERN, "${shown(filled(x.el, subject))} is a ${shown(type)}, no enum, so it has no cases to take apart")
+	}
+}
+type_levels(type: Term): list<Level> := match head(type).shape {
+	Constant(name, levels) => levels
+	_ => []
+}
+
+# A match on a parameter of the recursion being read, through its type's course: the step is a function of the
+# indices, the value and the values below it, and of the parameters riding, and it is the match on that value, the
+# values below riding it (recursion.wap)
+course_elaborated(x: Elaborating, e: Eliminating, subject: Term, arms: list<ArmWritten>, ridden: list<Term>): Term := {
+	step_parts = pi_parts(x, e.rest)!
+	unnamed = (1 to #e.indices + 2).list().map(at => WrittenBinder(HOLE_WORD, ø))
+	entered = binders_entered(x, unnamed + ridden_binders(x, ridden), step_parts.domain)
+	value = entered.variables#(#e.indices + 1)
+	x.course = Course(place_of(x, subject), entered.variables#(#e.indices + 2))
+	inner = match_on(x, value, arms, entered.rest!)
+	x.course = ø
+	unscoped(x.el, entered.variables)
+	step = closed_filled(x.el, inner, entered.variables, yes)
+	apply_all(apply(e.function, step), e.indices + [subject] + ridden)
+}
+# the binders of values riding a match, named as they are
+ridden_binders(x: Elaborating, ridden: list<Term>): list<WrittenBinder> := ridden.map(parameter => WrittenBinder(hypothesis_of(x.el.c, variable_id(parameter)).binder, ø))
+# what an arm is read under: the value matched, its type's name, the values the motive takes, and the arm's case
+# applied to the type's parameters
+class Matched { subject: Term; type_name: text; ridden: list<Term>; case: Term }
 # the arms of a match as written, `zero => 0`; ø for a match written otherwise
 arms_written(block: Node): list<ArmWritten>? := {
 	arms: list<ArmWritten> = []
@@ -154,12 +198,19 @@ minor_elaborated(x: Elaborating, arm: ArmWritten, fields: int, minor_type: Term,
 	named = if is_any(arm.pattern) then [] else pattern_fields(arm.pattern).map(named_binder)
 	if not is_any(arm.pattern) and #named != fields { refused(PATTERN, "${text(arm.pattern)} names ${#named} fields of a case that has ${fields}") }
 	unnamed = (1 to binders_counted(minor_type) - #named).list().map(at => WrittenBinder(HOLE_WORD, ø))
-	ridden = matched.ridden.map(parameter => WrittenBinder(hypothesis_of(x.el.c, variable_id(parameter)).binder, ø))
-	entered = binders_entered(x, named + unnamed + ridden, minor_type)
-	known = #x.below
-	if #named == fields { x.below += below_of(x, matched.subject, matched.type_name, entered.variables.take(fields), entered.variables.drop(fields).take(#unnamed)) }
+	entered = binders_entered(x, named + unnamed + ridden_binders(x, matched.ridden), minor_type)
+	field_values = entered.variables.take(fields)
+	before = Arm(#x.below, #x.known, x.course)
+	if #named == fields and x.course is ø { x.below += below_of(x, matched.subject, matched.type_name, field_values, entered.variables.drop(fields).take(#unnamed)) }
+	match matched.subject.shape {
+		Free(id) => x.known += [Known(id, apply_all(matched.case, field_values))]
+		_ => {}
+	}
+	x.course = course_riding(x, matched.ridden, entered.variables.drop(#named + #unnamed))
 	inner = elaborated(x, arm.result, entered.rest)
-	x.below = x.below.take(known)
+	x.below = x.below.take(before.below)
+	x.known = x.known.take(before.known)
+	x.course = before.course
 	unscoped(x.el, entered.variables)
 	closed_filled(x.el, inner, entered.variables, yes)
 }

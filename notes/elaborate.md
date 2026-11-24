@@ -136,9 +136,15 @@ wanted before its later arguments are read, so they are read with more known.
   such plain matches, outermost first.
 - **Recursion.** A function that matches on one of its parameters and calls itself only on fields of the matched
   case, with the other arguments as they are or changed, is the recursor with those calls replaced by the
-  induction hypotheses; the parameters that change ride in the motive as function arguments. A call on a field of
-  a field is reached through the helper the elaborator declares for each enum beside its recursor (the values
-  below a value).
+  induction hypotheses; the parameters that change ride in the motive as function arguments.
+- **The values below.** Once `products(Pair, Unit)` is bound (the prelude binds it), a match on a parameter of the
+  function goes through its type's course instead (theory/below.wap, made from the recursor the first time it is
+  asked for): the match is `T.course(params, motive, step, indices, n)`, and step reads the arms with the values below
+  n, a chain of pairs, riding every match inside as a parameter does. A call is the hypothesis found in that chain
+  whose value is the argument, with every variable an arm matched replaced by its case: `fib(k)` with
+  `n = successor(k)`, `k = successor(j)` finds `fib(successor(j))`. Without the products, or for an enum of several
+  types, one that eliminates only into Prop, or with a field that is a function into it, the recursor path stands,
+  and a call reaches only a field.
 - The body a function runs by is its recursion as written; it is kept for erase (plan 9.7) once S2 exists.
 
 ## Operators, traits and conditions (E3)
