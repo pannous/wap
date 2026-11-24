@@ -89,7 +89,7 @@ PY
 }
 source_commit=$(git -C "$tree" rev-parse HEAD)
 # the seed and what it reads beside it, installed and published
-cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && echo "refresh-seed: replaced $seed"
+cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && wap_tools_built "$tree" "$seed" && echo "refresh-seed: replaced $seed"
 # (the old compiler's machine code goes with it, and every program's it compiled: the native wap writes the new
 # compiler's at its first run, below)
 rm -f "$(dirname "$seed")"/*.cwasm
@@ -101,7 +101,7 @@ native=$(dirname "$(dirname "$seed")")
 # its first run, so the first one anyone makes finds the compiler's machine code written
 "$native/wap" '1+1' >/dev/null || echo "refresh-seed: the installed $native/wap fails to run 1+1" >&2
 beside=$scratch/wap-seed-beside.tar.gz
-tar -czf "$beside" -C "$tree/wap" "${WAP_BESIDE[@]}" -C "$tree" "$WAP_LIBRARY" || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
+tar -czf "$beside" -C "$tree/wap" "${WAP_BESIDE[@]}" -C "$tree" "$WAP_LIBRARY" -C "$(dirname "$seed")" "${WAP_TOOLS[@]%%:*}" || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
 release=wap-seed-$(date +%Y-%m-%d)-$(shasum -a 256 "$seed" | cut -c1-8)
 gh release create "$release" "$seed" "$beside" --repo "$REPOSITORY" --prerelease --title "$release" --target "$source_commit" \
 	--notes "wap's seed compiler: wap/compiler.wap of ${source_commit:0:10}, compiled by the stages A B C." &&
