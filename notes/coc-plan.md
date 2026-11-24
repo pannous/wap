@@ -240,7 +240,7 @@ has length 1, the lengths agree. For each one the compiler does the first of the
    and the function gets the effect Fail;
 5. it refuses, naming the condition and the fixes: state it as a parameter's condition, or test it with `if`.
 
-`! Pure` on a function, and `wap check --strict` for a whole program, stop after step 3: every obligation is then
+A proof, which refuses a function that is not pure by inference, and `wap check --strict` for a whole program, stop after step 3: every obligation is then
 proved or the program is refused. `wap check` lists the obligations left to run time, so a program's assurance rises
 without touching its source, as wiki/laws.md says of laws. A function's effect depends on what the provers find, so
 their work is counted in steps like the kernel's: the same program has the same effects on every machine.
@@ -649,7 +649,7 @@ Three things follow, and they are the whole of what consistency needs from effec
 
 The effect set is part of the type and has one written form, a yes or no for each effect and then the program's
 own events in order, so two spellings of one set are one type, and the kernel's own type check holds a function to
-its `! Pure` and to every other bound.
+every bound written (`! IO`), and a proof to the inferred effects being none.
 
 The opaque types need no rule and no axiom: the prelude declares one opaque constant, a family of pairs of a type
 and a member of it. `Eff(e, T)` is the first part of the pair at `e` and `T`, the computation that never returns
@@ -890,7 +890,7 @@ texts.
 | E2 enums, classes, match, recursion | today's spelling makes inductive blocks; `match` to recursors; structural recursion; the bodies functions run by | the programs of 3.4 and 3.5 as written, the nested one once K6 is in; `double(3)` is 6 when run and by `refl`; a `match` that misses a case is refused by `covering` |
 | E3 traits, operators and conditions | traits as structures with laws; instances from overloads; operators through traits; decidable conditions; the number tower as conversions | `sort` on a class with `compare`; a class without it refused naming the trait; `3 == 3.0` is yes; `if` on a proposition nothing can decide is refused by `undecidable condition` |
 | E4 subtypes | `where`, `type X < T`, conversions, obligations by computing and by facts in scope, else a check | the lines of 3.2 and 3.3, each with the outcome its comment states; `effects of` a function with a check left is Fail |
-| E5 statements and effects | blocks, variables, `for`, exits as terms; computation types; `effects of`; `! Pure` | `total` of 3.8 is Pure, and `total([1, 2, 3]) == 6` holds by `refl`; the lines of wiki/effects.md; `! Pure` refuses naming the chain |
+| E5 statements and effects | blocks, variables, `for`, exits as terms; computation types; `effects of`; a proof refuses an impure function by inference | `total` of 3.8 is Pure, and `total([1, 2, 3]) == 6` holds by `refl`; the lines of wiki/effects.md; a proof refuses an impure function naming the chain |
 | E6 measures | recursion by measure, `while` with a measure, Div; the decrease proved for a parameter moved by a literal toward a guarded bound (wiki/Footguns.md), other measures by a written proof until P3 | `fact(4)` is 24 and `fact` is Pure; a `while` without a measure is Div and still runs; `loop` of 3.8 |
 | E7 sums | unions, optional values, `any`, class families; calls distribute | the lines of 3.10; `speak` over a list of an animal and a dog picks each one's method |
 | E8 conditions lifted | a type holds a sized list or a set of itself: the plain type, the predicate, the subset type (section 7) | `class Quad { parts: vector(Quad, 4) }` is accepted, and a Quad given three parts is refused by `condition` |
@@ -963,7 +963,7 @@ Decided by the user (2026-11-24):
   `quotient_sound`; excluded middle and choice come only with `use classical`, and every report names them. A
   condition of an `if` must be decidable either way.
 - **An obligation nobody proved** is checked when the program runs, is listed by `wap check`, and gives the function
-  the effect Fail; `! Pure` and `--strict` refuse instead (3.9).
+  the effect Fail; a proof and `--strict` refuse instead (3.9).
 - **`==`** is the type's own test. The derived test (enums, classes, lists, texts, whole numbers) is proved to be
   equality, so laws rewrite with it; a class's own `equals` and the floats' `==` stay tests; a type is a quotient
   only where `quotient(…)` is written (3.5, 3.6).
