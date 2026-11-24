@@ -227,6 +227,15 @@ adds is how a candidate fits and where its instances come from.
 - Statements are read as kernel forms (Block, Set, If, Return, While, Break, Continue), which the tree's rules
   write; the elaborator names no statement word.
 
+## Sums (E7)
+
+- **`A or B` of two types is their union**, the prelude's `Sum(A, B)` (logic.wap), cases `left(a)` and `right(b)`
+  (`elaborate/sums.wap`). The spelling arrives as a condition, If(A, yes, B); a condition that is a type, neither a
+  bool nor a proposition, has the union as its one reading (`union_written`), until `or` is a word of the prelude.
+- **One normal form**: sums inside a union flattened, each part computed, kept once and ordered by its term's key,
+  then summed from the right; a union of one part is that part. So `id(nat) or bool`, `bool or nat` and
+  `nat or bool or nat` are one type.
+
 ## Files
 
 | file | holds | milestone |
@@ -244,6 +253,7 @@ adds is how a candidate fits and where its instances come from.
 | `elaborate/convert.wap` | the conversions, the path between two types, lifting through containers | E4 |
 | `elaborate/obligations.wap` | going down: prove or check | E4 |
 | `elaborate/statements.wap` | blocks, lets, a choice's rest, returns | E5 |
+| `elaborate/sums.wap` | unions of types as sums, their normal form | E7 |
 
 ## Rules every file keeps
 
