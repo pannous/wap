@@ -27,7 +27,11 @@ NARROWING_WORD = "narrowed"
 dispatching(called: Node, candidates: list<Signature>, types: list, s: TypingState) as Signature? := {
 	counted = candidates.filter(definition => takes_count(definition, #types, s))
 	if not counted.any(definition => tested_places(definition, types, s) != [] or generic_place(definition, types, s) != ø) { return ø }
-	name = name_for("${called}(${types_text(types)})", defined_name(define_of(counted#1, s)), called)
+	dispatching_named(dispatcher_name(called, counted, types, s), called, counted, types, s)
+}
+dispatcher_name(called: Node, counted: list<Signature>, types: list, s: TypingState) as Node := name_for("${called}(${types_text(types)})", defined_name(define_of(counted#1, s)), called)
+# the dispatching function of that name over the definitions that take the arguments' count
+dispatching_named(name: Node, called: Node, counted: list<Signature>, types: list, s: TypingState) as Signature := {
 	known = definition_keyed(place_key(name), s)
 	if known != ø { return known }
 	reads = parameters_of(name, types)
@@ -36,6 +40,26 @@ dispatching(called: Node, candidates: list<Signature>, types: list, s: TypingSta
 	made = dispatcher_made(name, reads, dispatch_body(dispatch, s), order.map(definition => if has_letters(definition.result, s.records) then ø else definition.result), s)
 	if order.any(definition => generic_place(definition, types, s) != ø) { s.dispatches.add(dispatch) }
 	made
+}
+# The dispatchers a module exports under the plain words its own definitions overload (wiki/wasm-representation.md
+# "Export names"): for a word's overloads of one count of parameters, the dispatcher of as many any values, typed as a
+# call would type it though only the host calls it, its name EXPORTED_AS the word
+# DEBT: A word with a generic list or map overload exports no dispatcher: its choice for each boxed type is typed even
+#   where the instance refuses, `≈(list<T>)` for a list of a type without ≈. Paid off when generic_choices leaves
+#   out the boxed types whose instance refuses.
+# DEBT: A dispatcher links the types module (its refusal of a type no overload takes, a char read as a text), so a
+#   host calling a module's export without the types module beside it traps at instantiation. Paid off when a
+#   dispatcher's refusal and reads are the module's own code.
+exported_dispatchers(defined: list<Signature>, s: TypingState) := {
+	own = defined.filter(definition => is_function(definition))
+	for word in own.map(definition => definition.name).unique {
+		overloads = own.filter(definition => definition.name == word)
+		types = overloads#1.parameters.map(type => ANY_SYMBOL)
+		if #overloads > 1 and overloads.all(each => #each.parameters == #types) and overloads.any(definition => tested_places(definition, types, s) != []) and overloads.all(definition => generic_place(definition, types, s) == ø) {
+			made = dispatching_named(with_fact(dispatcher_name(symbol(word), overloads, types, s), EXPORTED_AS, Text(word)), symbol(word), overloads, types, s)
+			function_typed(made, made.parameters, s, made.definer)
+		}
+	}
 }
 # A dispatch as typing writes it: the word called, the dispatcher's name, the definitions in their ranking, the
 # argument types and the parameters that read them; how many of the boxed types its choices cover
