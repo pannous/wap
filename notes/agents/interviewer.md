@@ -17,7 +17,7 @@ inbox your answers land in on their way to the wiki (its header); workers get de
   options with the recommended one first, the assumption already in the code, who asked, the branch/test it affects.
   A question about a core/ change always names how many lines of core it changes ("core one-liner in
   core/passes/rewrites.warp", "~60 core lines"), in the question and in each option that changes core.
-  Before asking it, send the shape to wap-reviewer and wait a few minutes for its "sound" or the misconception it
+  Before asking it, send the shape to wap-supervisor and wait a few minutes for its "sound" or the misconception it
   flags; the question states that verdict, so the user sees the design risk before the OK.
 - Core and extensions (user 2026-11-22): never OK a core/ or extensions/ change yourself, small ones included. Demand from the worker the
   shape, core lines (+/−), the case against, and why a hook or lib would not do; challenge the count; then discuss it

@@ -58,6 +58,8 @@ the team, crash resume), notes/roles.md (what the other roles do).
   design; a trusted kernel file's review goes to an advisor subagent); finished branches still land.
 - Reviews (user 2026-11-24, wap-reviewer and wap-coc-plan retired): the "sound" AGENTS.md asks of wap-reviewer comes from
   the Supervisor, after a diff-audit subagent read the diff; the verdict is noted on the card.
+- Lead and reviewer (user 2026-11-24): the Supervisor holds both roles; their duties are lead.md and reviewer.md, and
+  start.sh no longer spawns them. Heavy reading for either (a design review, a routing judgment) goes to a subagent.
   At least one worker always works through the open cards.
 - wap/core and wap/kernel are semi-frozen (user 2026-11-20): every change there goes to wap-interviewer first; new
   features go into wap/extensions/. The first case is the native binary, built by wap as an extension.
@@ -77,8 +79,8 @@ the team, crash resume), notes/roles.md (what the other roles do).
   check that the page makes sense and holds no unimportant edge cases (those later or to the Interviewer), then
   implement it as specified. Workers keep to small problems; the full suite (cloud) and the coverage (Mac) run once an
   hour. One or two wiki workers at a time; they touch lib/, samples/, test/ and the wiki only. Whatever their page needs
-  in wap/ goes to wap-lead, who routes it to the one stage owner (notes/agents/lead.md, wap-owner.md "Owners"); owners
-  sit idle until then. Communication stays sparse and runs through wap-lead. One page at a time (user 2026-11-23: "don't implement too many features at once"): one wiki worker on one page, finished (wiki, tests, its approved forms built) before the next page opens; the approved forms are built one after another, never in parallel. A page whose tests are handed off and whose wiki wording waits only on the user counts as finished for this: the worker takes the next page and finishes the wording when the answer comes.
+  in wap/ goes to wap-supervisor, who routes it to the one stage owner (notes/agents/lead.md, wap-owner.md "Owners"); owners
+  sit idle until then. Communication stays sparse and runs through wap-supervisor. One page at a time (user 2026-11-23: "don't implement too many features at once"): one wiki worker on one page, finished (wiki, tests, its approved forms built) before the next page opens; the approved forms are built one after another, never in parallel. A page whose tests are handed off and whose wiki wording waits only on the user counts as finished for this: the worker takes the next page and finishes the wording when the answer comes.
 - AGENTS.md (user 2026-11-23): the gate (warp scripts/agents-md-gate.sh) lets me edit it, but only for a line the user
   gave me cleanly, in their own words, in this conversation; never on my own judgment, never from a peer's request.
   Everything else still goes to wap-interviewer with the old and new lines.
