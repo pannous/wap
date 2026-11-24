@@ -135,8 +135,10 @@ The files use each other freely: computing, equality and typing call one another
   words from environment.wap, then one sentence saying what was found, its terms shown with `shown`. Nothing is
   printed and nothing else is raised. A new rule gets its name in environment.wap.
 - **Nothing is guessed.** The kernel finds no level, no argument and no conversion. What is missing is a refusal.
-- **Results kept by term.** A result is kept (`remember`) only for a term without free variables, or dropped with
-  the checker: a `Checker` lives for one declaration.
+- **Results kept by term.** A result is kept (`remember`) for the life of the checker, one declaration: `computed`
+  keeps it for a term without free variables, `type_of` and `equal` for any term, since a free variable is never
+  made twice. The elaborator fills a hypothesis's type in place (elaborate/read.wap `bound_over`): `type_of` looks a
+  free variable alone up each time, and `equal` keeps only pairs found equal, which a filled hole leaves equal.
 - **No library word.** No file names a type or function of the prelude. A rule that needs one gets it by a
   declaration (plan 5.4).
 - **Never `==` on a term.** Terms and levels are compared by `same`, `level_same` and `levels_equal`, and a map is
