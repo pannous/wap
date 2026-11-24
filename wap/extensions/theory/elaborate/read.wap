@@ -19,6 +19,10 @@ use "unify.wap"
 use "match.wap"
 use "recursion.wap"
 use "instances.wap"
+use "conditions.wap"
+use "../../../core/language.wap"
+use "../../../core/rules/stages.wap"
+use "../../../core/rules/lowering.wap"
 
 # the elaborator's own rules, which a refusal names
 OVERLOAD := "overload"
@@ -41,6 +45,8 @@ class Theory {
 	traits: map<text, list<text>> = {}
 	# the root of the wap tree the door is given (`--tree <root>`), under which its prelude and rules are found
 	tree: text? = ø
+	# the language whose rules give the spellings read here no form of their own, `if` among them (sugar/)
+	spellings: Language? = ø
 }
 # The reading of one declaration: its elaboration, which holds the binders in scope, the level names written
 # (explicit.wap's Reading); while its header is read, the letters found, as their variables; the holes for
@@ -72,11 +78,23 @@ made_of(x: Elaborating, t: Term, wanted: Term) := {
 form_elaborated(x: Elaborating, n: Node, wanted: Term?): Term := match n {
 	Symbol(name) => if name == HOLE_WORD then hole(x.el, HOLE_WORD, wanted ?? any_sort(x)) else name_elaborated(x, name, [], wanted)
 	Number(value) => numeral(value as int)
-	Call(called, arguments) => call_elaborated(x, called, arguments, wanted)
-	Key(called, Op.None, List(arguments, bracket, separator)) => if bracket in PARAMETER_BRACKETS then call_elaborated(x, called, arguments, wanted) else unelaborated(n)
+	If(condition, then_part, else_part) => if_elaborated(x, condition, then_part, else_part, wanted)
+	Case(subject, arms) => match_elaborated(x, subject, arms.map(arm_written), wanted)
+	Get(subject, key) => form_elaborated(x, named_form(n), wanted)
+	Call(called, arguments) => call_elaborated(x, named_form(called), arguments, wanted)
+	Key(called, Op.None, List(arguments, bracket, separator)) => if bracket in PARAMETER_BRACKETS then call_elaborated(x, called, arguments, wanted) else respelled(x, n, wanted, UNKNOWN_FORM, no_expression(n))
 	Fn(parameters, body) => bound_elaborated(x, items_or_one(parameters).map(named_binder), body, yes, wanted)
-	List(items, Bracket.Round, separator) => if #items == 1 then form_elaborated(x, items#1, wanted) else unelaborated(n)
-	_ => unelaborated(n)
+	List(items, Bracket.Round, separator) => if #items == 1 then form_elaborated(x, items#1, wanted) else respelled(x, n, wanted, UNKNOWN_FORM, no_expression(n))
+	_ => respelled(x, n, wanted, UNKNOWN_FORM, no_expression(n))
+}
+# a dotted name, which the rules write as a field read, `bool.yes` as Get(bool, "yes"); any other node as it is
+named_form(n: Node): Node := match n {
+	Get(subject, key) => dotted(named_form(subject), Symbol(field_named(key)))
+	_ => n
+}
+field_named(key: Node): text := match key {
+	Text(value) => value
+	_ => text(key)
 }
 # a sort of a level not known yet: what a type is read against
 any_sort(x: Elaborating): Term := universe(level_hole(x.el))
@@ -86,7 +104,6 @@ call_elaborated(x: Elaborating, called: Node, arguments: list<Node>, wanted: Ter
 	word = text(called)
 	if word == FUNCTION_TYPE and #arguments == 2 { return bound_elaborated(x, binders_of(arguments#1).map(typed_binder), arguments#2, no, wanted) }
 	if word == DOT and #arguments == 2 { return form_elaborated(x, dotted(arguments#1, arguments#2), wanted) }
-	if word == MATCH_WORD and #arguments == 2 { return match_elaborated(x, arguments#1, arms_written(arguments#2) ?? refused(PATTERN, "a match takes arms, `pattern => result`"), wanted) }
 	if #arguments == 1 and word == TYPE_WORD { return type_at(level_written(x, arguments#1)) }
 	if #arguments == 1 and word == SORT_WORD { return universe(level_written(x, arguments#1)) }
 	match called {
@@ -105,6 +122,12 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 	if x.recursing is not ø and name == x.recursing!.name { return recursive_call_elaborated(x, arguments, wanted) }
 	if arguments is empty and name == PROP_WORD { return PROP }
 	if arguments is empty and name == TYPE_WORD { return type_at(Zero) }
+	# `list.item(x, rest)`, which the rules write as `item(list, x, rest)`: the declaration under the first argument's
+	# name, the more specific one
+	if arguments is not empty {
+		qualified = "${text(named_form(arguments#1))}${DOT}${name}"
+		if declarations_named(x.theory, qualified) is not empty { return name_elaborated(x, qualified, arguments.drop(1), wanted) }
+	}
 	candidates = declarations_named(x.theory, name)
 	operation = trait_operation(x, name, candidates, arguments, wanted)
 	if operation is not ø { return operation! }
@@ -116,7 +139,7 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 		return given_arguments(x, letter, type_of(x.el.c, letter), arguments, wanted)
 	}
 	if name in x.theory.unproved_laws { refused(UNPROVED_LAW, "${name} is a law without a proof, a hint and never a proof: prove it after `:=`") }
-	refused(UNKNOWN_NAME, "${name} is neither a binder around it nor declared")
+	respelled(x, if arguments is empty then symbol(name) else Call(symbol(name), arguments), wanted, UNKNOWN_NAME, "${name} is neither a binder around it nor declared")
 }
 
 # A declaration at a level hole for each of its level parameters, a hole for each found binder, then its written
@@ -240,4 +263,18 @@ level_written(x: Elaborating, n: Node): Level := {
 }
 
 # a form the elaborator does not read
-unelaborated(n: Node) := refused(UNKNOWN_FORM, "${text(n)} is no expression")
+unelaborated(n: Node) := refused(UNKNOWN_FORM, no_expression(n))
+no_expression(n: Node): text := "${text(n)} is no expression"
+# code in the kernel's forms: its spellings rewritten by the language's rules, then lowered by the language that knows
+# their forms
+formed(p: Theory, language: Language, code: Node): Node := {
+	spellings = p.spellings ?? return lowered(language, code)
+	lowered(spellings!, rewritten_by(spellings!, spellings!.shape_rules, code).code)
+}
+# a node read here in no way, in a spelling the language's rules give a form: that form read, else the refusal
+respelled(x: Elaborating, n: Node, wanted: Term?, rule: text, refusal: text): Term := {
+	spellings = x.theory.spellings ?? refused(rule, refusal)
+	shaped = rewritten_by(spellings!, spellings!.shape_rules, n)
+	if not shaped.fired { refused(rule, refusal) }
+	form_elaborated(x, shaped.code, wanted)
+}

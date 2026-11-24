@@ -1,0 +1,78 @@
+# Choices by a condition (notes/elaborate.md "Operators, traits and conditions (E3)"): `if c then a else b` is a match.
+# On a bool c it matches c, `yes` giving a and `no` giving b; on a proposition c it matches the decision of c a search
+# finds, a `Decidable(c)`: in the arm `is_true(h)` a proof of c holds, in `is_false(h)` one of its negation. A
+# proposition nothing decides is refused as an undecidable condition: a proposition is no yes or no to choose by.
+use "../terms.wap"
+use "../environment.wap"
+use "../compute.wap"
+use "../typing.wap"
+use "../show.wap"
+use "../../../kernel/forms.wap"
+use "state.wap"
+use "unify.wap"
+use "read.wap"
+use "match.wap"
+use "instances.wap"
+
+# the enum a decision of a proposition is of, and its cases: the proposition holds, it does not
+DECIDABLE := "Decidable"
+HOLDS := "is_true"
+FAILS := "is_false"
+# a bool's cases, the one the then-part is chosen by first
+TRUTHS := ["yes", "no"]
+# the rule a choice by a proposition nothing decides is refused by
+UNDECIDABLE := "undecidable condition"
+# how many decisions deep the search builds a decision from the decisions of its parts
+SEARCH_DEPTH := 8
+
+# A choice: a match on the condition's bool, or on the decision of its proposition
+if_elaborated(x: Elaborating, condition: Node, then_part: Node, else_part: Node, wanted: Term?): Term := {
+	tested = filled(x.el, elaborated(x, condition, ø))
+	if not same(computed(x.el.c, filled(x.el, type_of(x.el.c, tested))), PROP) { return subject_matched(x, tested, chosen(TRUTHS, [], then_part, else_part), wanted) }
+	decision = decided(x, tested, SEARCH_DEPTH) ?? refused(UNDECIDABLE, "${shown(tested)} is a proposition nothing decides: declare a ${DECIDABLE}(${shown(tested)})")
+	subject_matched(x, decision!, chosen([HOLDS, FAILS], [symbol(HOLE_WORD)], then_part, else_part), wanted)
+}
+# the two arms of a choice: the first case gives the then-part, the second the else-part
+chosen(cases: list<text>, fields: list<Node>, then_part: Node, else_part: Node): list<ArmWritten> := [ArmWritten(case_written(cases#1, fields), then_part), ArmWritten(case_written(cases#2, fields), else_part)]
+case_written(case: text, fields: list<Node>): Node := if fields is empty then symbol(case) else Key(symbol(case), Op.None, List(fields, Bracket.Round, Separator.Comma))
+
+# The decision of a proposition: the first declaration giving a Decidable that is one of it, each binder it takes found
+# by unification or, a decision itself, by the search one step deeper; ø where none is found
+decided(x: Elaborating, proposition: Term, depth: int): Term? := {
+	if depth == 0 { return ø }
+	wanted = apply(constant(DECIDABLE, []), proposition)
+	for name in x.theory.environment.declarations.keys() {
+		found = decision_by(x, name, wanted, depth)
+		if found is not ø { return found }
+	}
+	ø
+}
+# a declaration's decision of the type wanted, its binders given holes; ø where it gives none, the holes taken back
+decision_by(x: Elaborating, name: text, wanted: Term, depth: int): Term? := {
+	d = declaration(x.theory.environment, name)!
+	if result_name(d.type) != DECIDABLE { return ø }
+	kept = found_so_far(x.el)
+	levels = d.levels.map(level => level_hole(x.el))
+	given = holes_given(x, name, constant(name, levels), with_levels(d.type, d.levels, levels))
+	fits = try { unified(x.el, type_of(x.el.c, given), wanted) and arguments(given).all(binder => binder_decided(x, binder, depth)) } catch e { mismatch(e) }
+	if fits { return filled(x.el, given) }
+	back_to(x.el, kept)
+	ø
+}
+# a binder's hole answered by unification, else by the decision its type asks for
+binder_decided(x: Elaborating, binder: Term, depth: int): bool := {
+	value = filled(x.el, binder)
+	if not open(x.el, value) { return yes }
+	type = computed(x.el.c, filled(x.el, type_of(x.el.c, value)))
+	if result_name(type) != DECIDABLE or open(x.el, type) { return no }
+	decision = decided(x, arguments(type)#1, depth - 1) ?? return no
+	unified(x.el, value, decision!)
+}
+# the name of the constant a type gives after its binders, ø for any other
+result_name(type: Term): text? := match type.shape {
+	Pi(binder, domain, body) => result_name(body)
+	_ => match head(type).shape {
+		Constant(name, levels) => name
+		_ => ø
+	}
+}
