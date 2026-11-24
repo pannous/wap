@@ -16,9 +16,13 @@ use "computing.wap"
 use "facts.wap"
 use "rewriting.wap"
 use "introduction.wap"
+use "apart.wap"
 
 # the provers a case's premise is proved by
-CASE_PROVERS: list<(Goal) -> Term?> := [by_computing, by_fact, by_rewriting, by_introduction]
+CASE_PROVERS: list<(Goal) -> Term?> := [by_computing, by_cases_apart, by_fact, by_rewriting, by_introduction]
+# how deep a case is taken apart again, along another parameter, before the search gives up on it: `x * y > 0`
+# from `x > 0 and y > 0` takes x apart and then y
+CASE_DEPTH := 2
 
 by_induction(goal: Goal): Term? := {
 	for parameter in goal.parameters {
@@ -27,8 +31,9 @@ by_induction(goal: Goal): Term? := {
 	}
 	ø
 }
-# the goal proved by the recursor of a parameter's type, the parameter its value and the goal over it its motive; ø
-# for a type of no enum, of several naming each other, or with indices
+# the goal proved by the recursor of a parameter's type, the parameter its value and the goal over it its motive, the
+# hypotheses about the parameter its premises again, so each case has them at its own value; ø for a parameter the
+# goal does not use, a type of no enum, of several naming each other, or with indices
 along(goal: Goal, value: Term): Term? := {
 	el = goal.el
 	type = computed(el.c, type_of(el.c, value))
@@ -42,8 +47,12 @@ along(goal: Goal, value: Term): Term? := {
 		_ => return ø
 	}
 	if facts.motives > 1 or facts.indices > 0 { return ø }
-	motive = closed_filled(el, goal.statement, [value], yes)
-	applied_law(goal, recursor, instance => unified(el, instance.holes#(facts.parameters + 1), motive) and valued(el, instance.holes.last, value, type), premise => case_proved(goal, premise))
+	about = goal.parameters.drop(goal.parameters.index_where(parameter => same(parameter, value))).filter(parameter => uses(filled(el, type_of(el.c, parameter)), value))
+	reverted = Goal(el, goal.parameters, closed_filled(el, goal.statement, about, no), goal.named, goal.depth)
+	if not uses(reverted.statement, value) { return ø }
+	motive = closed_filled(el, reverted.statement, [value], yes)
+	proof = applied_law(reverted, recursor, instance => unified(el, instance.holes#(facts.parameters + 1), motive) and valued(el, instance.holes.last, value, type), premise => case_proved(goal, premise)) ?? return ø
+	apply_all(proof, about)
 }
 # a hole given a value of the type it is given at
 valued(el: Elaboration, hole: Term, value: Term, type: Term): bool := unified(el, type_of(el.c, hole), type) and unified(el, hole, value)
@@ -51,7 +60,9 @@ valued(el: Elaboration, hole: Term, value: Term, type: Term): bool := unified(el
 case_proved(goal: Goal, premise: Term): bool := {
 	el = goal.el
 	case = goal_of(el, filled(el, type_of(el.c, premise)), goal.named)
-	within = Goal(el, goal.parameters + case.parameters, case.statement, goal.named)
-	proof = first_proof(within, CASE_PROVERS) ?? return no
+	within = Goal(el, goal.parameters + case.parameters, case.statement, goal.named, goal.depth + 1)
+	proof = first_proof(within, if within.depth < CASE_DEPTH then CASE_PROVERS + by_induction else CASE_PROVERS) ?? return no
 	unified(el, premise, closed_filled(el, proof, case.parameters, yes))
 }
+# whether a term holds a free variable
+uses(t: Term, variable: Term): bool := abstracted(t, variable_id(variable)).loose > t.loose

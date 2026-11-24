@@ -1,0 +1,79 @@
+# Proof by cases told apart (wiki/proof.md "Ways to prove"): a hypothesis that two values are equal whose sides
+# compute to different cases of an enum proves any goal. The equality carries `(g: G) => g` along the hypothesis,
+# its motive choosing, by the enum's recursor, `G -> G` at the left side's case and G at every other: what holds at
+# the left side then holds at the right. So `x > 0` at x = 0, computing to `no == yes`, proves whatever is asked
+use "../theory/terms.wap"
+use "../theory/environment.wap"
+use "../theory/typing.wap"
+use "../theory/compute.wap"
+use "../theory/numbers.wap"
+use "../theory/recursors.wap"
+use "../theory/nested.wap"
+use "../theory/elaborate/state.wap"
+use "../theory/elaborate/unify.wap"
+use "goals.wap"
+
+# the names of the binders the proof is made of
+KEPT := "g"
+CHOSEN := "y"
+CARRIED := "e"
+
+by_cases_apart(goal: Goal): Term? := {
+	wanted = filled(goal.el, goal.statement)
+	if open(goal.el, wanted) { return ø }
+	for parameter in goal.parameters {
+		proof = apart(goal.el.c, filled(goal.el, type_of(goal.el.c, parameter)), parameter, wanted)
+		if proof is not ø { return proof }
+	}
+	ø
+}
+# a proof of the goal from a hypothesis whose sides compute to different cases, ø for any other hypothesis
+apart(c: Checker, given_type: Term, given: Term, wanted: Term): Term? := {
+	equation = equation_of(c, given_type) ?? return ø
+	type = computed(c, equation.type)
+	enum = head(type)
+	levels = match enum.shape {
+		Constant(name, levels) => levels
+		_ => return ø
+	}
+	recursor = declaration(c.environment, recursor_name(constant_name(enum))) ?? return ø
+	facts = match recursor.kind {
+		Recursor(facts) => facts
+		_ => return ø
+	}
+	if facts.motives > 1 or facts.indices > 0 { return ø }
+	left = case_at(c, facts, equation.left) ?? return ø
+	right = case_at(c, facts, equation.right) ?? return ø
+	if left == right { return ø }
+	kept = hypothesis(c, KEPT, wanted)
+	choices = facts.cases.map(case => if case == facts.cases#left then closed_over(c, wanted, [kept], no) else wanted)
+	chooser = chosen(c, recursor, type, levels, arguments(type).take(facts.parameters), choices)
+	value = hypothesis(c, CHOSEN, equation.type)
+	along = hypothesis(c, CARRIED, stated(equation, equation.left, value))
+	motive = closed_over(c, apply(chooser, value), [value, along], yes)
+	carrier = constant(recursor_name(equation.equality), [Zero] + equation.levels)
+	apply_all(carrier, [equation.type, equation.left, motive, closed_over(c, kept, [kept], yes), equation.right, given])
+}
+# the place among the recursor's cases of the case a value computes to, ø where it computes to none
+case_at(c: Checker, facts: RecursorFacts, value: Term): int? := match head(as_case(c, computed(c, value))).shape {
+	Constant(name, levels) => {
+		at = facts.cases.index_where(case => case == name)
+		if at == 0 then ø else at
+	}
+	_ => ø
+}
+# the function choosing a proposition by the case of a value: the recursor at the parameters, into Prop, each minor
+# premise its choice under the case's fields
+chosen(c: Checker, recursor: Declaration, type: Term, levels: list<Level>, parameters: list<Term>, choices: list<Term>): Term := {
+	start = apply_all(constant(recursor.name, [Successor(Zero)] + levels), parameters)
+	choices.fold(apply(start, lambda(CHOSEN, type, PROP)), (applied, choice) => {
+		minor = opened(c, computed(c, type_of(c, applied)), 1).binders#1.domain
+		fields = opened(c, minor, binders_before(minor)).binders
+		apply(applied, closed_over(c, choice, variables(fields), yes))
+	})
+}
+# how many binders a function type takes before its result
+binders_before(t: Term): int := match t.shape {
+	Pi(binder, domain, body) => 1 + binders_before(body)
+	_ => 0
+}
