@@ -279,4 +279,10 @@ field_f64(at: Pair, offset: int): float := prim foreign("c", "field_f64", at, of
 pair = Pair(tag: int32(3), weight: 2.5, label: "seven")
 pair.weight = 4.5
 print "${field_i32(pair, 0)} ${field_f64(pair, 8)} ${pair.label}"')" "3 4.5 seven"
+# a function value is held in the memory: a closure keeps what it captures, and a function is given by its name
+check "a native function value runs, its captures kept and a function given by name" "$(native_ran function_values 'step = 3
+moved: (int) -> int = x => x + step
+twice(f: (int) -> int, x: int): int := f(f(x))
+negated(x: int): int := 0 - x
+print "${twice(moved, 1)} ${twice(negated, 5)} ${moved(10)} ${[1, 2, 3].contains(2)}"')" "7 5 13 yes"
 exit $((failures > 0))
