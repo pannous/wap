@@ -218,19 +218,28 @@ reading_as(language: Language, item: Node, fixity: Fixity) as Use? := match item
 # other lines are read: each row joins the aliases the file's words are read by (core/pipeline.wap operated_once),
 # and those of the files using it. Kept, for format, each is written back as its row reads
 aliases_taken(language: Language, program: Node, kept: bool = no) as Node := match program {
-	List(lines, Bracket.None, Separator.Newline) => refitted(List(lines.flat_map(line => if not (phrase_items(line)#1 == symbol(ALIAS_WORD) and alias_added(language, operated(language, line))) then [line] else if kept then [with_fact(line, WRITTEN, Text("${ALIAS_WORD} ${language.reading.last.spelling} ${ALIAS_ARROWS#1} ${language.reading.last.canonical}"))] else []), Bracket.None, Separator.Newline), program)
+	List(lines, Bracket.None, Separator.Newline) => refitted(List(lines.flat_map(line => alias_line_taken(language, line, kept)), Bracket.None, Separator.Newline), program)
 	_ => program
 }
+# an alias line's two sides are taken as written, never through the aliases read before it
+alias_line_taken(language: Language, line: Node, kept: bool) as list := {
+	if phrase_items(line)#1 != symbol(ALIAS_WORD) { return [line] }
+	reading = language.reading
+	language.reading = []
+	row = alias_read(operated(language, line))
+	language.reading = reading
+	if row == ø { return [line] }
+	language.reading.add(row!)
+	if kept then [with_fact(line, WRITTEN, Text("${ALIAS_WORD} ${row!.spelling} ${ALIAS_ARROWS#1} ${row!.canonical}"))] else []
+}
 # the line `alias (a => b)` as the arrow binds looser than the phrase or tighter, `alias (count <= length)`
-alias_added(language: Language, line: Node) as bool := match line {
-	Call(called, arguments) => #arguments == 2 and is_alias_phrase(arguments#1) and alias_row(language, line, spelling_written(called), items_of(arguments#1)#2, arguments#2)
-	List(items, Bracket.None, Separator.Space) => is_alias_phrase(line) and match items#2 { Call(called, arguments) => #arguments == 2 and alias_row(language, line, spelling_written(called), arguments#1, arguments#2); _ => no }
-	_ => no
+alias_read(line: Node) as Alias? := match line {
+	Call(called, arguments) => if #arguments == 2 and is_alias_phrase(arguments#1) then alias_row(line, spelling_written(called), items_of(arguments#1)#2, arguments#2) else ø
+	List(items, Bracket.None, Separator.Space) => if is_alias_phrase(line) then (match items#2 { Call(called, arguments) => if #arguments == 2 then alias_row(line, spelling_written(called), arguments#1, arguments#2) else ø; _ => ø }) else ø
+	_ => ø
 }
 is_alias_phrase(n: Node) as bool := #items_of(n) == 2 and items_of(n)#1 == symbol(ALIAS_WORD)
-alias_row(language: Language, line: Node, arrow: text, left: Node, right: Node) as bool := {
+alias_row(line: Node, arrow: text, left: Node, right: Node) as Alias := {
 	if not ALIAS_ARROWS.contains(arrow) { refused(line, "an alias points from the new name to its meaning: write alias ${left} => ${right}") }
-	row = if arrow == ALIAS_ARROWS#1 then Alias(text(left), text(right)) else Alias(text(right), text(left))
-	language.reading.add(row)
-	yes
+	if arrow == ALIAS_ARROWS#1 then Alias(text(left), text(right)) else Alias(text(right), text(left))
 }
