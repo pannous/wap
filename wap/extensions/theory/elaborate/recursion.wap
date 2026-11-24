@@ -1,0 +1,57 @@
+# A function's calls of itself elaborated as induction hypotheses (notes/elaborate.md "Match and recursion (E2)"):
+# while a definition's value is read, its own name is a call of its recursion. A match on one of its parameters takes
+# the other written parameters into its motive, so they may change from call to call; each arm has a hypothesis per
+# field of the matched type, the function at that field, and a call whose argument at the matched parameter's place
+# is such a field is that hypothesis given the other arguments: `double(successor(k)) := … double(k)` reads the
+# hypothesis of k. A call on anything else is refused, since its recursion may not end.
+use "../terms.wap"
+use "../environment.wap"
+use "../typing.wap"
+use "../show.wap"
+use "state.wap"
+use "read.wap"
+
+# the rule a call that may not end is refused by
+RECURSION := "recursion"
+
+# the definition being read: its name and its written parameters, as their variables
+class Recursion { name: text; parameters: list<Term> }
+# a field of a matched value and its induction hypothesis, and the parameter the match took apart
+class Below { subject: Term; field: Term; hypothesis: Term }
+
+# the written parameters a match on this subject takes into its motive: the others of the definition being read, when
+# the subject is one of its parameters
+riding(x: Elaborating, subject: Term): list<Term> := {
+	r = x.recursing ?? return []
+	if not r.parameters.any(parameter => same(parameter, subject)) { return [] }
+	r.parameters.filter(parameter => not same(parameter, subject))
+}
+
+# The hypotheses of an arm's fields, each by the field it is for: the fields of the matched type, in their order
+below_of(x: Elaborating, subject: Term, type_name: text, fields: list<Term>, hypotheses: list<Term>): list<Below> := {
+	recursive = fields.filter(field => ends_in(filled(x.el, type_of(x.el.c, field)), type_name))
+	(1 to #hypotheses).list().map(at => Below(subject, recursive#at, hypotheses#at))
+}
+# whether a type, after its binders as written, is the named type applied
+ends_in(type: Term, name: text): bool := match type.shape {
+	Pi(binder, domain, body) => ends_in(body, name)
+	_ => match head(type).shape {
+		Constant(head_name, levels) => head_name == name
+		_ => no
+	}
+}
+
+# A call of the definition being read: the hypothesis of the field it is called on, given the other arguments
+recursive_call_elaborated(x: Elaborating, arguments: list<Node>, wanted: Term?): Term := {
+	r = x.recursing!
+	if #arguments == #r.parameters {
+		for below in x.below.reverse() {
+			place = (1 to #r.parameters).list().find(at => same(r.parameters#at, below.subject)) ?? 0
+			if place > 0 and same(filled(x.el, elaborated(x, arguments#place, ø)), below.field) {
+				others = arguments.take(place - 1) + arguments.drop(place)
+				return given_arguments(x, below.hypothesis, type_of(x.el.c, below.hypothesis), others, wanted)
+			}
+		}
+	}
+	refused(RECURSION, "${r.name}(${arguments.map(argument => text(argument)).join(", ")}) calls ${r.name} on no field of a value it matched, so it may not end")
+}
