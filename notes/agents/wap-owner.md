@@ -150,7 +150,6 @@ wap/
     host.wap                  the host machinery system.wap's words use, hidden from programs
     memory_texts.wap          a native build's texts in the module's memory, read by its build in the place of text_bytes.wap
     memory_lists.wap          a native build's lists in the module's memory, read by its build in the place of list_items.wap
-    c.wap                     a C function's texts passed as NUL-terminated copies and given back; its out-pointers
 
   sugar/                      the rules of the surface spellings wap's own source uses, one file per topic
     calls.wap                 x.f(y), x.f → calls and Get
