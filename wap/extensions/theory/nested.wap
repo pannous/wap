@@ -16,12 +16,11 @@ use "inductive.wap"
 NESTED_MARK := "#"
 
 # The nesting being undone: the block's names and its level parameters, the free variables of its parameters, the
-# universe its first type lies in, the containers found so far, the types added for them and the cases still to read
+# containers found so far and the types added for them
 class Unnesting {
 	c: Checker
 	block: InductiveBlock
 	parameters: list<Term>
-	universe: Term
 	names: list<text>
 	containers: list<Term> = []
 	added: list<BlockType> = []
@@ -31,8 +30,7 @@ class Unnesting {
 # parameters; a block without nesting is itself
 class Unnested { block: InductiveBlock; nested: list<Term> }
 unnested(c: Checker, block: InductiveBlock, parameters: list<Term>): Unnested := {
-	first = block.types#1
-	u = Unnesting(c, block, parameters, binders_entered(c, passed(c, first.type, parameters)).rest, type_names(block))
+	u = Unnesting(c, block, parameters, type_names(block))
 	types = block.types.map(type => BlockType(type.name, type.type, type.cases.map(case => case_unnested(u, case))))
 	at = 1
 	while at <= #u.added {
@@ -100,22 +98,25 @@ inductive_facts(c: Checker, t: Term): InductiveFacts? := match t.shape {
 }
 
 # The type added for a container, added when it is new: the block's parameters, then the container's indices, in
-# the block's universe; its cases the container's, at its levels and parameters
+# the container's universe, which the block's must be (enum header); its cases the container's as declared, at its
+# levels and parameters, so a container that was nested itself is unnested again in turn
 added_for(u: Unnesting, container: Term): text := {
 	for at in 1 to #u.containers { if same(u.containers#at, container) { return u.added#at.name } }
 	name = "${u.names#1}${NESTED_MARK}${#u.containers + 1}"
-	own = inductive_facts(u.c, head(container))!.block.types.find(type => type.name == constant_name(head(container)))!
-	header = over_parameters(u, with_result(u.c, at_container(u, own.type, container), u.universe), no)
+	of = constant_name(head(container))
+	cases = inductive_facts(u.c, head(container))!.block.types.find(type => type.name == of)!.cases
+	header = at_container(u, of, container)
 	u.containers += [container]
-	u.added += [BlockType(name, header, own.cases.map(case => WrittenCase("${name}.${case.name}", over_parameters(u, at_container(u, case.type, container), no))))]
+	u.added += [BlockType(name, header, cases.map(case => WrittenCase("${name}.${case.name}", at_container(u, case.name, container))))]
 	added(u.c.environment, Declaration(name, u.block.levels, header, Axiom))
 	name
 }
 
-# a term of the container's declaration, its type or a case's, at the container's levels and parameters
-at_container(u: Unnesting, t: Term, container: Term): Term := {
-	declared_as = declaration(u.c.environment, constant_name(head(container)))!
-	passed(u.c, with_levels(t, declared_as.levels, constant_levels(head(container))), arguments(container))
+# the type of a declaration of the container, its own or a case's, at the container's levels and parameters, closed
+# over the block's parameters
+at_container(u: Unnesting, declared: text, container: Term): Term := {
+	declared_as = declaration(u.c.environment, declared)!
+	over_parameters(u, passed(u.c, with_levels(declared_as.type, declared_as.levels, constant_levels(head(container))), arguments(container)), no)
 }
 
 # --- terms
@@ -134,15 +135,6 @@ over_parameters(u: Unnesting, t: Term, function: bool): Term := {
 
 # a function type given its first arguments: what it gives for them
 passed(c: Checker, t: Term, given: list<Term>): Term := given.fold(t, (rest, argument) => instantiated(binder_body(c, rest), argument))
-
-# a function type with its final result replaced
-with_result(c: Checker, t: Term, result: Term): Term := match t.shape {
-	Pi(binder, domain, body) => {
-		variable = hypothesis(c, binder, domain)
-		pi(binder, domain, abstracted(with_result(c, instantiated(body, variable), result), free_id(variable)))
-	}
-	_ => result
-}
 
 free_id(t: Term): int := match t.shape {
 	Free(id) => id
