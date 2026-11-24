@@ -1,18 +1,16 @@
-# The console of the native wap, `wap` alone (driver.wap): each line read is the source <session>/<n>.wap, which uses
-# the modules of the lines before it, 1.wasm to <n-1>.wasm, compiled to <n>.wasm and run once in the session's store,
-# linked to their kept instances: a definition stays, an effect happens once, a value is shown. A line that fails or
-# defines nothing leaves nothing; the next line is <n> again.
+# The console of the native wap, `wap` alone (driver.wap): each line read is code, given the compiler on its standard
+# input with a use of the modules of the lines before it, <session>/1.wasm to <n-1>.wasm, compiled to <session>/<n>.wasm
+# and run once in the session's store, linked to their kept instances: a definition stays, an effect happens once, a
+# value is shown. A line that fails or defines nothing leaves nothing; the next line is <n> again.
 use foreign
 use "c.wap"
 use "run.wap"
 use "compiler.wap"
 use "editing.wap"
 
-WAP_SUFFIX := ".wap"
 PROMPT := "› "
 
 console(compiler: int, command: text) := {
-	global source_file
 	global module_file
 	# (by its real path: WASI follows no link out of the root, and the temporary folder often is one)
 	session = realpath(mkdtemp(temporary_path("/wap-console-XXXXXX")), 0)
@@ -22,16 +20,11 @@ console(compiler: int, command: text) := {
 	history: list<text> = if on_terminal() then history_read() else []
 	line = line_read(history)
 	while line != "" {
-		global source_file = line_path(session, lines + 1, WAP_SUFFIX)
 		global module_file = line_path(session, lines + 1, MODULE_SUFFIX)
-		source_written(source_file, line, session, lines)
-		if compiled(compiler, source_file, module_file) and instance_defined(linker, context, module_file, module_file, yes) { lines += 1 }
+		if compiled(compiler, STANDARD_INPUT_PATH, module_file, line_code(line, session, lines)) and instance_defined(linker, context, module_file, module_file, yes) { lines += 1 }
 		line = line_read(history)
 	}
-	for n in 1 upto lines + 2 {
-		unlink(line_path(session, n, WAP_SUFFIX))
-		unlink(line_path(session, n, MODULE_SUFFIX))
-	}
+	for n in 1 upto lines + 2 { unlink(line_path(session, n, MODULE_SUFFIX)) }
 	rmdir(session)
 }
 # a line of standard input ended by a newline, edited after the prompt on a terminal (editing.wap); "" at the input's end
@@ -50,11 +43,10 @@ line_read(history: list<text>): text := {
 on_terminal(): bool := isatty(STANDARD_INPUT) % BOOL_BYTE != 0
 # <session>/<n><suffix>
 line_path(session: text, n: int, suffix: text): text := "${session}/${n}${suffix}"
-# the line's source at the path: the line, then a use of each earlier line's module (after it, so what the compiler says of the
-# line is of its line 1)
-source_written(path: text, line: text, session: text, lines: int) := {
-	source = creat(path, FILE_MODE)
-	written(source, line)
-	for n in 1 upto lines + 1 { written(source, "use \"${line_path(session, n, MODULE_SUFFIX)}\"\n") }
-	close(source)
+# the line's code: the line, then a use of each earlier line's module (after it, so what the compiler says of the line is
+# of its line 1)
+line_code(line: text, session: text, lines: int): text := {
+	code = line
+	for n in 1 upto lines + 1 { code += "use \"${line_path(session, n, MODULE_SUFFIX)}\"\n" }
+	code
 }

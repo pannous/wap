@@ -103,8 +103,7 @@ default_of(value_type: list<int>) as list<int> := {
 	if value_type == I64 { return i64_const(0) }
 	if value_type == F64 { return f64_const(0.0) }
 	if value_type == I32 { return i32_const(0) }
-	if value_type#1 == NULLABLE_REFERENCE { return REF_NULL + value_type[1 ..] }
-	REF_NULL + value_type
+	REF_NULL + heap_of(value_type)
 }
 
 # whether a value type is a nullable reference, and the heap type it refers to
@@ -123,8 +122,7 @@ named(name: text) as list<int> := bytes_vector(name.bytes)
 # (an empty section is left out, as wasm allows)
 section(id: int, items: list<list<int>>) as list<int> := {
 	if #items == 0 { return [] }
-	content = counted(items)
-	[id] + unsigned(#content) + content
+	[id] + bytes_vector(counted(items))
 }
 
 # Types: a function's, a struct's, an array's. A field is its storage type and whether it is mutable.
@@ -133,7 +131,7 @@ field_type(storage: list<int>, mutability: int) as list<int> := storage + [mutab
 struct_type(fields: list<list<int>>) as list<int> := [STRUCT_TYPE] + counted(fields)
 array_type(item: list<int>) as list<int> := [ARRAY_TYPE] + item
 # a type open to subtypes, extending these type indices
-open_type(supertypes: list<int>, type: list<int>) as list<int> := [SUBTYPE] + unsigned(#supertypes) + supertypes.flat_map(unsigned) + type
+open_type(supertypes: list<int>, type: list<int>) as list<int> := [SUBTYPE] + counted(supertypes.map(unsigned)) + type
 
 # The index of a type, added once. Each type is its own recursion group, so a struct may hold references to itself.
 added_type(m: WasmModule, type: list<int>) as int := {
@@ -212,10 +210,7 @@ reserved_function(m: WasmModule, parameters: list<list<int>>, results: list<list
 # the code of a function whose place was reserved
 bodied(m: WasmModule, index: int, locals: list<list<int>>, body: list<int>) := { m.functions[index - #m.imports].code = code_entry(locals, body) }
 # a function's code: its size, its locals one entry each, its instructions and `end`
-code_entry(locals: list<list<int>>, body: list<int>) as list<int> := {
-	content = counted(locals.map(local => unsigned(1) + local)) + body + END
-	unsigned(#content) + content
-}
+code_entry(locals: list<list<int>>, body: list<int>) as list<int> := bytes_vector(counted(locals.map(local => unsigned(1) + local)) + body + END)
 
 # A global of that type, mutable or not, set at start by the constant instructions `initial`: its index.
 added_global(m: WasmModule, type: list<int>, mutability: int, initial: list<int>) as int := {
@@ -271,7 +266,7 @@ function_reference(m: WasmModule, index: int) as list<int> := {
 	instruction(REF_FUNC, [index])
 }
 # the element section, one declarative segment of the functions referred to; none when no function is
-declared_references(m: WasmModule) as list<int> := if m.referenced is empty then [] else section(ELEMENT_SECTION, [DECLARED_FUNCTIONS + unsigned(#m.referenced) + m.referenced.flat_map(unsigned)])
+declared_references(m: WasmModule) as list<int> := if m.referenced is empty then [] else section(ELEMENT_SECTION, [DECLARED_FUNCTIONS + counted(m.referenced.map(unsigned))])
 # The whole module, its sections in the order the format requires.
 module_bytes(m: WasmModule) as list<int> := {
 	declarations = m.functions.map(function => unsigned(function.type_index))
@@ -280,7 +275,7 @@ module_bytes(m: WasmModule) as list<int> := {
 	memory_pages = [[0x00] + unsigned(1 + (#m.memory_data + PAGE_BYTES - 1) ÷ PAGE_BYTES)]
 	# a program calling the compiled library runs on the library's memory
 	memory_import = if not m.imported_functions.any(function => function.module == m.tag_module) then [] else [named(m.tag_module) + named(MEMORY_EXPORT) + [MEMORY_KIND] + memory_pages#1]
-	segment_count = [DATA_COUNT_SECTION] + unsigned(#unsigned(#passive)) + unsigned(#passive)
+	segment_count = [DATA_COUNT_SECTION] + bytes_vector(unsigned(#passive))
 	MAGIC + VERSION + section(TYPE_SECTION, type_entries(m)) + section(IMPORT_SECTION, m.imports + memory_import + m.global_imports + m.tag_imports) + section(FUNCTION_SECTION, declarations) + section(MEMORY_SECTION, if memory_import is empty then memory_pages else []) + section(TAG_SECTION, m.tags) + section(GLOBAL_SECTION, m.globals.map(global => global.type + [global.mutability] + global.initial + END)) + section(EXPORT_SECTION, m.exports) + declared_references(m) + segment_count + section(CODE_SECTION, codes) + section(DATA_SECTION, passive) + names_section(m) + (if m.header is empty then [] else custom_section(WAP_SECTION, m.header.bytes))
 }
 # the custom section `name`, its subsection of function names, each a function's index and name in their order
@@ -292,9 +287,6 @@ MODULE_ENDING = ".wasm"
 names_section(m: WasmModule) as list<int> := {
 	known = m.imported_functions.map(function => function.name) + m.functions.map(function => function.name)
 	names = counted((0 to #known - 1).filter(index => known[index] is not empty).map(index => unsigned(index) + named(known[index])))
-	custom_section(NAME_SECTION, [FUNCTION_NAMES] + unsigned(#names) + names)
+	custom_section(NAME_SECTION, [FUNCTION_NAMES] + bytes_vector(names))
 }
-custom_section(name: text, bytes: list<int>) as list<int> := {
-	content = named(name) + bytes
-	[CUSTOM_SECTION] + unsigned(#content) + content
-}
+custom_section(name: text, bytes: list<int>) as list<int> := [CUSTOM_SECTION] + bytes_vector(named(name) + bytes)
