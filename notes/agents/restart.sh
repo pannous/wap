@@ -25,10 +25,12 @@ restart_one() {
 	tmux set-option -w -t "$old_pane" remain-on-exit on # the screen stays after Claude exits
 	tmux send-keys -t "$old_pane" -l "/exit"; sleep 0.5; tmux send-keys -t "$old_pane" Enter
 	sleep 3
-	if tmux capture-pane -p -t "$old_pane" | grep -qF "$EXIT_DIALOG"; then # a live old session keeps its address
+	local screen; screen=$(tmux capture-pane -p -t "$old_pane")
+	if echo "$screen" | grep -qF "$EXIT_DIALOG"; then # a live old session keeps its address
 		tmux send-keys -t "$old_pane" 3; sleep 0.3; tmux send-keys -t "$old_pane" Enter # Stay
 		tmux rename-session -t "=$session-old-$STAMP" "$session"
-		echo "$(date +%T) $session kept: background work still runs; restart it later"; return
+		echo "$(date +%T) $session kept: background work still runs; restart it later"
+		echo "$screen" | grep -A8 -F "$EXIT_DIALOG"; return # names what still runs
 	fi
 	[ "$args" = retire ] && { echo "$(date +%T) $session retired"; return; }
 	eval "\"$START\" $args" | sed "s/^/$(date +%T) $session: /"
