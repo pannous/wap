@@ -34,8 +34,9 @@ obligations).
 - **Writes** declarations into the theory's `Environment` through `declared` and `inductive_declared`, and
   nothing else. A term it hands over holds no hole.
 - **The door** `elaborate/door.wap --tree <root> program.wap` loads the prelude (`wap/extensions/theory/prelude/`): its explicit files
-  checked, then `operators.wap` elaborated, the operators declared by their spellings as wap's types module declares
-  them (`+(m: nat, n: nat): nat := add(m, n)`). It elaborates the program statement by statement, and prints as the kernel's door does: nothing for an accepted declaration, the
+  checked, then `operators.wap` and `any.wap` elaborated (`PRELUDE_ELABORATED`, elaborate/file.wap): the operators
+  declared by their spellings as wap's types module declares them (`+(m: nat, n: nat): nat := add(m, n)`), and `any`,
+  the enum holding every value, with the conversions into it. It elaborates the program statement by statement, and prints as the kernel's door does: nothing for an accepted declaration, the
   value's type for `type of e`, a refusal as `refused by <rule>: …`. The kernel's own door, `check.wap`, stays the
   door of the explicit programs.
 
