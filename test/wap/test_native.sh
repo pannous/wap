@@ -272,4 +272,41 @@ check "a standalone wap needs no library but the system's" "$(otool -L "$stage/s
 printf '%s\n' 'x = 1+2' 'f(a)= a*2' >"$stage/unformatted.wap"
 check "wap format prints the program in canonical spelling" "$(cd "$stage" && "$native_wap" format unformatted.wap 2>&1)" "x = 1 + 2
 f(a) = a * 2"
+# a record's instance is the C struct of its fields: C reads each at C's offset, and sees a field the program sets
+check "a native record crosses to C as the struct its fields make" "$(native_ran record_struct 'class Pair { tag: int32; weight: float; label: text }
+field_i32(at: Pair, offset: int): int32 := prim foreign("c", "field_i32", at, offset)
+field_f64(at: Pair, offset: int): float := prim foreign("c", "field_f64", at, offset)
+pair = Pair(tag: int32(3), weight: 2.5, label: "seven")
+pair.weight = 4.5
+print "${field_i32(pair, 0)} ${field_f64(pair, 8)} ${pair.label}"')" "3 4.5 seven"
+# a function value is held in the memory: a closure keeps what it captures, and a function is given by its name
+check "a native function value runs, its captures kept and a function given by name" "$(native_ran function_values 'step = 3
+moved: (int) -> int = x => x + step
+twice(f: (int) -> int, x: int): int := f(f(x))
+negated(x: int): int := 0 - x
+print "${twice(moved, 1)} ${twice(negated, 5)} ${moved(10)} ${[1, 2, 3].contains(2)}"')" "7 5 13 yes"
+# an optional is held in the memory: a plain value in its box, a record as itself, ø told apart from both
+check "a native optional holds a number, a record or ø" "$(native_ran optionals 'class Pair { left: int; right: int }
+paired(n: int): Pair? := if n > 0 then Pair(left: n, right: n * 2) else ø
+half(x: float): float? := if x > 0.0 then x / 2.0 else ø
+b: int? = 4
+c: int? = 4
+d: int? = ø
+print "${half(5.0) ?? 0.0} ${half(-1.0) ?? 9.5} ${paired(3)!.right} ${if paired(0) then "some" else "none"} ${b == c} ${b == d} ${d is ø}"')" "2.5 9.5 6 none yes no yes"
+# an enum's first case is a value, never ø
+check "a native optional holds an enum's first case" "$(native_ran present 'enum Color { Red, Green }
+seen(c: Color?) := if c == ø then "none" else "some"
+print "${seen(Color.Red)} ${seen(ø)}"')" "some none"
+# a record taken after a text starts where C's struct would, its float read
+check "a native record after a text reads its float" "$(native_ran aligned 'class Wide { x: float }
+name = "hello"
+w = Wide(2.5)
+print "${name} ${w.x}"')" "hello 2.5"
+# C calling back a wap function a natively built program hands it (lib/callbacks.wap c_callback, lib/native/callbacks.h)
+check "a native program's C calls back a function value" "$(native_ran called_back 'use c
+use callbacks
+qsort(base: list<int32>, count: i64, size: i64, compare: handle): void from '"'"'c'"'"'
+xs: list<int32> = [int32(3), int32(1), int32(4), int32(2)]
+qsort(xs, 4, 4, c_callback((a, b) => int(field_i32(a, 0)) - int(field_i32(b, 0)), ["handle", "handle"]))
+print "${xs#1} ${xs#2} ${xs#3} ${xs#4}"')" "1 2 3 4"
 exit $((failures > 0))
