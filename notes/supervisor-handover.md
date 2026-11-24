@@ -30,6 +30,8 @@ Role: notes/agents/supervisor.md (plus lead.md, wap-owner.md). Read those first;
   - republish data/vitals/wap-vitals.html to https://claude.ai/code/artifact/8b33d965-01c9-4a3b-9f75-d4597da4804e;
   - commit leftovers in wap and wap/wiki as "(user)";
   - give idle wiki workers their next page;
+  - find idle workers (`ListAgents`; any session at an empty prompt for an hour) and send each its next card by name,
+    day and night: "nothing new" is never a round's result while the board has unowned cards;
   - report only news.
 - Full suite: the cloud routine trig_011CmX1HYy4erz3ugNtuYZwm, hourly. The Mac cron runs coverage only.
 - Remote branch deletes are the supervisor's. Verify each branch is merged first, then `git -C <repo> push origin --delete <literal names>`; the hook refuses variables.
