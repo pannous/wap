@@ -4,6 +4,8 @@ Look things up here when a task needs them; never read it front to back at start
 differ and holds every rule; this file holds only the procedures behind them.
 
 ## Where to work
+- A finished or parked branch never ends the workday: after a handoff, a report or a hold (waiting for the user's OK,
+  a landing, another card), take the next card (`todo pick`) in the same turn. Only a quota wind-down ends work.
 - Quota wind-down: every worker finishes the card it is on, hands it off (AGENTS.md "Handoff"), writes its handover
   into the card (`todo release`) and retires. No new cards.
 - Beautiful types (decision beautiful-types): every lib/ declaration a branch touches leaves it fully and precisely
