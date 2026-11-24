@@ -89,7 +89,8 @@ the team, crash resume), notes/roles.md (what the other roles do).
   Everything else still goes to wap-interviewer with the old and new lines.
 - Core and extension changes (user 2026-11-22): no rubber
   stamps. Each one is discussed with the user (shape, core lines, why no hook or lib would do) before it lands; an
-  Interviewer OK alone does not land it.
+  Interviewer OK alone does not land it. A small overrun within an approved estimate's margin is decided by
+  wap-interviewer and logged on the card (user 2026-11-24); it does not go to the user again.
 
 ## Team handover (reboot, shutdown, "handover")
 1. Tell every running session (ListAgents; tmux warp-*) to push its branch, write its handover onto
