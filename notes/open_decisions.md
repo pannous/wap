@@ -32,17 +32,22 @@ show the user: the case against and why no library or hook does it (ask the bran
 - wap-build e7ebfcb7 (wap-emitter), +12 in extensions/native (driver 9, commands 3): `wap build app.wap` makes a
   native executable `app`; a .wap output name is refused so the source is never overwritten. The user OK'd about
   5 lines via wap-lead; it came to 12 (9 without the refusal). Recommend: OK, with the refusal.
-- unclosed-text (wap-fixer, the user's card): code given on the command line names the host's temp file in every
-  message (`wap 'x = "abc'` → "/private/var/…/T/wap-nLgENb.wap line 1:5: this text is never closed"). Shape: the
-  compiler reads its program from standard input when the path is `-` (the Unix convention); such code has no file,
-  so messages say "line 1:5", and `use "x.wap"` resolves against the current folder. Driver and console pass code
-  through stdin. Core: reader +2, compiler.wap +2; extensions (driver, console) about +8. Option: a `--code` option
-  (same core plus an option). Leave as is: the temp path stays in messages. Supervisor recommends stdin.
-  wap-reviewer: sound (serves pipes, no quoting, the temp file goes); nit: driver and console run the compiler in
-  the user's folder so `use "x.wap"` resolves there.
-
+- unclosed-text (wap-fixer, branch unclosed-text, built): code given on the command line or typed in the console
+  says `line 1:5: this text is never closed`, not the host's temp file path. Core: net +7 in core/errors.wap
+  (place_of leaves the file out for the path `-`); outside core: types/system.wap read("-") reads stdin once and
+  keeps it; driver and console pass code as stdin with `-`, no temp .wap files, run in the user's folder (reviewer's
+  nit built in). wap-reviewer: sound. Options: OK; Leave as is (the temp path stays in messages); Park.
+  Wiki diff to approve with it, wiki/cli.md "Running", added: "`wap -` (or `wap <compiler> - out.wasm`) reads the
+  program from standard input: `echo 'print 1' | wap -`. Code given in place of a file, on the command line, from
+  standard input or in the console, runs in the current folder, and its errors name only the line: `line 1:5: this
+  text is never closed`." Try (after the seed): /Users/me/dev/bin/wap 'x = "abc'
 ## To present (keep or change, at 10:00)
 
 - template-shape: the approved "normalize templates at declare" wasn't needed. The fix is +2 lines in
   core/rules/matcher.wap: a form pattern `rule q ($a + $b)` now fits the program's grouped `q (x + 1)`, while an
   argument group `f(x + 1)` stays a group. `m() as T := body` now uses the same rule as `m(): T := body`.
+- one-primitive-table (night decision): the emitter keeps its if-chain for primitives; the one-table refactor cost
+  +181 nodes, so it was dropped. Undo: land branch one-primitive-table-2 26bf51c7 and raise the ceiling.
+- previous-line (night decision; extension growth, lands after the morning OK): in the console `f(x: int) := 1`
+  then `f(x: int) := 2` makes later lines call the new f (about 5 lines in extensions/native/console.wap); today it
+  is refused with the console's internal file names. Undo: keep the refusal, worded without those names.
