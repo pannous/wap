@@ -244,8 +244,8 @@ refuses a type of the block under a subset's condition (strict positivity): the 
   premise is yes where the decision of each of its lifted conditions (E3's search, else `undecidable condition`) and
   each induction hypothesis are, `both` folding them; so the conditions of the values inside a value count too.
 - **The program's type.** The written name is the subset of the plain type where its bool is yes:
-  `Quad := Subset(Quad'plain, value => Equal(bool, Quad'valid(value), bool.yes))`, its decision the prelude's
-  `yes_decided`. The cases make plain values; where the program's type is wanted a value goes down to it as to any
+  `Quad := Subset(Quad'plain, value => Equal(bool, Quad'valid(value), bool.yes))`, decided by the prelude's
+  `yes_decided`, which E3's search finds as it finds a lifted condition written as a bool being yes. The cases make plain values; where the program's type is wanted a value goes down to it as to any
   subset (E4): computed to no, a Quad given three parts is refused by `condition`.
 - A name is shown without its mark and the word after it: `Quad'plain` and `Quad'valid` print as `Quad`.
 - Open: a list of the program's type where a list of the plain type is wanted (a conversion lifted through a
