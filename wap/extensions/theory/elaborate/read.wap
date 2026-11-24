@@ -8,6 +8,7 @@
 use "../terms.wap"
 use "../levels.wap"
 use "../environment.wap"
+use "../numbers.wap"
 use "../compute.wap"
 use "../typing.wap"
 use "../show.wap"
@@ -20,6 +21,8 @@ use "match.wap"
 use "recursion.wap"
 use "instances.wap"
 use "conditions.wap"
+use "convert.wap"
+use "obligations.wap"
 use "../../../kernel/surface.wap"
 use "../../../core/language.wap"
 use "../../../core/rules/stages.wap"
@@ -97,18 +100,21 @@ elaborating(p: Theory): Elaborating := Elaborating(p, elaboration(p.environment,
 # A term of the type wanted (ø: any)
 elaborated(x: Elaborating, n: Node, wanted: Term?): Term := {
 	t = form_elaborated(x, n, wanted)
-	if wanted is not ø { made_of(x, t, wanted!) }
-	t
+	if wanted is ø then t else made_of(x, t, wanted!)
 }
-# a term made of the type wanted, or refused
-made_of(x: Elaborating, t: Term, wanted: Term) := {
+# a term made of the type wanted: the term itself, its conversion there (convert.wap), the value of a subset with its
+# proof (obligations.wap), or refused
+made_of(x: Elaborating, t: Term, wanted: Term): Term := {
 	given = type_of(x.el.c, filled(x.el, t))
-	if not unified(x.el, given, wanted) { refused(VALUE_TYPE, "${shown(filled(x.el, t))} is a ${shown(filled(x.el, given))}, where a ${shown(filled(x.el, wanted))} is wanted") }
+	if unified(x.el, given, wanted) { return t }
+	converted(x, t, filled(x.el, given), filled(x.el, wanted)) ?? gone_down(x, t, filled(x.el, given), filled(x.el, wanted)) ?? refused(VALUE_TYPE, "${shown(filled(x.el, t))} is a ${shown(filled(x.el, given))}, where a ${shown(filled(x.el, wanted))} is wanted")
 }
 
 form_elaborated(x: Elaborating, n: Node, wanted: Term?): Term := match n {
 	Symbol(name) => if name == HOLE_WORD then hole(x.el, HOLE_WORD, wanted ?? any_sort(x)) else name_elaborated(x, name, [], wanted)
 	Number(value) => numeral(value as int)
+	Text(value) => text_literal(x.theory.environment, value)
+	Char(value) => text_literal(x.theory.environment, text(value))
 	If(condition, then_part, else_part) => if_elaborated(x, condition, then_part, else_part, wanted)
 	Case(subject, arms) => match_elaborated(x, subject, arms.map(arm_written), wanted)
 	Get(subject, key) => form_elaborated(x, named_form(n), wanted)
@@ -148,6 +154,7 @@ call_elaborated(x: Elaborating, called: Node, arguments: list<Node>, wanted: Ter
 	if word == FUNCTION_TYPE and #arguments == 2 { return bound_elaborated(x, binders_of(arguments#1).map(typed_binder), arguments#2, no, wanted) }
 	if word == DOT and #arguments == 2 { return form_elaborated(x, dotted(arguments#1, arguments#2), wanted) }
 	if #arguments == 1 and word == TYPE_WORD { return type_at(level_written(x, arguments#1)) }
+	if #arguments == 2 and word == IS_WORD { return is_elaborated(x, arguments#1, arguments#2) }
 	if #arguments == 1 and word == SORT_WORD { return universe(level_written(x, arguments#1)) }
 	match called {
 		Symbol(name) => name_elaborated(x, name, arguments, wanted)
@@ -188,11 +195,15 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 # A declaration at a level hole for each of its level parameters, a hole for each found binder, then its written
 # binders given the arguments
 declared_given(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?): Term := {
-	d = declaration(x.theory.environment, name)!
-	if wanted is not ø and d.kind is Recursor { return recursor_given(x, name, arguments, wanted!) }
-	levels = d.levels.map(level => level_hole(x.el))
-	given = holes_given(x, name, constant(name, levels), with_levels(d.type, d.levels, levels), x.theory.found.get(name) ?? 0)
+	if wanted is not ø and declaration(x.theory.environment, name)!.kind is Recursor { return recursor_given(x, name, arguments, wanted!) }
+	given = declared_holes(x, name, x.theory.found.get(name) ?? 0)
 	given_arguments(x, given.function, given.type, arguments, wanted)
+}
+# a declaration at a level hole for each of its level parameters, given a hole for each of its first `count` binders
+declared_holes(x: Elaborating, name: text, count: int?): Given := {
+	d = declaration(x.theory.environment, name)!
+	levels = d.levels.map(level => level_hole(x.el))
+	holes_given(x, name, constant(name, levels), with_levels(d.type, d.levels, levels), count)
 }
 # A function given a hole for each of its first `count` binders, for all of them where count is ø: its found binders,
 # a trait at its types, a decision's parts. A hole whose type is a trait is kept for the search
@@ -216,12 +227,16 @@ given_arguments(x: Elaborating, function: Term, type: Term, arguments: list<Node
 	rest = type
 	for argument in arguments {
 		parts = pi_parts(x, rest) ?? refused(NOT_A_FUNCTION, "${shown(filled(x.el, given))} is a ${shown(filled(x.el, rest))}, no function, and is given ${text(argument)}")
-		value = elaborated(x, argument, filled(x.el, parts.domain))
+		value = elaborated(x, it_read(x, argument, parts.domain), filled(x.el, parts.domain))
 		given = apply(given, value)
 		rest = instantiated(parts.body, value)
 	}
 	given
 }
+# an argument naming `it` where a function of one value is wanted is that function of it, as lowering reads one where
+# a declared parameter takes a function (wiki/function.md): `nat where it == 1` is filter(nat, it => it == 1)
+it_read(x: Elaborating, argument: Node, domain: Term): Node :=
+	if names_it(argument) and pi_parts(x, domain) is not ø then Fn(parameter_list(x.theory.spellings, symbol(IT_WORD)), argument) else argument
 # what a function type gives after a count of its binders, as written; ø for one with fewer
 result_after(type: Term, count: int): Term? := {
 	if count == 0 { return type }
@@ -249,18 +264,14 @@ overload_elaborated(x: Elaborating, name: text, candidates: list<text>, argument
 	declared_given(x, fit!, arguments, wanted)
 }
 # the declarations that fit the arguments and the type wanted, each tried and taken back
-fitting_declarations(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<text> := {
-	kept = found_so_far(x.el)
-	candidates.filter(candidate => {
-		fits = try {
-			given = declared_given(x, candidate, arguments, wanted)
-			if wanted is not ø { made_of(x, given, wanted!) }
-			yes
-		} catch e { mismatch(e) }
-		back_to(x.el, kept)
-		fits
+fitting_declarations(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<text> :=
+	fitting(x, candidates, candidate => {
+		given = declared_given(x, candidate, arguments, wanted)
+		if wanted is ø then given else made_of(x, given, wanted!)
 	})
-}
+# the candidates an attempt does not refuse as ill-typed, each tried and taken back
+fitting(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<text> :=
+	candidates.filter(candidate => taken_back(x.el, () => try { attempt(candidate); yes } catch e { mismatch(e) }))
 
 # --- binders
 

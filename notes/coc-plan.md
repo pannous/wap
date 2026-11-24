@@ -371,8 +371,8 @@ The kernel and the elaborator name no library word. Where a mechanism needs one,
 declaration:
 - **numbers**: which type number literals belong to, and which functions the arithmetic shortcuts stand for (6.7);
 - **quotient**: which type is the equality (6.6);
-- **texts**: a text literal is the library's function from the number that spells its bytes, applied to that
-  number: a 1 and then the bytes, so every text has its own number. The kernel has one literal, the natural number;
+- **texts**: a text literal is the library's function from the number that spells its code points, applied to that
+  number: a 1 and then the code points, base 0x110000, so every text has its own number (`texts(text_of)`). The kernel has one literal, the natural number;
 - **conversions, instances, the computation type, decidable conditions**: declarations of the types module that the
   elaborator's general mechanisms read (section 8); spellings such as `T where c`, `T?` and `if` reach library
   functions through rules in sugar/.
