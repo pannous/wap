@@ -251,4 +251,8 @@ printf '%s\n' '#include <stdint.h>' 'double sum_f32(float* p, int64_t bytes) { d
 check "a native list<float32> crosses as C's floats, and C's writes are seen" "$(printf '%s\n' "sum_f32(xs: list<float32>, size: length): f64 from 'c'" "halved(xs: list<float32>, size: length): ø from 'c'" 'xs: list<float32> = [float32(0.5), float32(1.25), float32(4.0)]' 'halved(xs)' 'print(text(sum_f32(xs)) + " " + text(float(xs#2)))' >"$stage/native_items.wap" && "$tree/wap/extensions/native/build.sh" "$compiler" "$stage/native_items.wap" "$stage/native_items" "$stage/native_items.c" 2>&1 && "$stage/native_items" 2>&1)" "2.875 0.625"
 # a compiler run from source with no library beside it and no warm state yet, as from wap's own tree, still compiles
 check "a compiler with no library beside it compiles hello" "$(rm -rf "$stage/bare" && mkdir -p "$stage/bare" && cp -R "$tree/wap" "$stage/bare/" && : >"$stage/bare/wap/warm.packed" && : >"$stage/bare/wap/types.wasm" && cd "$stage" && printf '%s\n' 'print "Hello"' >bare_hello.wap && "$native_wap" "$stage/bare/wap/compiler.wap" bare_hello.wap bare_hello.wasm 2>&1 && "$native_wap" bare_hello.wasm 2>&1)" "Hello"
+# an option before the program is told to it (the user: every run of a painting program headless, --no-window): `--no-window` makes it windowless, a program without it is not
+printf '%s\n' 'use os' 'print windowless()' >"$stage/windowless.wap"
+check "wap --no-window runs the program windowless" "$(cd "$stage" && "$native_wap" --no-window windowless.wap 2>&1; "$native_wap" windowless.wap 2>&1)" "yes
+no"
 exit $((failures > 0))

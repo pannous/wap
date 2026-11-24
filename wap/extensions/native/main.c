@@ -40,6 +40,11 @@ static void* epoch_ticking(void* engine) {
 static const char* library_folder = NULL;
 void wap_library_folder_set(const char* folder) { library_folder = strdup(folder); }
 const char* wap_library_folder(void) { return library_folder; }
+// the options of the run the native wap tells the programs it runs, a `name=value` line each (driver.wap options_taken),
+// which they read (lib/os.wap run_option); NULL till it is told
+static const char* run_options = NULL;
+void wap_run_options_set(const char* options) { run_options = strdup(options); }
+const char* wap_run_options(void) { return run_options; }
 // when this executable was built (commands.wap version)
 const char* wap_built(void) { return __DATE__ " " __TIME__; }
 void epoch_ticker_started(int64_t engine) {
