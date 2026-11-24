@@ -46,3 +46,5 @@ show the user: the case against and why no library or hook does it (ask the bran
 - template-shape: the approved "normalize templates at declare" wasn't needed. The fix is +2 lines in
   core/rules/matcher.wap: a form pattern `rule q ($a + $b)` now fits the program's grouped `q (x + 1)`, while an
   argument group `f(x + 1)` stays a group. `m() as T := body` now uses the same rule as `m(): T := body`.
+- one-primitive-table (night decision): the emitter keeps its if-chain for primitives; the one-table refactor cost
+  +181 nodes, so it was dropped. Undo: land branch one-primitive-table-2 26bf51c7 and raise the ceiling.
