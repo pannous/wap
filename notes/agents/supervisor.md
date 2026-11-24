@@ -38,6 +38,9 @@ the team, crash resume), notes/roles.md (what the other roles do).
 ## Team
 - Start of day: `tmux ls | grep warp-` and ListAgents; missing services: `notes/agents/start.sh` (integrator,
   interviewer, fixer). At most TWO feature workers at once.
+- Context (user 2026-11-24): every session runs with the full auto-compact window (global settings, 400k); nobody
+  lowers it for the project. A low window only for a one-off session, which is closed when its task is done. Instead
+  of shrinking context, retire long-running workers regularly at a card boundary (state on the card) and respawn them.
 - Leftovers in the main checkout (`git status --short` at every watch round and handover): integrate them in the same
   turn without asking: run what they touch and commit as "(user)", or, when they cannot work, save a
   patch in data/stray/ and restore the file from HEAD. At most one line about it to the user, once.
