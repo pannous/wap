@@ -28,10 +28,12 @@ ADD_CANCEL := "add_cancel"
 AT_MOST_ADD := "at_most_add"
 AT_MOST_DIFFERENCE := "at_most_difference"
 EQUALS_SOUND := "equals_sound"
+CHOSEN_DECIDED := "chosen_decided"
+CHOSEN_AT_YES := "chosen_at_yes"
 SYMMETRIC := "equal_symmetric"
 TRANSITIVE := "equal_transitive"
 CONGRUENT := "equal_congruent"
-LAWS := [ZERO_ADD, ADD_ASSOCIATIVE, ADD_SWAPPED, ADD_CANCEL, AT_MOST_ADD, AT_MOST_DIFFERENCE, EQUALS_SOUND, SYMMETRIC, TRANSITIVE, CONGRUENT]
+LAWS := [ZERO_ADD, ADD_ASSOCIATIVE, ADD_SWAPPED, ADD_CANCEL, AT_MOST_ADD, AT_MOST_DIFFERENCE, EQUALS_SOUND, CHOSEN_DECIDED, CHOSEN_AT_YES, SYMMETRIC, TRANSITIVE, CONGRUENT]
 # the level of the numbers' type
 ONE_LEVEL := Successor(Zero)
 # how many rows the elimination holds before it gives up
@@ -53,6 +55,8 @@ class Bound { left: Term; difference: Term; right: Term; proof: Term }
 # a row `Σ coefficient·atom + number >= 0`, and how many of each first row it sums
 class Row { coefficients: list<int>; number: int; sources: list<int> }
 # what makes t at least u: `t + gap == u`
+# a choice by a truth value: the function choosing, its parts at no and at yes, and the truth value deciding
+class Choice { chooser: Term; at_no: Term; at_yes: Term; decided: Term }
 class Gap { gap: Term; equated: Equated }
 
 by_linear_arithmetic(goal: Goal): Term? := {
@@ -100,7 +104,16 @@ equal_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Term? := {
 # A goal choosing by a truth value (`a and b` is the choice of b at a's yes): proved where the truth value is proved
 # yes and the choice at yes is proved, the proof of that carried back along the truth value's equation
 chosen_proof(s: Sums, bounds: list<Bound>, wanted: Term): Term? := {
-	choice = computed_folded(s.c, wanted)
+	choice = choice_of(s, wanted) ?? return ø
+	affirmed = constant(s.n.yes_case, [])
+	truth = constant(s.n.truth, [])
+	sure = proved(s, bounds, truth_stated(s, choice.decided)) ?? return ø
+	at_yes = proved(s, bounds, choice.at_yes) ?? return ø
+	carried(s.c, equation(s, truth, affirmed, choice.decided), law(SYMMETRIC, [ONE_LEVEL], [truth, choice.decided, affirmed, sure]), at_yes, v => apply(choice.chooser, v))
+}
+# t as a choice by a truth value, ø where it computes to none
+choice_of(s: Sums, t: Term): Choice? := {
+	choice = computed_folded(s.c, t)
 	recursor = match head(choice).shape {
 		Constant(name, levels) => name
 		_ => return ø
@@ -108,20 +121,15 @@ chosen_proof(s: Sums, bounds: list<Bound>, wanted: Term): Term? := {
 	facts = recursor_facts(s.c.environment, recursor) ?? return ø
 	given = arguments(choice)
 	if facts.of != s.n.truth or #given != before_major(facts) + 1 { return ø }
-	decided = given.last()
-	affirmed = constant(s.n.yes_case, [])
-	truth = constant(s.n.truth, [])
-	sure = proved(s, bounds, truth_stated(s, decided)) ?? return ø
-	at_yes = proved(s, bounds, given#(facts.parameters + facts.motives + facts.cases.index_where(case => case == s.n.yes_case))) ?? return ø
-	chooser = apply_all(head(choice), given.take(#given - 1))
-	carried(s.c, equation(s, truth, affirmed, decided), law(SYMMETRIC, [ONE_LEVEL], [truth, decided, affirmed, sure]), at_yes, v => apply(chooser, v))
+	part = case => given#(facts.parameters + facts.motives + facts.cases.index_where(found => found == case))
+	Choice(apply_all(head(choice), given.take(#given - 1)), part(s.n.no_case), part(s.n.yes_case), given.last())
 }
 
 # --- the hypotheses
 
 # what a hypothesis bounds: `a == b` of numbers both ways, `a <= b` and `a == b` of truth values made yes
 bounds_of(s: Sums, type: Term, proof: Term): list<Bound> := {
-	equation = equation_of(s.c, type) ?? return []
+	equation = equation_of(s.c, type) ?? return chosen_bounds(s, type, proof)
 	if is_named(s, equation.type, s.n.number) { return equal_bounds(s, equation.left, equation.right, proof) }
 	if not (is_named(s, equation.type, s.n.truth) and is_named(s, equation.right, s.n.yes_case)) { return [] }
 	compared = called(s, equation.left, s.at_most)
@@ -132,6 +140,14 @@ bounds_of(s: Sums, type: Term, proof: Term): list<Bound> := {
 	}
 	equal = called(s, equation.left, s.equals) ?? return []
 	equal_bounds(s, equal#1, equal#2, law(EQUALS_SOUND, [], [equal#1, equal#2, proof]))
+}
+# A fact choosing by a truth value whose part at no is false (`a and b`): the truth value is yes, and the part at yes
+# holds
+chosen_bounds(s: Sums, type: Term, proof: Term): list<Bound> := {
+	choice = choice_of(s, type) ?? return []
+	if not same(computed(s.c, choice.at_no), computed(s.c, truth_stated(s, constant(s.n.no_case, [])))) { return [] }
+	given = [choice.decided, choice.at_yes, proof]
+	bounds_of(s, truth_stated(s, choice.decided), law(CHOSEN_DECIDED, [], given)) + bounds_of(s, choice.at_yes, law(CHOSEN_AT_YES, [], given))
 }
 equal_bounds(s: Sums, a: Term, b: Term, proof: Term): list<Bound> := {
 	zero = constant(s.n.zero, [])
