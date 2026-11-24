@@ -11,8 +11,12 @@ obligations).
 
 - **Reads** a program's statements as the reader gives them (`statements_of`, as check.wap does): an enum or a class
   as written, read by explicit.wap's enum reader, the one the kernel's door uses; any other statement lowered alone
-  first (wap/kernel/forms.wap: Call, Fn, Define, If, Block, literals, Symbol), a `match` as the call of `match` on
-  the subject and a block of arrows. Lowering is the input of today's pipeline, which the elaborator replaces, so it
+  first (wap/kernel/forms.wap: Call, Fn, Define, If, Block, literals, Symbol). Before lowering, a statement is
+  rewritten by the shape rules of the tree the door is given (`--tree <root>`, its `wap/` folder loaded into a
+  language of its own, `Theory.spellings`), and lowered by that language: so `if c then a else b` arrives as
+  If(c, a, b), `match s { … }` as Case(s, Arm…), a dotted name as Get(subject, "name"), and `list.item(x, r)` as
+  `item(list, x, r)`, which a name read finds as `list.item` when `item` alone names nothing. A form or name read no
+  other way is tried once more through those rules before it is refused. Lowering is the input of today's pipeline, which the elaborator replaces, so it
   lowers no enum form the kernel needs (parameters, result types). It does not read today's binding or typing
   facts: it resolves names itself. A type is read by the same function as a value: there is one reader of
   expressions. Two forms are the reader's own, since a type is a value now:
@@ -29,7 +33,7 @@ obligations).
   axiom is an `Axiom`.
 - **Writes** declarations into the theory's `Environment` through `declared` and `inductive_declared`, and
   nothing else. A term it hands over holds no hole.
-- **The door** `elaborate/door.wap program.wap` loads the prelude (`wap/extensions/theory/prelude/`), elaborates the
+- **The door** `elaborate/door.wap --tree <root> program.wap` loads the prelude (`wap/extensions/theory/prelude/`), elaborates the
   program statement by statement, and prints as the kernel's door does: nothing for an accepted declaration, the
   value's type for `type of e`, a refusal as `refused by <rule>: …`. The kernel's own door, `check.wap`, stays the
   door of the explicit programs.
@@ -172,8 +176,10 @@ adds is how a candidate fits and where its instances come from.
   blocks.wap makes the test and the proof that it says yes exactly for equal values. In a place that wants a
   proposition (a law, a condition's fact, an obligation) `a == b` at such a type reads as `Equal(a, b)`; at a type
   with its own `equals`, and at the floats, it reads as "the test answers yes".
-- **Conditions.** The condition of `if`, `while` and of a `bool` place is a proposition with a decision: a value of
-  `Decidable(c)`, found by the same search (comparisons of numbers and texts, `and`, `or`, `not` of decided ones,
+- **Conditions.** `if c then a else b` is a match: on a `bool` c, `yes` gives a and `no` gives b. Any other
+  condition is a proposition with a decision, a value of `Decidable(c)` matched by its cases `is_true` and
+  `is_false`, found by a search over the declarations giving a `Decidable`, whose binders that are decisions are
+  searched in turn (up to 8 deep) (comparisons of numbers and texts, `and`, `or`, `not` of decided ones,
   a `bool` being yes). None found is the refusal `undecidable condition`. A value of another type used as a
   condition converts to a proposition by its trait of truth (a list: it is not empty). Inside the branch taken the
   condition is a fact in scope, a variable whose type is the proposition, and its negation in the other branch:
@@ -203,6 +209,24 @@ adds is how a candidate fits and where its instances come from.
 - `x as S` is going down with step 4 always allowed. `x is S` is the decision of the condition at x, a `bool`.
 - A provers' search is counted in steps like the kernel's work, so what is proved does not depend on the machine.
 
+## Statements and effects (E5)
+
+- **A block is its statements in order**, each binding what the rest reads (`elaborate/statements.wap`). `x = v` is
+  a let of x whose body is the rest of the block, so a name given a value of another type holds that type from
+  there on; `x: T = v` reads v as a T. The last statement is the block's value; a value before it is the refusal
+  `statement` (it would be lost), and so is a block that ends by giving a name a value.
+- **A choice joins again**: in `if c { a } else { b }; rest` the rest is read once, as a function (the join) of the
+  names the parts give that the rest can see (named before the choice, or given by both parts), and each part ends by
+  calling it. n choices in a row stay n joins, never 2^n copies; a return in a part skips the join.
+- **Only a name is given a value**: `xs#1 = 2` or `p.x = 2` is the refusal `statement` until updates of a part
+  come in (a binding named by the source text would drop the write).
+- **A return** is the block's value at once; the statements after it are never read.
+- Without rules the door sees blocks and lets only: `if` and `return` arrive as calls, which read.wap reads as calls.
+  Choices and returns reach statements.wap once the door reads with the tree's rules (E3); their lines wait in
+  test_theory_statements_wanted.wap.
+- Statements are read as kernel forms (Block, Set, If, Return, While, Break, Continue), which the tree's rules
+  write; the elaborator names no statement word.
+
 ## Files
 
 | file | holds | milestone |
@@ -219,6 +243,7 @@ adds is how a candidate fits and where its instances come from.
 | `elaborate/conditions.wap` | conditions, their decisions, the facts a branch knows | E3 |
 | `elaborate/convert.wap` | the conversions, the path between two types, lifting through containers | E4 |
 | `elaborate/obligations.wap` | going down: prove or check | E4 |
+| `elaborate/statements.wap` | blocks, lets, a choice's rest, returns | E5 |
 
 ## Rules every file keeps
 

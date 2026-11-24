@@ -78,6 +78,19 @@ static void* epoch_ticking(void* engine) {
 static const char* library_folder = NULL;
 void wap_library_folder_set(const char* folder) { library_folder = strdup(folder); }
 const char* wap_library_folder(void) { return library_folder; }
+// wap's seed folder built into this executable, a tar archive (build.sh --standalone: WAP_SEED its path, WAP_SEED_NAME
+// its name), which linking.wap unpacks once into the cache folder; a build without one names none, its seed folder
+// beside it
+#ifdef WAP_SEED
+static const unsigned char seed_archive[] = {
+#embed WAP_SEED
+};
+const char* wap_seed_name(void) { return WAP_SEED_NAME; }
+const unsigned char* wap_seed(void) { return seed_archive; }
+int64_t wap_seed_size(void) { return sizeof seed_archive; }
+#else
+const char* wap_seed_name(void) { return ""; }
+#endif
 // when this executable was built (commands.wap version)
 const char* wap_built(void) { return __DATE__ " " __TIME__; }
 void epoch_ticker_started(int64_t engine) {

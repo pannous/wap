@@ -18,6 +18,13 @@ use "state.wap"
 use "unify.wap"
 use "match.wap"
 use "recursion.wap"
+use "instances.wap"
+use "conditions.wap"
+use "../../../kernel/surface.wap"
+use "../../../core/language.wap"
+use "../../../core/rules/stages.wap"
+use "../../../core/rules/lowering.wap"
+use "statements.wap"
 
 # the elaborator's own rules, which a refusal names
 OVERLOAD := "overload"
@@ -30,19 +37,26 @@ HOLE_WORD := "_"
 LETTER_LENGTH := 1
 
 # The program elaborated so far: the kernel's environment, and what the kernel does not keep: how many found binders
-# each declaration takes before its written ones, the declarations an overloaded name stands for, and the laws stated
-# without a proof: hints, tested where they can be, never a proof of anything
+# each declaration takes before its written ones, the declarations an overloaded name stands for, the laws stated
+# without a proof (hints, tested where they can be, never a proof of anything), and each trait's operations
 class Theory {
 	environment: Environment = Environment()
 	found: map<text, int> = {}
 	overloads: map<text, list<text>> = {}
 	unproved_laws: map<text, Term> = {}
+	traits: map<text, list<text>> = {}
+	# the language whose rules give the spellings read here no form of their own, `if` among them (sugar/), loaded
+	# from the wap folder
+	spellings: Language = base_language()
+	# the laws, theorems and axioms in the order they are stated, which `wap verify` reports; those an `assume` left open
+	stated: list<text> = []
+	assumed: list<text> = []
 	# the declarations the prelude made, the first ones in place; and the names a program's declaration hides of them,
 	# each written name's kernel name
 	prelude_size: int = 0
 	hidden: map<text, text> = {}
-	# the root of the wap tree the door is given (`--tree <root>`), under which its prelude is found
-	tree: text = ""
+	# the wap folder the door is given (options.wap), in which its prelude is found
+	wap_folder: text = ""
 }
 # A written name's kernel name: the program's declaration where one hides the prelude's, a dotted name its owner's,
 # `nat.zero` the program's nat's case
@@ -61,7 +75,8 @@ declared_name(p: Theory, name: text): text := {
 	p.hidden[name]
 }
 # The reading of one declaration: its elaboration, which holds the binders in scope, the level names written
-# (explicit.wap's Reading); while its header is read, the letters found, as their variables
+# (explicit.wap's Reading); while its header is read, the letters found, as their variables; the holes for
+# instances of traits, which a search fills (instances.wap)
 class Elaborating {
 	theory: Theory
 	el: Elaboration
@@ -70,6 +85,7 @@ class Elaborating {
 	letters: list<Term> = []
 	recursing: Recursion? = ø
 	below: list<Below> = []
+	instances: list<Term> = []
 	course: Course? = ø
 	# why a match took apart its subject without the course, so a recursion on a value deeper than a field was not
 	# reachable: said with the refusal of such a call
@@ -93,11 +109,35 @@ made_of(x: Elaborating, t: Term, wanted: Term) := {
 form_elaborated(x: Elaborating, n: Node, wanted: Term?): Term := match n {
 	Symbol(name) => if name == HOLE_WORD then hole(x.el, HOLE_WORD, wanted ?? any_sort(x)) else name_elaborated(x, name, [], wanted)
 	Number(value) => numeral(value as int)
-	Call(called, arguments) => call_elaborated(x, called, arguments, wanted)
-	Key(called, Op.None, List(arguments, bracket, separator)) => if bracket in PARAMETER_BRACKETS then call_elaborated(x, called, arguments, wanted) else unelaborated(n)
+	If(condition, then_part, else_part) => if_elaborated(x, condition, then_part, else_part, wanted)
+	Case(subject, arms) => match_elaborated(x, subject, arms.map(arm_written), wanted)
+	Get(subject, key) => form_elaborated(x, named_form(n), wanted)
+	Call(called, arguments) => call_elaborated(x, named_form(called), arguments, wanted)
+	Key(called, Op.None, List(arguments, bracket, separator)) => if bracket in PARAMETER_BRACKETS then call_elaborated(x, called, arguments, wanted) else if bracket == Bracket.Square then levelled(x, called, arguments, wanted) else respelled(x, n, wanted, UNKNOWN_FORM, no_expression(n))
+	Item(subject, key) => levelled(x, subject, items_or_one(key), wanted)
+	Block(statements) => statements_elaborated(x, statements, wanted)
 	Fn(parameters, body) => bound_elaborated(x, items_or_one(parameters).map(named_binder), body, yes, wanted)
-	List(items, Bracket.Round, separator) => if #items == 1 then form_elaborated(x, items#1, wanted) else unelaborated(n)
-	_ => unelaborated(n)
+	List(items, Bracket.Round, separator) => if #items == 1 then form_elaborated(x, items#1, wanted) else respelled(x, n, wanted, UNKNOWN_FORM, no_expression(n))
+	_ => respelled(x, n, wanted, UNKNOWN_FORM, no_expression(n))
+}
+# a declaration at the levels written after its name, `Equal[1]`, which the rules write as Item(Equal, 1)
+levelled(x: Elaborating, written: Node, levels: list<Node>, wanted: Term?): Term := {
+	t = form_elaborated(x, written, wanted)
+	name = match head(t).shape {
+		Constant(name, held) => name
+		_ => refused(UNKNOWN_FORM, "${text(written)} names no declaration to give levels")
+	}
+	if not unified(x.el, head(t), constant(name, levels.map(level => level_written(x, level)))) { refused(VALUE_TYPE, "${text(written)} takes ${#declaration(x.theory.environment, name)!.levels} levels, not ${#levels}") }
+	t
+}
+# a dotted name, which the rules write as a field read, `bool.yes` as Get(bool, "yes"); any other node as it is
+named_form(n: Node): Node := match n {
+	Get(subject, key) => dotted(named_form(subject), Symbol(field_named(key)))
+	_ => n
+}
+field_named(key: Node): text := match key {
+	Text(value) => value
+	_ => text(key)
 }
 # a sort of a level not known yet: what a type is read against
 any_sort(x: Elaborating): Term := universe(level_hole(x.el))
@@ -107,7 +147,6 @@ call_elaborated(x: Elaborating, called: Node, arguments: list<Node>, wanted: Ter
 	word = text(called)
 	if word == FUNCTION_TYPE and #arguments == 2 { return bound_elaborated(x, binders_of(arguments#1).map(typed_binder), arguments#2, no, wanted) }
 	if word == DOT and #arguments == 2 { return form_elaborated(x, dotted(arguments#1, arguments#2), wanted) }
-	if word == MATCH_WORD and #arguments == 2 { return match_elaborated(x, arguments#1, arms_written(arguments#2) ?? refused(PATTERN, "a match takes arms, `pattern => result`"), wanted) }
 	if #arguments == 1 and word == TYPE_WORD { return type_at(level_written(x, arguments#1)) }
 	if #arguments == 1 and word == SORT_WORD { return universe(level_written(x, arguments#1)) }
 	match called {
@@ -126,8 +165,15 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 	if x.recursing is not ø and name == x.recursing!.name { return recursive_call_elaborated(x, arguments, wanted) }
 	if arguments is empty and name == PROP_WORD { return PROP }
 	if arguments is empty and name == TYPE_WORD { return type_at(Zero) }
-	kernel = kernel_name(x.theory, name)
-	candidates = x.theory.overloads.get(kernel) ?? (if declaration(x.theory.environment, kernel) is not ø then [kernel] else [])
+	# `list.item(x, rest)`, which the rules write as `item(list, x, rest)`: the declaration under the first argument's
+	# name, the more specific one
+	if arguments is not empty {
+		qualified = "${text(named_form(arguments#1))}${DOT}${name}"
+		if declarations_named(x.theory, qualified) is not empty { return name_elaborated(x, qualified, arguments.drop(1), wanted) }
+	}
+	candidates = declarations_named(x.theory, name)
+	operation = trait_operation(x, name, candidates, arguments, wanted)
+	if operation is not ø { return operation! }
 	if #candidates == 1 { return declared_given(x, candidates#1, arguments, wanted) }
 	if #candidates > 1 { return overload_elaborated(x, name, candidates, arguments, wanted) }
 	if x.header and #name == LETTER_LENGTH {
@@ -136,7 +182,7 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 		return given_arguments(x, letter, type_of(x.el.c, letter), arguments, wanted)
 	}
 	if name in x.theory.unproved_laws { refused(UNPROVED_LAW, "${name} is a law without a proof, a hint and never a proof: prove it after `:=`") }
-	refused(UNKNOWN_NAME, "${name} is neither a binder around it nor declared")
+	respelled(x, if arguments is empty then symbol(name) else Call(symbol(name), arguments), wanted, UNKNOWN_NAME, "${name} is neither a binder around it nor declared")
 }
 
 # A declaration at a level hole for each of its level parameters, a hole for each found binder, then its written
@@ -145,15 +191,18 @@ declared_given(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?)
 	d = declaration(x.theory.environment, name)!
 	if wanted is not ø and d.kind is Recursor { return recursor_given(x, name, arguments, wanted!) }
 	levels = d.levels.map(level => level_hole(x.el))
-	function = constant(name, levels)
-	type = with_levels(d.type, d.levels, levels)
-	for at in 1 to (x.theory.found.get(name) ?? 0) {
-		parts = pi_parts(x, type) ?? refused(NOT_A_FUNCTION, "${name} has fewer binders than it finds")
-		found = hole(x.el, "the ${parts.binder} of ${name}", parts.domain)
-		function = apply(function, found)
-		type = instantiated(parts.body, found)
-	}
-	given_arguments(x, function, type, arguments, wanted)
+	given = holes_given(x, name, constant(name, levels), with_levels(d.type, d.levels, levels), x.theory.found.get(name) ?? 0)
+	given_arguments(x, given.function, given.type, arguments, wanted)
+}
+# A function given a hole for each of its first `count` binders, for all of them where count is ø: its found binders,
+# a trait at its types, a decision's parts. A hole whose type is a trait is kept for the search
+class Given { function: Term; type: Term }
+holes_given(x: Elaborating, name: text, function: Term, type: Term, count: int? = ø): Given := {
+	if count == 0 { return Given(function, type) }
+	parts = pi_parts(x, type) ?? return (if count is ø then Given(function, type) else refused(NOT_A_FUNCTION, "${name} has fewer binders than it finds"))
+	found = hole(x.el, "the ${parts.binder} of ${name}", parts.domain)
+	instance_noted(x, found)
+	holes_given(x, name, apply(function, found), instantiated(parts.body, found), if count is ø then ø else count! - 1)
 }
 
 # A function of a type given its arguments, each read against its domain. When the result does not depend on the
@@ -188,16 +237,29 @@ pi_parts(x: Elaborating, type: Term): PiParts? := match computed(x.el.c, filled(
 	_ => ø
 }
 
+# the declarations a name stands for: an overloaded name's, else its own, else none
+declarations_named(p: Theory, name: text): list<text> := {
+	kernel = kernel_name(p, name)
+	p.overloads.get(kernel) ?? (if declaration(p.environment, kernel) is not ø then [kernel] else [])
+}
+
 # The declarations of an overloaded name tried in turn: exactly one must fit its arguments and the type wanted
 overload_elaborated(x: Elaborating, name: text, candidates: list<text>, arguments: list<Node>, wanted: Term?): Term := {
+	fit = the_only(fitting_declarations(x, candidates, arguments, wanted), OVERLOAD, "${name} here is") ?? refused(OVERLOAD, "${name} is none of ${candidates.join(", ")} here")
+	declared_given(x, fit!, arguments, wanted)
+}
+# the declarations that fit the arguments and the type wanted, each tried and taken back
+fitting_declarations(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<text> := {
 	kept = found_so_far(x.el)
-	fitting = candidates.filter(candidate => {
-		fits = try { declared_given(x, candidate, arguments, wanted); yes } catch e { mismatch(e) }
+	candidates.filter(candidate => {
+		fits = try {
+			given = declared_given(x, candidate, arguments, wanted)
+			if wanted is not ø { made_of(x, given, wanted!) }
+			yes
+		} catch e { mismatch(e) }
 		back_to(x.el, kept)
 		fits
 	})
-	if #fitting != 1 { refused(OVERLOAD, "${name} is ${if fitting is empty then "none" else fitting.join(" and ")} of ${candidates.join(", ")} here") }
-	declared_given(x, fitting#1, arguments, wanted)
 }
 
 # --- binders
@@ -248,4 +310,14 @@ level_written(x: Elaborating, n: Node): Level := {
 }
 
 # a form the elaborator does not read
-unelaborated(n: Node) := refused(UNKNOWN_FORM, "${text(n)} is no expression")
+unelaborated(n: Node) := refused(UNKNOWN_FORM, no_expression(n))
+no_expression(n: Node): text := "${text(n)} is no expression"
+# code in the kernel's forms: its spellings rewritten by the tree's rules, then lowered by the language that knows
+# their forms
+formed(p: Theory, code: Node): Node := lowered(p.spellings, rewritten_by(p.spellings, p.spellings.shape_rules, code).code)
+# a node read here in no way, in a spelling the language's rules give a form: that form read, else the refusal
+respelled(x: Elaborating, n: Node, wanted: Term?, rule: text, refusal: text): Term := {
+	shaped = rewritten_by(x.theory.spellings, x.theory.spellings.shape_rules, n)
+	if not shaped.fired { refused(rule, refusal) }
+	form_elaborated(x, shaped.code, wanted)
+}
