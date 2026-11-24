@@ -2,8 +2,10 @@
 use "../theory/terms.wap"
 use "../theory/environment.wap"
 use "../theory/compute.wap"
+use "../theory/typing.wap"
 use "../theory/inductive.wap"
 use "../theory/elaborate/state.wap"
+use "../theory/elaborate/unify.wap"
 
 # what a prover is asked: the statement under its parameters, each a binder in scope of the elaboration whose holes
 # the provers answer, and the laws its `by` names, which the provers try first
@@ -66,7 +68,35 @@ instance_of(el: Elaboration, law: Declaration): LawInstance := {
 	}
 	instance
 }
-# the laws proved so far, the provers' facts
-proved_laws(e: Environment): list<Declaration> := e.declarations.keys().map(name => e.declarations#name).filter(d => d.kind is Theorem)
+# A law whose conclusion is the goal, applied: its instance first `fitted` (a hole given a value before the
+# conclusion is matched), then each premise the conclusion left open `answered`; ø where any fails, its holes taken
+# back
+applied_law(goal: Goal, law: Declaration, fitted: (LawInstance) -> bool, answered: (Term) -> bool): Term? := {
+	el = goal.el
+	kept = found_so_far(el)
+	instance = instance_of(el, law)
+	if fitted(instance) and unified(el, instance.conclusion, goal.statement) and instance.holes.all(premise => not open(el, filled(el, premise)) or answered(premise)) {
+		proof = filled(el, instance.proof)
+		if not open(el, proof) { return proof }
+	}
+	back_to(el, kept)
+	ø
+}
+# the proof the first of the provers finds, ø where none does
+first_proof(goal: Goal, provers: list<(Goal) -> Term?>): Term? := {
+	for prover in provers {
+		proof = found_within_budget(() => prover(goal))
+		if proof is not ø { return proof }
+	}
+	ø
+}
+# what a prover found, ø when it gave up counting its steps; any other refusal is a prover's bug and is raised
+found_within_budget(search: () -> Term?): Term? := try { search() } catch e { if e.message.starts_with(REFUSED + GAVE_UP) then ø else raise e.message }
+# the provers' facts: the laws proved so far, and those taken as true, an axiom or an `assume` stating a proposition
+# (wiki/proof.md: an assumed theorem counts as proved for the ones after it)
+proved_laws(c: Checker): list<Declaration> := c.environment.declarations.keys().map(name => c.environment.declarations#name).filter(d => d.kind is Theorem or (d.kind is Axiom and states_proposition(c, d)))
+# whether a declaration's type is a proposition at its lowest levels, as it is at every level: a type ending in a
+# proposition is one at any level
+states_proposition(c: Checker, d: Declaration): bool := is_proposition(c, with_levels(d.type, d.levels, d.levels.map(level => Zero)))
 # the laws a prover tries, those `by` names first, each once
-laws_of(goal: Goal): list<Declaration> := (goal.named + proved_laws(goal.el.c.environment)).unique()
+laws_of(goal: Goal): list<Declaration> := (goal.named + proved_laws(goal.el.c)).unique()
