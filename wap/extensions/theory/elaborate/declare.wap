@@ -16,6 +16,7 @@ use "state.wap"
 use "read.wap"
 use "recursion.wap"
 use "instances.wap"
+use "../../prove/prove.wap"
 
 # the names a level hole left in a declaration's type becomes, the first one not written already; past them a name
 # and a count
@@ -24,6 +25,10 @@ LEVEL_NAMES := ["u", "v", "w"]
 UNPROVED_THEOREM := "unproved theorem"
 # the proof that leaves a gap: the statement is declared as an axiom, and every report names it
 ASSUME_WORD := "assume"
+# the proof that names laws for the provers to try first: `:= by add_zero, add_commutes`
+BY_WORD := "by"
+# the refusal of `by` naming a law that is not proved, or of the laws it names proving nothing
+UNPROVED_BY := "unproved by"
 # the declarations `wap verify` gives a verdict
 REPORTED_WORDS := [AXIOM_WORD, LAW_WORD, THEOREM_WORD]
 
@@ -55,7 +60,8 @@ declaration_elaborated(p: Theory, word: text, n: Node) := match n {
 
 # A declaration `name(parameters): type := value` elaborated and declared. Its header is read first, where a letter
 # nothing binds becomes a found binder; its type is the one written, else its value's. A theorem must be proved; a law
-# without a proof is a hint, kept beside the environment and never declared, so nothing can prove by it
+# without a proof goes to the provers, and one they cannot prove is a hint, kept beside the environment and never
+# declared, so nothing can prove by it
 definition_elaborated(p: Theory, word: text, named: Node, parameters: list<Node>, value: Node?) := {
 	x = elaborating(p)
 	name = if is_binder(named) then binder_name(named) else text(named)
@@ -70,7 +76,8 @@ definition_elaborated(p: Theory, word: text, named: Node, parameters: list<Node>
 	instances_filled(x)
 	x.recursing = Recursion(name, written)
 	assumed = value is not ø and text(value!) == ASSUME_WORD
-	body = if value is ø or assumed then ø else elaborated(x, value!, result)
+	by_laws = if value is ø then ø else laws_named(p, value!)
+	body = if value is ø or assumed or by_laws is not ø then ø else elaborated(x, value!, result)
 	instances_filled(x)
 	type = result ?? type_of(x.el.c, filled(x.el, body!))
 	variables = x.letters + written
@@ -78,12 +85,21 @@ definition_elaborated(p: Theory, word: text, named: Node, parameters: list<Node>
 	terms = finished(x, [closed_type] + (if body is ø then [] else [closed_filled(x.el, body!, variables, yes)]))
 	if word in REPORTED_WORDS { p.stated += [name] }
 	if assumed { p.assumed += [name] }
-	if word == LAW_WORD and body is ø and not assumed { p.unproved_laws[name] = terms#1 } else {
+	proof = if body is not ø then terms#2 else if by_laws is not ø or (word == LAW_WORD and not assumed) then proof_found(elaboration(p.environment, x.reading.levels), terms#1, by_laws ?? []) else ø
+	if by_laws is not ø and proof is ø { refused(UNPROVED_BY, "${name} is not proved by ${by_laws!.map(law => law.name).join(", ")}: name in `by` the laws its steps need") }
+	if word == LAW_WORD and proof is ø and not assumed { p.unproved_laws[name] = terms#1 } else {
 		key = overload_key(x, name, written)
-		declared(p.environment, Declaration(key, x.reading.levels, terms#1, declaration_kind(word, if body is ø then ø else terms#2)))
+		declared(p.environment, Declaration(key, x.reading.levels, terms#1, declaration_kind(word, proof)))
 		p.found[key] = #x.letters
 	}
 }
+
+# the laws a proof `by a, b` names, each proved before; ø for any other proof
+laws_named(p: Theory, value: Node): list<Declaration>? := match value {
+	Call(called, arguments) => if text(called) == BY_WORD then arguments.map(law => named_law(p, text(law))) else ø
+	_ => ø
+}
+named_law(p: Theory, name: text): Declaration := declaration(p.environment, kernel_name(p, name)) ?? refused(if p.unproved_laws.has(name) then UNPROVED_BY else UNKNOWN_NAME, "`by` names ${name}, which is no law proved before")
 
 # The name a declaration is declared by: its kernel name (`declared_name`), or for a second declaration of a name, the
 # name and its parameters' types, an overload of the name

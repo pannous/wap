@@ -3,9 +3,9 @@
 The elaborator of notes/coc-plan.md (section 8) turns a program as it is written into complete terms and hands
 every declaration to the kernel (notes/theory.md). It lies in `wap/extensions/theory/elaborate/` until the switch
 and is reached through a door of its own, `elaborate/door.wap`. It is not trusted: whatever it builds, the kernel's
-`declared` and `inductive_declared` judge. This note is the contract for its first four milestones: E1 (arguments
-found), E2 (enums, classes, match, recursion), E3 (operators, traits, conditions) and E4 (subtypes and
-obligations).
+`declared` and `inductive_declared` judge. This note is the contract for its milestones: E1 (arguments
+found), E2 (enums, classes, match, recursion), E3 (operators, traits, conditions), E4 (subtypes and
+obligations) and E8 (conditions lifted).
 
 ## What it reads and writes
 
@@ -124,6 +124,7 @@ wanted before its later arguments are read, so they are read with more known.
 | `Fn(parameters, body)` | a function; a binder type not written is a hole |
 | a function type, `Prop`, `Type`, `Sort(u)` | as in the explicit corner |
 | `_` | a hole |
+| `[a, b]` | `list.item(a, list.item(b, list.empty))`, the list where the program reads, a hole for each parameter its cases do not find |
 | `Case(subject, arms)` | a recursor applied (below) |
 
 ## Declarations
@@ -268,6 +269,28 @@ adds is how a candidate fits and where its instances come from.
   other types' a motive giving nothing (Unit at the motives' universe) and minors giving its value. A hypothesis rides
   the field its motive is applied to, so recursion is on fields of the subject's own type.
 
+## Conditions lifted (E8)
+
+A type may hold a list where a condition holds of itself, `class Quad { parts: vector(Quad, 4) }`, though the kernel
+refuses a type of the block under a subset's condition (strict positivity): the elaborator lifts the condition out.
+- **Which fields.** A case's field whose type computes to a `Subset` whose carrier holds a type of the block. Only
+  the field's own type: a list of such subsets stays refused by strict positivity.
+- **The plain block.** Each such field gets its carrier (`list(Quad)`); the block is declared plain, each type under
+  a marked name no program writes (`Quad'plain`), its cases under their written names (`Quad.Quad`), nesting under
+  containers as always. The condition is kept as a function of the block's parameters, the case's fields and the
+  field's value, so it may name an earlier field (`class Sized { n: nat; items: vector(Sized, n) }`).
+- **The bool.** Each type of the block gets `Quad'valid`, by the plain block's recursor into `bool`: a case's minor
+  premise is yes where the decision of each of its lifted conditions (E3's search, else `undecidable condition`) and
+  each induction hypothesis are, `both` folding them; so the conditions of the values inside a value count too.
+- **The program's type.** The written name is the subset of the plain type where its bool is yes:
+  `Quad := Subset(Quad'plain, value => Equal(bool, Quad'valid(value), bool.yes))`, decided by the prelude's
+  `yes_decided`, which E3's search finds as it finds a lifted condition written as a bool being yes. The cases make plain values; where the program's type is wanted a value goes down to it as to any
+  subset (E4): computed to no, a Quad given three parts is refused by `condition`.
+- A name is shown without its mark and the word after it: `Quad'plain` and `Quad'valid` print as `Quad`.
+- Open: a list of the program's type where a list of the plain type is wanted (a conversion lifted through a
+  container, section 8 of the plan) is refused; a match on a value of the program's type takes its `value` first.
+  Sets and maps of a type itself (quotients, their plain carriers) follow L5.
+
 ## Files
 
 | file | holds | milestone |
@@ -286,6 +309,7 @@ adds is how a candidate fits and where its instances come from.
 | `elaborate/obligations.wap` | going down: prove or check | E4 |
 | `elaborate/statements.wap` | blocks, lets, a choice's rest, counted loops, returns | E5 |
 | `elaborate/sums.wap` | unions of types as sums, their normal form | E7 |
+| `elaborate/lifted.wap` | conditions lifted out of recursive types: the plain block, its bool, the subset | E8 |
 
 ## Rules every file keeps
 

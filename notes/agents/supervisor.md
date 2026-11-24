@@ -40,7 +40,7 @@ the team, crash resume), notes/roles.md (what the other roles do).
 
 ## Team
 - Start of day: `tmux ls | grep warp-` and ListAgents; missing services: `notes/agents/start.sh` (integrator,
-  interviewer, fixer). At most TWO feature workers at once.
+  interviewer, fixer). At most three workers besides the integrator and the interviewer (user 2026-11-24, token cost); no session runs on Fable or a 1M window: Fable only as the advisor subagent. Sessions start lean (claude-remote.sh: no MCP, no plugins).
 - Context (user 2026-11-24): every session runs with the full auto-compact window (global settings, 400k); nobody
   lowers it for the project. A low window only for a one-off session, which is closed when its task is done. Instead
   of shrinking context, retire long-running workers regularly at a card boundary (state on the card) and respawn them.

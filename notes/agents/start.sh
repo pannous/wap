@@ -1,14 +1,13 @@
 #!/bin/bash
 # Spawns wap agent roles as Remote Control sessions in detached tmux (tmux name wap-<role>) and prints their URLs.
-#   notes/agents/start.sh                         the services and the stage owners (skips ones already running)
+#   notes/agents/start.sh                         the services (skips ones already running)
 #   notes/agents/start.sh <role>                  one of the SERVICES
 #   notes/agents/start.sh owner <stage>           the owner of one stage of OWNERS (wap-owner.md "Owners")
 #   notes/agents/start.sh worker <branch> "<task>"   a feature worker on that branch
 # The prompt of a role is notes/agents/<role>.md, read from origin/main by the session itself.
 REPO=/Users/me/dev/angles/wap
 SPAWN="$HOME/dev/bin/claude-remote.sh"
-SERVICES=(integrator interviewer fixer simplifier)  # the lead and the reviewer are the Supervisor (user 2026-11-24)
-OWNERS=(reader binding emitter native)
+SERVICES=(integrator interviewer fixer)  # simplifier and owners on demand: at most three workers (user 2026-11-24)  # the lead and the reviewer are the Supervisor (user 2026-11-24)
 
 supervisor_name() { echo "${WARP_SUPERVISOR:-the session that started you (see ListAgents)}"; }
 
@@ -27,7 +26,7 @@ spawn() {
 
 case "$1" in
 	"") for role in "${SERVICES[@]}"; do spawn "$role" "$(prompt_for "$role")"; done
-		for stage in "${OWNERS[@]}"; do spawn "$stage" "$(prompt_for wap-owner) YOU ARE wap-$stage, the owner named so in the Owners table."; done ;;
+		;;
 	owner)
 		[ -n "$2" ] || { echo "usage: $0 owner <stage>" >&2; exit 1; }
 		spawn "$2" "$(prompt_for wap-owner) YOU ARE wap-$2, the owner named so in the Owners table." ;;
