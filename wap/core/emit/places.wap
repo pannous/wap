@@ -20,13 +20,25 @@ class Place { reached: list<int>; read: list<int>; written: list<int> }
 place_of(subject: Node, key: Node, p: Program, f: Frame) as Place := {
 	record = record_named(p.records, type_of(subject)) ?? refused(subject, "a part reaching the emitter is a record's field: typing writes an item as a call of #")
 	field = index_where(fields_of(record), field => text(declared_name(field)) == text(key))
-	if p.m.memory != ø { return memory_place(code(subject, p, f).instructions, field, known_layout(field_declared(fields_of(record)#field), p), p.m.memory!.field_bytes) }
+	if p.m.memory != ø { return memory_place(code(subject, p, f).instructions, field_offset(record_layouts(record, p), field), record_layouts(record, p)#field) }
 	at = [struct_of(record, p.m, p.records), field]
 	Place(code(subject, p, f).instructions, instruction(STRUCT_GET, at), instruction(STRUCT_SET, at))
 }
-# a field of a record in the memory (wap/types/memory_lists.wap): its bytes at the record's address, one after another
-# in its record's order
-memory_place(reached: list<int>, field: int, type: list<int>, bytes: int) as Place := Place(reached + i32_const((field - 1) * bytes) + I32_ADD, item_loaded(type).code, item_stored(type).code)
+# A record's instance in the memory is laid out as C lays out a struct, so C reads it as one: its fields in its
+# record's order, each at the next multiple of its own width, the whole a multiple of its widest field's
+memory_place(reached: list<int>, offset: int, type: list<int>) as Place := Place(reached + i32_const(offset) + I32_ADD, item_loaded(type).code, item_stored(type).code)
+record_layouts(record: Record, p: Program) as list<list<int>> := fields_of(record).map(field => known_layout(field_declared(field), p))
+aligned(bytes: int, width: int) as int := (bytes + width - 1) ÷ width * width
+fields_end(layouts: list<list<int>>) as int := layouts.fold(0, (end, layout) => aligned(end, layout_bytes(layout)) + layout_bytes(layout))
+field_offset(layouts: list<list<int>>, field: int) as int := aligned(fields_end(layouts.take(field - 1)), layout_bytes(layouts#field))
+struct_bytes(layouts: list<list<int>>) as int := aligned(fields_end(layouts), max(layouts.map(layout_bytes)))
+# a new instance in the memory, its fields' values on the stack: the helper storing them, one for each layout of fields
+memory_struct_made(layouts: list<list<int>>, p: Program) as list<int> := helper_call(p, "memory struct ${layouts}", q => memory_struct_function(layouts, q))
+memory_struct_function(layouts: list<list<int>>, p: Program) as int := {
+	address = #layouts
+	stored = (1 to #layouts).flat_map(at => written_code(memory_place(local_get(address), field_offset(layouts, at), layouts#at), Code(layouts#at, local_get(at - 1))).instructions)
+	added_function(p.m, layouts, [I32], [I32], i32_const(struct_bytes(layouts)) + helper_call(p, MEMORY_TAKEN, memory_taking_function) + local_set(address) + stored + local_get(address))
+}
 read_code(type: list<int>, place: Place) as Code := Code(type, place.reached + place.read)
 written_code(place: Place, value: Code) as Code := Code([], place.reached + value.instructions + place.written)
 
@@ -40,7 +52,9 @@ map_code(form: Node, entries: list<Node>, p: Program, f: Frame) as Code := {
 # An instance, `Point{x: 1, y: 2}`: its fields' values in the order its record writes them, a new struct
 instance_code(form: Node, record: Record, items: list<Node>, p: Program, f: Frame) as Code := {
 	values = fields_of(record).map(field => items.filter(item => text(declared_name(item)) == text(declared_name(field)))#1)
-	Code(layout(form, p), i32_const(class_tag(record)) + (1 to #values).flat_map(at => field_filled(fields_of(record)#at, given_value(values#at), p, f)) + instruction(STRUCT_NEW, [struct_of(record, p.m, p.records)]))
+	filled = (1 to #values).flat_map(at => field_filled(fields_of(record)#at, given_value(values#at), p, f))
+	if p.m.memory != ø { return Code(layout(form, p), filled + memory_struct_made(record_layouts(record, p), p)) }
+	Code(layout(form, p), i32_const(class_tag(record)) + filled + instruction(STRUCT_NEW, [struct_of(record, p.m, p.records)]))
 }
 # the instructions of a value given to a field, made to fit the field's type
 field_filled(field: Node, value: Node, p: Program, f: Frame) as list<int> := {

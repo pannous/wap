@@ -272,4 +272,11 @@ check "a standalone wap needs no library but the system's" "$(otool -L "$stage/s
 printf '%s\n' 'x = 1+2' 'f(a)= a*2' >"$stage/unformatted.wap"
 check "wap format prints the program in canonical spelling" "$(cd "$stage" && "$native_wap" format unformatted.wap 2>&1)" "x = 1 + 2
 f(a) = a * 2"
+# a record's instance is the C struct of its fields: C reads each at C's offset, and sees a field the program sets
+check "a native record crosses to C as the struct its fields make" "$(native_ran record_struct 'class Pair { tag: int32; weight: float; label: text }
+field_i32(at: Pair, offset: int): int32 := prim foreign("c", "field_i32", at, offset)
+field_f64(at: Pair, offset: int): float := prim foreign("c", "field_f64", at, offset)
+pair = Pair(tag: int32(3), weight: 2.5, label: "seven")
+pair.weight = 4.5
+print "${field_i32(pair, 0)} ${field_f64(pair, 8)} ${pair.label}"')" "3 4.5 seven"
 exit $((failures > 0))
