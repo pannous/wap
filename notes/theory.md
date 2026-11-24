@@ -33,8 +33,9 @@ The files use each other freely: computing, equality and typing call one another
 - A term is built only by `bound`, `free`, `universe`, `constant`, `apply`, `apply_all`, `lambda`, `pi`, `let_in`,
   `numeral`, `projection`, which fill in the hash and the rest; never by `Term(…)`. `PROP`, `type_at(level)`.
 - `head(t)`, `arguments(t)`: a chain of applications taken apart.
-- `instantiated(body, value)`: a binder's body with its variable replaced. `abstracted(t, id)`: a term made the body
-  of a binder. `with_levels(t, names, levels)`: level parameters replaced.
+- `instantiated(body, value)`: a binder's body with its variable replaced; `instantiated_all(body, values)`: the
+  body under several binders, the outermost one's value first. `abstracted(t, id)`: a term made the body of a
+  binder. `with_levels(t, names, levels)`: level parameters replaced.
 - `same(a, b)`: the same tree, binder names aside. `level_same`, `levels_same`, `level_with`, `level_above`.
 
 **levels.wap**
