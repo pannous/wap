@@ -1,0 +1,140 @@
+# A match elaborated into its enum's recursor (notes/elaborate.md "Match and recursion (E2)"): the motive is the type
+# wanted with the subject and its indices made binders, each arm the minor premise of its case, its names the case's
+# fields: `match n { zero => 0; successor(k) => k }` is `nat.recursor(n => nat, 0, (k, below) => k, n)`. Each case
+# needs its arm; `other` or `_` stands for the cases the other arms leave out.
+use "../terms.wap"
+use "../environment.wap"
+use "../compute.wap"
+use "../typing.wap"
+use "../show.wap"
+use "../recursors.wap"
+use "../explicit.wap"
+use "../../../kernel/forms.wap"
+use "../../../core/type_notation.wap"
+use "state.wap"
+use "unify.wap"
+use "read.wap"
+
+MATCH_WORD := "match"
+# the patterns that fit every case
+ANY_CASE := ["other", HOLE_WORD]
+# the rule a match that leaves a case out is refused by
+COVERING := "covering"
+# the rule a match on no enum, or with an arm no case of it has, is refused by
+PATTERN := "pattern"
+
+# an arm as written: its pattern and its result
+class ArmWritten { pattern: Node; result: Node }
+
+# A match on a subject, of the type wanted: the subject's recursor applied to its parameters, the motive, one minor
+# premise per case, the indices and the subject
+match_elaborated(x: Elaborating, subject_written: Node, arms: list<ArmWritten>, wanted: Term?): Term := {
+	if wanted is ø { refused(CANNOT_FIND, "the type of a match is found from what is around it: write the type it gives") }
+	subject = elaborated(x, subject_written, ø)
+	type = computed(x.el.c, filled(x.el, type_of(x.el.c, filled(x.el, subject))))
+	name = match head(type).shape {
+		Constant(name, levels) => name
+		_ => refused(PATTERN, "${shown(filled(x.el, subject))} is a ${shown(type)}, no enum, so it has no cases to match")
+	}
+	recursor = declaration(x.theory.environment, recursor_name(name)) ?? refused(PATTERN, "${name} is no enum, so it has no cases to match")
+	facts = match recursor.kind {
+		Recursor(facts) => facts
+		_ => refused(PATTERN, "${name} is no enum, so it has no cases to match")
+	}
+	if facts.motives != 1 { refused(PATTERN, "${name} is one of several enums that name each other, which a match does not take apart yet") }
+	parameters = arguments(type).take(facts.parameters)
+	indices = arguments(type).drop(facts.parameters)
+	levels = recursor.levels.map(level => level_hole(x.el))
+	function = constant(recursor.name, levels)
+	rest = with_levels(recursor.type, recursor.levels, levels)
+	for parameter in parameters {
+		function = apply(function, parameter)
+		rest = instantiated(pi_parts(x, rest)!.body, parameter)
+	}
+	motive_parts = pi_parts(x, rest)!
+	motive = motive_made(x, motive_parts.domain, indices + [subject], wanted!)
+	made_of(x, motive, motive_parts.domain)
+	function = apply(function, motive)
+	rest = instantiated(motive_parts.body, motive)
+	stray = arms.filter(arm => not is_any(arm.pattern) and not facts.cases.any(case => names_case(arm.pattern, case)))
+	if stray is not empty { refused(PATTERN, "${stray.map(arm => text(arm.pattern)).join(", ")} is no case of ${name}") }
+	for place in 1 to #facts.cases {
+		minor_parts = pi_parts(x, rest)!
+		arm = arm_of(arms, facts.cases#place) ?? refused(COVERING, "match on ${name} misses ${facts.cases#place}")
+		minor = minor_elaborated(x, arm, facts.fields#place, minor_parts.domain)
+		function = apply(function, minor)
+		rest = instantiated(minor_parts.body, minor)
+	}
+	apply_all(function, indices + [subject])
+}
+# the arms of a match as written, `zero => 0`; ø for a match written otherwise
+arms_written(block: Node): list<ArmWritten>? := {
+	arms: list<ArmWritten> = []
+	written = match block {
+		Block(statements) => statements
+		_ => items_or_one(block)
+	}
+	for arm in written { arms += [arm_written(arm) ?? return ø] }
+	arms
+}
+arm_written(arm: Node): ArmWritten? := match arm {
+	Fn(patterns, result) => if #items_or_one(patterns) == 1 then ArmWritten(items_or_one(patterns)#1, result) else ø
+	Arm(pattern, result) => ArmWritten(pattern, result)
+	_ => ø
+}
+
+# The motive: a function of the indices and the value matched, the type wanted with the subject and its indices put
+# in their places where they are binders
+motive_made(x: Elaborating, domain: Term, matched: list<Term>, wanted: Term): Term := {
+	binders: list<Term> = []
+	rest = domain
+	for at in 1 to #matched {
+		parts = pi_parts(x, rest)!
+		binder = scoped(x.el, parts.binder, parts.domain)
+		binders += [binder]
+		rest = instantiated(parts.body, binder)
+	}
+	unscoped(x.el, binders)
+	standing = filled(x.el, wanted)
+	for at in 1 to #matched {
+		standing = match filled(x.el, matched#at).shape {
+			Free(id) => instantiated(abstracted(standing, id), binders#at)
+			_ => standing
+		}
+	}
+	closed_over(x.el.c, standing, binders, yes)
+}
+
+# the arm of a case: the one whose pattern names it, else the arm that fits any case
+arm_of(arms: list<ArmWritten>, case: text): ArmWritten? := arms.find(arm => names_case(arm.pattern, case)) ?? arms.find(arm => is_any(arm.pattern))
+is_any(pattern: Node): bool := text(pattern) in ANY_CASE
+# whether a pattern is this case, by its full name or by the name after its type's
+names_case(pattern: Node, case: text): bool := {
+	written = pattern_name(pattern)
+	written == case or case.ends_with("${DOT}${written}")
+}
+pattern_name(pattern: Node): text := name_of(dotted_pattern(pattern))
+dotted_pattern(pattern: Node): Node := match pattern {
+	Call(called, operands) => if text(called) == DOT then dotted(operands#1, operands#2) else pattern
+	_ => pattern
+}
+# the names an arm's pattern gives the case's fields
+pattern_fields(pattern: Node): list<Node> := match dotted_pattern(pattern) {
+	Call(called, operands) => operands
+	Key(called, Op.None, List(items, bracket, separator)) => items
+	_ => []
+}
+
+# One case's minor premise: the arm's result as a function of the case's fields, named by the pattern, and of the
+# values below them, which the recursion the arm makes reads (recursion.wap)
+minor_elaborated(x: Elaborating, arm: ArmWritten, fields: int, minor_type: Term): Term := {
+	named = if is_any(arm.pattern) then [] else pattern_fields(arm.pattern)
+	if not is_any(arm.pattern) and #named != fields { refused(PATTERN, "${text(arm.pattern)} names ${#named} fields of a case that has ${fields}") }
+	binders = (1 to binders_counted(minor_type)).list().map(at => if at <= #named then named#at else Symbol(HOLE_WORD))
+	bound_elaborated(x, binders.map(named_binder), arm.result, yes, minor_type)
+}
+# how many binders a minor premise's type writes before its result: the recursor writes each one, so none is computed
+binders_counted(type: Term): int := match type.shape {
+	Pi(binder, domain, body) => 1 + binders_counted(body)
+	_ => 0
+}
