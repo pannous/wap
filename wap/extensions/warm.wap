@@ -7,22 +7,57 @@ use "../core/pipeline.wap"
 use "../core/paths.wap"
 use "../core/stage.wap"
 use "../core/language.wap"
+use "../core/analyze/declarations.wap"
+use "../core/bindings.wap"
+use "../core/parse/operator_table.wap"
 use "../core/rules/patterns.wap"
 
 # what stands for the wap folder in a written path
 WAP_FOLDER_MARK = "<wap>/"
+# the entry beside the files' that holds the standard library's words
+STANDARD_ENTRY = "<standard>"
+# the library's folders whose modules only a `use` brings in, never their words (wiki/use.md "Library folders")
+USED_ONLY = ["extra", "host"]
 
-# the files the language read so far, packed: [path: [code, [word, …]], …]
-warm_state(language: Language, wap_folder: text) as text := pack(List(language.operated.keys.map(file => Key(Text(file), Op.Colon, List([language.operated[file].code, List(language.operated[file].words.map(word => Text(word)), Bracket.Square, Separator.Comma)], Bracket.Square, Separator.Comma))), Bracket.Square, Separator.Comma), path => marked(wap_folder, path))
+# the files the language read so far, packed: [path: [code, [word, …]], …], and the standard library's words, each
+# with the modules defining it: <standard>: [word: [path, …], …]
+warm_state(language: Language, wap_folder: text) as text := pack(List(language.operated.keys.map(file => Key(Text(file), Op.Colon, List([language.operated[file].code, List(language.operated[file].words.map(word => Text(word)), Bracket.Square, Separator.Comma)], Bracket.Square, Separator.Comma))) + [standard_entry(language, wap_folder)], Bracket.Square, Separator.Comma), path => marked(wap_folder, path))
+standard_entry(language: Language, wap_folder: text) as Node := {
+	standard = standard_words(language, wap_folder)
+	Key(Text(STANDARD_ENTRY), Op.Colon, List(standard.keys.map(word => Key(Text(word), Op.Colon, List(standard[word].map(file => Text(file)), Bracket.Square, Separator.Comma))), Bracket.Square, Separator.Comma))
+}
+# the words the standard library's modules define at their tops, each with the modules defining it: read from the
+# sources by a compiler without a warm state, so a cold and a warm compile know the same words; read by a language of
+# their own, so the files their uses bring stay out of the compile and its warm state
+standard_words(language: Language, wap_folder: text) as map<text, list<text>> := {
+	standard: map<text, list<text>> = {}
+	reading = base_language()
+	reading.readers = language.readers
+	for file in standard_files(in_folder(wap_folder, LIBRARY_FOLDER)) {
+		for word in unique(words_named(read_notation(reading, file))) { standard[word] = (if standard.has(word) then standard[word] else []) + [file] }
+	}
+	standard
+}
+# the standard library's modules: its own and those of its folders, but the folders only a `use` brings in
+standard_files(library: text) as list<text> := ([library] + list_files(library).filter(entry => not entry.contains(".") and not (entry in USED_ONLY)).map(entry => library + "/" + entry)).flat_map(folder => list_files(folder).filter(name => name.ends_with(".wap")).map(name => folder + "/" + name))
 
 # a packed warm state brought in: each file's code operated already, found by its path in this wap folder; an empty one
 # brings nothing, so the files are read
 warm_brought(language: Language, wap_folder: text, state: text) := {
 	if state == "" { return }
 	match unpack(state, path => unmarked(wap_folder, path)) {
-		List(files, bracket, separator) => for file in files { match file { Key(Text(path), op, List(kept, square, comma)) => language.operated[path] = Operated(kept#1, items_of(kept#2).map(word => text(word))); _ => raise "warm state: no file entry: ${text(file)}" } }
+		List(files, bracket, separator) => for file in files { match file {
+			Key(Text(path), op, List(kept, square, comma)) => if path == STANDARD_ENTRY { for word in kept { standard_word_brought(language, word) } } else { language.operated[path] = Operated(kept#1, items_of(kept#2).map(word => text(word))) }
+			_ => raise "warm state: no file entry: ${text(file)}"
+		} }
 		_ => raise "warm state: no list of files"
 	}
+}
+
+# a word of the standard library, as its entry holds it, `primes: ["<wap>/lib/math.wap"]`
+standard_word_brought(language: Language, entry: Node) := match entry {
+	Key(Text(word), op, files) => language.standard[word] = items_of(files).map(file => text(file))
+	_ => raise "warm state: no standard word: ${text(entry)}"
 }
 
 # a path inside the wap folder with the folder's mark in its place, `<wap>/types/rules.wap`; any other text as it is

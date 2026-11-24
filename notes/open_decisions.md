@@ -16,17 +16,31 @@ show the user: the case against and why no library or hook does it (ask the bran
 - valueless-argument 3e46a738, about +5 core: an argument, name or result that gives no value gives ø; a function
   giving nothing, used as a C callback, answers 0.
 - is-equal 3b44e172, +3 core (analyze/names.wap): `x is y` with two variables compares their values (wiki/equality.md).
-- map-pair-loop b4af8ab8 (wap-reader), +7 core (rules/stages, parse/operators, parse/keys), +266 nodes:
-  `for key, value in scores { … }` walks a map's keys with their values (wiki/inventions.md "Typed iteration").
-  Plain wap can't parse the two-name head. Recommend: yes. wap-reviewer: the core part is sound; the sugar rule's
-  `held[$key]` gives `for i, x in xs` a wrong value for a list. Fix: one library overload `pairs(m)` (a map gives
-  key and value, a list gives index and item); still +7. wap-reader reworks it tonight.
-- glued-block-head 342e6405 (wap-reader), +6 core (rules/matcher.wap): `class Point{x: int}` with the brace glued
-  declares the class, as wiki/pattern-matching.md and type.md write it. General: when a list's parts don't fit, the
-  matcher retries with the glued block split into head and block (class, enum, trait, match). Option: write only
-  `class Point {…}` in the wiki (0 core). Recommend: the matcher retry. wap-reviewer: sound and general; nit: try every rule glued first, then unglued
-  (not per rule), still about +6. wap-reader adjusts it tonight.
-
+- map-pair-loop ad1794e9 (wap-reader), +7 core (rules/stages, parse/operators, parse/keys): `for key, value in
+  scores { … }` walks a map's keys with their values (wiki/inventions.md "Typed iteration"); the rule walks the
+  library's `pairs(m)`, so `for i, x in xs` gives a list's places counted from 1 (as xs#1 and index_of do) with its
+  items. Plain wap can't parse the two-name head. wap-reviewer's fix is built in. Recommend: yes.
+- glued-block-head e85e5478 (wap-reader), +8 core (rules/stages +2, lines +6; matcher unchanged): `class
+  Point{x: int}` with the brace glued declares the class, as wiki/pattern-matching.md and type.md write it. Every
+  rule is tried on the phrase as written, then once with the glued block split off its end (class, enum, trait,
+  match). Option: write only `class Point {…}` in the wiki (0 core). wap-reviewer: sound; its nit is built in.
+  Recommend: yes.
+- module-alias-preload b739f052 (wap-reader), +13 core (core/language, parse/operator_table, parse/operators,
+  pipeline): a file's `alias sin => sine` beats the preload's sin and reaches only that file and the files that use
+  it. The user already decided the meaning (the alias wins, scoped); the OK asked is for the core lines. Careful
+  checks green. Recommend: OK.
+- wap-build e7ebfcb7 (wap-emitter), +12 in extensions/native (driver 9, commands 3): `wap build app.wap` makes a
+  native executable `app`; a .wap output name is refused so the source is never overwritten. The user OK'd about
+  5 lines via wap-lead; it came to 12 (9 without the refusal). Recommend: OK, with the refusal.
+- unclosed-text (wap-fixer, branch unclosed-text, built): code given on the command line or typed in the console
+  says `line 1:5: this text is never closed`, not the host's temp file path. Core: net +7 in core/errors.wap
+  (place_of leaves the file out for the path `-`); outside core: types/system.wap read("-") reads stdin once and
+  keeps it; driver and console pass code as stdin with `-`, no temp .wap files, run in the user's folder (reviewer's
+  nit built in). wap-reviewer: sound. Options: OK; Leave as is (the temp path stays in messages); Park.
+  Wiki diff to approve with it, wiki/cli.md "Running", added: "`wap -` (or `wap <compiler> - out.wasm`) reads the
+  program from standard input: `echo 'print 1' | wap -`. Code given in place of a file, on the command line, from
+  standard input or in the console, runs in the current folder, and its errors name only the line: `line 1:5: this
+  text is never closed`." Try (after the seed): /Users/me/dev/bin/wap 'x = "abc'
 ## To present (keep or change, at 10:00)
 
 - template-shape: the approved "normalize templates at declare" wasn't needed. The fix is +2 lines in
