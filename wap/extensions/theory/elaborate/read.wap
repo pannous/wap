@@ -119,6 +119,8 @@ class Elaborating {
 	lifting: bool = no
 	pending: list<Pending> = []
 	lifts: list<text> = []
+	# how many terms were made of a type wanted other than their own, so a fit with fewer such steps wins an overload
+	indirect: int = 0
 }
 elaborating(p: Theory): Elaborating := Elaborating(p, elaboration(p.environment, []), Reading(p.environment))
 
@@ -134,6 +136,7 @@ made_of(x: Elaborating, t: Term, wanted: Term): Term := {
 	if unified(x.el, given, wanted) { return t }
 	have = filled(x.el, given)
 	want = filled(x.el, wanted)
+	x.indirect += 1
 	converted(x, t, have, want) ?? gone_down(x, t, have, want) ?? injected(x, t, have, want) ?? lifted_into(x, t, have, want) ?? ran(x, t, have, want) ?? {
 		computation_refused(x, t, have)
 		refused(VALUE_TYPE, "${shown(filled(x.el, t))} is a ${shown(have)}, where a ${shown(want)} is wanted")
@@ -310,7 +313,7 @@ declarations_named(p: Theory, name: text): list<text> := {
 # fitting is refused naming why each did not, a refusal met inside an argument included
 overload_elaborated(x: Elaborating, name: text, candidates: list<text>, arguments: list<Node>, wanted: Term?): Term := {
 	trials = declarations_tried(x, candidates, arguments, wanted)
-	fit = the_only(fits(trials), OVERLOAD, "${name} here is")
+	fit = the_only(fits(nearest(trials)), OVERLOAD, "${name} here is")
 	if fit is ø { return distributed(x, name, arguments, wanted) ?? refused(NO_FIT, "${name} is none of ${trials.map(trial => "${trial.candidate} (${trial.refusal!})").join(", ")} here") }
 	declared_given(x, fit!, arguments, wanted)
 }
@@ -318,20 +321,32 @@ overload_elaborated(x: Elaborating, name: text, candidates: list<text>, argument
 fitting_declarations(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<text> := fits(declarations_tried(x, candidates, arguments, wanted))
 declarations_tried(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<Trial> := trials_of(x, candidates, candidate => {
 	given = declared_given(x, candidate, arguments, wanted)
-	if wanted is ø then given else made_of(x, given, wanted!)
+	# a result made of the type wanted is the place's step, no step of the fit: only the arguments' count
+	indirect = x.indirect
+	made = if wanted is ø then given else made_of(x, given, wanted!)
+	x.indirect = indirect
+	made
 })
 # the candidates an attempt does not refuse as ill-typed
 fitting(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<text> := fits(trials_of(x, candidates, attempt))
 fits(trials: list<Trial>): list<text> := trials.filter(trial => trial.refusal is ø).map(trial => trial.candidate)
-# a candidate an attempt was given: the refusal it met, ø where it fits
-class Trial { candidate: text; refusal: text? }
+# a candidate an attempt was given: the refusal it met, ø where it fits, and how many terms it made of a type other
+# than their own
+class Trial { candidate: text; refusal: text?; indirect: int }
 # each candidate given to an attempt, the answers it gives taken back
 trials_of(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<Trial> := candidates.map(candidate => {
 	before = arm_kept(x)
+	indirect = x.indirect
 	refusal = taken_back(x.el, () => refusal_of(candidate, attempt))
 	arm_restored(x, before)
-	Trial(candidate, refusal)
+	Trial(candidate, refusal, x.indirect - indirect)
 })
+# the trials that fit with the fewest indirect steps, and those that do not fit: a direct fit beats a fit through a
+# conversion, equal fits tie
+nearest(trials: list<Trial>): list<Trial> := {
+	fewest = trials.filter(trial => trial.refusal is ø).map(trial => trial.indirect).min() ?? 0
+	trials.filter(trial => trial.refusal is not ø or trial.indirect == fewest)
+}
 # the refusal an attempt meets, ø where it fits
 refusal_of(candidate: text, attempt: text -> Term): text? := try { attempt(candidate); ø } catch e { mismatch(e, UNFIT); e.message.replace(REFUSED, "") }
 
