@@ -1,7 +1,8 @@
 # Proof by rewriting (wiki/proof.md "Ways to prove"): both sides of an equation rewritten by earlier laws, a part
-# matching a law's left side replaced by its right side, until the two sides meet. Without `by` a law rewrites only
-# where it orients: its left side is bigger than its right and holds all its parameters, so each step shrinks the
-# term and needs nothing the match does not give. A law `by` names rewrites even where it does not orient, at most
+# matching a law's left side replaced by its right side, until the two sides meet; a hypothesis that is an equation
+# rewrites too, and a part's definitions unfold until it applies the law's function (`x + y` is `add(x, y)`). Without
+# `by` a law rewrites only where it orients: its left side holds all its parameters and is bigger than its right, or
+# as big with a head defined above the right's, so each step goes down and needs nothing the match does not give. A law `by` names rewrites even where it does not orient, at most
 # once at each place of a side, so `add(a, b) == add(b, a)` turns a sum round once instead of forever. The proof is
 # built from the equality's recursor alone: the left side's steps carried forward from `refl`, then the right side's
 # steps carried back
@@ -9,6 +10,7 @@ use "../theory/terms.wap"
 use "../theory/environment.wap"
 use "../theory/typing.wap"
 use "../theory/equal.wap"
+use "../theory/compute.wap"
 use "../theory/recursors.wap"
 use "../theory/elaborate/state.wap"
 use "../theory/elaborate/unify.wap"
@@ -23,10 +25,12 @@ CARRIED_PROOF := "e"
 ENDLESS := "endless rewriting"
 # what separates a law's name from the place it rewrote
 PLACE_MARK := "@"
+# what names a hypothesis among the rewriters
+GIVEN := "given "
 
 # A law that rewrites, the function its left side applies to how many arguments, which a part must apply alike before
 # the law is matched against it, and whether it rewrites only once at a place, a named law that does not orient
-class Rewriter { law: Declaration; function: text; count: int; once: bool }
+class Rewriter { name: text; made: () -> LawInstance; function: text; count: int; once: bool }
 # One rewrite: a proof of the part's equation, the term around the part, given what stands in the part, and the law
 # and place it rewrote
 class Rewrite { equation: Equation; proof: Term; around: (Term) -> Term; place: text }
@@ -35,7 +39,9 @@ class Rewritten { terms: list<Term>; steps: list<Rewrite> }
 
 by_rewriting(goal: Goal): Term? := {
 	equation = equation_of(goal.el.c, goal.statement) ?? return ø
-	rules = laws_of(goal).map(law => rewriter_of(goal, law)).compact()
+	laws = laws_of(goal).map(law => rewriter_of(goal, law.name, () => instance_of(goal.el, law), goal.named.any(named => named.name == law.name)))
+	given = goal.parameters.map(parameter => rewriter_of(goal, GIVEN + "${variable_id(parameter)}", () => LawInstance(parameter, [], filled(goal.el, type_of(goal.el.c, parameter))), yes))
+	rules = (laws + given).compact()
 	if rules is empty { return ø }
 	left = rewritten(goal, rules, equation.left)
 	right = rewritten(goal, rules, equation.right)
@@ -51,19 +57,45 @@ by_rewriting(goal: Goal): Term? := {
 # a proof of `left == t` carried along a rewrite of a part of t
 continued(goal: Goal, equation: Equation, step: Rewrite, proof: Term): Term := carried(goal, step, proof, t => stated(equation, equation.left, step.around(t)))
 
-# a law as a rewriter where it orients or `by` names it; ø elsewhere
-rewriter_of(goal: Goal, law: Declaration): Rewriter? := {
+# a law as a rewriter where it orients or `by` names it, a hypothesis always; ø elsewhere. A law orients where each
+# step goes down: its left side holds all its parameters and is bigger than its right, or as big with a head defined
+# above the right's head and no parameter standing more often on the right
+rewriter_of(goal: Goal, name: text, made: () -> LawInstance, named: bool): Rewriter? := {
 	el = goal.el
-	instance = taken_back(el, () => instance_of(el, law))
-	equation = equation_of(el.c, instance.conclusion)
-	if equation is ø { return ø }
-	held = holes_in(el, equation!.left)
-	orients = term_size(el, equation!.left) > term_size(el, equation!.right) and instance.holes.all(found => hole_id(found) in held)
-	if not orients and not goal.named.any(named => named.name == law.name) { return ø }
-	match head(equation!.left).shape {
-		Constant(name, levels) => Rewriter(law, name, #arguments(equation!.left), not orients)
+	instance = taken_back(el, made)
+	equation = equation_of(el.c, instance.conclusion) ?? return ø
+	held = holes_in(el, equation.left)
+	left_size = term_size(el, equation.left)
+	right_size = term_size(el, equation.right)
+	goes_down = left_size > right_size or (left_size == right_size and above(el.c, head(equation.left), head(equation.right)) and held.all(id => occurrences(equation.right, id) <= occurrences(equation.left, id)))
+	orients = goes_down and instance.holes.all(found => hole_id(found) in held)
+	if not orients and not named { return ø }
+	match head(equation.left).shape {
+		Constant(function, levels) => Rewriter(name, made, function, #arguments(equation.left), not orients)
 		_ => ø
 	}
+}
+# whether a function is defined above another: its definition names it, or names a function defined above it
+above(c: Checker, function: Term, other: Term): bool := match function.shape {
+	Constant(name, levels) => match other.shape {
+		Constant(other_name, other_levels) => defined_above(c, name, other_name)
+		_ => no
+	}
+	_ => no
+}
+defined_above(c: Checker, name: text, other: text): bool := match (declaration(c.environment, name) ?? return no).kind {
+	Defined(value) => constants_in(value).any(named => named == other or defined_above(c, named, other))
+	_ => no
+}
+# the names of the constants a term holds, each once
+constants_in(t: Term): list<text> := match t.shape {
+	Constant(name, levels) => [name]
+	_ => parts(t).flat_map(part => constants_in(part)).unique()
+}
+# how often a variable stands in a term
+occurrences(t: Term, id: int): int := match t.shape {
+	Free(found) => if found == id then 1 else 0
+	_ => parts(t).fold(0, (count, part) => count + occurrences(part, id))
 }
 # how many terms a term is made of, a hole counted as one
 term_size(el: Elaboration, t: Term): int := if is_hole_applied(el, t) then 1 else parts(t).fold(1, (size, part) => size + term_size(el, part))
@@ -91,7 +123,7 @@ rewritten(goal: Goal, rules: list<Rewriter>, side: Term): Rewritten := {
 # names the part's place, and used the places rewritten so far
 step_in(goal: Goal, rules: list<Rewriter>, t: Term, around: (Term) -> Term, path: text, used: list<text>): Rewrite? := {
 	for rule in rules {
-		place = rule.law.name + PLACE_MARK + path
+		place = rule.name + PLACE_MARK + path
 		if not (rule.once and place in used) {
 			step = rewrite_at(goal, rule, t, around, place)
 			if step is not ø { return step }
@@ -105,11 +137,11 @@ step_in(goal: Goal, rules: list<Rewriter>, t: Term, around: (Term) -> Term, path
 # a rule's law matched against a term, the proof that it equals the law's right side there; ø where it does not
 # match or changes nothing, the holes of the try taken back
 rewrite_at(goal: Goal, rule: Rewriter, t: Term, around: (Term) -> Term, place: text): Rewrite? := {
-	if not applies_alike(t, rule) { return ø }
 	el = goal.el
+	part = applied_alike(el.c, t, rule) ?? return ø
 	attempt(el, () => {
-		instance = instance_of(el, rule.law)
-		if not matched(el, equation_of(el.c, instance.conclusion)!.left, t) { return ø }
+		instance = rule.made()
+		if not matched(el, equation_of(el.c, instance.conclusion)!.left, part) { return ø }
 		proof = filled(el, instance.proof)
 		equation = equation_of(el.c, filled(el, instance.conclusion))!
 		if open(el, proof) or same(equation.left, equation.right) then ø else Rewrite(equation, proof, around, place)
@@ -134,9 +166,14 @@ matched(el: Elaboration, pattern: Term, t: Term): bool := {
 		_ => no
 	}
 }
-applies_alike(t: Term, rule: Rewriter): bool := match head(t).shape {
-	Constant(name, levels) => name == rule.function and #arguments(t) == rule.count
-	_ => no
+# a part as the rule's function applies to its arguments, its definitions unfolded until it does: `x + y` as
+# `add(x, y)`; ø where it never does
+applied_alike(c: Checker, t: Term, rule: Rewriter): Term? := match head(t).shape {
+	Constant(name, levels) => {
+		if name == rule.function and #arguments(t) == rule.count { return t }
+		applied_alike(c, computed_folded(c, unfolded(c, t) ?? return ø), rule)
+	}
+	_ => ø
 }
 
 # a proof of `motive(a)` carried along a step's proof of `a == b` to a proof of `motive(b)`, by the equality's
