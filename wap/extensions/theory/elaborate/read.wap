@@ -5,6 +5,7 @@
 # found binders get a hole each, its written ones an argument each; the call's result is made the type wanted before
 # its arguments are read, so they are read with more known. While a definition's header is read, a one-letter name
 # nothing binds is a letter: a found binder of the definition.
+use magnitude
 use "../terms.wap"
 use "../levels.wap"
 use "../environment.wap"
@@ -32,17 +33,14 @@ class Theory {
 	found: map<text, int> = {}
 	overloads: map<text, list<text>> = {}
 }
-# a name in scope: a binder gone into, as its free variable
-class Named { name: text; variable: Term }
-# The reading of one declaration: its elaboration, the names in scope, the level names written (explicit.wap's
-# Reading); while its header is read, the letters found
+# The reading of one declaration: its elaboration, which holds the binders in scope, the level names written
+# (explicit.wap's Reading); while its header is read, the letters found, as their variables
 class Elaborating {
 	theory: Theory
 	el: Elaboration
 	reading: Reading
-	scope: list<Named> = []
 	header: bool = no
-	letters: list<Named> = []
+	letters: list<Term> = []
 }
 elaborating(p: Theory): Elaborating := Elaborating(p, elaboration(p.environment, []), Reading(p.environment))
 
@@ -60,7 +58,7 @@ made_of(x: Elaborating, t: Term, wanted: Term) := {
 
 form_elaborated(x: Elaborating, n: Node, wanted: Term?): Term := match n {
 	Symbol(name) => if name == HOLE_WORD then hole(x.el, HOLE_WORD, wanted ?? any_sort(x)) else name_elaborated(x, name, [], wanted)
-	Number(value) => numeral(value as int)
+	Number(value) => numeral(magnitude(value as int))
 	Call(called, arguments) => call_elaborated(x, called, arguments, wanted)
 	Key(called, Op.None, List(arguments, Bracket.Round, separator)) => call_elaborated(x, called, arguments, wanted)
 	Fn(parameters, body) => bound_elaborated(x, items_or_one(parameters).map(named_binder), body, yes, wanted)
@@ -88,16 +86,16 @@ call_elaborated(x: Elaborating, called: Node, arguments: list<Node>, wanted: Ter
 
 # A name and the arguments written after it: a binder around it, a sort, a declaration, or in a header a new letter
 name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?): Term := {
-	named = (x.scope.reverse() + x.letters).find(around => around.name == name)
-	if named is not ø { return given_arguments(x, named!.variable, type_of(x.el.c, named!.variable), arguments, wanted) }
+	bound = named(x.el, name)
+	if bound is not ø { return given_arguments(x, bound!, type_of(x.el.c, bound!), arguments, wanted) }
 	if arguments is empty and name == PROP_WORD { return PROP }
 	if arguments is empty and name == TYPE_WORD { return type_at(Zero) }
 	candidates = x.theory.overloads.get(name) ?? (if declaration(x.theory.environment, name) is not ø then [name] else [])
 	if #candidates == 1 { return declared_given(x, candidates#1, arguments, wanted) }
 	if #candidates > 1 { return overload_elaborated(x, name, candidates, arguments, wanted) }
 	if x.header and #name == LETTER_LENGTH {
-		letter = hypothesis(x.el.c, name, wanted ?? hole(x.el, "the type of ${name}", any_sort(x)))
-		x.letters += [Named(name, letter)]
+		letter = scoped(x.el, name, wanted ?? hole_over(x.el, "the type of ${name}", any_sort(x), x.letters))
+		x.letters += [letter]
 		return given_arguments(x, letter, type_of(x.el.c, letter), arguments, wanted)
 	}
 	refused(UNKNOWN_NAME, "${name} is neither a binder around it nor declared")
@@ -178,15 +176,12 @@ typed_binder(n: Node): WrittenBinder := WrittenBinder(binder_name(n), binder_typ
 gone_into(x: Elaborating, binder: WrittenBinder, expected: Term?): Term := {
 	domain = if binder.type is not ø then elaborated(x, binder.type!, any_sort(x)) else expected ?? hole(x.el, "the type of ${binder.name}", any_sort(x))
 	if binder.type is not ø and expected is not ø and not unified(x.el, domain, expected!) { refused(VALUE_TYPE, "${binder.name} is written a ${shown(filled(x.el, domain))}, where a ${shown(filled(x.el, expected!))} is wanted") }
-	variable = hypothesis(x.el.c, binder.name, domain)
-	x.scope += [Named(binder.name, variable)]
-	variable
+	scoped(x.el, binder.name, domain)
 }
 
 # A function type or a function over its binders: a function's binders take their types from the function type
 # wanted where they are left out
 bound_elaborated(x: Elaborating, binders: list<WrittenBinder>, body: Node, function: bool, wanted: Term?): Term := {
-	depth = #x.scope
 	expected = if function then wanted else ø
 	variables: list<Term> = []
 	for binder in binders {
@@ -196,18 +191,8 @@ bound_elaborated(x: Elaborating, binders: list<WrittenBinder>, body: Node, funct
 		expected = if parts is ø then ø else instantiated(parts!.body, variable)
 	}
 	inner = elaborated(x, body, if function then expected else any_sort(x))
-	x.scope = x.scope.take(depth)
-	bound_over(x, inner, variables, function)
-}
-# A term closed over binders gone into, each binder's type and the term filled first, so an answer naming a binder's
-# variable is bound by it
-bound_over(x: Elaborating, t: Term, variables: list<Term>, function: bool): Term := {
-	for variable in variables {
-		id = variable_id(variable)
-		hypothesis = hypothesis_of(x.el.c, id)
-		x.el.c.hypotheses#id = Hypothesis(hypothesis.binder, filled(x.el, hypothesis.type))
-	}
-	closed_over(x.el.c, filled(x.el, t), variables, function)
+	unscoped(x.el, variables)
+	closed_over(x.el.c, inner, variables, function)
 }
 
 # a level as written; a name nothing binds is a level parameter of the declaration
