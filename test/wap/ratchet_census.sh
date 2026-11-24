@@ -6,7 +6,7 @@
 # typing, any, is for programs; user decision via warp-lead, 2026-11-18): no place of it is typed any, outside the
 # types, the language programs get.
 # Run it with bash test/wap/ratchet_census.sh [--compiler <module>] (or test/wap/run.sh --wait test/wap/ratchet_census.sh, never in run.sh's
-# default set: about 1 min more); its modules run on the native wap on PATH
+# default set: about 6 min more); its modules run on the native wap on PATH
 # files outside the types module: a types file is no program but every program's library, typed function by function
 # (warp-lead, 2026-11-18)
 FILES_TYPED_WHOLE=62
@@ -17,8 +17,8 @@ SIZE_NODES=142780
 # the theory's elaborator (notes/coc-plan.md S1, scripts/theory-census.wap) over the compiler's source, lib/ and the
 # test programs: the statements it accepts may not drop below the floor, and its wall time stays under the ratio times
 # the typing census's, measured in the same run
-THEORY_ACCEPTED=0
-THEORY_TIME_RATIO=0
+THEORY_ACCEPTED=1331
+THEORY_TIME_RATIO=3
 
 source "$(dirname "$0")/compile.sh"
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
@@ -60,7 +60,7 @@ check "the files wap types whole stay at least $FILES_TYPED_WHOLE ($total)" "$(a
 check "the functions wap does not type alone stay at most $FUNCTIONS_UNTYPED" "$(at_most "$untyped" $FUNCTIONS_UNTYPED)" "yes"
 check "wap's size stays at most $SIZE_NODES nodes" "$(at_most "$size" $SIZE_NODES)" "yes"
 check "the theory accepts at least $THEORY_ACCEPTED statements ($(grep '^accepted' "$theory_report"))" "$(at_least "$accepted" $THEORY_ACCEPTED)" "yes"
-check "the theory's census takes at most $THEORY_TIME_RATIO times the typing census's time" "$(at_most "$time_ratio" $THEORY_TIME_RATIO)" "yes"
+check "the theory's census takes at most $THEORY_TIME_RATIO times the typing census's time ($(seconds "$theory_report") s, $(seconds "$report") s)" "$(at_most "$time_ratio" $THEORY_TIME_RATIO)" "yes"
 check "wap reads, lowers and binds its own source" "$(if [ -n "$total" ]; then grep '^front' "$report"; else echo "no total line"; fi)" ""
 check "no place of the compiler's own source is typed any" "$( [ -n "$total" ] && echo "$compiler_anys" || echo "no total line")" ""
 exit $((failures > 0))
