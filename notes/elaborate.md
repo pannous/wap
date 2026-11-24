@@ -259,6 +259,13 @@ adds is how a candidate fits and where its instances come from.
   again inside its `right` arm, and a second union argument in turn. The match's type is the type wanted, else the
   union of the arms' types (`nat` where every arm gives one). A match on an enum whose type takes universes (the
   prelude's Sum, list) unifies each parameter with the recursor's domain, so its level holes are found.
+- **`any` is a data node** (prelude/any.wap): an enum of nothing, a bool, an int, a text and a list of anys, each a
+  value of it by an overload of `convert`. A conversion fits only where the value's type is its binder's, so a level
+  hole in ø's Unit fits nothing else. The way out of an any, a check when the program runs, waits for effects (E5).
+- **A match on one of several enums that name each other** (a mutual block, or a nested one like `any` and its
+  list): the block's recursor takes one motive and minors per type; the subject's own get the motive and the arms, the
+  other types' a motive giving nothing (Unit at the motives' universe) and minors giving its value. A hypothesis rides
+  the field its motive is applied to, so recursion is on fields of the subject's own type.
 
 ## Files
 

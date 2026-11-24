@@ -16,6 +16,7 @@ use "state.wap"
 use "unify.wap"
 use "read.wap"
 use "recursion.wap"
+use "sums.wap"
 
 # the patterns that fit every case
 ANY_CASE := ["other", HOLE_WORD]
@@ -61,7 +62,8 @@ match_on(x: Elaborating, subject: Term, arms: list<ArmWritten>, wanted: Term): T
 		function = apply(function, minor)
 		rest = instantiated(minor_parts.body, minor)
 	}
-	apply_all(function, e.indices + [subject] + ridden)
+	done = unwanted_given(x, Eliminating(e.facts, function, rest, e.indices, e.levels, e.parameters, e.after, e.universe), e.after)
+	apply_all(done.function, e.indices + [subject] + ridden)
 }
 # A recursor called on a value, of the type wanted: its motive made from that type, as a match's is, so the call
 # writes the minor premises, the indices and the value: `nat.recursor(0, (k, below) => k, n)`
@@ -76,7 +78,7 @@ recursor_given(x: Elaborating, name: text, arguments: list<Node>, wanted: Term):
 # A value's recursor, or its course, applied to the parameters of the value's type and to the motive: the type wanted
 # with the value and its indices made binders; what it takes next, the minor premises or the step, the value's
 # indices, and its type's levels and parameters
-class Eliminating { facts: RecursorFacts; function: Term; rest: Term; indices: list<Term>; levels: list<Level>; parameters: list<Term> }
+class Eliminating { facts: RecursorFacts; function: Term; rest: Term; indices: list<Term>; levels: list<Level>; parameters: list<Term>; after: int; universe: Level }
 eliminating(x: Elaborating, subject: Term, wanted: Term, eliminator: text): Eliminating := {
 	type = subject_type(x, subject)
 	name = type_name_of(x, subject)
@@ -85,7 +87,6 @@ eliminating(x: Elaborating, subject: Term, wanted: Term, eliminator: text): Elim
 		Recursor(facts) => facts
 		_ => refused(PATTERN, "${name} is no enum, so it has no cases to take apart")
 	}
-	if facts.motives != 1 { refused(PATTERN, "${name} is one of several enums that name each other, whose values are not taken apart one by one") }
 	parameters = arguments(type).take(facts.parameters)
 	indices = arguments(type).drop(facts.parameters)
 	used = declaration(x.theory.environment, eliminator)!
@@ -97,10 +98,46 @@ eliminating(x: Elaborating, subject: Term, wanted: Term, eliminator: text): Elim
 		function = apply(function, made_of(x, parameter, parts.domain))
 		rest = instantiated(parts.body, parameter)
 	}
-	motive_parts = pi_parts(x, rest)!
-	motive = motive_made(x, motive_parts.domain, indices + [subject], wanted)
-	made_of(x, motive, motive_parts.domain)
-	Eliminating(facts, apply(function, motive), instantiated(motive_parts.body, motive), indices, type_levels(type), parameters)
+	# an enum of several that name each other is taken apart by its own motive and cases, the others' giving nothing
+	block = inductive_block(x, name)
+	own = type_names(block).index_of(name)
+	universe = sort_level(result_of(pi_parts(x, rest)!.domain))
+	for place in 1 to facts.motives {
+		parts = pi_parts(x, rest)!
+		motive = if place == own then motive_made(x, parts.domain, indices + [subject], wanted) else constant_over(parts.domain, nothing_type(x, universe))
+		made_of(x, motive, parts.domain)
+		function = apply(function, motive)
+		rest = instantiated(parts.body, motive)
+	}
+	before = block.types.take(own - 1).map(t => #t.cases).sum()
+	unwanted_given(x, Eliminating(facts, function, rest, indices, type_levels(type), parameters, facts.minors - before - #facts.cases, universe), before)
+}
+# the block of enums naming each other an enum is declared in, empty for a name of no enum
+inductive_block(x: Elaborating, name: text): InductiveBlock := match declaration(x.theory.environment, name)!.kind {
+	Inductive(facts) => facts.block
+	_ => InductiveBlock([], 0, [])
+}
+# an elimination given a count of minor premises of the cases no arm takes apart, each giving nothing's value
+unwanted_given(x: Elaborating, e: Eliminating, count: int): Eliminating := {
+	function = e.function
+	rest = e.rest
+	for at in 1 to count {
+		parts = pi_parts(x, rest)!
+		minor = constant_over(parts.domain, nothing_value(x, [e.universe]))
+		function = apply(function, minor)
+		rest = instantiated(parts.body, minor)
+	}
+	Eliminating(e.facts, function, rest, e.indices, e.levels, e.parameters, e.after, e.universe)
+}
+# a function over every binder of a type, giving a value that names none of them
+constant_over(type: Term, value: Term): Term := match type.shape {
+	Pi(binder, domain, body) => lambda(binder, domain, constant_over(body, value))
+	_ => value
+}
+# the level of a sort
+sort_level(sort: Term): Level := match sort.shape {
+	Sort(level) => level
+	_ => refused(NOT_A_TYPE, "${shown(sort)} is no sort")
 }
 # the type of a value matched, computed; the name of its type, refused for a value of no enum
 subject_type(x: Elaborating, subject: Term): Term := computed(x.el.c, filled(x.el, type_of(x.el.c, filled(x.el, subject))))
@@ -196,7 +233,7 @@ minor_elaborated(x: Elaborating, arm: ArmWritten, fields: int, minor_type: Term,
 	entered = binders_entered(x, named + unnamed + ridden_binders(x, matched.ridden), minor_type)
 	field_values = entered.variables.take(fields)
 	before = Arm(#x.below, #x.known, x.course)
-	if #named == fields and x.course is ø { x.below += below_of(x, matched.subject, matched.type_name, field_values, entered.variables.drop(fields).take(#unnamed)) }
+	if #named == fields and x.course is ø { x.below += below_of(x, matched.subject, matched.type_name, entered.variables.drop(fields).take(#unnamed)) }
 	match matched.subject.shape {
 		Free(id) => x.known += [Known(id, apply_all(matched.case, field_values))]
 		_ => {}
