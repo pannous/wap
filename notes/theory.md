@@ -118,3 +118,24 @@ refusal "unknown name".
 when it is accepted. `type of e` prints the type. The first refusal is printed as its one line, `refused by <rule>:
 <what was found>`, and ends the run with a failing exit code. The output is the test: test/wap/test_theory.wap gives
 a program and compares what the door says. A line for a refusal compares the part before the colon only.
+
+## Costs
+
+What the kernel's shapes cost in wap as it compiles today, measured by the probes in data/k0/ (native wap, one run
+each, 10 million steps unless said):
+
+| measured | time |
+|---|---|
+| a term built, `App(Var, Lit)` | 119 ms |
+| a match over twelve cases | 190 ms; each case built and matched, 161 ms |
+| recursion 100,000 deep | 1 ms |
+| a loop written as a call of itself in last place, 100 × 100,000 | 93 ms, against 6 ms for `while` |
+
+Three limits follow, and the kernel is written around them:
+- **The stack** holds between 200,000 and 400,000 frames, and a call of itself in last place is not made a loop:
+  chains are walked in loops, and recursion stays below 100,000 deep.
+- **`==` on a recursive enum** costs twice as much per level of depth, so a term is never compared with `==`:
+  `same(a, b)` compares the hash first, then the tree.
+- **A map keyed by an enum value** hashes the case name only, so terms that share a head share a slot: caches are
+  keyed by a term's int `hash`.
+No two terms are made one (interning) yet: `same` stays the one place that would change when shared terms cost too much.
