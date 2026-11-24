@@ -14,6 +14,11 @@ FUNCTIONS_UNTYPED=0
 # wap's size, the nodes its reader makes of its source (scripts/wap-size.warp), may not rise above the ceiling: only a
 # real simplification lowers it
 SIZE_NODES=142780
+# the theory's elaborator (notes/coc-plan.md S1, scripts/theory-census.wap) over the compiler's source, lib/ and the
+# test programs: the statements it accepts may not drop below the floor, and its wall time stays under the ratio times
+# the typing census's, measured in the same run
+THEORY_ACCEPTED=0
+THEORY_TIME_RATIO=0
 
 source "$(dirname "$0")/compile.sh"
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
@@ -28,8 +33,17 @@ report="$stage/census.out"
 census="$stage/wap-census.wasm"
 # the compiler's source finds its standard modules (`use foreign`) beside the census, as beside a compiler
 wap_beside_copied "$root" "$stage" || exit 1
+# each census timed inside its job slot, so waiting for the slot is not counted: its report ends with time's `real` line
+timed() { scripts/job-slot.sh /usr/bin/time -p "$@"; }
+seconds() { sed -n 's/^real //p' "$1"; }
 (cd "$root" && $wap "$compiler" scripts/wap-census.warp "$census" >"$report" 2>&1 &&
-	scripts/job-slot.sh $wap "$census" $(compiler_sources) >"$report" 2>&1)
+	timed $wap "$census" $(compiler_sources) >"$report" 2>&1)
+theory_report="$stage/theory-census.out"
+theory_census="$stage/theory-census.wasm"
+(cd "$root" && $wap "$compiler" scripts/theory-census.wap "$theory_census" >"$theory_report" 2>&1 &&
+	timed $wap "$theory_census" --tree . $(compiler_sources) $(git ls-files 'lib/*.wap') test/test_*.wap >"$theory_report" 2>&1)
+accepted=$(sed -n 's/^accepted \([0-9]*\) of [0-9]* statements$/\1/p' "$theory_report")
+time_ratio=$(awk -v theory="$(seconds "$theory_report")" -v typing="$(seconds "$report")" 'BEGIN { if (theory != "" && typing > 0) printf "%d", theory / typing + 0.999 }')
 total=$(grep '^total' "$report" | cut -f2)
 measure="$stage/wap-size.wasm"
 size=$(cd "$root" && $wap "$compiler" scripts/wap-size.warp "$measure" 2>&1 && $wap "$measure" $(compiler_sources) | sed -n 's/^total\t//p')
@@ -45,6 +59,8 @@ at_least() { [ -n "$1" ] && [ "$1" -ge "$2" ] && echo yes || echo "${1:-no total
 check "the files wap types whole stay at least $FILES_TYPED_WHOLE ($total)" "$(at_least "$whole" $FILES_TYPED_WHOLE)" "yes"
 check "the functions wap does not type alone stay at most $FUNCTIONS_UNTYPED" "$(at_most "$untyped" $FUNCTIONS_UNTYPED)" "yes"
 check "wap's size stays at most $SIZE_NODES nodes" "$(at_most "$size" $SIZE_NODES)" "yes"
+check "the theory accepts at least $THEORY_ACCEPTED statements ($(grep '^accepted' "$theory_report"))" "$(at_least "$accepted" $THEORY_ACCEPTED)" "yes"
+check "the theory's census takes at most $THEORY_TIME_RATIO times the typing census's time" "$(at_most "$time_ratio" $THEORY_TIME_RATIO)" "yes"
 check "wap reads, lowers and binds its own source" "$(if [ -n "$total" ]; then grep '^front' "$report"; else echo "no total line"; fi)" ""
 check "no place of the compiler's own source is typed any" "$( [ -n "$total" ] && echo "$compiler_anys" || echo "no total line")" ""
 exit $((failures > 0))
