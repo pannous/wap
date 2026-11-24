@@ -100,16 +100,19 @@ rule_added(language: Language, written: Node, pattern: Node, template: Node, fac
 	writes_nothing = ungrouped(template) is Empty
 	output = if writes_nothing then NOTHING_WRITTEN else ungrouped(template)
 	for hole in holes_in(output) { if not holes_in(normal).contains(hole) and not holes_in(normal).contains(hole + REST_MARK) { refused(written, "the rule writes " + hole + ", which its pattern has no hole for") } }
-	stage = matcher_stage(compiled_pattern(language, normal))
+	# a rule waits for the stages of its head's rules written before it: a catch-all after a class case runs with it
+	head = heads_of(language, normal)#1
+	own = matcher_stage(compiled_pattern(language, normal))
+	stage = [DECLARED_STAGE, TYPED_STAGE].filter(later => rules_of_stage(language, later).by_head.has(head)).fold(own, (a, b) => max(a, b))
 	# a typed rule meets typed kernel: its pattern and template are lowered as the program is, `twice $x: int`; a
 	# refusal stays as written
 	if stage == TYPED_STAGE { normal = lowered(language, normal); output = if writes_nothing or refusal_of(output) != ø then output else forms_built(language, lowered(language, output)) }
 	matcher = compiled_pattern(language, normal)
-	rule = Rule(heads_of(language, normal)#1, matcher, output, names_bound_in(language, output), parameters_bound_in(language, output), written, specificity(matcher) + (if fact == "" then 0 else 2), fact)
+	rule = Rule(heads_of(language, normal)#1, matcher, stage, output, names_bound_in(language, output), parameters_bound_in(language, output), written, specificity(matcher) + (if fact == "" then 0 else 2), fact)
+	# a rule loaded again, its file read twice, is the rule already there: in its own stage or one it was raised to
+	if RULE_STAGES.filter(at => at >= own).any(at => rules_of_stage(language, at).by_head.has(rule.head) and rules_of_stage(language, at).by_head[rule.head].any(other => "${other.written}" == "${written}")) { return }
 	rules = rules_of_stage(language, stage)
 	if not rules.by_head.has(rule.head) { rules.by_head[rule.head] = [] }
-	# a rule loaded again, its file read twice, is the rule already there
-	if rules.by_head[rule.head].any(other => "${other.written}" == "${written}") { return }
 	rules.by_head[rule.head].add(rule)
 	rules.checked = no
 	match normal { List(items, Bracket.None, Separator.Space) => words_told(language, items, matcher.parts.any(takes_block)); _ => ø }
@@ -137,7 +140,7 @@ refusal_of(template: Node) as text? := phrase_text(template, REFUSE_WORD)
 #   plus those of the modules it uses.
 shaped_program(language: Language, program: Node) as Node := {
 	rest = rules_loaded(language, program)
-	for stage in [SHAPE_STAGE, DECLARED_STAGE, TYPED_STAGE] { terminating(language, rules_of_stage(language, stage)) }
+	for stage in RULE_STAGES { terminating(language, rules_of_stage(language, stage)) }
 	# the rewritten program stands for the program: it keeps its facts, the file it was read from among them; a
 	# program of rules only is an empty block, as Empty carries no facts
 	shaped = rewritten_by(language, language.shape_rules, rest).code ?? Block([])
@@ -294,10 +297,10 @@ rule_applied(language: Language, rules: Rules, n: Node) as list<Node> := {
 	chosen = best ?? return (if apart(n) == ø then [] else rule_applied(language, rules, apart(n)!))
 	refusal = refusal_of(chosen.template)
 	if refusal != ø { refused(placed_like(n, written_of(n) ?? n), refusal) }
-	taken_holes = if matcher_stage(chosen.matcher) == TYPED_STAGE then typed_holes(best_bindings) else best_bindings
+	taken_holes = if chosen.stage == TYPED_STAGE then typed_holes(best_bindings) else best_bindings
 	made = built(language, chosen.template, with_bound_names(taken_holes, chosen))
 	# a declaration rule writes surface code, which the shape rules shape as they shaped the program's (stage 1)
-	result = if matcher_stage(chosen.matcher) == DECLARED_STAGE then rewritten_by(language, language.shape_rules, made).code ?? made else made
+	result = if chosen.stage == DECLARED_STAGE and made != NOTHING_WRITTEN then rewritten_by(language, language.shape_rules, made).code ?? made else made
 	taken = if chosen.fact == "" or result is Empty then result else with_fact(result, chosen.fact, False)
 	[if taken is Empty then taken else with_fact(taken, RULE, chosen.written)]
 }

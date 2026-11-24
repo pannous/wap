@@ -309,4 +309,14 @@ qsort(base: list<int32>, count: i64, size: i64, compare: handle): void from '"'"
 xs: list<int32> = [int32(3), int32(1), int32(4), int32(2)]
 qsort(xs, 4, 4, c_callback((a, b) => int(field_i32(a, 0)) - int(field_i32(b, 0)), ["handle", "handle"]))
 print "${xs#1} ${xs#2} ${xs#3} ${xs#4}"')" "1 2 3 4"
+# a record handed to C as the struct of its fields, C's writes into them read back once the call returns
+# (extensions/c/foreign.wap c_record_laid): mktime turns the 31st of February 2024 into the 2nd of March, day 61
+cat > "$stage/record_crossed.wap" <<'PROGRAM'
+class Tm { second: int32; minute: int32; hour: int32; day: int32; month: int32; year: int32; weekday: int32; yearday: int32; dst: int32; offset: int; zone: int }
+mktime(t: Tm): i64 from 'c'
+t = Tm(int32(0), int32(0), int32(12), int32(31), int32(1), int32(124), int32(0), int32(0), int32(-1), 0, 0)
+mktime(t)
+print "${t.month} ${t.day} ${t.yearday}"
+PROGRAM
+check "a record crosses to C as its struct and comes back as C wrote it" "$(cd "$stage" && "$native_wap" record_crossed.wap 2>&1)" "2 2 61"
 exit $((failures > 0))
