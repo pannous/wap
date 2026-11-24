@@ -3,6 +3,7 @@
 #
 # A name is looked up among the binders around it, innermost first, then among the declarations; anything else is
 # refused. A level name that nothing binds is a level parameter of its statement, in the order of first appearance.
+use magnitude
 use "terms.wap"
 use "levels.wap"
 use "environment.wap"
@@ -17,9 +18,12 @@ IMAX_WORD := "imax"
 AXIOM_WORD := "axiom"
 LAW_WORD := "law"
 OPAQUE_WORD := "opaque"
+ENUM_WORD := "enum"
 DECLARATION_WORDS := [AXIOM_WORD, LAW_WORD, OPAQUE_WORD]
+PROJECTION_WORD := "projection"
+BINDING_WORDS := [NUMBERS, SHORTCUT, QUOTIENTS]
 QUESTION_WORDS := ["type", "of"]
-QUOTIENTS_WORD := "quotients"
+AXIOMS_QUESTION_WORDS := ["axioms", "of"]
 # the operators of the spellings
 FUNCTION_TYPE := "->"
 FUNCTION := "=>"
@@ -30,21 +34,74 @@ DOT := "."
 # the name of a binder written without one, `A -> B`
 NO_NAME := ""
 
-# What a statement says: a declaration to check and add, the question for a term's type, with the level parameters
-# it names, or `quotients(Equal)`, which names the type of equality the quotients are made with
+# What a statement says: a declaration to check and add, an inductive block, the question for a term's type,
+# with the level parameters it names, the question for the axioms a name rests on, or `quotients(Equal)`, which
+# names the type of equality the quotients are made with
 enum Statement {
 	Declares(declaration: Declaration)
+	DeclaresBlock(block: InductiveBlock)
 	AsksType(of: Term, levels: list<text>)
-	Quotients(equality: text)
+	AsksAxioms(of: text)
+	Binds(word: text, names: list<text>)
 }
 
-# The state of reading one statement: the declarations a name may be, and the level parameters met so far
+# The state of reading one statement: the declarations a name may be, the level parameters met so far, and the
+# types of the block being read, which stand inside it without levels
 class Reading {
 	environment: Environment
 	levels: list<text> = []
+	block: list<text> = []
 }
 
-# One statement of an explicit program: `type of e`, or a declaration, its head before `:=` and its value after it
+# A program's statements in the units they are read in: the enums next to each other that name one another, directly
+# or through others, are one block; any other statement is a unit of its own
+units_of(statements: list<Node>): list<list<Node>> := {
+	units: list<list<Node>> = []
+	run: list<Node> = []
+	for statement in statements {
+		if enum_written(statement) is not ø {
+			run += [statement]
+		} else {
+			units += blocks_of(run) + [[statement]]
+			run = []
+		}
+	}
+	units + blocks_of(run)
+}
+# enums next to each other grouped into blocks, each in the order written: enums that name one another, directly
+# or through others, are one block
+blocks_of(run: list<Node>): list<list<Node>> := {
+	names = run.map(statement => enum_name(statement))
+	words = run.map(statement => words_in(statement))
+	groups((1 to #run).list(), (i: int, j: int) => names#j in words#i).map(block => block.map(at => run#at))
+}
+# the places not grouped yet, grouped: the first one's group, then the groups of the rest
+groups(left: list<int>, naming: (int, int) -> bool): list<list<int>> := {
+	if left is empty { return [] }
+	named = grown([left#1], left, naming)
+	naming_back = grown([left#1], left, (i: int, j: int) => naming(j, i))
+	block = left.filter(at => at in named and at in naming_back)
+	[block] + groups(left.filter(at => not (at in block)), naming)
+}
+# a group with every place one of it reaches added, until none is
+grown(block: list<int>, left: list<int>, reaches: (int, int) -> bool): list<int> := {
+	joined = left.filter(j => not (j in block) and block.any(i => reaches(i, j)))
+	if joined is empty then block else grown(block + joined, left, reaches)
+}
+# the words a node writes, at any depth
+words_in(n: Node): list<text> := match n {
+	Symbol(name) => [name]
+	Call(called, arguments) => words_in(called) + arguments.flat_map(argument => words_in(argument))
+	Key(left, op, right) => words_in(left) + words_in(right)
+	List(items, bracket, separator) => items.flat_map(item => words_in(item))
+	_ => []
+}
+
+# One unit of a program: an inductive block, or one statement
+unit_read(e: Environment, unit: list<Node>): Statement := if enum_written(unit#1) is not ø then DeclaresBlock(block_read(e, unit)) else statement_read(e, unit#1)
+
+# One statement of an explicit program: `type of e`, `axioms of name`, or a declaration, its head before `:=` and
+# its value after it
 statement_read(e: Environment, statement: Node): Statement := {
 	r = Reading(e)
 	question = after_words(statement, QUESTION_WORDS)
@@ -52,9 +109,11 @@ statement_read(e: Environment, statement: Node): Statement := {
 		of = term_read(r, question!, [])
 		return AsksType(of, r.levels)
 	}
+	axioms_question = after_words(statement, AXIOMS_QUESTION_WORDS)
+	if axioms_question is not ø { return AsksAxioms(text(axioms_question!)) }
 	match statement {
 		Call(called, arguments) => if text(called) == DEFINE and #arguments == 2 then Declares(declaration_read(r, arguments#1, arguments#2)) else Declares(declaration_read(r, statement, ø))
-		Key(word, Op.None, List([equality], Bracket.Round, separator)) => if text(word) == QUOTIENTS_WORD then Quotients(text(equality)) else Declares(declaration_read(r, statement, ø))
+		Key(word, Op.None, List(names, Bracket.Round, separator)) => if text(word) in BINDING_WORDS then Binds(text(word), names.map(name => name_of(name))) else Declares(declaration_read(r, statement, ø))
 		_ => Declares(declaration_read(r, statement, ø))
 	}
 }
@@ -91,9 +150,10 @@ after_words(n: Node, words: list<text>): Node? := match n {
 	_ => ø
 }
 phrase_of(items: list<Node>): Node := if #items == 1 then items#1 else List(items, Bracket.None, Separator.Space)
-# the name a declaration's head declares, and the parameters written after it
+# the name a declaration's head declares or a statement names, `bool.yes` dotted, and the parameters written after it
 name_of(head: Node): text := match head {
 	Key(name, Op.None, List(items, Bracket.Round, separator)) => text(name)
+	Call(called, operands) => if text(called) == DOT then text(dotted(operands#1, operands#2)) else text(head)
 	_ => text(head)
 }
 parameters_of(head: Node): list<Node> := match head {
@@ -101,10 +161,66 @@ parameters_of(head: Node): list<Node> := match head {
 	_ => []
 }
 
+# An inductive block from its enums, `enum Name(p: A): I -> Sort(u) { case(x: B): Name(p, i) }`: the parameters
+# after the first name are the block's, and every header and case is read with them in front. The headers are read
+# before the cases, so the block's level parameters are all met when a case names one of its types
+block_read(e: Environment, enums: list<Node>): InductiveBlock := {
+	r = Reading(e, block: enums.map(statement => enum_name(statement)))
+	types = enums.map(statement => enum_read(r, statement))
+	InductiveBlock(r.levels, #parameters_of(enum_named(enums#1)), types)
+}
+# one enum of a block, its header and cases read under its own parameters: the kernel refuses a block whose parameters differ
+enum_read(r: Reading, statement: Node): BlockType := {
+	name = enum_name(statement)
+	parameters = parameters_of(enum_named(statement))
+	header = bound_read(r, parameters, header_type(enum_head(statement)), [], yes)
+	BlockType(name, header, enum_written(statement)!.cases.map(case => case_read(r, name, parameters, case)))
+}
+# `case(x: B): Name(p, i)`, declared as `Name.case`: the block's parameters, the case's fields, its result
+case_read(r: Reading, type: text, parameters: list<Node>, case: Node): WrittenCase := match case {
+	Key(named, Op.Colon, result) => WrittenCase("${type}${DOT}${name_of(named)}", bound_read(r, parameters + parameters_of(named), result, [], yes))
+	_ => unreadable(case)
+}
+# an enum statement taken apart: its head `Name(p: A): type` and its cases
+class EnumWritten { head: Node; cases: list<Node> }
+enum_written(statement: Node): EnumWritten? := {
+	written = after_words(statement, [ENUM_WORD]) ?? return ø
+	before_cases(written)
+}
+enum_head(statement: Node): Node := enum_written(statement)!.head
+# the name and parameters before the colon, `Name(p: A)`
+enum_named(statement: Node): Node := match enum_head(statement) {
+	Key(named, Op.Colon, type) => named
+	_ => unreadable(statement)
+}
+enum_name(statement: Node): text := name_of(enum_named(statement))
+header_type(head: Node): Node := match head {
+	Key(named, Op.Colon, type) => type
+	_ => unreadable(head)
+}
+# A statement without the braces of cases it ends with, the mirror of after_words: the braces stand in the rightmost
+# phrase, which an operator written before them holds: `enum E: T -> Prop { … }` is `E: (T -> (Prop { … }))`
+before_cases(n: Node): EnumWritten? := match n {
+	List(items, Bracket.None, Separator.Space) => if #items > 1 then cases_ending(items) else ø
+	Call(called, arguments) => {
+		last = before_cases(arguments#(#arguments)) ?? return ø
+		EnumWritten(Call(called, arguments.take(#arguments - 1) + [last.head]), last.cases)
+	}
+	Key(left, op, right) => {
+		last = before_cases(right) ?? return ø
+		EnumWritten(Key(left, op, last.head), last.cases)
+	}
+	_ => ø
+}
+cases_ending(items: list<Node>): EnumWritten? := match items#(#items) {
+	List(cases, Bracket.Curly, separator) => EnumWritten(phrase_of(items.take(#items - 1)), cases)
+	_ => ø
+}
+
 # The term a node writes, inside binders of these names, the innermost last
 term_read(r: Reading, n: Node, scope: list<text>): Term := match n {
 	Symbol(name) => name_read(r, name, scope)
-	Number(value) => numeral(value as int)
+	Number(value) => numeral(magnitude(value as int))
 	Call(called, arguments) => operation_read(r, text(called), arguments, scope, n)
 	Key(written, Op.None, List(items, Bracket.Round, separator)) => applied_read(r, written, items, scope)
 	Key(written, Op.None, List(items, Bracket.Square, separator)) => constant(text(written), items.map(level => level_read(r, level)))
@@ -116,16 +232,19 @@ term_read(r: Reading, n: Node, scope: list<text>): Term := match n {
 name_read(r: Reading, name: text, scope: list<text>): Term := {
 	place = scope.reverse().index_of(name)
 	if place > 0 { return bound(place - 1) }
+	if name in r.block { return constant(name, r.levels.map(level => Parameter(level))) }
 	if name == PROP_WORD { return PROP }
 	if name == TYPE_WORD { return type_at(Zero) }
 	if declaration(r.environment, name) is ø { refused(UNKNOWN_NAME, "${name} is neither a binder around it nor declared") }
 	constant(name, [])
 }
-# `Type(u)`, `Sort(u)`, or a function applied to its arguments, the first one first
+# `Type(u)`, `Sort(u)`, `projection(Pair, 1, p)` for a field of a structure value, or a function applied to its
+# arguments, the first one first
 applied_read(r: Reading, written: Node, arguments: list<Node>, scope: list<text>): Term := {
 	word = text(written)
 	if #arguments == 1 and word == TYPE_WORD { return type_at(level_read(r, arguments#1)) }
 	if #arguments == 1 and word == SORT_WORD { return universe(level_read(r, arguments#1)) }
+	if #arguments == 3 and word == PROJECTION_WORD { return projection(text(arguments#1), whole_read(arguments#2), term_read(r, arguments#3, scope)) }
 	apply_all(term_read(r, written, scope), arguments.map(argument => term_read(r, argument, scope)))
 }
 # a function type, a function, or a dotted name: `(x: A) -> B`, `A -> B`, `(x: A) => b`, `And.intro`
@@ -184,11 +303,11 @@ level_read(r: Reading, n: Node): Level := match n {
 		if not (name in r.levels) { r.levels += [name] }
 		Parameter(name)
 	}
-	Call(called, arguments) => if text(called) == LEVEL_ADD and #arguments == 2 then level_above(level_read(r, arguments#1), level_steps(arguments#2)) else unreadable(n)
+	Call(called, arguments) => if text(called) == LEVEL_ADD and #arguments == 2 then level_above(level_read(r, arguments#1), whole_read(arguments#2)) else unreadable(n)
 	Key(written, Op.None, List(items, Bracket.Round, separator)) => level_function_read(r, text(written), items, n)
 	_ => unreadable(n)
 }
-level_steps(n: Node): int := match n {
+whole_read(n: Node): int := match n {
 	Number(value) => value as int
 	_ => unreadable(n)
 }
