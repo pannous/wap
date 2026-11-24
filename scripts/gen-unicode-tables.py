@@ -7,7 +7,7 @@ version from https://www.unicode.org/Public/<VERSION>/ucd/ into a directory (dat
     python3 scripts/gen-unicode-tables.py <that directory>
 The raw UCD files are not committed."""
 import sys, os
-VERSION = "15.1.0"
+VERSION = "17.0.0"
 if len(sys.argv) != 2: sys.exit("usage: scripts/gen-unicode-tables.py <directory of the UCD files>")
 ucd = sys.argv[1]
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")

@@ -1,0 +1,256 @@
+# The standard module jpeg: a JPEG file's pixels, in plain wap (lib/image reads pictures with it). jpeg_picture(bytes)
+# is its Picture: width, height and pixels, Colors row by row from the top left. It reads baseline JPEGs, what cameras
+# and most programs write: 8-bit, Huffman coded, gray or YCbCr at any sampling (4:4:4, 4:2:2, 4:2:0), with or without
+# restart markers. A progressive, lossless, arithmetic-coded or CMYK one is refused, saying so.
+use color
+use math
+
+# the markers this reader acts on (after the 0xFF byte)
+MARKER := 0xFF
+START_OF_FRAME := 0xC0
+EXTENDED_FRAME := 0xC1
+HUFFMAN_TABLES := 0xC4
+END_OF_IMAGE := 0xD9
+START_OF_SCAN := 0xDA
+QUANTIZATION_TABLES := 0xDB
+RESTART_INTERVAL := 0xDD
+FIRST_RESTART := 0xD0
+LAST_RESTART := 0xD7
+# every other start of frame: progressive, lossless, hierarchical or arithmetic coded
+UNREAD_FRAMES := [0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF]
+# the markers standing alone, no length after them
+LONE_MARKERS := [0x01, 0xD8] + (FIRST_RESTART to LAST_RESTART)
+# a block is 8 × 8 samples, its 64 coefficients; a sample is a byte, its middle 128
+SIDE := 8
+BLOCK := 64
+SAMPLE_MIDDLE := 128
+BRIGHTEST := 255
+# a table holds 4 DC slots, then 4 AC ones; a Huffman code is at most 16 bits long
+TABLE_SLOTS := 8
+AC_SLOTS := 4
+LONGEST_CODE := 16
+# a byte's two halves: a table's class and id, a component's sampling factors
+NIBBLE := 16
+# an AC symbol of size 0: the run of 15 zeros after which more come, else the block's end
+ZERO_RUN := 15
+GRAY_COMPONENTS := 1
+COLOR_COMPONENTS := 3
+
+# where each of a block's 64 coefficients goes, in the zigzag order the file writes them
+ZIGZAG := [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14,
+	21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61,
+	54, 47, 55, 62, 63]
+# the inverse DCT's weights: COSINES[u * 8 + x] is c(u)/2 · cos((2x + 1)uπ/16), c(0) = 1/√2, else 1
+COSINES := [(if u == 0 then sqrt(0.5) else 1.0) / 2.0 * cos(float((2 * x + 1) * u) * pi / 16.0) for u in 0 upto SIDE for x in 0 upto SIDE]
+
+# a component (Y, Cb or Cr): its sampling factors, quantization table, Huffman tables and the samples decoded so far
+class JpegComponent { id: int, horizontal: int, vertical: int, quantization: int, dc_table: int = 0, ac_table: int = 0,
+	previous_dc: int = 0, plane_width: int = 0, samples: list<int> = [] }
+# a Huffman table as the decoder walks it (JPEG F.2.2.3): per code length the lowest and highest code and where its
+# symbols start
+class JpegHuffman { lowest: list<int>, highest: list<int>, first: list<int>, symbols: list<int> }
+# the entropy-coded bytes read a bit at a time, a 0xFF byte followed by 0x00 being one 0xFF
+class JpegBits { bytes: list<int>, at: int, byte: int = 0, left: int = 0 }
+# what the segments before the scan set up
+class JpegTables { quantization: list<list<int>>, huffman: list<JpegHuffman>, components: list<JpegComponent>,
+	width: int = 0, height: int = 0, restart_interval: int = 0 }
+
+two_bytes(bytes: list<int>, at: int): int := bytes[at] * 256 + bytes[at + 1]
+no_huffman(): JpegHuffman := JpegHuffman([], [], [], [])
+
+jpeg_picture(bytes: list<int>): Picture := {
+	tables = JpegTables(spread([], AC_SLOTS), spread(no_huffman(), TABLE_SLOTS), [])
+	at = 2
+	while at < #bytes {
+		if bytes[at] != MARKER { raise "not a JPEG marker at byte ${at}" }
+		marker = bytes[at + 1]
+		at += 2
+		if marker == END_OF_IMAGE { raise "the JPEG ends before its picture" }
+		if marker not in LONE_MARKERS {
+			length = two_bytes(bytes, at)
+			segment = bytes[at + 2 .. at + length]
+			if marker in UNREAD_FRAMES { raise "jpeg reads baseline JPEGs; this one is progressive, lossless or arithmetic coded (marker 0x${padded_hex(marker, 2)}): save it as baseline" }
+			if marker == QUANTIZATION_TABLES { quantization_read(segment, tables) }
+			if marker == HUFFMAN_TABLES { huffman_read(segment, tables) }
+			if marker == RESTART_INTERVAL { tables.restart_interval = two_bytes(segment, 0) }
+			if marker == START_OF_FRAME or marker == EXTENDED_FRAME { frame_read(segment, tables) }
+			if marker == START_OF_SCAN {
+				scan_started(segment, tables)
+				scan_decoded(JpegBits(bytes, at + length), tables)
+				return Picture(tables.width, tables.height, colors_of(tables.components, tables.width, tables.height))
+			}
+			at += length
+		}
+	}
+	raise "the JPEG has no picture"
+}
+
+# SOF: the picture's size and its components
+frame_read(segment: list<int>, tables: JpegTables) := {
+	tables.height = two_bytes(segment, 1)
+	tables.width = two_bytes(segment, 3)
+	tables.components = (0 upto segment[5]).map(k => JpegComponent(segment[6 + 3 * k], segment[7 + 3 * k] ÷ NIBBLE, segment[7 + 3 * k] % NIBBLE, segment[8 + 3 * k]))
+	if #tables.components not in [GRAY_COMPONENTS, COLOR_COMPONENTS] { raise "jpeg reads gray and YCbCr JPEGs; this one has ${#tables.components} components (CMYK?)" }
+}
+# SOS: each component's Huffman tables
+scan_started(segment: list<int>, tables: JpegTables) := {
+	for k in 0 upto segment[0] {
+		tabled = segment[2 + 2 * k]
+		component = tables.components.filter(c => c.id == segment[1 + 2 * k])[0]
+		component.dc_table = tabled ÷ NIBBLE
+		component.ac_table = AC_SLOTS + tabled % NIBBLE
+	}
+}
+# DQT: each table's 64 steps, in zigzag order, 8 or 16 bits each
+quantization_read(segment: list<int>, tables: JpegTables) := {
+	at = 0
+	while at < #segment {
+		wide = segment[at] ÷ NIBBLE > 0
+		steps_at = at + 1
+		tables.quantization[segment[at] % NIBBLE] = (0 upto BLOCK).map(k => if wide then two_bytes(segment, steps_at + 2 * k) else segment[steps_at + k])
+		at += 1 + BLOCK * (if wide then 2 else 1)
+	}
+}
+# DHT: each table's count of codes of each length 1 to 16, then its symbols; DC tables in slots 0-3, AC in 4-7
+huffman_read(segment: list<int>, tables: JpegTables) := {
+	at = 0
+	while at < #segment {
+		slot = AC_SLOTS * (segment[at] ÷ NIBBLE) + segment[at] % NIBBLE
+		counts = segment[at + 1 .. at + 1 + LONGEST_CODE]
+		symbols = segment[at + 1 + LONGEST_CODE .. at + 1 + LONGEST_CODE + counts.sum()]
+		tables.huffman[slot] = huffman_table(counts, symbols)
+		at += 1 + LONGEST_CODE + #symbols
+	}
+}
+huffman_table(counts: list<int>, symbols: list<int>): JpegHuffman := {
+	table = no_huffman()
+	table.symbols = symbols
+	code = 0
+	taken = 0
+	for length in 0 upto LONGEST_CODE {
+		table.lowest.add(code)
+		table.first.add(taken)
+		code += counts[length]
+		taken += counts[length]
+		table.highest.add(if counts[length] > 0 then code - 1 else -1)
+		code *= 2
+	}
+	table
+}
+
+# the blocks a component has in each minimum coded unit, across and down (one component alone is coded block by block,
+# whatever its sampling)
+blocks_across(c: JpegComponent, alone: bool): int := if alone then 1 else c.horizontal
+blocks_down(c: JpegComponent, alone: bool): int := if alone then 1 else c.vertical
+# the scan's blocks into each component's samples, minimum coded unit by unit, left to right and top down
+scan_decoded(bits: JpegBits, tables: JpegTables) := {
+	components = tables.components
+	alone = #components == GRAY_COMPONENTS
+	unit_width = SIDE * components.map(c => blocks_across(c, alone)).max()
+	unit_height = SIDE * components.map(c => blocks_down(c, alone)).max()
+	units_wide = (tables.width + unit_width - 1) ÷ unit_width
+	units_high = (tables.height + unit_height - 1) ÷ unit_height
+	for component in components {
+		component.plane_width = units_wide * blocks_across(component, alone) * SIDE
+		component.samples = spread(0, component.plane_width * units_high * blocks_down(component, alone) * SIDE)
+	}
+	for unit in 0 upto units_wide * units_high {
+		if tables.restart_interval > 0 and unit > 0 and unit % tables.restart_interval == 0 { restarted(bits, components) }
+		for component in components {
+			across = blocks_across(component, alone)
+			down = blocks_down(component, alone)
+			for block in 0 upto across * down {
+				left = ((unit % units_wide) * across + block % across) * SIDE
+				top = ((unit ÷ units_wide) * down + block ÷ across) * SIDE
+				block_decoded(bits, component, tables, left, top)
+			}
+		}
+	}
+}
+# at a restart marker: the bits start at the next byte, each component's DC anew
+restarted(bits: JpegBits, components: list<JpegComponent>) := {
+	bits.left = 0
+	next = bits.bytes[bits.at + 1]
+	if bits.bytes[bits.at] == MARKER and next >= FIRST_RESTART and next <= LAST_RESTART { bits.at += 2 }
+	for component in components { component.previous_dc = 0 }
+}
+# one 8×8 block: its DC difference and run-length coded ACs, dequantized, inverse transformed into the samples
+block_decoded(bits: JpegBits, component: JpegComponent, tables: JpegTables, left: int, top: int) := {
+	steps = tables.quantization[component.quantization]
+	coefficients = spread(0.0, BLOCK)
+	size = decoded(bits, tables.huffman[component.dc_table])
+	component.previous_dc += extended(bits_received(bits, size), size)
+	coefficients[0] = float(component.previous_dc * steps[0])
+	k = 1
+	while k < BLOCK {
+		symbol = decoded(bits, tables.huffman[component.ac_table])
+		run = symbol ÷ NIBBLE
+		size = symbol % NIBBLE
+		if size == 0 { k = if run == ZERO_RUN then k + NIBBLE else BLOCK } else {
+			k += run
+			coefficients[ZIGZAG[k]] = float(extended(bits_received(bits, size), size) * steps[k])
+			k += 1
+		}
+	}
+	transformed = inverse_dct(coefficients)
+	for y in 0 upto SIDE {
+		for x in 0 upto SIDE { component.samples[(top + y) * component.plane_width + left + x] = clamp(round(transformed[y * SIDE + x] + float(SAMPLE_MIDDLE)), 0, BRIGHTEST) }
+	}
+}
+# the 8×8 samples of a block's coefficients: the rows' inverse DCT, then the columns'
+inverse_dct(coefficients: list<float>): list<float> := {
+	rows = [(0 upto SIDE).map(u => COSINES[u * SIDE + x] * coefficients[y * SIDE + u]).sum() for y in 0 upto SIDE for x in 0 upto SIDE]
+	[(0 upto SIDE).map(v => COSINES[v * SIDE + y] * rows[v * SIDE + x]).sum() for y in 0 upto SIDE for x in 0 upto SIDE]
+}
+
+# the next symbol of the Huffman code: the code read bit by bit until it is one of its length
+decoded(bits: JpegBits, table: JpegHuffman): int := {
+	code = 0
+	for length in 0 upto LONGEST_CODE {
+		code = code * 2 + scan_bit(bits)
+		if code <= table.highest[length] { return table.symbols[table.first[length] + code - table.lowest[length]] }
+	}
+	raise "a JPEG Huffman code past 16 bits at byte ${bits.at}: the file is damaged"
+}
+scan_bit(bits: JpegBits): int := {
+	if bits.left == 0 {
+		bits.byte = bits.bytes[bits.at]
+		bits.at += if bits.byte == MARKER and bits.bytes[bits.at + 1] == 0 then 2 else 1
+		bits.left = SIDE
+	}
+	bits.left -= 1
+	(bits.byte >>> bits.left) % 2
+}
+# the next size bits as a number, the high bit first
+bits_received(bits: JpegBits, size: int): int := (0 upto size).fold(0, (value, i) => value * 2 + scan_bit(bits))
+# a size-bit value as the signed number it codes: below half its range a negative one
+extended(value: int, size: int): int := if size == 0 then 0 else if value < 1 << (size - 1) then value - (1 << size) + 1 else value
+
+# the pixels' colors: gray as it is, YCbCr turned into red, green and blue (JFIF); a component sampled more coarsely
+# is read between its samples, each sample at the center of the pixels it covers (as libjpeg's smooth upsampling)
+colors_of(components: list<JpegComponent>, width: int, height: int): list<Color> := {
+	if #components == GRAY_COMPONENTS { return [gray_color(sample_at(components[0], x, y, 1.0, 1.0)) for y in 0 upto height for x in 0 upto width] }
+	widest = float(components.map(c => c.horizontal).max())
+	tallest = float(components.map(c => c.vertical).max())
+	read = (c: JpegComponent, x: int, y: int) => sample_at(c, x, y, widest / float(c.horizontal), tallest / float(c.vertical))
+	middle = float(SAMPLE_MIDDLE)
+	[ycbcr_color(read(components[0], x, y), read(components[1], x, y) - middle, read(components[2], x, y) - middle) for y in 0 upto height for x in 0 upto width]
+}
+# the component's sample under the pixel, its samples each spread over across × down pixels: bilinear between the four
+# nearest, the edges repeated
+sample_at(c: JpegComponent, x: int, y: int, across: float, down: float): float := {
+	if across == 1.0 and down == 1.0 { return float(c.samples[y * c.plane_width + x]) }
+	column = max(0.0, (float(x) + 0.5) / across - 0.5)
+	row = max(0.0, (float(y) + 0.5) / down - 0.5)
+	left = trunc(column)
+	top = trunc(row)
+	right = min(left + 1, c.plane_width - 1)
+	below = min(top + 1, #c.samples ÷ c.plane_width - 1)
+	at = (sx: int, sy: int) => float(c.samples[sy * c.plane_width + sx])
+	upper = lerp(at(left, top), at(right, top), column - float(left))
+	lower = lerp(at(left, below), at(right, below), column - float(left))
+	lerp(upper, lower, row - float(top))
+}
+gray_color(luma: float): Color := rgb(luma, luma, luma)
+ycbcr_color(luma: float, blue: float, red: float): Color := rgb(channel(luma + 1.402 * red), channel(luma - 0.344136 * blue - 0.714136 * red), channel(luma + 1.772 * blue))
+channel(x: float): float := clamp(x, 0.0, float(BRIGHTEST))

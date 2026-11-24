@@ -2,6 +2,7 @@
 // run by lib/native/wasi.c, which answers its WASI calls over libc and holds main(); the glue build.sh writes with
 // glue.awk calls the C functions the program imports. A program of no GC value (no text, list or raise), as wasm2c
 // takes no GC type
+#include <string.h>
 #include "program.h"
 #include "native/wasi.c"
 
@@ -13,14 +14,7 @@ static void* c_function(const char* name) { return native_function("c", name); }
 #include "glue.c"
 #include "native/native_call.h"
 #include "native/callbacks.h"
-// whether the executable runs on ARM64, whose C takes a struct of more than 16 bytes by a pointer to a copy (types/c.wap c_struct)
-int32_t on_arm64(void) {
-#if defined(__aarch64__)
-	return 1;
-#else
-	return 0;
-#endif
-}
+#include "native/fields.h"
 
 // the host words of a module the program runs through wasmtime (the native wap's host_words.wap): wasmtime calls this
 // with an import's record, and the program's exported host_word answers it (glue.awk defines PROGRAM_HOST_WORD for a program exporting one)
@@ -41,6 +35,11 @@ static void* epoch_ticking(void* engine) {
 	for (;;) { sleep(1); epoch_incremented(engine); }
 	return NULL;
 }
+// the library folder the native wap found beside its compiler (linking.wap), which the programs it runs read
+// (lib/host/native_host/platform.wap library_folder); NULL till it is told
+static const char* library_folder = NULL;
+void wap_library_folder_set(const char* folder) { library_folder = strdup(folder); }
+const char* wap_library_folder(void) { return library_folder; }
 // when this executable was built (commands.wap version)
 const char* wap_built(void) { return __DATE__ " " __TIME__; }
 void epoch_ticker_started(int64_t engine) {

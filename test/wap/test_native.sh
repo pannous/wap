@@ -245,4 +245,9 @@ pick(x: int): Coin := if x > 0 then Dime else Penny
 exit(if pick(1) == Dime then 3 else 4)' >/dev/null; echo $?)" "3"
 check "a native program's uncaught raise says its text and exits with 1" "$(native_ran raising 'raise "out of coins"'; echo "exit $?")" "out of coins
 exit 1"
+# a typed list in a native program hands C its own items, packed at their width: C sums them and writes into them
+printf '%s\n' '#include <stdint.h>' 'double sum_f32(float* p, int64_t bytes) { double s = 0; for (int64_t i = 0; i < bytes / 4; i++) s += p[i]; return s; }' 'void halved(float* p, int64_t bytes) { for (int64_t i = 0; i < bytes / 4; i++) p[i] /= 2; }' >"$stage/native_items.c"
+check "a native list<float32> crosses as C's floats, and C's writes are seen" "$(printf '%s\n' "sum_f32(xs: list<float32>, size: length): f64 from 'c'" "halved(xs: list<float32>, size: length): ø from 'c'" 'xs: list<float32> = [float32(0.5), float32(1.25), float32(4.0)]' 'halved(xs)' 'print(text(sum_f32(xs)) + " " + text(float(xs#2)))' >"$stage/native_items.wap" && "$tree/wap/extensions/native/build.sh" "$compiler" "$stage/native_items.wap" "$stage/native_items" "$stage/native_items.c" 2>&1 && "$stage/native_items" 2>&1)" "2.875 0.625"
+# a compiler run from source with no library beside it and no warm state yet, as from wap's own tree, still compiles
+check "a compiler with no library beside it compiles hello" "$(rm -rf "$stage/bare" && mkdir -p "$stage/bare" && cp -R "$tree/wap" "$stage/bare/" && : >"$stage/bare/wap/warm.packed" && : >"$stage/bare/wap/types.wasm" && cd "$stage" && printf '%s\n' 'print "Hello"' >bare_hello.wap && "$native_wap" "$stage/bare/wap/compiler.wap" bare_hello.wap bare_hello.wasm 2>&1 && "$native_wap" bare_hello.wasm 2>&1)" "Hello"
 exit $((failures > 0))

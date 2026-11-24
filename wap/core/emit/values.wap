@@ -26,19 +26,19 @@ class Code {
 WORD_LAYOUTS = {"int": I64, "float": F64, "float32": F32, "bool": I32, "char": I32, "int32": I32, "number": ANYREF, "any": ANYREF}
 # the layouts a build keeping its values in the memory takes (memory_kept)
 NUMBER_LAYOUTS = [I32, I64, F32, F64]
+# the bytes a value of a layout takes in the memory, a list's item at its type's width (wap/types/memory_lists.wap)
+layout_bytes(layout: list<int>) as int := if layout in [I32, F32] then 4 else 8
 # a case's tag, the first field of an enum's struct: its place among the cases, from 0
 TAG_FIELD = field_type(I32, IMMUTABLE)
 # a class tag's hash: its base and the largest i32 prime, so every tag is a positive i32
 TAG_BASE = 31
 TAG_RANGE = 2147483647
-# the type a plain enum's value fits, one whose cases carry no fields: `==(a: enum, b: enum)` compares their tags
-ENUM_WORD = "enum"
 
 # the GC type of a text: its UTF-8 bytes
 text_type(m: WasmModule) as int := added_type(m, array_type(field_type(I8, MUTABLE)))
 # the wasm type of a text's value: a reference to its bytes, null where it is missing; or the address of its bytes in
 # the memory
-text_layout(m: WasmModule) as list<int> := memory_layout(m, "text") ?? nullable(text_type(m))
+text_layout(m: WasmModule) as list<int> := memory_layout(m, TEXT_TYPE) ?? nullable(text_type(m))
 # the layout of a type word's values in the memory, ø where they are GC values
 memory_layout(m: WasmModule, word: text) as list<int>? := if m.memory == ø then ø else m.memory!.layouts.get(word)
 
@@ -66,7 +66,7 @@ layout_of(type_name: Node, m: WasmModule, records: Records, at: Node? = ø) as l
 		type = fact_of(type_name, NARROWS) ?? type_name
 		name = text(type)
 		record = record_named(records, type)
-		if WORD_LAYOUTS.has(name) then WORD_LAYOUTS[name] else if name == "text" then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == MAP_TYPE then nullable(map_base(m)) else if name == ENUM_WORD then enum_layout(m) else if record == ø then ø else if plain_enums(m) and cases_of(record!).all(case => case_fields(case) is empty) then I32 else nullable(struct_of(record, m, records))
+		if WORD_LAYOUTS.has(name) then WORD_LAYOUTS[name] else if name == TEXT_TYPE then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == MAP_TYPE then nullable(map_base(m)) else if name == ENUM_TYPE then enum_layout(m) else if record == ø then ø else if plain_enums(m) and cases_of(record!).all(case => case_fields(case) is empty) then I32 else nullable(struct_of(record, m, records))
 	}
 	_ => {
 		index = list_index(type_name, m, records) ?? function_value_index(type_name, m, records) ?? signature_value_index(type_name, m, records) ?? map_index(type_name, m, records)
@@ -96,7 +96,7 @@ optional_layout(type: Node, m: WasmModule, records: Records) as list<int>? := {
 	held = known_layout(base, m, records)
 	if held in PLAIN_VALUES then nullable(box_index(m, text(base))) else held
 }
-PLAIN_VALUES = [I32, I64, F64]
+PLAIN_VALUES = [I32, I64, F32, F64]
 # The box of a plain value of a type, `int`: a struct of the value, one type for each type word, so a value in an `any`
 # is told apart by its box at run time
 box_index(m: WasmModule, word: text) as int := plain_typed(m, word, layout => struct_type([field_type(layout, IMMUTABLE)]))
@@ -125,7 +125,6 @@ function_value_index(type: Node, m: WasmModule, records: Records) as int? := {
 # its captures first as an anyref, then its parameters, giving its result.
 VALUE_FUNCTION_AT = 0
 VALUE_CAPTURES_AT = 1
-EMPTY_TYPE_WORD = "ø"
 signature_value_index(type: Node, m: WasmModule, records: Records) as int? := {
 	parts = function_parts(type)
 	if parts == ø then ø else signature_struct(parts, m, records)
@@ -135,7 +134,7 @@ signature_struct(parts: FunctionType, m: WasmModule, records: Records) as int :=
 # the function a value of a signature refers to: what it captures, then the signature's parameters
 signature_function_index(parts: FunctionType, m: WasmModule, records: Records) as int := added_type(m, function_type([ANYREF] + signature_parameters(parts, m, records), signature_results(parts, m, records)))
 signature_parameters(parts: FunctionType, m: WasmModule, records: Records) as list<list<int>> := parts.parameters.map(parameter => known_layout(parameter, m, records))
-signature_results(parts: FunctionType, m: WasmModule, records: Records) as list<list<int>> := if text(parts.result) == EMPTY_TYPE_WORD then [] else [known_layout(parts.result, m, records)]
+signature_results(parts: FunctionType, m: WasmModule, records: Records) as list<list<int>> := if text(parts.result) == EMPTY_TYPE then [] else [known_layout(parts.result, m, records)]
 # a type's layout, refused when the emitter has none for it yet
 known_layout(type: Node, m: WasmModule, records: Records, at: Node? = ø) as list<int> := layout_of(type, m, records, at) ?? no_layout(type, at ?? type)
 # the refusal of a type the emitter cannot lay out yet, at the code that has it
@@ -183,9 +182,9 @@ class_tag(record: Record) as int := text(record_declared(record)).bytes.fold(0, 
 # the GC type every enum's extends: its case's tag, which the instructions of `tagged` read. In the memory (a native
 # build) a case of no fields is its tag alone, an i32, as a class's instance is its address
 enum_base(m: WasmModule) as int := added_type(m, open_type([], struct_type([TAG_FIELD])))
-enum_layout(m: WasmModule) as list<int> := memory_layout(m, ENUM_WORD) ?? nullable(enum_base(m))
+enum_layout(m: WasmModule) as list<int> := memory_layout(m, ENUM_TYPE) ?? nullable(enum_base(m))
 # whether an enum's case of no fields is its tag alone
-plain_enums(m: WasmModule) as bool := memory_layout(m, ENUM_WORD) != ø
+plain_enums(m: WasmModule) as bool := memory_layout(m, ENUM_TYPE) != ø
 tagged(m: WasmModule) as list<int> := if plain_enums(m) then [] else instruction(STRUCT_GET, [enum_base(m), 0])
 # the field `at` of a case's own fields, after its record's, of the value on the stack cast to the case's struct
 case_field_read(cast: int, record: Record, at: int) as list<int> := heap_instruction(REF_CAST_NULL, cast) + instruction(STRUCT_GET, [cast, at + #fields_of(record)])
