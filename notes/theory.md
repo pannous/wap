@@ -178,8 +178,9 @@ case of a block of one type with two cases without fields, in `Type`; `Equal` as
 the type `nat`, and where a rule asks for a case, 0 is the first case and n + 1 the second applied to the number n.
 
 **`shortcut(kind, function, theorems…)`**, one per shortcut, in the order of this table. `N` is the number type, `Z`
-and `S` its cases, `yes` and `no` the truth values. The kernel builds each statement as written here, for all `m`
-and `n` of `N`, the `==` being `Equal[1]` at `N` or at the truth values' type:
+and `S` its cases, `yes` and `no` the truth values. The kernel builds each statement as written here, the `==`
+being `Equal[1]` at `N` or at the truth values' type. A statement binds only the variables it names, `m` before `n`,
+each of `N`: `f(m, Z) == m` is `(m: N) -> …`, and `f(Z, Z) == yes` has no binder:
 
 | statement | function | the theorems, in order |
 |---|---|---|
@@ -193,7 +194,10 @@ and `n` of `N`, the `==` being `Equal[1]` at `N` or at the truth values' type:
 A theorem licenses its shortcut when it is a declared theorem whose type is the built statement (`same`, so binder
 names aside) and neither it nor the function rests on an axiom (`axioms_of` is empty for both). A shortcut fires
 only on its bound constant, without levels, applied to two numbers, and gives what the arithmetic of numbers
-without a bound gives: a number, or a truth value.
+without a bound gives: a number, or a truth value. A statement the order forbids is refused: multiply needs add
+bound, divide needs add, multiply and at most. The rules these statements refuse by are `numbers` (a shape that
+is not the wanted one, a second numbers statement) and `shortcut` (a function's type, a theorem's statement, an
+axiom rested on, a function bound already or needed and not bound).
 
 ## The door
 
