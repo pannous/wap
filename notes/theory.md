@@ -20,6 +20,7 @@ all of them keep. The plan says what the rules are; this note says where they li
 | `inductive.wap` | an inductive block checked | 7, checks 1 to 5 | theory-inductive-checks |
 | `nested.wap` | a block nested in another inductive type made plain | 7, nested types | theory-inductive-checks |
 | `recursors.wap` | recursors made, their computation rules | 7, checks 6 and 7 | theory-recursors |
+| `quotients.wap` | the statement `quotients(Equal)`: the quotient and its ways out | 6.4, 6.6 | theory-quotients |
 
 The files use each other freely: computing, equality and typing call one another.
 
@@ -106,9 +107,17 @@ The files use each other freely: computing, equality and typing call one another
   closed rule per case for iota. The types nested.wap added for containers are turned back into the containers, in
   every type, rule and case name.
 
+**quotients.wap**
+- `quotients_declared(e, equality)`: the statement `quotients(Equal)`. Equality must have the shape of `Equal`; the
+  four constants `quotient`, `quotient.of`, `quotient.lift` and `quotient.induct` are checked by typing and added,
+  resting on nothing. Computing (compute.wap) takes lift or induct applied to `quotient.of(T, r, a)` to the function
+  applied to `a`. That joined values are equal is the prelude's axiom `quotient_sound` (prelude/quotient.wap), from
+  which `function_extensionality` is proved.
+
 **explicit.wap, show.wap, check.wap**
-- `statement_read(e, statement)`: one statement of an explicit program as a `Statement`: `Declares(declaration)` or
-  `AsksType(of)`.
+- `statement_read(e, statement)`: one statement of an explicit program as a `Statement`: `Declares(declaration)`,
+  `AsksType(of)` or `Quotients(equality)`. A block `{…}` is read as its bindings and the term they lead to, so a
+  value written on the lines below its head reads as that one term.
 - `shown(t)`: a term in wap notation; reading that text gives the same term again. A binder whose variable the rest
   does not use is shown without its name, `a -> b`; arrows nest to the right without brackets, and a function type
   as a domain has them, `(a -> b) -> c`.
@@ -159,6 +168,7 @@ of the language, and each is read as its term directly.
 | `opaque name(x: A): B := value` | an opaque constant |
 | `enum Name(p: A): I -> Sort(u) { case(x: B): Name(p, i) }` | a type of an inductive block: what stands after the name are the parameters, the same in every case; the result type holds the indices; each case writes its fields and its result in full. Inside its own block a type stands without levels. Enum statements that stand next to each other and name one another are one block |
 | `Name.recursor[v, u](parameters, motive, one minor premise per case, indices, major premise)` | the recursor: the motive's level first, where the type may compute into any universe; a minor premise takes the case's fields and then the induction hypothesis of each field of the type itself |
+| `projection(Pair, 1, p)` | `Projection`: the first field of p, a value of the structure Pair (K4) |
 | `type of e` | the question for e's type |
 
 A level name in a declaration that nothing binds is a level parameter of it, in the order of first appearance. A
