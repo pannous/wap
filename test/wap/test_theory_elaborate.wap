@@ -55,6 +55,25 @@ check("a case has one arm", refused_by(elaborated("match_twice", NAT + "predeces
 check("a match has one arm for the cases left out", refused_by(elaborated("match_other_twice", NAT + "predecessor(n: nat): nat := match n { zero => nat.zero; other => nat.zero; _ => nat.zero }")), "refused by pattern")
 check("a parameter that stays meets a result that is a function", elaborated("shift", NAT + EQUAL + "shift(n: nat, m: nat): nat -> nat := match n { zero => x => m; successor(k) => x => shift(k, m)(x) }\nr: Equal(shift(${ONE}, ${ONE})(nat.zero), ${ONE}) := Equal.refl"), "")
 
+# traits and their instances. Source: wiki/trait.md "Conforming", notes/elaborate.md "Operators, traits and conditions (E3)"
+BOOL := "enum bool { no, yes }\n"
+ORDERABLE := "trait Orderable { less(a: T, b: T): bool }\n"
+COLOR := "enum color { red, green }\nless(a: color, b: color): bool := match a { red => match b { red => bool.no; green => bool.yes }; green => bool.no }\n"
+SORT := "insert(x: T, l: list<T>): list<T> := match l { empty => list.item(x, list.empty); item(first, rest) => match less(x, first) { yes => list.item(x, list.item(first, rest)); no => list.item(first, insert(x, rest)) } }\nsort(l: list<T>): list<T> := match l { empty => list.empty; item(first, rest) => insert(first, sort(rest)) }\n"
+SORTING := NAT + EQUAL + LIST + BOOL + ORDERABLE + COLOR + SORT
+COLORS := "list.item(color.green, list.item(color.red, list.empty))"
+check("a trait's operation at a letter's type is the definition's to be given", elaborated("sort_type", SORTING + "type of sort(${COLORS})"), "list(color)")
+check("a type's own definitions are its instance, and sort computes with them", elaborated("sort_computes", SORTING + "r: Equal(sort(${COLORS}), list.item(color.red, list.item(color.green, list.empty))) := Equal.refl"), "")
+check("a type without the trait's operation is refused naming the trait", refused_by(elaborated("sort_refused", SORTING + "enum shade { dark }\ntype of sort(list.item(shade.dark, list.empty))")), "refused by trait")
+
+# choices by a condition. Source: notes/elaborate.md "Operators, traits and conditions (E3)"
+LOGIC := "enum True: Prop { intro }\nenum False: Prop { }\nNot(a: Prop): Prop := a -> False\nenum Decidable(p: Prop): Type { is_false(h: Not(p)): Decidable(p), is_true(h: p): Decidable(p) }\ntrue_decided: Decidable(True) := Decidable.is_true(True.intro)\n"
+CHOOSING := NAT + EQUAL + BOOL + LOGIC
+check("a choice by a bool computes", elaborated("if_bool", CHOOSING + "flip(b: bool): bool := if b then bool.no else bool.yes\nr: Equal(flip(bool.yes), bool.no) := Equal.refl"), "")
+check("a choice by a proposition matches its decision", elaborated("if_decided", CHOOSING + "pick(n: nat): bool := if True then bool.yes else bool.no\nr: Equal(pick(nat.zero), bool.yes) := Equal.refl"), "")
+check("a decision is built from the decisions of its parts", elaborated("if_built", CHOOSING + "axiom not_decided: (p: Prop) -> (d: Decidable(p)) -> Decidable(Not(p))\npick(n: nat): bool := if Not(True) then bool.yes else bool.no\ntype of pick(nat.zero)"), "bool")
+check("a choice by a proposition nothing decides is refused", refused_by(elaborated("if_undecidable", CHOOSING + "pick(n: nat): bool := if False then bool.yes else bool.no")), "refused by undecidable condition")
+
 # recursion on any value below one matched, once the products are bound. Source: wiki/enum.md, notes/elaborate.md
 # "Match and recursion (E2)"
 PRODUCTS := "enum Pair(A: Sort(u), B: Sort(v)): Sort(max(1, max(u, v))) { intro(first: A, second: B) }\nenum Unit: Sort(u) { unit }\nproducts(Pair, Unit)\n"
@@ -66,6 +85,10 @@ check("recursion on a list's rest's rest", elaborated("pairs", PRODUCTS + NAT + 
 check("the products are a pair type and a unit type", refused_by(elaborated("products_shape", NAT + "enum Unit: Sort(u) { unit }\nproducts(nat, Unit)")), "refused by products")
 check("a call on no value below one matched is refused through the course too", refused_by(elaborated("course_loops", PRODUCTS + NAT + "f(n: nat): nat := match n { zero => nat.zero; successor(k) => f(nat.successor(n)) }")), "refused by recursion")
 check("a proof by induction with the products bound", elaborated("course_even", PRODUCTS + NAT + EVEN + DOUBLE + "law double_even(n: nat): Even(double(n)) := match n { zero => Even.zero; successor(k) => Even.step(double_even(k)) }\ntype of double_even(nat.zero)"), "Even(double(nat.zero))")
+check("a proposition two declarations decide is refused naming both", refusals(elaborated("if_two_decisions", CHOOSING + "again_decided: Decidable(True) := Decidable.is_true(True.intro)\npick(n: nat): bool := if True then bool.yes else bool.no")), ["refused by overload: True is decided by true_decided and again_decided: keep one"])
+check("an operation two traits have is refused naming both", refusals(elaborated("two_traits", NAT + EQUAL + LIST + BOOL + ORDERABLE + "trait Ranked { less(a: T, b: T): bool }\n" + COLOR + SORT)), ["refused by trait: less is an operation of Orderable and Ranked: keep one"])
+check("an operation two traits have is the declaration of its name that fits", elaborated("two_traits_fit", NAT + EQUAL + LIST + BOOL + ORDERABLE + "trait Ranked { less(a: T, b: T): bool }\n" + COLOR + "type of less(color.red, color.green)"), "bool")
+check("a condition is decided by the prelude's Decidable where the program declares none, by its own where it does", elaborated("if_prelude_decided", "pick(n: nat): bool := if True then bool.yes else bool.no\nlaw picked: Equal(bool, pick(0), bool.yes) := Equal.refl(bool, bool.yes)"), "")
 
 # the prelude, loaded before the program, and a program's declaration hiding the prelude's of the same name from there
 # on. Source: notes/elaborate.md "The door" and "Names"
@@ -77,3 +100,4 @@ check("the prelude's declaration stands before the program's", elaborated("hidin
 check("a prelude theorem keeps the name the program hid", elaborated("hiding_theorem", SECOND + "law kept: Equal(nat, 3, 3) := add_zero(3)"), "")
 check("the elaborator's door without the wap tree says how to give it", said([script.wap, doors_built[ELABORATOR_DOOR], written("no_tree", "type of 1")], folder: script.tree).contains(TREE_OPTION), yes)
 check("the wap tree may stand after the program", said([script.wap, doors_built[ELABORATOR_DOOR], written("tree_after", "type of divide(7, 2)"), TREE_OPTION, script.tree], folder: script.tree), "nat")
+check("a declaration at the levels written after its name", elaborated("levels_written", "law kept: Equal[1](bool, bool.yes, bool.yes) := Equal.refl[1](bool, bool.yes)"), "")
