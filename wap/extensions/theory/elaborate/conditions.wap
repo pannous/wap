@@ -12,6 +12,7 @@ use "state.wap"
 use "unify.wap"
 use "read.wap"
 use "match.wap"
+use "recursion.wap"
 use "instances.wap"
 use "lifted.wap"
 
@@ -25,10 +26,55 @@ TRUTHS := [YES, NO]
 UNDECIDABLE := "undecidable condition"
 # how many decisions deep the search builds a decision from the decisions of its parts
 SEARCH_DEPTH := 8
+# how many values deep a choice inside a recursion is taken apart by the cases of what its condition waits on
+CASE_DEPTH := 8
 
 # A choice: a match on the condition's bool, or on the decision of its proposition
 if_elaborated(x: Elaborating, condition: Node, then_part: Node, else_part: Node, wanted: Term?): Term := {
 	tested = filled(x.el, elaborated(x, condition, ø))
+	if x.recursing is not ø { return choice_by_cases(x, tested, condition, then_part, else_part, wanted) ?? truth_matched(x, tested, then_part, else_part, wanted) }
+	truth_matched(x, tested, then_part, else_part, wanted)
+}
+# Inside a recursion a choice is read by the cases of what its condition waits on (wiki/Footguns.md "Deciding
+# termination"): where the arms around decide the condition, only the part chosen; where it waits on a parameter or a
+# part of one, a match on that value with the choice again in every arm. So `if equals(n, 0) then … else …
+# f(subtract(n, 1))` reads the call where n is a successor, on the value below it, and a choice by `n <= 1` takes n
+# apart twice
+choice_by_cases(x: Elaborating, tested: Term, condition: Node, then_part: Node, else_part: Node, wanted: Term?): Term? := {
+	decided = computed(x.el.c, known_in(x, tested))
+	if is_case(decided, TRUTHS#1) { return elaborated(x, then_part, wanted) }
+	if is_case(decided, TRUTHS#2) { return elaborated(x, else_part, wanted) }
+	if x.cases_deep >= CASE_DEPTH { return ø }
+	subject = waiting_on(x.el.c, decided) ?? return ø
+	if not within_parameter(x, subject) { return ø }
+	x.cases_deep += 1
+	taken_apart = subject_matched(x, subject, [ArmWritten(symbol(ANY_CASE#1), If(condition, then_part, else_part))], wanted)
+	x.cases_deep -= 1
+	taken_apart
+}
+# whether a variable is a parameter of the recursion being read or a part the arms around took one apart into
+within_parameter(x: Elaborating, variable: Term): bool := x.recursing!.parameters.any(parameter => variable_id(variable) in free_variables(known_in(x, filled(x.el, parameter))))
+# whether a term is a case of this name
+is_case(t: Term, case: text): bool := match head(t).shape {
+	Constant(name, levels) => names_case(symbol(case), name)
+	_ => no
+}
+# The variable a term's computing waits on: the value its recursor takes apart, or what that value waits on; ø for
+# a term that waits on none
+waiting_on(c: Checker, t: Term): Term? := {
+	stuck = computed(c, t)
+	match head(stuck).shape {
+		Free(id) => if arguments(stuck) is empty then stuck else ø
+		Constant(name, levels) => {
+			facts = recursor_facts(c.environment, name) ?? return ø
+			taken = before_major(facts)
+			if #arguments(stuck) <= taken then ø else waiting_on(c, arguments(stuck)#(taken + 1))
+		}
+		_ => ø
+	}
+}
+# a choice on a bool as the match of its cases, on a proposition as the match of its decision
+truth_matched(x: Elaborating, tested: Term, then_part: Node, else_part: Node, wanted: Term?): Term := {
 	if not same(computed(x.el.c, filled(x.el, type_of(x.el.c, tested))), PROP) { return subject_matched(x, tested, chosen(TRUTHS, [], then_part, else_part), wanted) }
 	subject_matched(x, decision_of(x, tested), chosen([HOLDS, FAILS], [symbol(HOLE_WORD)], then_part, else_part), wanted)
 }
