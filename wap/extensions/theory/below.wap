@@ -45,23 +45,29 @@ unit_shaped(facts: InductiveFacts, unit: text): bool := {
 	block_shaped(facts, 1, 0, universe(u), [constant(unit, [u])])
 }
 
-# The name of a type's course, declared with its below the first time it is asked for; ø where the products are not
-# bound, or the type is no enum of one type taken apart into any universe, or a field holds a function into it
-course_of(e: Environment, type: text): text? := {
-	products = e.products ?? return ø
+# How a match on a type's values reaches the values below them: through its course, declared with its below the
+# first time it is asked for, or without one, and why: the products are not bound, the type is no enum of one type
+# taken apart into any universe, or a field holds a function into it. A `below` or `course` the program declared
+# itself is refused as a name declared twice
+enum Way { Through(course: text), Without(reason: text) }
+course_of(e: Environment, type: text): Way := {
+	products = e.products ?? return Without("no products are bound: `products(Pair, Unit)` binds them")
 	name = type + COURSE
-	if declaration(e, name) is not ø { return name }
-	facts = match (declaration(e, type) ?? return ø).kind {
+	if name in e.courses { return Through(name) }
+	facts = match (declaration(e, type) ?? return Without("${type} is no enum")).kind {
 		Inductive(facts) => facts
-		_ => return ø
+		_ => return Without("${type} is no enum")
 	}
-	if not facts.any_motive or #facts.block.types != 1 { return ø }
+	if not facts.any_motive { return Without("${type} is taken apart only into Prop") }
+	if #facts.block.types != 1 { return Without("${type} is one of several enums that name each other") }
 	m = making(e, facts)
-	if m.cases#1.any(case => case.inductions.any(induction => induction.binders is not empty)) { return ø }
+	if m.cases#1.any(case => case.inductions.any(induction => induction.binders is not empty)) { return Without("a field of ${type} is a function into it") }
 	b = Built(type, m, products, constant(type + BELOW, m.levels.map(level => Parameter(level))), Parameter(MOTIVE_LEVEL), Max(Successor(Zero), Parameter(MOTIVE_LEVEL)))
-	declared(e, below_made(b))
-	declared(e, course_made(b))
-	name
+	major = major_entered(b)
+	declared(e, below_made(b, major))
+	declared(e, course_made(b, major))
+	e.courses += [name]
+	Through(name)
 }
 
 # What both are built of: the type, the recursor's binders, the products, below at its own levels, the level of the motive's
@@ -76,9 +82,9 @@ motive_at(b: Built, indices: list<Term>, value: Term): Term := motive_applied(b.
 course_value_type(b: Built, indices: list<Term>, value: Term): Term := pair_type(b, b.values, b.pairs, motive_at(b, indices, value), below_at(b, indices, value))
 below_at(b: Built, indices: list<Term>, value: Term): Term := apply_all(b.below, variables(b.m.parameters) + [the_motive(b)] + indices + [value])
 # the type's recursor into the motive given, applied to the parameters, the minor premises, the indices and the value
-recursor_into(b: Built, level: Level, motive: Term, minors: list<Term>, indices: list<Local>, value: Local): Term := {
+recursor_into(b: Built, level: Level, motive: Term, minors: list<Term>, major: Major): Term := {
 	levels = [level] + b.m.facts.block.levels.map(name => Parameter(name))
-	apply_all(constant(recursor_name(b.type), levels), variables(b.m.parameters) + [motive] + minors + variables(indices) + [value.variable])
+	apply_all(constant(recursor_name(b.type), levels), variables(b.m.parameters) + [motive] + minors + variables(major_binders(major)))
 }
 # the binders a definition takes after the parameters and the motive: the indices and the value
 class Major { indices: list<Local>; value: Local }
@@ -86,11 +92,17 @@ major_entered(b: Built): Major := {
 	indices = indices_entered(b.m, 1)
 	Major(indices, entered(b.m.c, MAJOR, type_applied(b.m, 1, variables(indices))))
 }
+major_binders(major: Major): list<Local> := major.indices + [major.value]
+# the definition of a type's below or course: a function of the parameters, the motive, what it takes next, the
+# indices and the value
+made_of_binders(b: Built, suffix: text, taken: list<Local>, major: Major, type: Term, value: Term): Declaration := {
+	binders = b.m.parameters + [b.m.motives#1] + taken + major_binders(major)
+	Declaration(b.type + suffix, b.m.levels, pis(binders, type), Defined(lambdas(binders, value)))
+}
 
 # `below(parameters, motive, indices, t)`: the recursor into types, each case's minor premise the pairs of its
 # recursive fields' motive and their below, its hypothesis
-below_made(b: Built): Declaration := {
-	major = major_entered(b)
+below_made(b: Built, major: Major): Declaration := {
 	sort = universe(b.pairs)
 	minors = b.m.cases#1.map(case => {
 		hypotheses = case.inductions.map(induction => entered(b.m.c, INDUCTION, sort))
@@ -100,18 +112,17 @@ below_made(b: Built): Declaration := {
 		})
 		lambdas(case.fields + hypotheses, chain)
 	})
-	value = recursor_into(b, Successor(b.pairs), lambdas(major.indices + [major.value], sort), minors, major.indices, major.value)
-	binders = b.m.parameters + [b.m.motives#1] + major.indices + [major.value]
-	Declaration(b.type + BELOW, b.m.levels, pis(binders, sort), Defined(lambdas(binders, value)))
+	value = recursor_into(b, Successor(b.pairs), lambdas(major_binders(major), sort), minors, major)
+	made_of_binders(b, BELOW, [], major, sort, value)
 }
 
 # `course(parameters, motive, step, indices, t)`: the first of the recursor's pair of the motive's value and the
 # values below, each case's minor premise the step at the case given the values below it, paired with them
-course_made(b: Built): Declaration := {
-	inside = major_entered(b)
-	values = entered(b.m.c, BELOW_VALUE, below_at(b, variables(inside.indices), inside.value.variable))
-	step = entered(b.m.c, STEP, pis(inside.indices + [inside.value, values], motive_at(b, variables(inside.indices), inside.value.variable)))
-	major = major_entered(b)
+course_made(b: Built, major: Major): Declaration := {
+	indices = variables(major.indices)
+	at = major.value.variable
+	values = entered(b.m.c, BELOW_VALUE, below_at(b, indices, at))
+	step = entered(b.m.c, STEP, pis(major_binders(major) + [values], motive_at(b, indices, at)))
 	minors = b.m.cases#1.map(case => {
 		hypotheses = case.inductions.map(induction => entered(b.m.c, INDUCTION, course_value_type(b, induction.indices, induction.field)))
 		below_value = (1 to #hypotheses).list().reverse().fold(Chain(constant(b.products.one, [b.pairs]), constant(b.products.unit, [b.pairs])), (rest, at) => {
@@ -123,9 +134,8 @@ course_made(b: Built): Declaration := {
 		pair = apply_all(constant(b.products.intro, [b.values, b.pairs]), [motive_at(b, case.indices, case.value), below_at(b, case.indices, case.value), made, below_value.value])
 		lambdas(case.fields + hypotheses, pair)
 	})
-	value = projection(b.products.pair, 1, recursor_into(b, b.pairs, lambdas(major.indices + [major.value], course_value_type(b, variables(major.indices), major.value.variable)), minors, major.indices, major.value))
-	binders = b.m.parameters + [b.m.motives#1, step] + major.indices + [major.value]
-	Declaration(b.type + COURSE, b.m.levels, pis(binders, motive_at(b, variables(major.indices), major.value.variable)), Defined(lambdas(binders, value)))
+	value = projection(b.products.pair, 1, recursor_into(b, b.pairs, lambdas(major_binders(major), course_value_type(b, indices, at)), minors, major))
+	made_of_binders(b, COURSE, [step], major, motive_at(b, indices, at), value)
 }
 # the values below a case's value, and their type
 class Chain { value: Term; type: Term }
