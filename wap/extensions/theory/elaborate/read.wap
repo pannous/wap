@@ -153,16 +153,18 @@ declared_given(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?)
 	d = declaration(x.theory.environment, name)!
 	if wanted is not ø and d.kind is Recursor { return recursor_given(x, name, arguments, wanted!) }
 	levels = d.levels.map(level => level_hole(x.el))
-	function = constant(name, levels)
-	type = with_levels(d.type, d.levels, levels)
-	for at in 1 to (x.theory.found.get(name) ?? 0) {
-		parts = pi_parts(x, type) ?? refused(NOT_A_FUNCTION, "${name} has fewer binders than it finds")
-		found = hole(x.el, "the ${parts.binder} of ${name}", parts.domain)
-		instance_noted(x, found)
-		function = apply(function, found)
-		type = instantiated(parts.body, found)
-	}
-	given_arguments(x, function, type, arguments, wanted)
+	given = holes_given(x, name, constant(name, levels), with_levels(d.type, d.levels, levels), x.theory.found.get(name) ?? 0)
+	given_arguments(x, given.function, given.type, arguments, wanted)
+}
+# A function given a hole for each of its first `count` binders, for all of them where count is ø: its found binders,
+# a trait at its types, a decision's parts. A hole whose type is a trait is kept for the search
+class Given { function: Term; type: Term }
+holes_given(x: Elaborating, name: text, function: Term, type: Term, count: int? = ø): Given := {
+	if count == 0 { return Given(function, type) }
+	parts = pi_parts(x, type) ?? return (if count is ø then Given(function, type) else refused(NOT_A_FUNCTION, "${name} has fewer binders than it finds"))
+	found = hole(x.el, "the ${parts.binder} of ${name}", parts.domain)
+	instance_noted(x, found)
+	holes_given(x, name, apply(function, found), instantiated(parts.body, found), if count is ø then ø else count! - 1)
 }
 
 # A function of a type given its arguments, each read against its domain. When the result does not depend on the
@@ -270,16 +272,12 @@ level_written(x: Elaborating, n: Node): Level := {
 # a form the elaborator does not read
 unelaborated(n: Node) := refused(UNKNOWN_FORM, no_expression(n))
 no_expression(n: Node): text := "${text(n)} is no expression"
-# code in the kernel's forms: its spellings rewritten by the language's rules, then lowered by the language that knows
+# code in the kernel's forms: its spellings rewritten by the tree's rules, then lowered by the language that knows
 # their forms
-formed(p: Theory, language: Language, code: Node): Node := {
-	spellings = p.spellings ?? return lowered(language, code)
-	lowered(spellings!, rewritten_by(spellings!, spellings!.shape_rules, code).code)
-}
+formed(p: Theory, code: Node): Node := lowered(p.spellings!, rewritten_by(p.spellings!, p.spellings!.shape_rules, code).code)
 # a node read here in no way, in a spelling the language's rules give a form: that form read, else the refusal
 respelled(x: Elaborating, n: Node, wanted: Term?, rule: text, refusal: text): Term := {
-	spellings = x.theory.spellings ?? refused(rule, refusal)
-	shaped = rewritten_by(spellings!, spellings!.shape_rules, n)
+	shaped = rewritten_by(x.theory.spellings!, x.theory.spellings!.shape_rules, n)
 	if not shaped.fired { refused(rule, refusal) }
 	form_elaborated(x, shaped.code, wanted)
 }
