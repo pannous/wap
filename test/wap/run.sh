@@ -59,7 +59,8 @@ all_run() {
 [ "$1" = one_run ] && {
 	shift
 	output=$(outputs "$1")
-	one_run "$@" >"$output" 2>&1; status=$?
+	# in a subshell, as compile.sh exits when the compiler under test does not build
+	(one_run "$@") >"$output" 2>&1; status=$?
 	[ $status = 0 ] || grep -q '^✗' "$output" || echo "✗ $(basename "$1") exited $status" >>"$output"
 	grep -q '^[✓✗⊘]' "$output" || echo "✗ $(basename "$1") printed no check" >>"$output"
 	exit
