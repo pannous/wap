@@ -26,6 +26,8 @@ all of them keep. The plan says what the rules are; this note says where they li
 | `prelude/quotient.wap` | the quotients bound, their axiom, function extensionality proved | K5 | theory-quotients |
 | `prelude/numbers.wap` | nat with its shortcuts and the theorems that license them, the comparisons, int | L2 | theory-prelude-numbers |
 | `elaborate/` | the elaborator, which is not trusted: notes/elaborate.md | 8 | theory-arguments-found and after |
+| `export.wap` | what the environment accepted written as an export, one record a line | K7 | theory-second-opinion |
+| `second/` | the second checker: an export checked again by rules of its own | K7 | theory-second-opinion |
 
 The files use each other freely: computing, equality and typing call one another.
 
@@ -265,6 +267,23 @@ axiom rested on, a function bound already or needed and not bound).
 when it is accepted. `type of e` prints the type. The first refusal is printed as its one line, `refused by <rule>:
 <what was found>`, and ends the run with a failing exit code. The output is the test: test/wap/test_theory.wap gives
 a program and compares what the door says. A line for a refusal compares the part before the colon only.
+
+## A second opinion
+
+A program either door accepts can be written out: `export("file")` writes what the environment accepted, in order
+and as it was given (a declaration as stated, a block as written, a binding statement with its names). The format is
+Lean 4's export format with wap's own names, one JSON record a line, described at the top of `export.wap`. A block's
+cases, recursors and the quotients' constants are never written: the reader makes them again.
+
+`second/` checks an export again, `wap second/check.wap <export> [<name>…]`, silent when it accepts and printing the
+first refusal otherwise; each name given prints the axioms it rests on, as `axioms of` does. It shares no function
+with the kernel and reads only the export, so a mistake in one is caught by the other unless both make it. It is kept
+as small as it can be: no elaboration, no caches, a term compared by its tree. Its files: `expressions.wap` (levels
+and terms), `read.wap` (the export read, a record out of order or of no known kind refused), `judge.wap` (typing,
+computing, equality, a declaration admitted), `blocks.wap` (a block checked, its recursors and their computation,
+structures), `bindings.wap` (numbers, shortcuts and quotients). test/wap/test_theory_second.wap gives it the preludes
+and mutual, indexed and level-polymorphic blocks with a projection (nested blocks and the divide
+shortcut are left out), compares its axioms with the door's, and hands it forged exports that it must refuse.
 
 ## Costs
 
