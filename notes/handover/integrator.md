@@ -1,31 +1,27 @@
-# Integrator handover (2026-11-23, ~01:45)
+# Integrator handover (2026-11-24)
 
-## State
-- wap main 3d04e23 (+ the cloud suite commit b5e9cdb). Installed ~/dev/bin/wap: seed wap-seed-2026-11-23-09acdec9,
-  built from d78439a (library-embedded layout), lock d00b034. Checked by hand: version, hello from another folder,
-  console ↑/← in a pty, `xs: any = [5, 6, 7]; print xs`.
-- Size ceiling (test/wap/ratchet_census.sh) 123154; Mac full suite on 1b09da9: 871 ✓, 1 ✗.
-- The one known red: test_dynamic's last line, two anys holding "a" compared with == trap (card any-char-equality,
-  pinned by map-print).
+Landing worktree: /Volumes/Worktrees/wap-land (detached). Merges are main-first-parent: checkout origin/main, `git merge --no-ff <tip>`.
+Close cards and delete branches only after the push succeeded (`push && todo done …`); branch deletes by literal name.
+Size: `seed=$(dirname "$(readlink -f "$(command -v wap)")")/wap-seed/wap.wasm; mkdir -p data/size; wap "$seed" scripts/wap-size.warp data/size/s.wasm; wap data/size/s.wasm $(git ls-files 'wap/*.wap') | sed -n 's/^total\t//p'`
 
-## Open: new reds in the cloud full suite at 3d04e23
-- b5e9cdb: 829 ✓, 4 ✗; failed test_dynamic (known), test_c.sh, test_modules.sh. The Mac suite on 1b09da9 had
-  test_c and test_modules green, so the likely suspect is library-embedded (4d19514, merged 1b09da9) or
-  seed-library-path on Linux: a module links the library by its compiler's folder path. First job: read the cloud
-  failures and send them to the library-embedded owner (warp-wap-arch's successor); revert-first if it is the
-  install layout.
+## In flight (local in wap-land, not pushed)
+On fd03b599: op-spelled-once a504663f, c-callback-overwrite 45f83e5e, any-layout-missing 7d9261e0, ini-review-nits a42620dc,
+then SIZE_NODES 135201 -> 134830 (measured). hello + growth green. Careful checks (areas2.log: operators operator_page nodes
+types c native guarded config_formats modules; self.log: test_self) were running in background. If green (only the
+alias line red in test_modules): push, then `todo done` op-spelled-once / c-callback-overwrite / any-layout-missing, delete
+those branches and ini-review-nits.
 
-## Held / waiting
-- dispatch-rounds (warp-wap-lang, +10 nodes, card any-values): waits for the user's morning discussion.
-- compile-library-programs remote branch: kept, its owner still works on it.
-- No land/ queue, nothing merged-but-unpushed.
-
-## Rules
-- wap has no after-push: only scripts/refresh-seed.sh <tree> installs ~/dev/bin/wap; run one after every landing
-  the user should see, then push the lock commit it makes.
-- wap core/extension landings need a "discussed with the user" card note (user rule 11-22); pure shrinks need a
-  warp-reviewer OK note. The census also guards "functions typed alone ≤ 0".
-- Remote branch deletes are hook-blocked for the integrator: send merged names to the supervisor.
-
-## Leftovers in /Volumes/Worktrees/wap-land
-- Local branches held/batch-with-any-values, held/one-memory-batch: superseded test merges, safe to delete.
+## Queue (handed, not held)
+- module-alias-preload 903c3c53 (user OK on card; census line conflicts: remeasure). Fixes test_modules' alias red.
+- simplify-43 dc07aa2a (pure shrink, reviewer sound; census line conflicts: remeasure)
+- unclosed-text ebd95ed7 (user OK + wiki line pushed; +1 WAP_SUFFIX moved to driver.wap)
+- truthiness-absent 82e36688 (test variable rename, own commit)
+- library-port-pga 898998c3 (lib only; check glyph operators are plain definitions, no rewrite rules)
+- format-fidelity 3d477367 (types/texts.wap escaped \r + one test_reader line)
+- wap-headless 9660c92, fn-type-empty-result 08b4db9e (supervisor's list; fn-type-empty-result needs wap-reviewer sound on its +1: check the card)
+## Held for the user (wap-interviewer queue)
+exact-numbers-literals 2310158e (core +6), prelude-modules-hint 25846492 (+4 core/extensions), any-truth-crash e64c0d15,
+native-cache-folders 91ef2aba, fix-previous-line 19b558da (console extension).
+## Owed
+Full run.sh on main's tip after the queue, counts to wap-supervisor (13 known reds outside _wanted; test_conditions_truthiness
+fixed by truthiness-absent, test_modules by module-alias-preload). Seed refresh before any try line.
