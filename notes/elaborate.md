@@ -3,9 +3,9 @@
 The elaborator of notes/coc-plan.md (section 8) turns a program as it is written into complete terms and hands
 every declaration to the kernel (notes/theory.md). It lies in `wap/extensions/theory/elaborate/` until the switch
 and is reached through a door of its own, `elaborate/door.wap`. It is not trusted: whatever it builds, the kernel's
-`declared` and `inductive_declared` judge. This note is the contract for its first four milestones: E1 (arguments
-found), E2 (enums, classes, match, recursion), E3 (operators, traits, conditions) and E4 (subtypes and
-obligations).
+`declared` and `inductive_declared` judge. This note is the contract for its milestones: E1 (arguments
+found), E2 (enums, classes, match, recursion), E3 (operators, traits, conditions), E4 (subtypes and
+obligations) and E8 (conditions lifted).
 
 ## What it reads and writes
 
@@ -209,6 +209,28 @@ adds is how a candidate fits and where its instances come from.
 - `x as S` is going down with step 4 always allowed. `x is S` is the decision of the condition at x, a `bool`.
 - A provers' search is counted in steps like the kernel's work, so what is proved does not depend on the machine.
 
+## Conditions lifted (E8)
+
+A type may hold a list where a condition holds of itself, `class Quad { parts: vector(Quad, 4) }`, though the kernel
+refuses a type of the block under a subset's condition (strict positivity): the elaborator lifts the condition out.
+- **Which fields.** A case's field whose type computes to a `Subset` whose carrier holds a type of the block. Only
+  the field's own type: a list of such subsets stays refused by strict positivity.
+- **The plain block.** Each such field gets its carrier (`list(Quad)`); the block is declared plain, each type under
+  a marked name no program writes (`Quad'plain`), its cases under their written names (`Quad.Quad`), nesting under
+  containers as always. The condition is kept as a function of the block's parameters, the case's fields and the
+  field's value, so it may name an earlier field (`class Sized { n: nat; items: vector(Sized, n) }`).
+- **The bool.** Each type of the block gets `Quad'valid`, by the plain block's recursor into `bool`: a case's minor
+  premise is yes where the decision of each of its lifted conditions (E3's search, else `undecidable condition`) and
+  each induction hypothesis are, `both` folding them; so the conditions of the values inside a value count too.
+- **The program's type.** The written name is the subset of the plain type where its bool is yes:
+  `Quad := Subset(Quad'plain, value => Equal(bool, Quad'valid(value), bool.yes))`, its decision the prelude's
+  `yes_decided`. The cases make plain values; where the program's type is wanted a value goes down to it as to any
+  subset (E4): computed to no, a Quad given three parts is refused by `condition`.
+- A name is shown without its mark and the word after it: `Quad'plain` and `Quad'valid` print as `Quad`.
+- Open: a list of the program's type where a list of the plain type is wanted (a conversion lifted through a
+  container, section 8 of the plan) is refused; a match on a value of the program's type takes its `value` first.
+  Sets and maps of a type itself (quotients, their plain carriers) follow L5.
+
 ## Files
 
 | file | holds | milestone |
@@ -225,6 +247,7 @@ adds is how a candidate fits and where its instances come from.
 | `elaborate/conditions.wap` | conditions, their decisions, the facts a branch knows | E3 |
 | `elaborate/convert.wap` | the conversions, the path between two types, lifting through containers | E4 |
 | `elaborate/obligations.wap` | going down: prove or check | E4 |
+| `elaborate/lifted.wap` | conditions lifted out of recursive types: the plain block, its bool, the subset | E8 |
 
 ## Rules every file keeps
 
