@@ -51,7 +51,10 @@ the team, crash resume), notes/roles.md (what the other roles do).
   warp-<old> warp-<new>` plus `~/dev/bin/rename-when-idle warp-<new>`; tell the Integrator and Interviewer.
 - Idle worker: give it its area's cards from `todo pick` (the user's "(user)" drafts first, easy before big).
 - Red tests are the work list (user 2026-11-20): every red test line is already its own to-do and needs no card. Instead
-  of picking cards, pick red tests and hand them out to workers. Not yet: the user's own priorities (now: wap's native binary) come before red tests.
+  of picking cards, pick red tests and hand them out to workers. Not yet: the user's own priorities (now: dependent types and the proof system, notes/coc-plan.md on branch coc-plan) come before red tests.
+- Focus (user 2026-11-24): regular work is paused; the whole fleet implements the plan of dependent types and the basic
+  proof system (card coc-plan, its milestones). The Supervisor coordinates it (cards of topic
+  dependent-types, owners, briefs); wap-coc-plan is its design authority and builds the K1 heart; finished branches still land.
   At least one worker always works through the open cards.
 - wap/core and wap/kernel are semi-frozen (user 2026-11-20): every change there goes to wap-interviewer first; new
   features go into wap/extensions/. The first case is the native binary, built by wap as an extension.
