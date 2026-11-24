@@ -38,7 +38,8 @@ show the user: the case against and why no library or hook does it (ask the bran
   so messages say "line 1:5", and `use "x.wap"` resolves against the current folder. Driver and console pass code
   through stdin. Core: reader +2, compiler.wap +2; extensions (driver, console) about +8. Option: a `--code` option
   (same core plus an option). Leave as is: the temp path stays in messages. Supervisor recommends stdin.
-  wap-reviewer verdict: asked 2026-11-24.
+  wap-reviewer: sound (serves pipes, no quoting, the temp file goes); nit: driver and console run the compiler in
+  the user's folder so `use "x.wap"` resolves there.
 
 ## To present (keep or change, at 10:00)
 
