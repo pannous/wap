@@ -218,7 +218,8 @@ refusal "unknown name".
 ## The declarations that bind names
 
 The kernel names no type of the prelude (plan 5.4). Four statements of the explicit corner bind the ones a
-mechanism needs (bindings.wap). Each is checked, and `quotients`, `numbers` and `products` stand once.
+mechanism needs (bindings.wap). Each is checked; `quotients` and `numbers` stand once, and a later `products`
+stands instead of an earlier one, as a below already made keeps the pair it was made of.
 
 **`quotients(Equal)`** (K5, plan 6.6). `Equal` must have the shape of equality: a block of one type with one level
 parameter `u`, the parameters `T: Sort(u)` and `a: T`, one index of type `T`, in `Prop`, and one case without
