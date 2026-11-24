@@ -319,14 +319,14 @@ language and writes one.
   `Decidable`), numbers, lists, texts, maps, optional values, the effects and the computation type, the conversions.
 - `wap/extensions/prove/`: the provers.
 
-Until the switch (milestone S3) the kernel is built in `wap/extensions/theory/`, so wap/core and wap/kernel stay as
-they are while it grows.
+Until the switch (milestone S3) the kernel is built in `wap/extensions/theory/`, as a module of its own, so
+wap/core and wap/kernel stay as they are and the compiler keeps its size and speed while it grows.
 
 ### 5.3 Size
 
 | part | today | target | trusted |
 |---|---|---|---|
-| reader, operators, rules (parse, rules, sugar) | 3,167 | about the same | no |
+| reader, operators, rules (core/parse, core/rules) | 2,907 | about the same | no |
 | typing: analyze, then elaborate | 3,385 | 7,000 to 9,000 | no |
 | kernel | 89 | 3,600 | yes |
 | erase | 0 | 400 | for what runs |
@@ -575,8 +575,10 @@ A type may mention only functions of the first row: `vector(int, read_number())`
 ### 9.2 Computation types
 
 `T ! IO` is `Eff(IO, T)`, a structure of the prelude around a function from the world to an outcome: the value with
-the next world, a raised error, or stopped. `World` is an opaque type no program can make a value of; the program's
-main gets the only one. Three things follow, and they are the whole of what consistency needs from effects:
+the next world, a raised error, or stopped. `World` is a structure of the prelude whose constructor no program can
+call: the program's main is handed the only one. A host type (a float, a file) is likewise a structure around the
+number that is its bits or its handle, with opaque operations. Three things follow, and they are the whole of what
+consistency needs from effects:
 - every computation type has a member, the computation that stops, so an opaque constant of such a type needs no
   axiom: host operations and functions that may not end add none;
 - the value of a computation can be used only inside another computation, so a pure term cannot run one, and a
@@ -658,8 +660,8 @@ The standing of that argument: the model is published for these rules without et
 mutual and nested blocks and number literals. Those four have short arguments of their own: eta holds for tuples of
 sets; a projection is a recursor applied; a mutual block is one family over a tag, and a nested one is rewritten
 into a mutual one before it is checked; a shortcut is licensed by a theorem. The model needs set theory with a
-ladder of large sets, the usual price of a universe hierarchy. No system of this family has a machine-checked proof
-for all its rules together, and the plan claims none.
+ladder of large sets, the usual price of a universe hierarchy. No system of this family has a finished
+machine-checked proof for all its rules together, and the plan claims none.
 
 **Nothing outside the kernel can add a rule.**
 - The elaborator, the sugar rules and the provers only build terms, and every term is checked whole.
@@ -780,7 +782,7 @@ first day.
 | E3 subtypes | `where`, `type X < T`, conversions, obligations by computing and by facts in scope, else a check | the lines of 3.2 and 3.3, each with the outcome its comment states; `effects of` a function with a check left is Fail |
 | E4 traits and conditions | traits as structures with laws; instances from overloads; operators; decidable conditions; the number tower as conversions | `sort` on a class with `compare`; a class without it refused naming the trait; `3 == 3.0` is yes; `if` on a proposition nothing can decide is refused |
 | E5 statements and effects | blocks, variables, `for`, exits as terms; computation types; `effects of`; `! Pure` | `total` of 3.8 is Pure and a law about it is Proved; the lines of wiki/effects.md; `! Pure` refuses naming the chain |
-| E6 measures | recursion by measure, `while` with a measure, Div | `fact(4)` is 24 and `fact` is Pure; a `while` without a measure is Div and still runs; `loop` of 3.8 |
+| E6 measures | recursion by measure, `while` with a measure, Div; the decrease proved for a parameter moved by a literal toward a guarded bound (wiki/Footguns.md), other measures by a written proof until P3 | `fact(4)` is 24 and `fact` is Pure; a `while` without a measure is Div and still runs; `loop` of 3.8 |
 | E7 sums | unions, optional values, `any`, class families; calls distribute | the lines of 3.10; `speak` over a list of an animal and a dog picks each one's method |
 
 **P, proving**
@@ -854,9 +856,11 @@ Each with the recommendation first and its cost in core. They go to the user thr
    function of the type respects it (3.6). The other way: `==` stays a free function for such types, and laws cannot
    rewrite with it. 0 core lines.
 5. **`extends`.** Recommended: the parent's fields with a conversion to the parent, and a place typed by the parent
-   holds the sum of the class and its extensions, so dispatch at run time is the sum rule (3.10). The other way,
-   an open hierarchy decided by a tag at run time, needs a mechanism of its own in core.
-6. **Unlike types join to their union**, not to `any` (section 4). Recommended. 0 core lines.
+   holds the sum of the class and its extensions, so dispatch at run time is the sum rule (3.10); a hierarchy is
+   closed where it is compiled. The other way, an open hierarchy decided by a tag at run time, needs a mechanism of
+   its own in core.
+6. **What a type holds.** Recommended: unlike types join to their union, not to `any`; `T?` is T or ø and no longer
+   also an Error, which is `T or Error` (section 4). 0 core lines.
 7. **W0 and `wap verify`.** Recommended: the Lean model and the Lean prover retire at milestones S3 and P3; until
    then they stay beside the new ones. 0 core lines.
 8. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
@@ -876,6 +880,9 @@ None of these waits for a decision above, and none touches wap/core or wap/kerne
 3. **The pages**: drafts of the wiki pages `type` (rewritten), `subtype`, `proposition`, `proof`, `quotient`,
    `universe`, with their red test files, for the interviewer.
 4. **The two shape rules** of 3.11, once the pages are approved.
+
+The kernel and the elaborator each get an owner (notes/agents/wap-owner.md "Owners"); a change to the kernel passes
+a second reader, since it is the one trusted part.
 
 ## Sources
 
