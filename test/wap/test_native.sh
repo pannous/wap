@@ -261,4 +261,9 @@ check "a compiler with no library beside it compiles hello" "$(rm -rf "$stage/ba
 # `wap verify <file>` runs the verify program beside its compiler on the file, from any folder
 printf '%s\n' 'axiom choice: Prop' >"$stage/axiom_only.wap"
 check "wap verify gives each axiom and law its verdict, from any folder" "$(cd "$stage" && "$native_wap" verify axiom_only.wap 2>&1)" "choice: Axiom"
+# a native wap built standalone holds its seed (build.sh --standalone): it runs with no seed folder beside it, its seed
+# unpacked into the cache folder of the user's home once
+native_wap_built "$stage/standalone" --standalone >/dev/null && rm -rf "$stage/standalone/wap-seed"
+check "a standalone wap runs a program and verifies a file with no seed folder beside it" "$(cd "$stage" && HOME="$stage/home" "$stage/standalone/wap" hello.wap 2>&1 && HOME="$stage/home" "$stage/standalone/wap" verify axiom_only.wap 2>&1)" "Hello
+choice: Axiom"
 exit $((failures > 0))

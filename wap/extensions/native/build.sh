@@ -49,8 +49,9 @@ wap_ran "$building/compiler/wap.wasm" --sources native "$program" "$building/$MO
 seed=()
 if [ -n "$standalone" ]; then
 	seeded="$(dirname "$compiler")"
-	(cd "$seeded" && COPYFILE_DISABLE=1 tar -cf "$building/seed.tar" "${WAP_PARTS[@]}")
-	seed_name=seed-$(cd "$seeded" && find "${WAP_PARTS[@]}" -type f | sort | xargs shasum | shasum | cut -c1-$SEED_NAME_DIGITS)
+	parts=("${WAP_PARTS[@]}" $(cd "$seeded" && echo $WAP_LIBRARY_LINKED))
+	(cd "$seeded" && COPYFILE_DISABLE=1 tar -cf "$building/seed.tar" "${parts[@]}")
+	seed_name=seed-$(cd "$seeded" && find "${parts[@]}" -type f | sort | xargs shasum | shasum | cut -c1-$SEED_NAME_DIGITS)
 	seed=(-DWAP_SEED="\"$building/seed.tar\"" -DWAP_SEED_NAME="\"$seed_name\"")
 fi
 awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"

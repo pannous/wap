@@ -13,13 +13,17 @@ WAP_LIBRARY=lib
 # the tools the native wap runs beside its compiler, each a program of wap/ compiled once wherever a seed folder is made:
 # its module's name there, then its source (`wap verify`, wap/extensions/native/driver.wap)
 WAP_TOOLS=(verify.wasm:wap/extensions/theory/elaborate/verify.wap)
+# the library module a compiler writes beside itself, named by its hash, which the tools link (extensions/wasm/library.wap)
+WAP_LIBRARY_LINKED='types-*.wasm'
 # a seed folder's parts, by name: the compiler, what it reads beside itself, the tools (its machine code *.cwasm is none)
 WAP_PARTS=(wap.wasm "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "${WAP_TOOLS[@]%%:*}")
-# wap_tools_built <tree> <compiler>: each tool compiled by that compiler, by the native wap on PATH, into its folder
+# wap_tools_built <tree> <compiler>: each tool compiled by that compiler, by the native wap on PATH, in its folder, so
+# the tool links the library module by its name beside it and the folder can move
 wap_tools_built() {
-	local tool
+	local tool tree
+	tree=$(cd "$1" && pwd -P) || return 1
 	for tool in "${WAP_TOOLS[@]}"; do
-		wap "$2" "$1/${tool#*:}" "$(dirname "$2")/${tool%%:*}" >&2 || { echo "wap-beside: ${tool#*:} did not compile" >&2; return 1; }
+		(cd "$(dirname "$2")" && wap "${2##*/}" "$tree/${tool#*:}" "${tool%%:*}" >&2) || { echo "wap-beside: ${tool#*:} did not compile" >&2; return 1; }
 	done
 }
 # wap_beside_copied <tree> <folder>: all of it copied from the tree into the folder
