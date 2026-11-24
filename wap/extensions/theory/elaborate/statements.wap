@@ -1,0 +1,45 @@
+# Statements read as terms (coc-plan 9.5, notes/elaborate.md "Statements"): a block is its statements in order, each
+# one binding what the rest of the block reads. A value given to a name is a new binding of it, `s = s + 1` a let
+# whose body is the rest, so its type may change; a choice runs the rest of the block in each of its parts, so what a
+# part gives a name, or a return in it, reaches the rest as it would when run; a return gives the block's value at
+# once, and the statements after it are never read.
+use "../terms.wap"
+use "../environment.wap"
+use "../typing.wap"
+use "../../../kernel/forms.wap"
+use "state.wap"
+use "read.wap"
+
+# the elaborator's own rule a refusal names
+STATEMENT := "statement"
+
+# A block of the type wanted: its first statement, the rest of the block after it
+statements_elaborated(x: Elaborating, statements: list<Node>, wanted: Term?): Term := {
+	if statements is empty { refused(STATEMENT, "an empty block gives no value: write the value last") }
+	first = statements#1
+	rest = statements.drop(1)
+	match first {
+		Return(value) => elaborated(x, value, wanted)
+		Set(place, value) => if rest is empty then refused(STATEMENT, "${text(first)} gives no value: write the value after it") else let_elaborated(x, named_binder(place), value, rest, wanted)
+		If(condition, then_part, else_part) => if rest is empty then elaborated(x, first, wanted) else elaborated(x, If(condition, followed(then_part, rest), followed(else_part, rest)), wanted)
+		_ => if rest is empty then elaborated(x, first, wanted) else refused(STATEMENT, "${text(first)} gives nothing the rest of the block reads: a value before the last is lost")
+	}
+}
+# a part of a choice and the rest of the block after it: one block (an else-part left out is the rest alone)
+followed(part: Node, rest: list<Node>): Node := Block(statements_in(part) + rest)
+statements_in(part: Node): list<Node> := match part {
+	Block(statements) => statements
+	Empty => []
+	_ => [part]
+}
+
+# `name = value` and the rest of the block: a let of the name, which holds the value's type in the rest
+let_elaborated(x: Elaborating, binder: WrittenBinder, value_written: Node, rest: list<Node>, wanted: Term?): Term := {
+	type = if binder.type is not ø then elaborated(x, binder.type!, any_sort(x)) else ø
+	value = filled(x.el, elaborated(x, value_written, type))
+	held = filled(x.el, type ?? type_of(x.el.c, value))
+	variable = scoped(x.el, binder.name, held)
+	body = statements_elaborated(x, rest, wanted)
+	unscoped(x.el, [variable])
+	let_in(binder.name, held, value, abstracted(filled(x.el, body), variable_id(variable)))
+}

@@ -203,6 +203,18 @@ adds is how a candidate fits and where its instances come from.
 - `x as S` is going down with step 4 always allowed. `x is S` is the decision of the condition at x, a `bool`.
 - A provers' search is counted in steps like the kernel's work, so what is proved does not depend on the machine.
 
+## Statements and effects (E5)
+
+- **A block is its statements in order**, each binding what the rest reads (`elaborate/statements.wap`). `x = v` is
+  a let of x whose body is the rest of the block, so a name given a value of another type holds that type from
+  there on; `x: T = v` reads v as a T. The last statement is the block's value; a value before it is the refusal
+  `statement` (it would be lost), and so is a block that ends by giving a name a value.
+- **A choice runs the rest of the block in each part**: `if c { a }; rest` is `if c { a; rest } else { rest }`. What
+  a part gives a name, or a return in it, reaches the rest as it would when run, with no state passed by hand.
+- **A return** is the block's value at once; the statements after it are never read.
+- Statements are read as kernel forms (Block, Set, If, Return, While, Break, Continue), which the tree's rules
+  write; the elaborator names no statement word.
+
 ## Files
 
 | file | holds | milestone |
@@ -219,6 +231,7 @@ adds is how a candidate fits and where its instances come from.
 | `elaborate/conditions.wap` | conditions, their decisions, the facts a branch knows | E3 |
 | `elaborate/convert.wap` | the conversions, the path between two types, lifting through containers | E4 |
 | `elaborate/obligations.wap` | going down: prove or check | E4 |
+| `elaborate/statements.wap` | blocks, lets, a choice's rest, returns | E5 |
 
 ## Rules every file keeps
 
