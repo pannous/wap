@@ -11,7 +11,7 @@ all of them keep. The plan says what the rules are; this note says where they li
 | `terms.wap` | levels and terms, building them, substitution, sameness | 6.1 | theory-terms |
 | `levels.wap` | levels compared: equal, at most, the level of a function type | 6.2 | theory-terms |
 | `environment.wap` | declarations, the environment, the state of a check, refusals | 6.6 | theory-terms |
-| `compute.wap` | a term computed to its head: beta, zeta, delta | 6.4 | theory-computing |
+| `compute.wap` | a term computed to its head: beta, zeta, delta, iota (with K) | 6.4, 7 | theory-computing |
 | `equal.wap` | definitional equality | 6.5 | theory-equality |
 | `typing.wap` | a term's type; a declaration checked and added | 6.3, 6.6 | theory-typing |
 | `explicit.wap` | a program in the explicit spellings read into terms and declarations | below | theory-explicit |
@@ -66,7 +66,9 @@ The files use each other freely: computing, equality and typing call one another
 
 **compute.wap**
 - `computed(c, t)`: t computed until its head is no beta, zeta or delta step (6.4).
-- `computed_folded(c, t)`: the same without delta, so the caller chooses what unfolds.
+- `computed_folded(c, t)`: the same without delta, so the caller chooses what unfolds. Iota is part of it: a
+  recursor whose major premise computes to a case of its type takes that case's rule; with K, a proof of its
+  proposition that is no case stands for the case when their types are equal.
 - `unfolded(c, t)`: t with its head constant replaced by its value at its levels, ø when the head unfolds to nothing;
   a head constant nothing declares is the refusal `unknown name`.
 
@@ -94,6 +96,15 @@ The files use each other freely: computing, equality and typing call one another
   replaced by that type; the plain block goes through checks 1 to 5 unchanged. A container holding a type of the
   block in an index, or a variable of the case in a parameter, is refused by `strict positivity`; so is one that uses
   its parameter negatively, when the plain block is checked.
+
+**recursors.wap**
+- `recursors_made(e, facts)`: one recursor per type of a declared block, `<type>.recursor`, each one's type checked
+  by typing; inductive_declared adds them. Its level parameters: a level for the motives first where the block may
+  be taken apart into any universe (named so no program can write it), then the block's. Its binders: the
+  parameters, one motive per type, one minor premise per case of the block (a case's fields, then an induction
+  hypothesis per field of a type of the block), the type's indices, the major premise. Its `Recursor` facts hold one
+  closed rule per case for iota. The types nested.wap added for containers are turned back into the containers, in
+  every type, rule and case name.
 
 **explicit.wap, show.wap, check.wap**
 - `statement_read(e, statement)`: one statement of an explicit program as a `Statement`: `Declares(declaration)` or
@@ -124,6 +135,9 @@ The files use each other freely: computing, equality and typing call one another
   hash of one are what "Costs" below measures. An optional value is tested with `is ø`.
 - **Each file names what it uses.** `use` is not transitive: a file that names a `Shape` case uses terms.wap
   itself, even when it also uses a file that does.
+- **A list is a value.** A list handed to a function is the function's own: `found += [x]` there never reaches
+  the caller. What a walk gathers it gives back as its result, or puts into a map or a field of a class, which the
+  caller shares.
 
 ## The explicit spellings
 
@@ -178,8 +192,9 @@ case of a block of one type with two cases without fields, in `Type`; `Equal` as
 the type `nat`, and where a rule asks for a case, 0 is the first case and n + 1 the second applied to the number n.
 
 **`shortcut(kind, function, theorems…)`**, one per shortcut, in the order of this table. `N` is the number type, `Z`
-and `S` its cases, `yes` and `no` the truth values. The kernel builds each statement as written here, for all `m`
-and `n` of `N`, the `==` being `Equal[1]` at `N` or at the truth values' type:
+and `S` its cases, `yes` and `no` the truth values. The kernel builds each statement as written here, the `==`
+being `Equal[1]` at `N` or at the truth values' type. A statement binds only the variables it names, `m` before `n`,
+each of `N`: `f(m, Z) == m` is `(m: N) -> …`, and `f(Z, Z) == yes` has no binder:
 
 | statement | function | the theorems, in order |
 |---|---|---|
@@ -193,7 +208,10 @@ and `n` of `N`, the `==` being `Equal[1]` at `N` or at the truth values' type:
 A theorem licenses its shortcut when it is a declared theorem whose type is the built statement (`same`, so binder
 names aside) and neither it nor the function rests on an axiom (`axioms_of` is empty for both). A shortcut fires
 only on its bound constant, without levels, applied to two numbers, and gives what the arithmetic of numbers
-without a bound gives: a number, or a truth value.
+without a bound gives: a number, or a truth value. A statement the order forbids is refused: multiply needs add
+bound, divide needs add, multiply and at most. The rules these statements refuse by are `numbers` (a shape that
+is not the wanted one, a second numbers statement) and `shortcut` (a function's type, a theorem's statement, an
+axiom rested on, a function bound already or needed and not bound).
 
 ## The door
 

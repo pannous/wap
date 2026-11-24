@@ -6,6 +6,8 @@
 use "terms.wap"
 use "environment.wap"
 use "numbers.wap"
+use "typing.wap"
+use "equal.wap"
 
 # t computed until its head is no beta, zeta or delta step
 computed(c: Checker, t: Term): Term := {
@@ -36,11 +38,52 @@ computed_folded(c: Checker, t: Term): Term := {
 				if given is empty { break }
 				result = beta(leading, given)
 			}
+			Constant(name, levels) => { result = iota(c, name, levels, given) ?? break }
 			_ => break
 		}
 		stepped(c)
 	}
 	result
+}
+# A recursor applied to a case (iota, notes/coc-plan.md 7): the case's computation rule at the recursor's levels,
+# applied to the recursor's parameters, motives and minor premises, to the case's fields and to the arguments left
+# over; ø for any other head, or a recursor whose major premise computes to no case of its type
+iota(c: Checker, name: text, levels: list<Level>, given: list<Term>): Term? := {
+	d = declaration(c.environment, name) ?? return ø
+	match d.kind {
+		Recursor(facts) => {
+			shared = facts.parameters + facts.motives + facts.minors
+			taken = shared + facts.indices
+			if #given <= taken { return ø }
+			major = as_case(c, computed(c, given#(taken + 1)))
+			place = case_place(facts, major)
+			if place == 0 and facts.k {
+				major = k_case(c, facts, major) ?? return ø
+				place = 1
+			}
+			if place == 0 { return ø }
+			apply_all(with_levels(facts.rules#place, d.levels, levels), given.take(shared) + case_fields(major, facts.fields#place) + given.drop(taken + 1))
+		}
+		_ => ø
+	}
+}
+# a case's fields: the last of its arguments, after its type's parameters
+case_fields(value: Term, count: int): list<Term> := arguments(value).drop(#arguments(value) - count)
+# the place of a term's head among the recursor's cases, 0 for no case of its type
+case_place(facts: RecursorFacts, t: Term): int := match head(t).shape {
+	Constant(case, levels) => facts.cases.index_of(case)
+	_ => 0
+}
+# K: a proof of a proposition with one case and no fields, which is no case application, stands for the case at the
+# parameters of its type, when the case's type and the proof's type are equal; ø when they are not
+k_case(c: Checker, facts: RecursorFacts, proof: Term): Term? := {
+	type = computed(c, type_of(c, proof))
+	built = match head(type).shape {
+		Constant(name, levels) => if name == facts.of then apply_all(constant(facts.cases#1, levels), arguments(type).take(#arguments(type) - facts.indices)) else ø
+		_ => ø
+	}
+	if built is ø or not equal(c, type_of(c, built), type) { return ø }
+	built
 }
 # a function of nested binders applied to arguments: as many binders as there are arguments eaten at once, the
 # arguments it does not take applied to what is left
