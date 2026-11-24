@@ -81,18 +81,20 @@ taken(definition: Signature, at: int, boxed: list<Node>, s: TypingState) as list
 #   it was compiled: a program's list<Foo> in an any, handed to such a module's function that calls text(x), raises
 #   "no definition takes these values' types" when it runs. Paid off when a program's boxed types reach the dispatchers
 #   of the modules it uses, or such a call is refused at compile time naming the module's function.
-dispatches_completed(s: TypingState) := {
+dispatches_completed(s: TypingState) as bool := {
 	before: list<Node> = []
+	grown = no
 	while s.dispatches.any(dispatch => dispatch.covered < #boxed_known(s)) {
 		known = boxed_known(s)
 		retyped = s.dispatches.filter(dispatch => dispatch.covered < #known and known[dispatch.covered ..].any(type => fits_generic(dispatch, type, s)))
 		for dispatch in s.dispatches { if not retyped.contains(dispatch) { dispatch.covered = #known } }
-		for dispatch in retyped { dispatcher_retyped(dispatch, s) }
+		for dispatch in retyped { grown = dispatcher_retyped(dispatch, s) or grown }
 		fresh = boxed_known(s)[#known ..]
 		deeper = deeper_type(fresh, before)
 		if deeper != ø { refused(retyped#1.name, "${retyped#1.called} with an any boxes ever deeper types, ${type_text(deeper!)}: say the type the any holds where it is used") }
 		before = fresh
 	}
+	grown
 }
 # a type of these that holds one of those, ø for none
 deeper_type(fresh: list<Node>, before: list<Node>) as Node? := fresh.find(type => before.any(old => holds_type(type, old)))
@@ -107,7 +109,8 @@ boxed_known(s: TypingState) as list<Node> := {
 	for type in s.boxed.map(each => settled_type(each, s)) { if not has_unknowns(type) and not known.any(other => same_type(other, type)) { known.add(type) } }
 	known
 }
-dispatcher_retyped(dispatch: Dispatch, s: TypingState) := {
+# whether its result changed: the callers typed before took the old one
+dispatcher_retyped(dispatch: Dispatch, s: TypingState) as bool := {
 	key = place_key(dispatch.name)
 	define = define_of(definition_keyed(key, s) ?? refused(dispatch.name, "a dispatcher is held"), s)
 	retyped: Define = match define { Define(name, parameters, body) => refitted(Define(name, parameters, dispatch_body(dispatch, s)), define) }
@@ -116,7 +119,7 @@ dispatcher_retyped(dispatch: Dispatch, s: TypingState) := {
 	typed = instances_of(key, s)
 	s.functions = s.functions.filter(each => each.function.key != key)
 	s.instances[key] = []
-	for instance in typed { function_typed(instance.function, instance.arguments, s, dispatch.name) }
+	typed.map(instance => not same_type(function_typed(instance.function, instance.arguments, s, dispatch.name).result ?? ANY_SYMBOL, instance.result ?? ANY_SYMBOL)).contains(yes)
 }
 # The dispatching function a read of this field on an any means, `.name(any)`; ø when no record has the field
 field_dispatching(key: Node, s: TypingState) as Signature? := {
