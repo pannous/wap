@@ -1,0 +1,88 @@
+# A statement elaborated (notes/elaborate.md "Declaring"): a declaration's header read first, its letters becoming
+# found binders, then its value read against the header's type; what is still open when it is read whole is refused
+# as `cannot find`, and what is filled goes to the kernel, which judges it. `type of e` prints e's type.
+use "../terms.wap"
+use "../levels.wap"
+use "../environment.wap"
+use "../typing.wap"
+use "../show.wap"
+use "../explicit.wap"
+use "../../../kernel/forms.wap"
+use "../../../core/type_notation.wap"
+use "state.wap"
+use "read.wap"
+
+# the names a level hole left in a declaration's type becomes, the first one not written already; past them a name
+# and a count
+LEVEL_NAMES := ["u", "v", "w"]
+
+# A statement of a program in the lowered forms: a definition, an axiom, or `type of e`
+statement_elaborated(p: Theory, statement: Node) := match statement {
+	Define(named, parameters, value) => definition_elaborated(p, "", named, items_or_one(parameters), value)
+	Call(called, arguments) => {
+		word = text(called)
+		if word == QUESTION_WORDS#1 and #arguments == 2 and text(arguments#1) == QUESTION_WORDS#2 { return print shown(asked_type(p, arguments#2)) }
+		if word in DECLARATION_WORDS and #arguments == 1 { return definition_elaborated(p, word, arguments#1, [], ø) }
+		unelaborated(statement)
+	}
+	_ => unelaborated(statement)
+}
+
+# A declaration `name(parameters): type := value` elaborated and declared. Its header is read first, where a letter
+# nothing binds becomes a found binder; its type is the one written, else its value's
+definition_elaborated(p: Theory, word: text, named: Node, parameters: list<Node>, value: Node?) := {
+	x = elaborating(p)
+	name = if is_binder(named) then binder_name(named) else text(named)
+	written_type = if is_binder(named) then binder_type(named) else ø
+	if written_type is ø and value is ø { unelaborated(named) }
+	x.header = yes
+	written = parameters.map(parameter => gone_into(x, named_binder(parameter), ø))
+	result = if written_type is ø then ø else elaborated(x, written_type!, any_sort(x))
+	x.header = no
+	body = if value is ø then ø else elaborated(x, value!, result)
+	type = result ?? type_of(x.el.c, filled(x.el, body!))
+	variables = x.letters.map(letter => letter.variable) + written
+	closed_type = bound_over(x, type, variables, no)
+	terms = finished(x, [closed_type] + (if body is ø then [] else [bound_over(x, body!, variables, yes)]))
+	key = overload_key(x, name, written)
+	declared(p.environment, Declaration(key, x.reading.levels, terms#1, declaration_kind(word, if body is ø then ø else terms#2)))
+	p.found[key] = #x.letters
+}
+
+# The name a declaration is declared by: its own, or for a second declaration of a name, the name and its parameters'
+# types, an overload of the name
+overload_key(x: Elaborating, name: text, written: list<Term>): text := {
+	p = x.theory
+	if declaration(p.environment, name) is ø { return name }
+	key = "${name}(${written.map(variable => shown(filled(x.el, type_of(x.el.c, variable)))).join(", ")})"
+	p.overloads[name] = (p.overloads.get(name) ?? [name]) + [key]
+	key
+}
+
+# The type of a term elaborated alone
+asked_type(p: Theory, n: Node): Term := {
+	x = elaborating(p)
+	t = elaborated(x, n, ø)
+	finished(x, [type_of(x.el.c, filled(x.el, t)), filled(x.el, t)])#1
+}
+
+# Terms read whole, filled: a hole without an answer, or a level problem that does not hold, cannot be found; a level
+# hole left in the first term becomes a level parameter, one left only in the others cannot be found
+finished(x: Elaborating, terms: list<Term>): list<Term> := {
+	filled_terms = terms.map(t => filled(x.el, t))
+	open = filled_terms.flat_map(t => holes_in(x.el, t)).unique()
+	if open is not empty { refused(CANNOT_FIND, "${open.map(id => x.el.holes#id.name).join(", ")} cannot be found from what is written") }
+	if not level_problems_hold(x.el) { refused(CANNOT_FIND, "a universe level cannot be found from what is written") }
+	holes = term_level_holes(filled_terms#1)
+	if filled_terms.drop(1).any(t => term_level_holes(t).any(name => not (name in holes))) { refused(CANNOT_FIND, "a universe level cannot be found from what is written") }
+	names = holes.map(hole => level_named(x.reading))
+	filled_terms.map(t => with_levels(t, holes, names.map(name => Parameter(name))))
+}
+# a new level parameter of the reading, by the first name not taken
+level_named(r: Reading): text := {
+	at = 1
+	while level_name(at) in r.levels { at += 1 }
+	r.levels += [level_name(at)]
+	level_name(at)
+}
+level_name(at: int): text := if at <= #LEVEL_NAMES then LEVEL_NAMES#at else "${LEVEL_NAMES#1}${at}"
