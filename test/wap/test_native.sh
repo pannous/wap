@@ -249,6 +249,13 @@ exit 1"
 # a typed list in a native program hands C its own items, packed at their width: C sums them and writes into them
 printf '%s\n' '#include <stdint.h>' 'double sum_f32(float* p, int64_t bytes) { double s = 0; for (int64_t i = 0; i < bytes / 4; i++) s += p[i]; return s; }' 'void halved(float* p, int64_t bytes) { for (int64_t i = 0; i < bytes / 4; i++) p[i] /= 2; }' >"$stage/native_items.c"
 check "a native list<float32> crosses as C's floats, and C's writes are seen" "$(printf '%s\n' "sum_f32(xs: list<float32>, size: length): f64 from 'c'" "halved(xs: list<float32>, size: length): ø from 'c'" 'xs: list<float32> = [float32(0.5), float32(1.25), float32(4.0)]' 'halved(xs)' 'print(text(sum_f32(xs)) + " " + text(float(xs#2)))' >"$stage/native_items.wap" && "$tree/wap/extensions/native/build.sh" "$compiler" "$stage/native_items.wap" "$stage/native_items" "$stage/native_items.c" 2>&1 && "$stage/native_items" 2>&1)" "2.875 0.625"
+# code given in place of a file, on the command line or to the console, is read in the current folder and its errors
+# name its line alone, as no file holds it (wiki/cli.md)
+check "wap names the line of code given in place of a file" "$("$native_wap" 'x = "abc' 2>&1 | grep -c '^line 1:5: this text is never closed')" "1"
+check "the console names the line of an error" "$(printf '%s\n' 'x = "abc' | "$native_wap" 2>&1 | grep -c '^line 1:5: this text is never closed')" "1"
+printf '%s\n' 'twice(x: int) as int := x * 2' >"$stage/helper.wap"
+check "code given uses a file of the current folder" "$(cd "$stage" && "$native_wap" 'use "helper.wap"; twice(21)' 2>&1)" "42"
+check "wap - runs the program standard input gives" "$(printf '%s\n' 'print 1 + 1' | "$native_wap" - 2>&1)" "2"
 # a compiler run from source with no library beside it and no warm state yet, as from wap's own tree, still compiles
 check "a compiler with no library beside it compiles hello" "$(rm -rf "$stage/bare" && mkdir -p "$stage/bare" && cp -R "$tree/wap" "$stage/bare/" && : >"$stage/bare/wap/warm.packed" && : >"$stage/bare/wap/types.wasm" && cd "$stage" && printf '%s\n' 'print "Hello"' >bare_hello.wap && "$native_wap" "$stage/bare/wap/compiler.wap" bare_hello.wap bare_hello.wasm 2>&1 && "$native_wap" bare_hello.wasm 2>&1)" "Hello"
 # an option before the program is told to it (the user: every run of a painting program headless, --no-window): `--no-window` makes it windowless, a program without it is not
