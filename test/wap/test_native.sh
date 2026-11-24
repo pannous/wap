@@ -252,4 +252,7 @@ check "a native list<float32> crosses as C's floats, and C's writes are seen" "$
 check "the console sets a value an earlier line gave" "$(printf '%s\n' 's = 1' 's = 2' 's' | "$native_wap" 2>&1)" "1
 2
 2"
+# a console line defining a word again replaces the earlier line's: the lines after it call the new one
+check "the console replaces a function a later line defines again" "$(printf '%s\n' 'f(x: int) as int := x * 2' 'f(21)' 'f(x: int) as int := x * 3' 'f(14)' | "$native_wap" 2>&1)" "42
+42"
 exit $((failures > 0))

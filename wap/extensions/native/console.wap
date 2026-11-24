@@ -1,5 +1,5 @@
 # The console of the native wap, `wap` alone (driver.wap): each line read is the source <session>/<n>.wap, which uses
-# the modules of the lines before it, 1.wasm to <n-1>.wasm, compiled to <n>.wasm and run once in the session's store,
+# the modules of the lines before it, 1.wasm to <n-1>.wasm, but those whose words a later line defined again, compiled to <n>.wasm and run once in the session's store,
 # linked to their kept instances: a definition stays, an effect happens once, a value is shown. A line that fails or
 # defines nothing leaves nothing; the next line is <n> again.
 use "c.wap"
@@ -18,13 +18,21 @@ console(compiler: int, command: text) := {
 	linker = linker_made()
 	context = context_made([command])
 	lines = 0
+	# the lines whose modules the next line uses; the words each line defines
+	kept: list<int> = []
+	words_of: list<list<text>> = []
 	history: list<text> = if on_terminal() then history_read() else []
 	line = line_read(history)
 	while line != "" {
 		global source_file = line_path(session, lines + 1, WAP_SUFFIX)
 		global module_file = line_path(session, lines + 1, MODULE_SUFFIX)
-		source_written(source_file, line, session, lines)
-		if compiled(compiler, source_file, module_file) and instance_defined(linker, context, module_file, module_file, yes) { lines += 1 }
+		source_written(source_file, line, session, kept)
+		defined: list<text> = if compiled(compiler, source_file, module_file) then instance_words(linker, context, module_file, module_file, yes) else []
+		if defined is not empty {
+			lines += 1
+			kept = kept.filter(n => not words_of#n.any(word => defined.contains(word))) + [lines]
+			words_of += [defined]
+		}
 		line = line_read(history)
 	}
 	for n in 1 upto lines + 2 {
@@ -49,11 +57,11 @@ line_read(history: list<text>): text := {
 on_terminal(): bool := isatty(STANDARD_INPUT) % BOOL_BYTE != 0
 # <session>/<n><suffix>
 line_path(session: text, n: int, suffix: text): text := "${session}/${n}${suffix}"
-# the line's source at the path: the line, then a use of each earlier line's module (after it, so what the compiler says of the
+# the line's source at the path: the line, then a use of each kept earlier line's module (after it, so what the compiler says of the
 # line is of its line 1)
-source_written(path: text, line: text, session: text, lines: int) := {
+source_written(path: text, line: text, session: text, kept: list<int>) := {
 	source = creat(path, FILE_MODE)
 	written(source, line)
-	for n in 1 upto lines + 1 { written(source, "use \"${line_path(session, n, MODULE_SUFFIX)}\"\n") }
+	for n in kept { written(source, "use \"${line_path(session, n, MODULE_SUFFIX)}\"\n") }
 	close(source)
 }
