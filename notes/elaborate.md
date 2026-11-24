@@ -238,6 +238,8 @@ adds is how a candidate fits and where its instances come from.
 - **One normal form**: sums inside a union flattened, each part computed, kept once and ordered by its term's key,
   then summed from the right; a union of one part is that part. So `id(nat) or bool`, `bool or nat` and
   `nat or bool or nat` are one type.
+- **A value of a part is a value of the union** (`injected`, last in made_of's chain after the conversions and the
+  subsets): it is held by `left` where its type is the first part, else by `right` of its injection into the rest.
 
 ## Files
 
