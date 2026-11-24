@@ -31,6 +31,11 @@ use "statements.wap"
 
 # the elaborator's own rules, which a refusal names
 OVERLOAD := "overload"
+# the refusal of a call no declaration of its name fits
+NO_FIT := "no fitting overload"
+# the refusals of a declaration tried that does not fit: an argument of another type, also one no declaration of its
+# name fits, and more arguments than it takes
+UNFIT := ILL_TYPED + [NO_FIT, NOT_A_FUNCTION]
 # the refusal of a proof by a law stated without one
 UNPROVED_LAW := "unproved law"
 UNKNOWN_FORM := "unknown form"
@@ -258,20 +263,31 @@ declarations_named(p: Theory, name: text): list<text> := {
 	p.overloads.get(kernel) ?? (if declaration(p.environment, kernel) is not ø then [kernel] else [])
 }
 
-# The declarations of an overloaded name tried in turn: exactly one must fit its arguments and the type wanted
+# The declarations of an overloaded name tried in turn: exactly one must fit its arguments and the type wanted; none
+# fitting is refused naming why each did not, a refusal met inside an argument included
 overload_elaborated(x: Elaborating, name: text, candidates: list<text>, arguments: list<Node>, wanted: Term?): Term := {
-	fit = the_only(fitting_declarations(x, candidates, arguments, wanted), OVERLOAD, "${name} here is") ?? refused(OVERLOAD, "${name} is none of ${candidates.join(", ")} here")
+	trials = declarations_tried(x, candidates, arguments, wanted)
+	fit = the_only(fits(trials), OVERLOAD, "${name} here is") ?? refused(NO_FIT, "${name} is none of ${trials.map(trial => "${trial.candidate} (${trial.refusal!})").join(", ")} here")
 	declared_given(x, fit!, arguments, wanted)
 }
-# the declarations that fit the arguments and the type wanted, each tried and taken back
-fitting_declarations(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<text> :=
-	fitting(x, candidates, candidate => {
-		given = declared_given(x, candidate, arguments, wanted)
-		if wanted is ø then given else made_of(x, given, wanted!)
-	})
-# the candidates an attempt does not refuse as ill-typed, each tried and taken back
-fitting(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<text> :=
-	candidates.filter(candidate => taken_back(x.el, () => try { attempt(candidate); yes } catch e { mismatch(e) }))
+# the declarations that fit the arguments and the type wanted
+fitting_declarations(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<text> := fits(declarations_tried(x, candidates, arguments, wanted))
+declarations_tried(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<Trial> := tried(x, candidates, candidate => {
+	given = declared_given(x, candidate, arguments, wanted)
+	if wanted is ø then given else made_of(x, given, wanted!)
+})
+# the candidates an attempt does not refuse as ill-typed
+fitting(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<text> := fits(tried(x, candidates, attempt))
+fits(trials: list<Trial>): list<text> := trials.filter(trial => trial.refusal is ø).map(trial => trial.candidate)
+# a candidate an attempt was given: the refusal it met, ø where it fits
+class Trial { candidate: text; refusal: text? }
+# each candidate given to an attempt, the answers it gives taken back
+tried(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<Trial> := candidates.map(candidate => {
+	kept = found_so_far(x.el)
+	refusal: text? = try { attempt(candidate); ø } catch e { mismatch(e, UNFIT); e.message.replace(REFUSED, "") }
+	back_to(x.el, kept)
+	Trial(candidate, refusal)
+})
 
 # --- binders
 
