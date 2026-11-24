@@ -258,4 +258,14 @@ check "code given uses a file of the current folder" "$(cd "$stage" && "$native_
 check "wap - runs the program standard input gives" "$(printf '%s\n' 'print 1 + 1' | "$native_wap" - 2>&1)" "2"
 # a compiler run from source with no library beside it and no warm state yet, as from wap's own tree, still compiles
 check "a compiler with no library beside it compiles hello" "$(rm -rf "$stage/bare" && mkdir -p "$stage/bare" && cp -R "$tree/wap" "$stage/bare/" && : >"$stage/bare/wap/warm.packed" && : >"$stage/bare/wap/types.wasm" && cd "$stage" && printf '%s\n' 'print "Hello"' >bare_hello.wap && "$native_wap" "$stage/bare/wap/compiler.wap" bare_hello.wap bare_hello.wasm 2>&1 && "$native_wap" bare_hello.wasm 2>&1)" "Hello"
+# `wap verify <file>` runs the verify program beside its compiler on the file, from any folder
+printf '%s\n' 'axiom choice: Prop' >"$stage/axiom_only.wap"
+check "wap verify gives each axiom and law its verdict, from any folder" "$(cd "$stage" && "$native_wap" verify axiom_only.wap 2>&1)" "choice: Axiom"
+# a native wap built standalone holds its seed (build.sh --standalone): it runs with no seed folder beside it, its seed
+# unpacked into the cache folder of the user's home once
+native_wap_built "$stage/standalone" --standalone >/dev/null && rm -rf "$stage/standalone/wap-seed"
+check "a standalone wap runs a program and verifies a file with no seed folder beside it" "$(cd "$stage" && HOME="$stage/home" "$stage/standalone/wap" hello.wap 2>&1 && HOME="$stage/home" "$stage/standalone/wap" verify axiom_only.wap 2>&1)" "Hello
+choice: Axiom"
+# and wasmtime's static library beside the shared one (warp's scripts/wasmtime-c-api.sh) is linked into it whole
+check "a standalone wap needs no library but the system's" "$(otool -L "$stage/standalone/wap" | tail -n +2 | grep -vc libSystem)" "0"
 exit $((failures > 0))

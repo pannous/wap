@@ -5,6 +5,7 @@
 #   warp wap/compiler.wap hello.wap hello.wasm      compile
 #   warp hello.wasm                                  run it
 #   warp wap/compiler.wap format hello.wap           print it in canonical warp spelling
+#   warp wap/compiler.wap optimize hello.wap         write it again without the functions nothing calls
 #
 # Its stages, each with one job and a declared input and output; a form outside a stage's input is refused, naming it:
 #   read      text → notation       core/parse/reader.wap
@@ -20,6 +21,10 @@
 #   encode    module → bytes        core/emit/wasm.wap, the wasm binary format (its codes: core/emit/opcodes.wap)
 # Every stage runs through one walker, core/stage.wap: a node a stage builds takes the position of the node it rewrote.
 use "core/pipeline.wap"
+use "core/parse/cascade.wap"
+use "core/parse/atoms.wap"
+use "core/analyze/declarations.wap"
+use "core/analyze/variables.wap"
 use "core/parse/operators.wap"
 use "core/rules/stages.wap"
 use "core/format.wap"
@@ -43,6 +48,9 @@ WARM_STATE := embedded("warm.packed")
 LIBRARY := embedded("types.wasm")
 SOURCES_OPTION = "--sources"
 WARM_COMMAND = "warm"
+FORMAT_COMMAND = "format"
+OPTIMIZE_COMMAND = "optimize"
+WAP_EXTENSION = ".wap"
 from_sources = #args > 0 and args#1 == SOURCES_OPTION
 given = if from_sources then args[1 ..] else args
 warm = not from_sources and WARM_STATE != ""
@@ -51,13 +59,13 @@ language = base_language()
 # the extensions this compiler is built with: a compiled module read as the source it stands for; C functions as lib
 # writes them
 language.readers[".wasm"] = wasm_source
-language.readers[".wap"] = part_source
+language.readers[WAP_EXTENSION] = part_source
 if warm { warm_brought(language, program.folder, WARM_STATE) } else { language.standard = standard_words(language, program.folder) }
 language.use_free_modules = USE_FREE_MODULES
 rules_loaded(language, operated_file(language, in_folder(program.folder, C_FUNCTION_RULES)))
 rules_files_loaded(language, program.folder)
 if warm { rules_checked(language) }
-if #given < 2 { raise "usage: warp wap/compiler.wap [--sources] <program> <module.wasm>, format <program>, warm <state file>, or native <program> <module.wasm>" }
+if #given < 2 { raise "usage: warp wap/compiler.wap [--sources] <program> <module.wasm>, format <program>, optimize <program>, warm <state file>, or native <program> <module.wasm>" }
 # the library a compile reads: the module held where the compiler holds one; the warm state, written for the compiler
 # built next, holds the module beside it, the one that compiler holds; from sources, as the compilers bootstrap and a
 # native build compile (whose texts are not the GC ones the module holds), its source
@@ -67,7 +75,7 @@ types = types_declared(language, program.folder, library)
 # a module: its functions compiled once each and exported, the rest of its code as wap source in its wap section
 compiled(file: text, module: text) as list := {
 	modules = declared_modules(language, file)
-	typed = typed_modules(language, modules, types)
+	typed = typed_modules(language, modules, types, file)
 	own = modules.last
 	exported = compiled_once(own, added_records(Records(), statements_in(typed)))
 	m = emitted(typed, file, (exported + library_exports(modules)).map(signature => export_key(signature.definer)), language.memory, raise_module(program.folder, library), is_library(program.folder, file))
@@ -79,8 +87,39 @@ compiled(file: text, module: text) as list := {
 # (the native `wap` compiles as the native warp does: the program's folder, its lib/ and runtime follow, unread here)
 # `native <program> <module.wasm>`: for a native build (wap/extensions/native/build.sh), each text in the memory
 # `format <program>`: the program in canonical warp, each reading typing decided spelled out (core/format.wap); code
-# typing refuses, a fragment or data, as it reads
-if given#1 == "format" { try { typed_modules(language, declared_modules(language, given#2), types) } else ø; code = read_notation(language, given#2); words_known(language, code); print statements_text(language, [groupings_written(language, operated_program(language, code, aliases_kept: yes))], Bracket.None) }
+# typing refuses, a fragment or data, as it reads. Without the definitions of the signatures gone
+formatted(file: text, gone: list<Signature> = []) as text := {
+	try { typed_modules(language, declared_modules(language, file), types, file) } else ø
+	code = read_notation(language, file)
+	words_known(language, code)
+	statements_text(language, [groupings_written(language, without_definitions(operated_program(language, code, aliases_kept: yes), gone))], Bracket.None)
+}
+# the program's own functions nothing calls: typed only once called, as a used module's are, typing leaves them out.
+# A file of definitions only, a library, has no caller to judge by: none of its functions is uncalled
+uncalled(modules: list<Module>) as list<Signature> := {
+	if not top_level_statements(modules.last.code).any(statement => declaration_of(statement) == ø and not is_use(statement)) { return [] }
+	typed = statements_in(typed_modules(language, modules, types, "")).filter(statement => statement is Define).map(define => text(defined_name(define)))
+	modules.last.signatures.filter(signature => signature.kind == DefinitionKind.Function and not typed.contains(signature.name))
+}
+# a program without the statements defining these signatures, each written where its name is; the others stay, those
+# on their lines too
+without_definitions(program: Node, gone: list<Signature>) as Node := if gone is empty then program else with_facts_of(List(top_level_statements(program).filter(statement => not gone.any(signature => same_place(statement, signature.definer))), Bracket.None, Separator.Newline), program)
+# the names the other wap files of a file's folder mention, in code, rule templates and comments alike: a function one
+# of them names may be called from there
+mentioned_beside(file: text) as list<text> := {
+	folder = folder_of(file)
+	list_files(folder).filter(name => name.ends_with(WAP_EXTENSION) and name != file_name(file)).flat_map(name => names_in(read(in_folder(folder, name))))
+}
+names_in(t: text) as list<text> := words(t.codepoints.map(c => if is_name_char(text(c)) then text(c) else " ").join(""))
+# `optimize <program>`: the file written again without the functions nothing calls, there or beside it, each said
+optimized(file: text) := {
+	beside = mentioned_beside(file)
+	gone = uncalled(declared_modules(language, file)).filter(signature => not beside.contains(signature.name))
+	write(file, formatted(file, gone))
+	for signature in gone { print "removed: ${signature.name}" }
+}
+if given#1 == FORMAT_COMMAND { print formatted(given#2) }
+else if given#1 == OPTIMIZE_COMMAND { optimized(given#2) }
 else if given#1 == WARM_COMMAND { write_bytes(given#2, bytes(warm_state(language, program.folder, types))) }
 else if given#1 == "native" { language.memory = NATIVE_MEMORY; write_bytes(given#3, compiled(given#2, given#3)) }
 else {
