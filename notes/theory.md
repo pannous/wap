@@ -282,7 +282,8 @@ as small as it can be: no elaboration, no caches, a term compared by its tree. I
 and terms), `read.wap` (the export read, a record out of order or of no known kind refused), `judge.wap` (typing,
 computing, equality, a declaration admitted), `blocks.wap` (a block checked, its recursors and their computation,
 structures), `bindings.wap` (numbers, shortcuts and quotients). test/wap/test_theory_second.wap gives it the preludes
-and blocks of every shape, compares its axioms with the door's, and hands it forged exports that it must refuse.
+and mutual, indexed and level-polymorphic blocks with a projection (nested blocks and the divide
+shortcut are left out), compares its axioms with the door's, and hands it forged exports that it must refuse.
 
 ## Costs
 
