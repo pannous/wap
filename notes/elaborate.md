@@ -240,6 +240,11 @@ adds is how a candidate fits and where its instances come from.
   `nat or bool or nat` are one type.
 - **A value of a part is a value of the union** (`injected`, last in made_of's chain after the conversions and the
   subsets): it is held by `left` where its type is the first part, else by `right` of its injection into the rest.
+- **Optional values are unions with nothing**: ø is the prelude's Unit where a type is wanted, its value `unit`
+  elsewhere, at the level of the nothing the union wanted holds. `T?` is `T or ø`, and nothing is ordered last at the
+  level of the part before it, so `nat?`, `nat or ø` and the prelude's `optional(nat)` = Sum(nat, Unit) are one type.
+  An optional of a union, `(A or B)?`, flattens to Sum(A, Sum(B, Unit)), which is not `optional(A or B)` written
+  with the parameter (Sum(Sum(A, B), Unit)): a normal form by sorting does not commute with putting a union in for T.
 
 ## Files
 
