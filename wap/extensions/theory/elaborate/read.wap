@@ -25,6 +25,7 @@ use "convert.wap"
 use "obligations.wap"
 use "sums.wap"
 use "lifted.wap"
+use "effects.wap"
 use "../../../kernel/surface.wap"
 use "../../../core/language.wap"
 use "../../../core/rules/stages.wap"
@@ -68,6 +69,8 @@ class Theory {
 	# each written name's kernel name
 	prelude_size: int = 0
 	hidden: map<text, text> = {}
+	# the bodies as written of the functions that may not end, which run by them and are declared opaque
+	run_bodies: map<text, Node> = {}
 	# the wap folder the door is given (options.wap), in which its prelude is found
 	wap_folder: text = ""
 }
@@ -109,6 +112,11 @@ class Elaborating {
 	# the names the innermost loop's round passes on to the rounds after it and to the rest after the loop, where a
 	# break or a continue leaves it
 	round_given: list<text>? = ø
+	# inside a function, which runs a computation where a plain value is wanted; the computations run whose binder has
+	# not closed yet, and the effects a binder that closed with plain type needed (effects.wap)
+	lifting: bool = no
+	pending: list<Pending> = []
+	lifts: list<text> = []
 }
 elaborating(p: Theory): Elaborating := Elaborating(p, elaboration(p.environment, []), Reading(p.environment))
 
@@ -124,7 +132,10 @@ made_of(x: Elaborating, t: Term, wanted: Term): Term := {
 	if unified(x.el, given, wanted) { return t }
 	have = filled(x.el, given)
 	want = filled(x.el, wanted)
-	converted(x, t, have, want) ?? gone_down(x, t, have, want) ?? injected(x, t, have, want) ?? refused(VALUE_TYPE, "${shown(filled(x.el, t))} is a ${shown(have)}, where a ${shown(want)} is wanted")
+	converted(x, t, have, want) ?? gone_down(x, t, have, want) ?? injected(x, t, have, want) ?? lifted_into(x, t, have, want) ?? ran(x, t, have, want) ?? {
+		computation_refused(x, t, have)
+		refused(VALUE_TYPE, "${shown(filled(x.el, t))} is a ${shown(have)}, where a ${shown(want)} is wanted")
+	}
 }
 
 form_elaborated(x: Elaborating, n: Node, wanted: Term?): Term := match n {
@@ -144,7 +155,7 @@ form_elaborated(x: Elaborating, n: Node, wanted: Term?): Term := match n {
 	Block(statements) => statements_elaborated(x, statements, wanted)
 	Fn(parameters, body) => bound_elaborated(x, items_or_one(parameters).map(named_binder), body, yes, wanted)
 	List(items, Bracket.Round, separator) => if #items == 1 then form_elaborated(x, items#1, wanted) else respelled(x, n, wanted, UNKNOWN_FORM, no_expression(n))
-	List(items, Bracket.Square, separator) => form_elaborated(x, listed(x, items), wanted)
+	List(items, Bracket.Square, separator) => computation_read(x, n) ?? form_elaborated(x, listed(x, items), wanted)
 	_ => optional_written(x, n) ?? respelled(x, n, wanted, UNKNOWN_FORM, no_expression(n))
 }
 # `[a, b]`: the list's cases where the program reads, list.item(a, list.item(b, list.empty))
@@ -341,7 +352,7 @@ gone_into(x: Elaborating, binder: WrittenBinder, expected: Term?): Term := {
 # wanted where they are left out
 bound_elaborated(x: Elaborating, binders: list<WrittenBinder>, body: Node, function: bool, wanted: Term?): Term := {
 	entered = binders_entered(x, binders, if function then wanted else ø)
-	inner = elaborated(x, body, if function then entered.rest else any_sort(x))
+	inner = if function then closed_over(x, entered.rest, () => elaborated(x, body, entered.rest)) else elaborated(x, body, any_sort(x))
 	unscoped(x.el, entered.variables)
 	closed_filled(x.el, inner, entered.variables, function)
 }
