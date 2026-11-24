@@ -1,0 +1,64 @@
+# A program file elaborated statement by statement (notes/elaborate.md "What it reads and writes"), what the
+# elaborator's door and `wap verify` share. It reads the statements before lowering, which the elaborator replaces at
+# the switch: an enum or class unit is read as written, a statement that binds names (`products(Pair, Unit)`) as the
+# theory's door reads it, any other statement lowered alone first.
+use "../../../core/pipeline.wap"
+use "../../../core/language.wap"
+use "../../../core/rules/lowering.wap"
+use "../environment.wap"
+use "../explicit.wap"
+use "../bindings.wap"
+use "../options.wap"
+use "../../../kernel/forms.wap"
+use "../../../core/type_notation.wap"
+use "read.wap"
+use "declare.wap"
+use "blocks.wap"
+
+# a declaration word's declaration is lowered without its word, which lowering does not know
+unit_elaborated(p: Theory, language: Language, unit: list<Node>) := {
+	statement = unit#1
+	if block_written(statement) is not ø { return block_elaborated(p, unit) }
+	binding = binding_written(statement)
+	if binding is not ø { return binding_declared(p.environment, Binding(binding!.word, binding!.names.map(name => kernel_name(p, name)))) }
+	for word in DECLARATION_WORDS {
+		declared = after_words(statement, [word])
+		if declared is not ø { return declared_lowered(p, word, language, declared!) }
+	}
+	statement_elaborated(p, lowered(language, statement))
+}
+
+# a declaration lowered and elaborated; one without a value, `law open(n: nat): T`, is lowered as the head of a
+# definition, since lowering reads parameters only before `:=`, and declared without its value
+declared_lowered(p: Theory, word: text, language: Language, declared: Node) := {
+	if is_definition(declared) { return declaration_elaborated(p, word, lowered(language, declared)) }
+	match lowered(language, Call(symbol(DEFINE), [declared, symbol(HOLE_WORD)])) {
+		Define(named, parameters, value) => definition_elaborated(p, word, named, items_or_one(parameters), ø)
+		_ => unelaborated(declared)
+	}
+}
+is_definition(n: Node): bool := match n { Call(called, arguments) => text(called) == DEFINE and #arguments == 2; _ => no }
+
+# the prelude's files in the wap folder, each using the ones before it, read in the explicit spellings
+PRELUDE_FOLDER := "extensions/theory/prelude"
+PRELUDE_FILES := ["logic", "numbers", "quotient", "data"]
+
+# the prelude checked into the theory's environment, its declarations counted
+prelude_checked(p: Theory, language: Language) := {
+	for file in PRELUDE_FILES {
+		for unit in units_of(statements_of(operated_file(language, in_folder(p.wap_folder, "${PRELUDE_FOLDER}/${file}.wap")))) { statement_checked(p.environment, unit_read(p.environment, unit)) }
+	}
+	p.prelude_size = #p.environment.places
+}
+
+# a door's run: its arguments read (options.wap), the prelude checked, then the program file's statements elaborated in
+# order into the theory; the first refusal is printed and ends the run
+door_elaborated(p: Theory, given: list<text>) := {
+	language = base_language()
+	try {
+		arguments = door_arguments(given)
+		p.wap_folder = arguments.wap_folder
+		prelude_checked(p, language)
+		for unit in units_of(statements_of(operated_file(language, arguments.program))) { unit_elaborated(p, language, unit) }
+	} catch refusal { stopped_by(refusal) }
+}
