@@ -3,7 +3,10 @@
 # builds with wasm2c's runtime, lib/native/wasi.c and the C glue of its imports (main.c, glue.awk beside this
 # script). The program uses no GC value: no list or raise; a text is in the module's memory, as the compiler writes one
 # that reads types/memory_texts.wap in the place of types/text_bytes.wap.
-#   wap/extensions/native/build.sh <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]
+#   wap/extensions/native/build.sh [--standalone] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]
+# --standalone: the parts of the compiler's seed folder (scripts/lib/wap-beside.sh WAP_PARTS) built into the executable,
+# which the native wap unpacks once into its cache folder (main.c wap_seed, linking.wap seed_folder_found) in place of
+# a wap-seed/ folder beside it
 # the arguments after the executable are the C compiler's, the libraries the program's C functions are in:
 # `-Llib -lwarp_wasmtime -Wl,-rpath,@executable_path/lib` for the native wap (driver.wap)
 # The compiler runs on the native wap on PATH, else on wasmtime (scripts/lib/wap-host.sh). The build's files go in
@@ -15,8 +18,13 @@ C_FLAGS="-O2 -rdynamic -std=c23"
 MODULE_NAME=program
 WASM2C_RUNTIME=share/wabt/wasm2c
 WABT_HEADERS=include
+STANDALONE_OPTION=--standalone
+# the seed's name: the first digits of its parts' contents hashed, so a seed built again unchanged finds its unpacked folder
+SEED_NAME_DIGITS=12
 
-[ $# -ge 3 ] || { echo "usage: $0 <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]" >&2; exit 2; }
+standalone=""
+[ "${1-}" = "$STANDALONE_OPTION" ] && standalone=1 && shift
+[ $# -ge 3 ] || { echo "usage: $0 [$STANDALONE_OPTION] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]" >&2; exit 2; }
 compiler=$1 program=$2 executable=$3
 shift 3
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -38,7 +46,14 @@ mkdir -p "$building/compiler"
 cp "$building/compiler/types/memory_texts.wap" "$building/compiler/types/text_bytes.wap" && cp "$building/compiler/types/memory_lists.wap" "$building/compiler/types/list_items.wap"
 wap_ran "$building/compiler/wap.wasm" --sources native "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
+seed=()
+if [ -n "$standalone" ]; then
+	seeded="$(dirname "$compiler")"
+	(cd "$seeded" && COPYFILE_DISABLE=1 tar -cf "$building/seed.tar" "${WAP_PARTS[@]}")
+	seed_name=seed-$(cd "$seeded" && find "${WAP_PARTS[@]}" -type f | sort | xargs shasum | shasum | cut -c1-$SEED_NAME_DIGITS)
+	seed=(-DWAP_SEED="\"$building/seed.tar\"" -DWAP_SEED_NAME="\"$seed_name\"")
+fi
 awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"
-"$C_COMPILER" $C_FLAGS -I"$building" -I"$wabt/$WASM2C_RUNTIME" -I"$wabt/$WABT_HEADERS" -I"$library" -o "$executable" \
+"$C_COMPILER" $C_FLAGS ${seed[@]+"${seed[@]}"} -I"$building" -I"$wabt/$WASM2C_RUNTIME" -I"$wabt/$WABT_HEADERS" -I"$library" -o "$executable" \
 	"$building/$MODULE_NAME.c" "$here/main.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-impl.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-mem-impl.c" -lm "$@"
 rm -rf "$building"

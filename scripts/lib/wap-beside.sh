@@ -13,6 +13,8 @@ WAP_LIBRARY=lib
 # the tools the native wap runs beside its compiler, each a program of wap/ compiled once wherever a seed folder is made:
 # its module's name there, then its source (`wap verify`, wap/extensions/native/driver.wap)
 WAP_TOOLS=(verify.wasm:wap/extensions/theory/elaborate/verify.wap)
+# a seed folder's parts, by name: the compiler, what it reads beside itself, the tools (its machine code *.cwasm is none)
+WAP_PARTS=(wap.wasm "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "${WAP_TOOLS[@]%%:*}")
 # wap_tools_built <tree> <compiler>: each tool compiled by that compiler, by the native wap on PATH, into its folder
 wap_tools_built() {
 	local tool
@@ -27,7 +29,7 @@ wap_beside_copied() {
 # wap_beside_mirrored <tree> <folder>: the folder holds exactly that beside its compiler, wap.wasm and the machine code
 # *.cwasm (refresh-seed's to remove): copied, whatever the tree no longer has removed, one line naming it
 wap_beside_mirrored() {
-	local kept=" wap.wasm ${WAP_BESIDE[*]} $WAP_LIBRARY ${WAP_TOOLS[*]%%:*} " entry removed="" synced
+	local kept=" ${WAP_PARTS[*]} " entry removed="" synced
 	for entry in "$2"/*; do
 		case "$kept" in *" ${entry##*/} "*) continue ;; esac
 		case "${entry##*/}" in *.cwasm) continue ;; esac
