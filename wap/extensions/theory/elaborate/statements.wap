@@ -3,7 +3,8 @@
 # `s = s + 1` a let whose body is the rest, so its type may change. A choice before the rest of the block joins
 # again: the rest is read once, as a function of the names the parts give (the join), and each part ends by calling
 # it, so a return in a part skips it. A counted loop is a walk down the number of its rounds: each round ends by
-# calling the walk of the rounds left with the names it gives, the last one the join. A return gives the block's
+# calling the walk of the rounds left with the names it gives, the last one the join; a continue ends a round there, a
+# break calls the join at once. A return gives the block's
 # value at once, and the statements after it are never read.
 use "../terms.wap"
 use "../environment.wap"
@@ -33,6 +34,8 @@ statements_elaborated(x: Elaborating, statements: list<Node>, wanted: Term?): Te
 	match first {
 		Return(value) => elaborated(x, value, wanted)
 		Block(inner) => statements_elaborated(x, inner + rest, wanted)
+		Break() => left_elaborated(x, first, EXIT, [], wanted)
+		Continue() => left_elaborated(x, first, NEXT, [symbol(ROUND)], wanted)
 		Set(place, value) => if rest is empty then refused(STATEMENT, "${text(first)} gives no value: write the value after it") else let_elaborated(x, place_binder(place), value, rest, wanted)
 		If(condition, then_part, else_part) => if rest is empty then elaborated(x, first, wanted) else joined_elaborated(x, condition, statements_in(then_part), statements_in(else_part), rest, wanted)
 		For(place, count, body) => if rest is empty then refused(STATEMENT, "${text(first)} gives no value: write the value after it") else walked_elaborated(x, place, count, statements_in(body), rest, wanted)
@@ -121,11 +124,20 @@ round_elaborated(x: Elaborating, numbers: Numbers, place: Node, body: list<Node>
 	before = scoped(x.el, BEFORE, number)
 	variables = given.map(given_name => scoped(x.el, given_name, type_before(x, given_name)))
 	round = scoped(x.el, ROUND, number)
-	run = statements_elaborated(x, [Set(place, symbol(ROUND))] + body + [Call(symbol(NEXT), [symbol(ROUND)] + given.map(symbol))], wanted)
+	around = x.round_given
+	x.round_given = given
+	run = statements_elaborated(x, [Set(place, symbol(ROUND))] + body + [Continue()], wanted)
+	x.round_given = around
 	unscoped(x.el, [round])
 	rounds = let_in(ROUND, number, next(numbers, before), abstracted(filled(x.el, run), variable_id(round)))
 	unscoped(x.el, [left, walking, before] + variables)
 	closed_filled(x.el, rounds, [left, walking, before] + variables, yes)
+}
+# a break or a continue: the round left by calling the rest after the loop, or the walk of the rounds after it, with
+# the names the round passes on; the statements after it are never read
+left_elaborated(x: Elaborating, word: Node, name: text, leading: list<Node>, wanted: Term?): Term := {
+	given = x.round_given ?? refused(STATEMENT, "${text(word)} leaves a loop: write it in a loop's body")
+	elaborated(x, Call(symbol(name), leading + given.map(symbol)), wanted)
 }
 # a name's type before a choice, else a hole the parts' calls of the join answer
 type_before(x: Elaborating, name: text): Term := {
