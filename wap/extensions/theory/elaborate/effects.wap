@@ -89,8 +89,22 @@ never_given(x: Elaborating, computations: Term): Term := {
 level_of(x: Elaborating, type: Term): Level := sort_level(computed(x.el.c, filled(x.el, type_of(x.el.c, filled(x.el, type)))))
 # whether a type is a computation type, `T ! e`
 is_computation(x: Elaborating, type: Term): bool := result_name(folded(x, type)) == kernel_name(x.theory, COMPUTATION)
-# a type by beta and zeta alone: a computation type stays named, never unfolded
-folded(x: Elaborating, type: Term): Term := computed_folded(x.el.c, filled(x.el, type))
+# a type with its definitions unfolded until a function type or a computation type is reached, which stays named,
+# never unfolded
+folded(x: Elaborating, type: Term): Term := {
+	t = computed_folded(x.el.c, filled(x.el, type))
+	while result_name(t) != kernel_name(x.theory, COMPUTATION) and not is_function_type(t) { t = computed_folded(x.el.c, unfolded(x.el.c, t) ?? break) }
+	t
+}
+is_function_type(t: Term): bool := match t.shape {
+	Pi(binder, domain, body) => yes
+	_ => no
+}
+# what a function's type gives after all its binders, unfolded as far
+ended_in(x: Elaborating, type: Term): Term := {
+	t = folded(x, type)
+	if is_function_type(t) then ended_in(x, result_of(t)) else t
+}
 # What `T ! IO` writes, the mark glued to its subject and the effects' words after it, a list by spaces: those two;
 # ø for any other form
 class Marked { subject: Node; words: list<Node> }
@@ -118,7 +132,7 @@ is_sort(t: Term): bool := match t.shape {
 
 # the effects a function's type gives: those of the computation it ends in, none where it ends in no computation
 effects_given(x: Elaborating, type: Term): list<text> := {
-	result = folded(x, result_of(filled(x.el, type)))
+	result = ended_in(x, type)
 	if is_computation(x, result) then set_words(x, arguments(result)#1) else []
 }
 # effects as wiki/effects.md writes them: Pure, one effect, or several in brackets
@@ -157,6 +171,8 @@ may_not_end(e: Error): bool := e.message.starts_with(REFUSED + ENDING)
 diverging(x: Elaborating, word: text, name: text, result: Term?, body: Node, refusal: Error): Read := {
 	if word in PROVED_WORDS { refused(EFFECT, "${name} may not end (${effects_shown(diverging_effects(x))}), and a proof must be pure: ${refusal.message.replace(REFUSED + ENDING + ": ", "")}") }
 	if result is ø { raise refusal.message + ": write its result type, so it is a computation that may not end" }
+	x.pending = []
+	x.lifts = []
 	x.theory.run_bodies[name] = body
 	computations = computation(x, diverging_effects(x), result!)
 	Read(never_given(x, computations), computations)
@@ -217,20 +233,17 @@ body_read(x: Elaborating, result: Term?, read: (Term?) -> Term): Read := {
 	x.lifts = []
 	Read(closed_over(x, lifted, () => read(lifted)), lifted)
 }
-# whether a function gives nothing, the prelude's Unit: it is called for what it does, so it is never pure, whatever
-# its effects
-gives_nothing(x: Elaborating, type: Term): bool := match filled(x.el, type).shape {
-	Pi(binder, domain, body) => result_name(folded(x, result_of(filled(x.el, type)))) == kernel_name(x.theory, NOTHING)
-	_ => no
-}
+# whether a definition gives nothing, the prelude's Unit, a function of no parameters among them: it is called for
+# what it does, so it is never pure, whatever its effects; Unit's own case is a value
+gives_nothing(x: Elaborating, d: Declaration): bool := not (d.kind is Constructor) and result_name(ended_in(x, d.type)) == kernel_name(x.theory, NOTHING)
 # A law or theorem whose statement names a computation, or a function that gives nothing, is tested, never proved:
 # what either does is nothing the theory knows
 statement_pure(x: Elaborating, name: text, statement: Term, proof: Node?): bool := {
 	named: map<text, bool> = {}
 	constants_named(statement, named)
-	computing = named.keys().find(used => used == kernel_name(x.theory, COMPUTATION) or impure(x, declaration(x.theory.environment, used)!.type))
+	computing = named.keys().find(used => used == kernel_name(x.theory, COMPUTATION) or impure(x, declaration(x.theory.environment, used)!))
 	if computing is not ø and proof is not ø { refused(EFFECT, "${name} states something of ${written_name(computing!)}, which is not pure: a law of what is not pure is tested, never proved, so state it without a proof") }
 	computing is ø
 }
-# whether what a type gives is not pure: a computation, or a function that gives nothing
-impure(x: Elaborating, type: Term): bool := is_computation(x, result_of(filled(x.el, type))) or gives_nothing(x, type)
+# whether what a declaration gives is not pure: a computation, or nothing
+impure(x: Elaborating, d: Declaration): bool := is_computation(x, ended_in(x, d.type)) or gives_nothing(x, d)
