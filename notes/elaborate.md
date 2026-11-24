@@ -33,8 +33,9 @@ obligations).
   axiom is an `Axiom`.
 - **Writes** declarations into the theory's `Environment` through `declared` and `inductive_declared`, and
   nothing else. A term it hands over holds no hole.
-- **The door** `elaborate/door.wap --tree <root> program.wap` loads the prelude (`wap/extensions/theory/prelude/`), elaborates the
-  program statement by statement, and prints as the kernel's door does: nothing for an accepted declaration, the
+- **The door** `elaborate/door.wap --tree <root> program.wap` loads the prelude (`wap/extensions/theory/prelude/`): its explicit files
+  checked, then `operators.wap` elaborated, the operators declared by their spellings as wap's types module declares
+  them (`+(m: nat, n: nat): nat := add(m, n)`). It elaborates the program statement by statement, and prints as the kernel's door does: nothing for an accepted declaration, the
   value's type for `type of e`, a refusal as `refused by <rule>: …`. The kernel's own door, `check.wap`, stays the
   door of the explicit programs.
 
@@ -161,7 +162,8 @@ adds is how a candidate fits and where its instances come from.
 
 - **Fitting.** An argument fits a parameter when its type unifies with the parameter's, or converts to it (E4's
   conversions; E3 needs the number tower's). Of the candidates that fit, one without a conversion beats one with,
-  fewer conversions beat more; two left is the refusal `overload`. So `x + y` of a `nat` and an `int` is the `int`
+  fewer conversions beat more; two left is the refusal `overload`, none the refusal `no fitting overload`. A
+  candidate whose argument fits no declaration of its own name, or that takes fewer arguments than given, does not fit. So `x + y` of a `nat` and an `int` is the `int`
   one, and `3 + 4` the `nat` one, with no rule about operators.
 - **Numbers.** A number read against a wanted type other than the prelude's `nat` is the conversion of the number
   to that type; with no type wanted it is a `nat`.
