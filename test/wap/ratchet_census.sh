@@ -26,6 +26,8 @@ unmerged=$(cd "$root" && git ls-files --unmerged 'wap/*.wap' | cut -f2 | sort -u
 # tree's root, where it reads wap/ and notes/
 report="$stage/census.out"
 census="$stage/wap-census.wasm"
+# the compiler's source finds its standard modules (`use foreign`) beside the census, as beside a compiler
+wap_beside_copied "$root" "$stage" || exit 1
 (cd "$root" && $wap "$compiler" scripts/wap-census.warp "$census" >"$report" 2>&1 &&
 	scripts/job-slot.sh $wap "$census" $(git ls-files 'wap/*.wap') >"$report" 2>&1)
 total=$(grep '^total' "$report" | cut -f2)
