@@ -32,7 +32,7 @@ The files use each other freely: computing, equality and typing call one another
   `Pi(binder, domain, body)`, `LetIn(binder, type, value, body)`, `Numeral(value)`, `Projection(structure, field, of)`.
 - A term is built only by `bound`, `free`, `universe`, `constant`, `apply`, `apply_all`, `lambda`, `pi`, `let_in`,
   `numeral`, `projection`, which fill in the hash and the rest; never by `Term(…)`. `PROP`, `type_at(level)`.
-- `head(t)`, `arguments(t)`: a chain of applications taken apart.
+- `head(t)`, `arguments(t)`: a chain of applications taken apart. `parts(t)`: the terms t is made of, in order.
 - `instantiated(body, value)`: a binder's body with its variable replaced; `instantiated_all(body, values)`: the
   body under several binders, the outermost one's value first. `abstracted(t, id)`: a term made the body of a
   binder. `with_levels(t, names, levels)`: level parameters replaced.
@@ -45,8 +45,13 @@ The files use each other freely: computing, equality and typing call one another
 
 **environment.wap**
 - `Declaration`: `name`, `levels` (its level parameters), `type`, `kind`: `Axiom`, `Defined(value)`,
-  `Theorem(value)`, `Opaque(value)`. `unfolding(d)`: the value a use unfolds to, ø for an axiom and an opaque one.
-- `Environment`, `declaration(e, name)`, `place(e, name)` (later declared, larger), `added(e, d)`.
+  `Theorem(value)`, `Opaque(value)`, `Inductive(facts)` (a type of a block) and `Constructor(of, place, fields)` (one
+  of its cases). `unfolding(d)`: the value a use unfolds to, ø for an axiom and an opaque one.
+- `Environment`, `declaration(e, name)`, `place(e, name)` (later declared, larger), `added(e, d)`, `copied(e)`.
+- `names_new(e, names)`, `levels_distinct(levels)`, `closed(t, name)`: the checks before a declaration's type is read.
+- `InductiveBlock` (its levels, its count of parameters, its `BlockType`s, each with its `WrittenCase`s) as written,
+  and `InductiveFacts`, what checks 1 to 5 found of it: its level, each type's indices, each case's fields and
+  recursive fields, whether it is taken apart into any universe, whether it is a structure, whether K holds.
 - `Checker`: the state of one check, made by `checker(e, levels)`. `hypothesis(c, binder, type)` gives the free
   variable of a binder gone into, `hypothesis_of(c, id)` its name and type. `stepped(c)` counts a step of computing.
   `Memory`, `remembered`, `remember`: results kept by term.
@@ -64,6 +69,11 @@ The files use each other freely: computing, equality and typing call one another
 - `type_of(c, t)`: the type of t, or a refusal (6.3).
 - `level_of(c, type)`: the level of the sort a type lies in; a refusal when it is no type.
 - `declared(e, d)`: d checked (6.6) and then part of e, or a refusal.
+
+**inductive.wap**
+- `inductive_declared(e, block)`: the block checked (7, checks 1 to 5), its types and cases added, its facts given
+  for the recursors. Its rules: `enum header`, `case type`, `parameters`, `case result`, `field universe`,
+  `strict positivity`. A type of the block nested in another inductive type is refused by strict positivity.
 
 **explicit.wap, show.wap, check.wap**
 - `statement_read(e, statement)`: one statement of an explicit program as a `Statement`: `Declares(declaration)` or
