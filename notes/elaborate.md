@@ -162,8 +162,10 @@ adds is how a candidate fits and where its instances come from.
 
 - **Fitting.** An argument fits a parameter when its type unifies with the parameter's, or converts to it (E4's
   conversions; E3 needs the number tower's). Of the candidates that fit, one without a conversion beats one with,
-  fewer conversions beat more; two left is the refusal `overload`, none the refusal `no fitting overload`. A
-  candidate whose argument fits no declaration of its own name, or that takes fewer arguments than given, does not fit. So `x + y` of a `nat` and an `int` is the `int`
+  fewer conversions beat more; two left is the refusal `overload`, none the refusal `no fitting overload`, naming
+  why each candidate did not fit. A candidate whose argument fits no declaration of its own name, or that takes fewer
+  arguments than given, does not fit; that argument's refusal is the candidate's reason, so a cause inside an argument
+  stays in the message. So `x + y` of a `nat` and an `int` is the `int`
   one, and `3 + 4` the `nat` one, with no rule about operators.
 - **Numbers.** A number read against a wanted type other than the prelude's `nat` is the conversion of the number
   to that type; with no type wanted it is a `nat`.
