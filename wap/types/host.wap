@@ -21,6 +21,8 @@ WRITE_RIGHT := 64
 FROM_START := 0
 FROM_END := 2
 SLASH := 47
+# WASI: the most bytes of a link's target read
+LINK_BYTES := 4096
 # WASI: the open flag of a folder and the right to read its entries; an entry: where the next one starts (its first
 # word), its name's length at 16, its name after the header; the bytes read at once
 FOLDER_FLAG := 2
@@ -84,6 +86,7 @@ fd_readdir(folder: int, entries_at: int, length: int, cookie: int, used_at: int)
 clock_time_get(clock: int, precision: int, time_at: int): int := prim clock_time_get(clock, precision, time_at)
 random_get(at: int, count: int): int := prim random_get(at, count)
 poll_oneoff(subscriptions_at: int, events_at: int, count: int, given_at: int): int := prim poll_oneoff(subscriptions_at, events_at, count, given_at)
+path_readlink(folder: int, path_at: int, length: int, target_at: int, size: int, used_at: int): int := prim path_readlink(folder, path_at, length, target_at, size, used_at)
 # a clock's time in nanoseconds, asked to a precision: WASI's clock_time_get puts it at 0, as two words
 clock_nanos(clock: int, precision: int): int := {
 	clock_time_get(clock, precision, 0)
@@ -105,13 +108,44 @@ zero_ended(at: int): text := {
 	memory_text(at, end - at)
 }
 # the file at a path opened with these flags and rights, relative to the current folder or from the root (/…); ø for a
-# path it cannot open
+# path it cannot open. A host that follows no link to a path from the root (wasmtime's) is given the path the links name
 opened_at(written: text, flags: int, rights: int): int? := {
 	path = home_expanded(written)
-	rooted = if byte_count(path) > 0 and byte_at(path, 0) == SLASH then 1 else 0
-	place(bytes_between(path, rooted, byte_count(path)))
-	if path_open(CURRENT_FOLDER + rooted, FOLLOW_LINKS, BYTES_AT, byte_count(path) - rooted, flags, rights, 0, 0, MOVED_AT) != 0 { return ø }
-	memory_word(MOVED_AT)
+	length = path_placed(path)
+	if path_open(CURRENT_FOLDER + rooted(path), FOLLOW_LINKS, BYTES_AT, length, flags, rights, 0, 0, MOVED_AT) == 0 { return memory_word(MOVED_AT) }
+	followed = links_followed(path)
+	if followed == path then ø else opened_at(followed, flags, rights)
+}
+# 1 for a path from the root, whose / WASI leaves to the root folder, else 0
+rooted(path: text): int := if byte_count(path) > 0 and byte_at(path, 0) == SLASH then 1 else 0
+# a path's bytes placed at BYTES_AT for a WASI call, a leading / left out; their count
+path_placed(path: text): int := {
+	place(bytes_between(path, rooted(path), byte_count(path)))
+	byte_count(path) - rooted(path)
+}
+# the path with its first link, the shortest leading part of it that is one, replaced by the link's target
+links_followed(path: text): text := {
+	for end in 1 upto byte_count(path) + 1 {
+		if end == byte_count(path) or byte_at(path, end) == SLASH {
+			link = bytes_between(path, 0, end)
+			target = link_target(link)
+			if target != "" { return (if byte_at(target, 0) == SLASH then target else bytes_between(link, 0, folder_end(link)) + target) + bytes_between(path, end, byte_count(path)) }
+		}
+	}
+	path
+}
+# what the link at a path names, read after the path's bytes; "" where the path is no link
+link_target(link: text): text := {
+	length = path_placed(link)
+	memory_holding(length + LINK_BYTES)
+	if path_readlink(CURRENT_FOLDER + rooted(link), BYTES_AT, length, BYTES_AT + length, LINK_BYTES, MOVED_AT) != 0 { return "" }
+	memory_text(BYTES_AT + length, memory_word(MOVED_AT))
+}
+# the length of a path's folder part, its last / included; 0 for a bare name
+folder_end(path: text): int := {
+	end = byte_count(path)
+	while end > 0 and byte_at(path, end - 1) != SLASH { end -= 1 }
+	end
 }
 # the file opened, a path it cannot open raising the refusal and the path
 opened(path: text, flags: int, rights: int, refusal: text): int := opened_at(path, flags, rights) ?? raise(refusal + path)

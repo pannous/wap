@@ -80,6 +80,17 @@ uint32_t w2c_wasi__snapshot__preview1_path_open(struct w2c_wasi__snapshot__previ
 	store32(wasi, opened, (uint32_t)fd);
 	return 0;
 }
+// the target of the link at the path, as path_open finds the path
+uint32_t w2c_wasi__snapshot__preview1_path_readlink(struct w2c_wasi__snapshot__preview1* wasi, uint32_t folder, uint32_t path, uint32_t length,
+	uint32_t target, uint32_t size, uint32_t used) {
+	(void)folder;
+	char* name = strndup((char*)at(wasi, path), length);
+	ssize_t count = readlink(name, (char*)at(wasi, target), size);
+	free(name);
+	if (count < 0) return WASI_FAILED;
+	store32(wasi, used, (uint32_t)count);
+	return 0;
+}
 uint32_t w2c_wasi__snapshot__preview1_args_sizes_get(struct w2c_wasi__snapshot__preview1* wasi, uint32_t count, uint32_t size) {
 	uint32_t bytes = 0;
 	for (int i = 0; i < wasi->argc; i++) bytes += (uint32_t)strlen(wasi->argv[i]) + 1;
