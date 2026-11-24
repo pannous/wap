@@ -32,6 +32,13 @@ show the user: the case against and why no library or hook does it (ask the bran
 - wap-build e7ebfcb7 (wap-emitter), +12 in extensions/native (driver 9, commands 3): `wap build app.wap` makes a
   native executable `app`; a .wap output name is refused so the source is never overwritten. The user OK'd about
   5 lines via wap-lead; it came to 12 (9 without the refusal). Recommend: OK, with the refusal.
+- unclosed-text (wap-fixer, the user's card): code given on the command line names the host's temp file in every
+  message (`wap 'x = "abc'` → "/private/var/…/T/wap-nLgENb.wap line 1:5: this text is never closed"). Shape: the
+  compiler reads its program from standard input when the path is `-` (the Unix convention); such code has no file,
+  so messages say "line 1:5", and `use "x.wap"` resolves against the current folder. Driver and console pass code
+  through stdin. Core: reader +2, compiler.wap +2; extensions (driver, console) about +8. Option: a `--code` option
+  (same core plus an option). Leave as is: the temp path stays in messages. Supervisor recommends stdin.
+  wap-reviewer verdict: asked 2026-11-24.
 
 ## To present (keep or change, at 10:00)
 
