@@ -95,39 +95,42 @@ declaration_taken(language: Language, called: text, arguments: list) as list<Nod
 }
 
 
-head_rules(language: Language, stage: int, head: text) as list<Rule> := rules_of_stage(language, stage).by_head.get(head) ?? []
+# the rules of a stage whose written pattern has a pattern's head: typed rules are kept under their lowered pattern's head
+head_rules(language: Language, stage: int, pattern: Node) as list<Rule> := {
+	head = heads_of(language, pattern)#1
+	rules = rules_of_stage(language, stage).by_head
+	if stage == TYPED_STAGE then rules.values().flat_map(each => each).filter(other => heads_of(language, other.pattern)#1 == head) else rules.get(head) ?? []
+}
 # a rule is more specific than a general one when it weighs more and the general one fits its pattern
 waits_for(general: Matcher, weight: int, specific: Rule) as bool := specific.specificity > weight and matches(general, specific.pattern, {})
+same_rule(rule: Rule, written: Node) as bool := "${rule.written}" == "${written}"
+# a rule taken out of its stage, its head with it once it holds no other
+rule_taken(rules: Rules, taken: Rule) := { kept = rules.by_head[taken.head].filter(other => not same_rule(other, taken.written)); if kept is empty { rules.by_head.remove(taken.head) } else { rules.by_head[taken.head] = kept } }
 rule_added(language: Language, written: Node, pattern: Node, template: Node, fact: text) := {
 	normal = normalized(ungrouped(pattern))
 	writes_nothing = ungrouped(template) is Empty
 	output = if writes_nothing then NOTHING_WRITTEN else ungrouped(template)
 	for hole in holes_in(output) { if not holes_in(normal).contains(hole) and not holes_in(normal).contains(hole + REST_MARK) { refused(written, "the rule writes " + hole + ", which its pattern has no hole for") } }
-	head = heads_of(language, normal)#1
 	general = compiled_pattern(language, normal)
-	own = matcher_stage(general)
-	fact_weight = if fact == "" then 0 else 2
-	weight = specificity(general) + fact_weight
+	weight = specificity(general) + (if fact == "" then 0 else 2)
 	# a rule waits for the stages of the more specific rules of its head: the most specific rule wins across stages
-	stage = RULE_STAGES.filter(later => later > own and head_rules(language, later, head).any(other => waits_for(general, weight, other))).fold(own, (a, b) => max(a, b))
+	stage = max(matcher_stage(general), RULE_STAGES.filter(at => head_rules(language, at, normal).any(other => waits_for(general, weight, other))).fold(SHAPE_STAGE, (a, b) => max(a, b)))
 	# a typed rule meets typed kernel: its pattern and template are lowered as the program is, `twice $x: int`; a
 	# refusal stays as written
-	written_pattern = normal
-	if stage == TYPED_STAGE { normal = lowered(language, normal); output = if writes_nothing or refusal_of(output) != ø then output else forms_built(language, lowered(language, output)) }
-	matcher = compiled_pattern(language, normal)
-	rule = Rule(heads_of(language, normal)#1, matcher, stage, written_pattern, output, names_bound_in(language, output), parameters_bound_in(language, output), written, specificity(matcher) + fact_weight, fact)
-	# a rule loaded again, its file read twice, is the rule already there: in its own stage or one it was raised to
-	if RULE_STAGES.filter(at => at >= own).any(at => head_rules(language, at, rule.head).any(other => "${other.written}" == "${written}")) { return }
+	placed = normal
+	if stage == TYPED_STAGE { placed = lowered(language, normal); output = if writes_nothing or refusal_of(output) != ø then output else forms_built(language, lowered(language, output)) }
+	matcher = compiled_pattern(language, placed)
+	rule = Rule(heads_of(language, placed)#1, matcher, stage, normal, output, names_bound_in(language, output), parameters_bound_in(language, output), written, weight, fact)
+	# a rule loaded again, its file read twice, is the rule already there, in whichever stage it waits
+	if RULE_STAGES.any(at => head_rules(language, at, normal).any(other => same_rule(other, written))) { return }
 	rules = rules_of_stage(language, stage)
-	rules.by_head[rule.head] = head_rules(language, stage, rule.head) + [rule]
+	rules.by_head[rule.head] = (rules.by_head.get(rule.head) ?? []) + [rule]
 	# the less specific rules of its head in earlier stages wait for it
 	for earlier in RULE_STAGES.filter(at => at < stage) {
-		waiting = head_rules(language, earlier, head).filter(other => waits_for(other.matcher, other.specificity, rule))
-		rules_of_stage(language, earlier).by_head[head] = head_rules(language, earlier, head).filter(other => not waits_for(other.matcher, other.specificity, rule))
-		for moved in waiting { rule_added(language, moved.written, moved.pattern, moved.template, moved.fact) }
+		for moved in head_rules(language, earlier, normal).filter(other => waits_for(other.matcher, other.specificity, rule)) { rule_taken(rules_of_stage(language, earlier), moved); rule_added(language, moved.written, moved.pattern, moved.template, moved.fact) }
 	}
 	rules.checked = no
-	match normal { List(items, Bracket.None, Separator.Space) => words_told(language, items, matcher.parts.any(takes_block)); _ => ø }
+	match placed { List(items, Bracket.None, Separator.Space) => words_told(language, items, matcher.parts.any(takes_block)); _ => ø }
 }
 # a phrase pattern's words told the operator stage: the first ones lead it, the words after the first are inner words,
 # each with the words whose phrases it continues

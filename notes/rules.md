@@ -24,4 +24,4 @@ less specific rules of earlier stages up to its own stage. Within one stage, the
 A rule raised to stage 2 writes surface code. The shape rules then shape it, as they shaped the program. A group of
 one phrase it rewrote is kept as stage 1 keeps it (group_kept), so `(c_type int)` becomes `int`.
 
-Tests: test/test_rules.wap "a catch-all written after a class case …" and "a catch-all written before a class case …", test/wap/test_native.sh "a record crosses to C …".
+Specification: wiki/rule.md "Which rule applies". Tests: test/test_rules.wap "a catch-all written after a class case …" and "a catch-all written before a class case …", test/wap/test_native.sh "a record crosses to C …".
