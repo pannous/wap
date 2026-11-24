@@ -124,7 +124,7 @@ differ and holds every rule; this file holds only the procedures behind them.
 - `warp format yes <files>` (notes/warp_format.md) before the handoff; commit what it moved.
 - Merging origin/main: take a side of a conflicted file only after `git diff <merge-base> HEAD -- <file>` (merges your
   branch carries are your side too); otherwise resolve the hunk and check `git diff origin/main -- <file>` shows only
-  your change. Keep merges real: `source scripts/lib/sync-main.sh; up_to_date_main` or `git merge origin/main`, never
+  your change. Keep merges real: `git fetch --no-write-fetch-head origin main && git merge origin/main`, never
   `git pull --rebase`. A pushed branch is never rebased or force-pushed.
 - "Quickly" means about a minute: one targeted test or none, a try line with `/Users/me/dev/bin/warp
   --lib <worktree>/lib`, hand off right after.
