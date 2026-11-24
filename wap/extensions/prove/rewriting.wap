@@ -40,6 +40,8 @@ class Rewritten { terms: list<Term>; steps: list<Rewrite> }
 by_rewriting(goal: Goal): Term? := {
 	equation = equation_of(goal.el.c, goal.statement) ?? return ø
 	laws = laws_of(goal).map(law => rewriter_of(goal, law.name, () => instance_of(goal.el, law), goal.named.any(named => named.name == law.name)))
+	# a hypothesis rewrites as a law `by` names does, even where it does not orient: what the goal assumes is what it
+	# is about, often an equation of two variables, which no order turns down; it rewrites once at each place
 	given = goal.parameters.map(parameter => rewriter_of(goal, GIVEN + "${variable_id(parameter)}", () => LawInstance(parameter, [], filled(goal.el, type_of(goal.el.c, parameter))), yes))
 	rules = (laws + given).compact()
 	if rules is empty { return ø }
@@ -55,7 +57,7 @@ by_rewriting(goal: Goal): Term? := {
 	right.steps.take(back - 1).reverse().fold(forward, (proof, step) => continued(goal, equation, reversed(goal, step), proof))
 }
 # a proof of `left == t` carried along a rewrite of a part of t
-continued(goal: Goal, equation: Equation, step: Rewrite, proof: Term): Term := carried(goal, step, proof, t => stated(equation, equation.left, step.around(t)))
+continued(goal: Goal, equation: Equation, step: Rewrite, proof: Term): Term := carried(goal.el.c, step.equation, step.proof, proof, t => stated(equation, equation.left, step.around(t)))
 
 # a law as a rewriter where it orients or `by` names it, a hypothesis always; ø elsewhere. A law orients where each
 # step goes down: its left side holds all its parameters and is bigger than its right, or as big with a head defined
@@ -105,8 +107,10 @@ is_hole_applied(el: Elaboration, t: Term): bool := match head(t).shape {
 }
 hole_id(found: Term): int := variable_id(head(found))
 
-# a side rewritten step by step until no rule matches a part of it or the limit is reached; a side still rewriting
-# at the limit by a law `by` names is refused, naming the laws
+# a side rewritten step by step until no rule matches a part of it. Each step goes down in size, or keeps it and goes
+# down at the head only, so that order alone does not end every rewriting: the limit does. A side still rewriting at
+# the limit is refused, naming the rules: by a law `by` names, for the program to name fewer; else the prover gives
+# up on the goal
 rewritten(goal: Goal, rules: list<Rewriter>, side: Term): Rewritten := {
 	done = Rewritten([side], [])
 	while #done.steps < REWRITE_LIMIT {
@@ -115,9 +119,10 @@ rewritten(goal: Goal, rules: list<Rewriter>, side: Term): Rewritten := {
 		done.steps += [step]
 		done.terms += [step.around(step.equation.right)]
 	}
-	named = goal.named.filter(law => done.steps.any(step => step.place.starts_with(law.name + PLACE_MARK))).map(law => law.name)
+	rewriting = rules.filter(rule => done.steps.any(step => step.place.starts_with(rule.name + PLACE_MARK))).map(rule => rule.name)
+	named = goal.named.map(law => law.name).filter(name => name in rewriting)
 	if named is not empty { refused(ENDLESS, "the laws `by` names rewrite a side without end: ${named.join(", ")}; name fewer laws in `by`") }
-	done
+	refused(GAVE_UP, "rewriting a side took more than ${REWRITE_LIMIT} steps, by ${rewriting.join(", ")}")
 }
 # the first rewrite of a term or of one of its parts, outermost first; around gives the whole term of a part, path
 # names the part's place, and used the places rewritten so far
@@ -176,18 +181,17 @@ applied_alike(c: Checker, t: Term, rule: Rewriter): Term? := match head(t).shape
 	_ => ø
 }
 
-# a proof of `motive(a)` carried along a step's proof of `a == b` to a proof of `motive(b)`, by the equality's
+# a proof of `motive(a)` carried along a proof of the equation `a == b` to a proof of `motive(b)`, by the equality's
 # recursor, the motive a proposition
-carried(goal: Goal, step: Rewrite, start: Term, motive: (Term) -> Term): Term := {
-	c = goal.el.c
-	value = hypothesis(c, CARRIED_VALUE, step.equation.type)
-	along = hypothesis(c, CARRIED_PROOF, stated(step.equation, step.equation.left, value))
-	recursor = constant(recursor_name(step.equation.equality), [Zero] + step.equation.levels)
-	apply_all(recursor, [step.equation.type, step.equation.left, closed_over(c, motive(value), [value, along], yes), start, step.equation.right, step.proof])
+carried(c: Checker, equation: Equation, proof: Term, start: Term, motive: (Term) -> Term): Term := {
+	value = hypothesis(c, CARRIED_VALUE, equation.type)
+	along = hypothesis(c, CARRIED_PROOF, stated(equation, equation.left, value))
+	recursor = constant(recursor_name(equation.equality), [Zero] + equation.levels)
+	apply_all(recursor, [equation.type, equation.left, closed_over(c, motive(value), [value, along], yes), start, equation.right, proof])
 }
 # a step turned round: a proof of `b == a` from its proof of `a == b`, carried from `a == a`
 reversed(goal: Goal, step: Rewrite): Rewrite := {
 	e = step.equation
 	turned = Equation(e.equality, e.levels, e.type, e.right, e.left)
-	Rewrite(turned, carried(goal, step, reflexivity(goal.el.c, e, e.left), t => stated(e, t, e.left)), step.around, step.place)
+	Rewrite(turned, carried(goal.el.c, e, step.proof, reflexivity(goal.el.c, e, e.left), t => stated(e, t, e.left)), step.around, step.place)
 }
