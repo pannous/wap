@@ -48,6 +48,8 @@ unscoped(el: Elaboration, variables: list<Term>) := {
 	left = variables.map(variable_id)
 	el.scope = el.scope.filter(variable => not left.contains(variable_id(variable)))
 }
+# A term closed over binders, it and each binder's type filled first, so no answered hole stays in it
+closed_filled(el: Elaboration, t: Term, variables: list<Term>, function: bool): Term := closed_typed(el.c, filled(el, t), variables, function, variable => filled(el, hypothesis_of(el.c, variable_id(variable)).type))
 # the innermost binder in scope of a name
 named(el: Elaboration, name: text): Term? := el.scope.reverse().find(variable => hypothesis_of(el.c, variable_id(variable)).binder == name)
 
@@ -55,7 +57,7 @@ named(el: Elaboration, name: text): Term? := el.scope.reverse().find(variable =>
 hole(el: Elaboration, name: text, type: Term): Term := hole_over(el, name, type, el.scope)
 # a hole that is a function of these binders only, applied to them: its type names no other binder
 hole_over(el: Elaboration, name: text, type: Term, variables: list<Term>): Term := {
-	function = hypothesis(el.c, name, closed_over(el.c, type, variables, no))
+	function = hypothesis(el.c, name, closed_filled(el, type, variables, no))
 	id = variable_id(function)
 	el.holes[id] = Hole(id, name)
 	apply_all(function, variables)
@@ -105,14 +107,23 @@ filled(el: Elaboration, t: Term): Term := {
 			given = arguments(t).map(each => filled(el, each))
 			if is_hole(el, applied) then beta(filled(el, applied), given) else apply_all(filled(el, applied), given)
 		}
-		Lambda(binder, domain, body) => lambda(binder, filled(el, domain), filled_under(el, binder, domain, body))
-		Pi(binder, domain, body) => pi(binder, filled(el, domain), filled_under(el, binder, domain, body))
-		LetIn(binder, type, value, body) => let_in(binder, filled(el, type), filled(el, value), filled_under(el, binder, type, body))
+		Lambda(binder, domain, body) => {
+			typed = filled(el, domain)
+			lambda(binder, typed, filled_under(el, binder, typed, body))
+		}
+		Pi(binder, domain, body) => {
+			typed = filled(el, domain)
+			pi(binder, typed, filled_under(el, binder, typed, body))
+		}
+		LetIn(binder, type, value, body) => {
+			typed = filled(el, type)
+			let_in(binder, typed, filled(el, value), filled_under(el, binder, typed, body))
+		}
 		Projection(structure, field, of) => projection(structure, field, filled(el, of))
 		_ => t
 	}
 }
-# A binder's body filled. A body that uses the binder's variable and may hold a hole is gone into by a free
+# A binder's body filled, its domain filled already. A body that uses the binder's variable and may hold a hole is gone into by a free
 # variable, as the kernel goes under a binder: an answer's body then takes closed arguments only
 filled_under(el: Elaboration, binder: text, domain: Term, body: Term): Term := {
 	if body.loose == 0 or not body.holds_free { return filled(el, body) }
