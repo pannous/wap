@@ -40,8 +40,8 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	placed = spread_alone(if arguments.any(is_named) then arranged_arguments(n, called, arguments, candidates, s) else arguments, candidates, s)
 	by_count = candidates.filter(definition => takes_count(definition, #placed, s))
 	# a function's name among arguments no definition takes takes the rest, `sin cos 0` is sin(cos(0)) (wiki/call.md)
-	nested = (1 to #placed - 1).find(at => names_function(placed#at) and candidates.any(definition => takes_count(definition, at, s)))
-	if by_count is empty and nested != ø { return typed_form(nested_read(n, called, placed, nested!), s, f, expected) }
+	reading = if by_count is empty then nested_read(n, called, placed, candidates, s) else ø
+	if reading != ø { hint(warning_of(n, "the parameter counts read it as ${call_shown(reading!)}")); typed_readings[reading_key(called)] = reading!; return typed_form(reading!, s, f, expected) }
 	receiver = fact_of(called, RECEIVER)
 	held = if by_count is empty and receiver != ø then value_type(typed_form(receiver, s, f, ø)) else ø
 	if held != ø and candidates.any(definition => takes_count(definition, #placed + 1, s) and same_type(definition.parameters#1 ?? EMPTY_SYMBOL, held)) { return typed_form(refitted(Call(called, [receiver!] + placed), n), s, f, expected) }
@@ -61,8 +61,15 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	if made != ø { return typed_form(made, s, f, expected) }
 	call_chosen(n, called, scopes, given, expected, s, f)
 }
-# the call that reading gives, said in a note, as the reading is decided by the parameter counts
-nested_read(n: Node, called: Node, placed: list, at: int) as Node := { reading = refitted(Call(called, placed.take(at - 1) + [refitted(Call(placed#at, placed[at ..]), placed#at)]), n); hint(warning_of(n, "${placed#at} takes the values after it: ${call_shown(reading)}")); typed_readings[reading_key(called)] = reading; reading }
+# the call that reading gives, the inner name taking the rest in turn where none of its definitions takes it all, so
+# one note says the whole reading, `print sin cos 0` as print(sin(cos(0)))
+nested_read(n: Node, called: Node, placed: list, candidates: list<Signature>, s: TypingState) as Node? := {
+	at = (1 to #placed - 1).find(at => names_function(placed#at) and candidates.any(definition => takes_count(definition, at, s))) ?? return ø
+	inner = scoped_definitions(placed#at, s).flat_map(scope => scope)
+	rest = refitted(Call(placed#at, placed[at ..]), placed#at)
+	taken = inner.any(definition => takes_count(definition, #placed - at, s))
+	refitted(Call(called, placed.take(at - 1) + [if taken then rest else nested_read(rest, placed#at, placed[at ..], inner, s) ?? rest]), n)
+}
 # the readings typing decided, by the word that leads the code they read: `wap format` prints them (format.wap)
 typed_readings: map<text, Node> = {}
 reading_key(head: Node) as text := place_of(head) + "${head}"
