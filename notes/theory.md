@@ -22,6 +22,8 @@ all of them keep. The plan says what the rules are; this note says where they li
 | `recursors.wap` | recursors made, their computation rules | 7, checks 6 and 7 | theory-recursors |
 | `quotients.wap` | the statement `quotients(Equal)`: the quotient and its ways out | 6.4, 6.6 | theory-quotients |
 | `numbers.wap` | the statements `numbers(…)` and `shortcut(…)`: number literals and the seven shortcuts | 6.7 | theory-numbers |
+| `below.wap` | the statement `products(Pair, Unit)`: each enum's below and course | 8, E2 | theory-below |
+| `bindings.wap` | the statements that bind names, read and sent to their files | below | theory-below |
 | `prelude/logic.wap` | the logic as an explicit program: False, True, And, Or, Not, Equal, Exists, bool, Decidable | L1 | theory-prelude-logic |
 | `prelude/quotient.wap` | the quotients bound, their axiom, function extensionality proved | K5 | theory-quotients |
 | `prelude/numbers.wap` | nat with its shortcuts and the theorems that license them, the comparisons, int | L2 | theory-prelude-numbers |
@@ -215,8 +217,8 @@ refusal "unknown name".
 
 ## The declarations that bind names
 
-The kernel names no type of the prelude (plan 5.4). Three statements of the explicit corner bind the ones a
-mechanism needs. Each is checked, and `quotients` and `numbers` stand once.
+The kernel names no type of the prelude (plan 5.4). Four statements of the explicit corner bind the ones a
+mechanism needs (bindings.wap). Each is checked, and `quotients`, `numbers` and `products` stand once.
 
 **`quotients(Equal)`** (K5, plan 6.6). `Equal` must have the shape of equality: a block of one type with one level
 parameter `u`, the parameters `T: Sort(u)` and `a: T`, one index of type `T`, in `Prop`, and one case without
@@ -233,6 +235,14 @@ Computing (6.4), the last argument computed first: `quotient.lift[u, v](T, r, B,
 `f(a)`, and `quotient.induct[u](T, r, motive, h, quotient.of[u](T, r, a))` is `h(a)`. That joined values are equal is
 an axiom of the prelude, written like any other: `axiom quotient_sound(T: Sort(u), r: T -> T -> Prop, a: T, b: T):
 r(a, b) -> Equal[u](quotient[u](T, r), quotient.of[u](T, r, a), quotient.of[u](T, r, b))`.
+
+**`products(Pair, Unit)`** (E2). `Pair` must have the shape of `enum Pair(A: Sort(u), B: Sort(v)): Sort(max(1, max(u,
+v))) { intro(first: A, second: B) }`, `Unit` of `enum Unit: Sort(u) { unit }`. From then on an enum of one type that
+eliminates into any sort, with no field a function into it, gets two definitions the first time a recursion asks:
+`T.below[u, …](params, motive, indices, t): Sort(max(1, u))`, by the recursor into types, each case the pairs of its
+recursive fields' motive and their own below, ending in Unit; and `T.course[u, …](params, motive, step, indices, t):
+motive(indices, t)`, the first of the recursor's pair of the motive's value and the values below, where step takes
+the indices, the value and its below. The kernel checks both like any definition.
 
 **`numbers(nat, bool.yes, Equal)`** (K3, plan 6.7). `nat` must be a block of one type without parameters, indices
 or level parameters, in `Type`, with a case without fields and then a case with one field of `nat`; `bool.yes` a
