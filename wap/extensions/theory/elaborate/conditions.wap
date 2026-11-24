@@ -35,20 +35,24 @@ if_elaborated(x: Elaborating, condition: Node, then_part: Node, else_part: Node,
 	truth_matched(x, tested, then_part, else_part, wanted)
 }
 # Inside a recursion a choice is read by the cases of what its condition waits on (wiki/Footguns.md "Deciding
-# termination"): where the arms around decide the condition, only the part chosen; where it waits on a value of an
-# enum, a match on that value with the choice again in every arm. So `if equals(n, 0) then … else … f(subtract(n, 1))`
-# reads the call where n is a successor, on the value below it, and a choice by `n < 2` takes n apart twice
+# termination"): where the arms around decide the condition, only the part chosen; where it waits on a parameter or a
+# part of one, a match on that value with the choice again in every arm. So `if equals(n, 0) then … else …
+# f(subtract(n, 1))` reads the call where n is a successor, on the value below it, and a choice by `n <= 1` takes n
+# apart twice
 choice_by_cases(x: Elaborating, tested: Term, condition: Node, then_part: Node, else_part: Node, wanted: Term?): Term? := {
 	decided = computed(x.el.c, known_in(x, tested))
 	if is_case(decided, TRUTHS#1) { return elaborated(x, then_part, wanted) }
 	if is_case(decided, TRUTHS#2) { return elaborated(x, else_part, wanted) }
 	if x.cases_deep >= CASE_DEPTH { return ø }
 	subject = waiting_on(x.el.c, decided) ?? return ø
+	if not within_parameter(x, subject) { return ø }
 	x.cases_deep += 1
 	taken_apart = subject_matched(x, subject, [ArmWritten(symbol(ANY_CASE#1), If(condition, then_part, else_part))], wanted)
 	x.cases_deep -= 1
 	taken_apart
 }
+# whether a variable is a parameter of the recursion being read or a part the arms around took one apart into
+within_parameter(x: Elaborating, variable: Term): bool := x.recursing!.parameters.any(parameter => variable_id(variable) in free_variables(known_in(x, filled(x.el, parameter))))
 # whether a term is a case of this name
 is_case(t: Term, case: text): bool := match head(t).shape {
 	Constant(name, levels) => names_case(symbol(case), name)
@@ -62,7 +66,7 @@ waiting_on(c: Checker, t: Term): Term? := {
 		Free(id) => if arguments(stuck) is empty then stuck else ø
 		Constant(name, levels) => {
 			facts = recursor_facts(c.environment, name) ?? return ø
-			taken = facts.parameters + facts.motives + facts.minors + facts.indices
+			taken = before_major(facts)
 			if #arguments(stuck) <= taken then ø else waiting_on(c, arguments(stuck)#(taken + 1))
 		}
 		_ => ø
