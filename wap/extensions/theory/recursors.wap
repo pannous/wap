@@ -49,10 +49,18 @@ opened(c: Checker, t: Term, count: int): Opened := {
 	}
 	Opened(binders, rest)
 }
-# how many binders a function type has as it is written
-binders_written(t: Term): int := match t.shape {
-	Pi(binder, domain, body) => 1 + binders_written(body)
-	_ => 0
+# A field's type gone into as strict positivity judged it (inductive.wap's `positive`): computed, and again inside
+# each binder
+judged(c: Checker, t: Term): Opened := {
+	type = computed(c, t)
+	match type.shape {
+		Pi(binder, domain, body) => {
+			inside = entered(c, binder, domain)
+			rest = judged(c, instantiated(body, inside.variable))
+			Opened([inside] + rest.binders, rest.rest)
+		}
+		_ => Opened([], type)
+	}
 }
 
 # A recursive field's induction hypothesis: the binders of the field's function type, the type of the block it ends
@@ -74,13 +82,14 @@ class Making {
 	turned: map<text, Turned> = {}
 }
 
-# The recursors of a declared block (checks 6 and 7), each one's type checked by typing
+# The recursors of a declared block (checks 6 and 7), made where the types added for containers are axioms, so
+# fields naming them compute; each recursor's type checked by typing in the real environment
 recursors_made(e: Environment, facts: InductiveFacts): list<Declaration> := {
 	block = facts.block
 	levels = if facts.any_motive then [MOTIVE_LEVEL] + block.levels else block.levels
-	m = Making(facts, checker(e, levels), levels)
-	m.parameters = opened(m.c, block.types#1.type, block.parameters).binders
 	written = #block.types - #facts.nested
+	m = Making(facts, checker(holding(e, block.types.drop(written), block.levels), levels), levels)
+	m.parameters = opened(m.c, block.types#1.type, block.parameters).binders
 	for added in 1 to #facts.nested {
 		type = block.types#(written + added)
 		m.turned[type.name] = Turned(facts.nested#added, 0)
@@ -111,13 +120,15 @@ indices_entered(m: Making, at: int): list<Local> := opened(m.c, with_parameters(
 # a motive applied to indices and to a value of its type
 motive_applied(m: Making, at: int, indices: list<Term>, value: Term): Term := apply_all(m.motives#at.variable, indices + [value])
 
+# a motive's name: `motive` for a block of one type, else `motive_1`, `motive_2` … in the order of the types
+motive_name(m: Making, at: int): text := if #m.facts.block.types == 1 then MOTIVE else "${MOTIVE}_${at}"
 # The motive of a type: a function of its indices and a value of it into the motives' universe, any universe where
 # the block may be taken apart into one, else Prop
 motive_made(m: Making, at: int): Local := {
 	indices = indices_entered(m, at)
 	major = entered(m.c, MAJOR, type_applied(m, at, variables(indices)))
 	sort = universe(if m.facts.any_motive then Parameter(MOTIVE_LEVEL) else Zero)
-	entered(m.c, MOTIVE, pis(indices + [major], sort))
+	entered(m.c, motive_name(m, at), pis(indices + [major], sort))
 }
 
 # The minor premise of a case: its fields, then an induction hypothesis for each field of a type of the block, then
@@ -133,7 +144,7 @@ case_made(m: Making, at: int, place: int): CaseMade := {
 
 # The hypothesis of a field `(x_1: D_1) -> … -> I_l(P, indices)`: `(x_1: D_1) -> … -> C_l(indices, b(x_1, …))`
 induction_made(m: Making, field: Local): Induction := {
-	inside = opened(m.c, field.domain, binders_written(field.domain))
+	inside = judged(m.c, field.domain)
 	of = match head(inside.rest).shape {
 		Constant(name, levels) => type_names(m.facts.block).index_of(name)
 		_ => 0
