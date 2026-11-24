@@ -17,6 +17,7 @@ use "read.wap"
 use "recursion.wap"
 use "instances.wap"
 use "effects.wap"
+use "templates.wap"
 use "../../prove/prove.wap"
 
 # the names a level hole left in a declaration's type becomes, the first one not written already; past them a name
@@ -54,25 +55,36 @@ statement_elaborated(p: Theory, statement: Node) := match statement {
 # what a question of two words, `type of e` or `axioms of name`, asks about; ø for another call
 asked_about(words: list<text>, word: text, arguments: list<Node>): Node? := if word == words#1 and #arguments == 2 and text(arguments#1) == words#2 then arguments#2 else ø
 
+# the word of a line naming a statement's parameter, `for x: T`
+FOR_WORD := "for"
+
 # A declaration under its word (empty for a plain definition), `axiom name: type` or `theorem name(parameters): type := proof`: the
 # definition the word is called on, or a typed name without a value
 declaration_elaborated(p: Theory, word: text, n: Node) := match n {
-	Define(named, parameters, value) => definition_elaborated(p, word, named, items_or_one(parameters), value)
+	Define(named, parameters, value) => {
+		written = items_or_one(parameters)
+		# a function with an untyped parameter is a template, elaborated at each call by its arguments' types
+		if word == "" and written.any(parameter => named_binder(parameter).type is ø) { p.templates[definition_name(named)] = Template(named, written, value) } else { definition_elaborated(p, word, named, written, value) }
+	}
 	_ => definition_elaborated(p, word, n, [], ø)
 }
 
 # A declaration `name(parameters): type := value` elaborated and declared. Its header is read first, where a letter
 # nothing binds becomes a found binder; its type is the one written, else its value's. A theorem must be proved; a law
 # without a proof goes to the provers, and one they cannot prove is a hint, kept beside the environment and never
-# declared, so nothing can prove by it
-definition_elaborated(p: Theory, word: text, named: Node, parameters: list<Node>, value: Node?) := {
+# declared, so nothing can prove by it. A parameter without a written type takes its type from `typed`, a template's
+# version (templates.wap). The name it is declared by; ø for a law kept as a hint
+definition_elaborated(p: Theory, word: text, head: Node, written_parameters: list<Node>, value: Node?, typed: list<Term> = []): text? := {
+	quantified = quantified_head(head)
+	named = quantified.named
+	parameters = written_parameters + quantified.parameters
 	x = elaborating(p)
-	name = if is_binder(named) then binder_name(named) else text(named)
+	name = definition_name(named)
 	written_type = if is_binder(named) then binder_type(named) else ø
 	if written_type is ø and value is ø { unelaborated(named) }
 	if word == THEOREM_WORD and value is ø { refused(UNPROVED_THEOREM, "theorem ${name} has no proof: prove it after `:=`, or state it as a law, which may stay unproved") }
 	x.header = yes
-	written = parameters.map(parameter => gone_into(x, named_binder(parameter), ø))
+	written = (1 to #parameters).list().map(at => gone_into(x, named_binder(parameters#at), if at <= #typed then typed#at else ø))
 	result = if written_type is ø then ø else elaborated(x, written_type!, any_sort(x))
 	x.header = no
 	# the header's instances found before the body, which may compute with them
@@ -101,11 +113,37 @@ definition_elaborated(p: Theory, word: text, named: Node, parameters: list<Node>
 	if assumed { p.assumed += [name] }
 	proof = if body is not ø then terms#2 else if provable and (by_laws is not ø or (word == LAW_WORD and not assumed)) then proof_found(elaboration(p.environment, x.reading.levels), terms#1, by_laws ?? []) else ø
 	if by_laws is not ø and proof is ø { refused(UNPROVED_BY, "${name} is not proved by ${by_laws!.map(law => law.name).join(", ")}: name in `by` the laws its steps need") }
-	if word == LAW_WORD and proof is ø and not assumed { p.unproved_laws[name] = terms#1 } else {
-		if given is not ø { within_bound(x, name, terms#1, given!.bound) }
-		declared(p.environment, overloaded(p, Declaration(name, x.reading.levels, terms#1, declaration_kind(if diverged then OPAQUE_WORD else word, proof)), #x.letters, #variables))
+	if word == LAW_WORD and proof is ø and not assumed {
+		p.unproved_laws[name] = terms#1
+		return ø
 	}
+	if given is not ø { within_bound(x, name, terms#1, given!.bound) }
+	declaration = overloaded(p, Declaration(name, x.reading.levels, terms#1, declaration_kind(if diverged then OPAQUE_WORD else word, proof)), #x.letters, #variables)
+	declared(p.environment, declaration)
+	declaration.name
 }
+
+# A head whose statement starts with lines `for x: T`, each one a parameter as `law name(x: T)` writes it
+# (wiki/proposition.md: `for n: nat` before a statement is the same as a parameter), the rest the statement
+class Quantified { named: Node; parameters: list<Node> }
+quantified_head(head: Node): Quantified := {
+	lines = match binder_type(head) {
+		List(items, Bracket.Curly, separator) => items
+		_ => return Quantified(head, [])
+	}
+	count = 0
+	while count < #lines and for_binder(lines#(count + 1)) is not ø { count += 1 }
+	if count == 0 or not is_binder(head) { return Quantified(head, []) }
+	rest = lines.drop(count)
+	Quantified(Key(symbol(binder_name(head)), Op.Colon, if #rest == 1 then rest#1 else List(rest, Bracket.Curly, Separator.Newline)), lines.take(count).map(line => for_binder(line)!))
+}
+# the binder of a line `for x: T`, ø for any other line
+for_binder(line: Node): Node? := match line {
+	List(items, Bracket.None, Separator.Space) => if #items == 2 and text(items#1) == FOR_WORD and is_binder(items#2) then items#2 else ø
+	_ => ø
+}
+# the name a definition's head declares, `f` of `f: T` and of `f`
+definition_name(named: Node): text := if is_binder(named) then binder_name(named) else text(named)
 
 # the laws a proof `by a, b` names, each proved before; ø for any other proof
 laws_named(p: Theory, value: Node): list<Declaration>? := match value {
