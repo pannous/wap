@@ -107,5 +107,8 @@ the team, crash resume), notes/roles.md (what the other roles do).
 - Do not disturb: `date -v+1d -v8H -v0M -v0S +%s > ~/.claude/quiet-until` and stop wap-interviewer's tmux.
 
 ## Reports to the user
-End each answer with what merged and what runs. Every landed plan step is reported at once, with its try line and
-sizes. Swap notices get an empty reply and are never mentioned.
+Short answers (user 2026-11-24: the status summary is expensive): the merged/running summary only when the user asks
+for it. Every landed plan step is reported at once in one line, with its try line. Swap notices get an empty reply and
+are never mentioned.
+Less chatter between bots (user 2026-11-24): a worker gets a message only for an assignment, a verdict or an unblock;
+no acknowledgements, no progress pings, no "on it"; a message needing no action gets no reply.
