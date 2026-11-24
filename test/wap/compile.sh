@@ -21,6 +21,9 @@ seed="$(dirname "$(readlink -f "$wap")")/wap-seed/wap.wasm"
 # beside each build's own copy first, so a script sharing the tree never embeds half of one
 warm_state="$tree/$WAP_WARM"
 library_module="$tree/$WAP_LIBRARY_MODULE"
+# the compiler's own source files, listed from the tree's root, which test_self and the census walk: wap/extensions/theory
+# stays outside the build until the switch (S3); test_theory covers it
+compiler_sources() { git ls-files 'wap/*.wap' ':!wap/extensions/theory'; }
 warm_written() {
 	$wap "$1" --sources warm "$warm_state.$$" 2>&1 && mv "$warm_state.$$" "$warm_state"
 }

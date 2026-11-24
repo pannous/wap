@@ -21,6 +21,9 @@ all of them keep. The plan says what the rules are; this note says where they li
 | `nested.wap` | a block nested in another inductive type made plain | 7, nested types | theory-inductive-checks |
 | `recursors.wap` | recursors made, their computation rules | 7, checks 6 and 7 | theory-recursors |
 | `quotients.wap` | the statement `quotients(Equal)`: the quotient and its ways out | 6.4, 6.6 | theory-quotients |
+| `numbers.wap` | the statements `numbers(…)` and `shortcut(…)`: number literals and the seven shortcuts | 6.7 | theory-numbers |
+| `prelude/` | the library in the explicit spellings, input of the door: `logic.wap`, `quotient.wap` | 11, track L | theory-prelude-… |
+| `elaborate/` | the elaborator, which is not trusted: notes/elaborate.md | 8 | theory-arguments-found and after |
 
 The files use each other freely: computing, equality and typing call one another.
 
@@ -36,8 +39,11 @@ The files use each other freely: computing, equality and typing call one another
   `numeral`, `projection`, which fill in the hash and the rest; never by `Term(…)`. `PROP`, `type_at(level)`.
 - `head(t)`, `arguments(t)`: a chain of applications taken apart. `parts(t)`: the terms t is made of, in order.
 - `instantiated(body, value)`: a binder's body with its variable replaced; `instantiated_all(body, values)`: the
-  body under several binders, the outermost one's value first. `abstracted(t, id)`: a term made the body of a
-  binder. `with_levels(t, names, levels)`: level parameters replaced.
+  body under several binders, the outermost one's value first; `body_under(t, binders)`: what lies under a
+  function type's first binders, for `instantiated_all`. A value put in holds no loose variable, and both refuse
+  one that does. `abstracted(t, id)`: a term made the body of a binder. `with_levels(t, names, levels)`: level
+  parameters replaced.
+- `variable_id(variable)`: the id of a free variable. `free_variables(t)`: the ids of those a term holds.
 - `same(a, b)`: the same tree, binder names aside. `level_same`, `levels_same`, `level_with`, `level_above`.
 
 **levels.wap**
@@ -47,18 +53,23 @@ The files use each other freely: computing, equality and typing call one another
 
 **environment.wap**
 - `Declaration`: `name`, `levels` (its level parameters), `type`, `kind`: `Axiom`, `Defined(value)`,
-  `Theorem(value)`, `Opaque(value)`, `Inductive(facts)` (a type of a block) and `Constructor(of, place, fields)` (one
-  of its cases). `unfolding(d)`: the value a use unfolds to, ø for an axiom and an opaque one.
-- `Environment`, `declaration(e, name)`, `place(e, name)` (later declared, larger), `added(e, d)`, `copied(e)`.
-- `names_new(e, names)`, `levels_distinct(levels)`, `closed(t, name)`: the checks before a declaration's type is read.
+  `Theorem(value)`, `Opaque(value)`, `Inductive(facts)` (a type of a block), `Constructor(of, place, fields)` (one
+  of its cases), `Recursor(facts)` and `Quotient(part)`. `unfolding(d)`: the value a use unfolds to, ø for every
+  kind but a definition and a theorem.
+- `Environment`, `declaration(e, name)` (ø for a name nothing declares), `declared_named(e, name)` (the refusal
+  `unknown name` instead), `place(e, name)` (later declared, larger), `added(e, d)`.
+- `structure_facts(e, name)`: the facts of the structure a name declares (one type, one case, no index, holding no
+  value of itself), ø for any other name: what projections, eta for structures and unit eta ask.
 - `InductiveBlock` (its levels, its count of parameters, its `BlockType`s, each with its `WrittenCase`s) as written,
   and `InductiveFacts`, what checks 1 to 5 found of it: the block made plain (its types first, then one `Name#k`
   for each container), each container as a function of the block's parameters (`nested`), its level, each type's
   indices, each case's fields and recursive fields, whether it is taken apart into any universe, whether it is a
   structure, whether K holds.
 - `Checker`: the state of one check, made by `checker(e, levels)`. `hypothesis(c, binder, type)` gives the free
-  variable of a binder gone into, `hypothesis_of(c, id)` its name and type. `stepped(c)` counts a step of computing.
-  `Memory`, `remembered`, `remember`: results kept by term.
+  variable of a binder gone into, `hypothesis_of(c, id)` its name and type; an id is given once in a checker's
+  life. `closed_over(c, t, variables, function)`: a term closed again over variables gone into, as a function type
+  or as a function. `stepped(c)` counts a step of computing. `Memory`, `remembered`, `remember`: results kept by
+  term.
 - `refused(rule, found)` and the rules' names.
 - `axioms_of(e, name)`: every axiom a declaration rests on. `rests_on(e, name, terms, own)` records it when a
   declaration is added: an axiom rests on itself, any other declaration on what the names in its terms rest on.
@@ -72,14 +83,34 @@ The files use each other freely: computing, equality and typing call one another
   proposition that is no case stands for the case when their types are equal.
 - `unfolded(c, t)`: t with its head constant replaced by its value at its levels, ø when the head unfolds to nothing;
   a head constant nothing declares is the refusal `unknown name`.
+- A head constant computes by its declaration's kind: a recursor takes iota, a quotient's lift or induct its step
+  on `quotient.of`; a function a shortcut statement bound takes its shortcut on two numbers where it would unfold.
+  Where a rule asks for a case, a number is zero or the successor of the number before it (6.4): iota opens its
+  major premise so, and equality opens a number that stands against a case.
+- Structures (K4): `projection(S, k, t)` whose value t computes, delta too, to S's case applied to all its
+  parameters and fields is field k, applied to what the projection was applied to; any other projection is stuck
+  and stays as written. A recursor of a structure whose major premise p computes to no case takes p as the case
+  applied to the parameters of p's type and to `projection(S, k, p)` for each field; never when p is a proof
+  (`is_proposition` of its type), whose data fields no projection may read.
 
 **equal.wap**
-- `equal(c, a, b)`: definitional equality (6.5).
+- `equal(c, a, b)`: definitional equality (6.5), its rules in this order: the same tree; both sides computed
+  without delta and compared again; proofs (rule 3: when a's type is a proposition the answer is whether the two
+  types are equal, and it is final); the unfolding loop, the later-declared head first, heads of one name compared
+  before they unfold; two terms of one shape, part by part, two projections of one structure and field by their
+  values; then, each tried both ways, a number opened against a case, eta for functions, eta for structures (a
+  structure's case applied to all its parameters and fields against a term t of an equal type: each field equal to
+  `projection(S, k, t)`), and last unit (a term whose type computes to a structure without fields equals any term
+  of an equal type).
+- A pair found equal is kept for the rest of the check, open terms too: a free variable is made once. A pair found
+  unequal is not kept.
 
 **typing.wap**
 - `type_of(c, t)`: the type of t, or a refusal (6.3). Its rules: `unknown name`, `level count`, `level parameter`,
-  `not a function`, `argument type`, `value type` (a let's value), `not closed`; `no numbers` and `not a structure`
-  until K3 and K4 give numbers and projections their rules.
+  `not a function`, `argument type`, `value type` (a let's value), `not closed`, `no numbers` (a number before a
+  numbers statement), and for a projection `not a structure` (the value's type is no structure, or has no such
+  field) and `data out of a proof` (the value is a proof and the field is data, or a later field's type names it).
+- `is_proposition(c, type)`: whether a type lies in Prop.
 - `level_of(c, type)`: the level of the sort a type lies in; the refusal `not a type` when it lies in none.
 - `declared(e, d)`: an axiom, a definition, a theorem or an opaque constant checked (6.6) and then part of e, with
   what it rests on recorded. Its rules beside those of typing: `name taken`, `level parameter`, `not closed`,
@@ -135,8 +166,11 @@ The files use each other freely: computing, equality and typing call one another
   words from environment.wap, then one sentence saying what was found, its terms shown with `shown`. Nothing is
   printed and nothing else is raised. A new rule gets its name in environment.wap.
 - **Nothing is guessed.** The kernel finds no level, no argument and no conversion. What is missing is a refusal.
-- **Results kept by term.** A result is kept (`remember`) only for a term without free variables, or dropped with
-  the checker: a `Checker` lives for one declaration.
+- **Results kept by term.** A result is kept (`remember`) for the life of the checker, one declaration: `computed`
+  keeps it for a term without free variables, `type_of` and `equal` for any term, since a free variable is never
+  made twice. The elaborator fills a hypothesis's type in place (elaborate/read.wap `bound_over`): `type_of` looks a
+  free variable alone up each time, and a kept type of a larger term still holds the unfilled hole, which every
+  reader of the elaborator fills in; `equal` keeps only pairs found equal, which a filled hole leaves equal.
 - **No library word.** No file names a type or function of the prelude. A rule that needs one gets it by a
   declaration (plan 5.4).
 - **Never `==` on a term.** Terms and levels are compared by `same`, `level_same` and `levels_equal`, and a map is
