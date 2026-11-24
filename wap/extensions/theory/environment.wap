@@ -21,6 +21,15 @@ NOT_A_PROPOSITION := "not a proposition"
 NAME_TAKEN := "name taken"
 NOT_CLOSED := "not closed"
 GAVE_UP := "gave up"
+ENUM_HEADER := "enum header"
+CASE_TYPE := "case type"
+PARAMETERS := "parameters"
+CASE_RESULT := "case result"
+FIELD_UNIVERSE := "field universe"
+STRICT_POSITIVITY := "strict positivity"
+NO_NUMBERS := "no numbers"
+NOT_A_STRUCTURE := "not a structure"
+NOT_EXPLICIT := "not explicit"
 
 refused(rule: text, found: text) := raise REFUSED + rule + ": " + found
 
@@ -33,7 +42,54 @@ enum DeclarationKind {
 	Defined(value: Term)
 	Theorem(value: Term)
 	Opaque(value: Term)
+	# a type of an inductive block, and one of its cases: the name of its type, its place among the type's cases, and
+	# how many fields it takes after the block's parameters
+	Inductive(facts: InductiveFacts)
+	Constructor(of: text, place: int, fields: int)
+	# the recursor of a type of a block (recursors.wap)
+	Recursor(facts: RecursorFacts)
 }
+
+# An inductive block as it is written (7): its level parameters and the count of parameters all its types share,
+# and its types, each with its cases. Inside the block a type of it is written as its constant at the block's level
+# parameters
+class WrittenCase { name: text; type: Term }
+class BlockType { name: text; type: Term; cases: list<WrittenCase> }
+class InductiveBlock { levels: list<text>; parameters: int; types: list<BlockType> }
+type_names(block: InductiveBlock): list<text> := block.types.map(type => type.name)
+# What checks 1 to 5 found of a block, so the recursors are made without finding it again: the block made plain,
+# its types first and then one for each container a type of it is nested in, and that container as a function of
+# the block's parameters (nested.wap); the universe its types lie in; each type's count of indices; each case's count
+# of fields and the places of the fields that hold a type of the block, by type and then by case; whether its
+# recursors may compute into any universe or into Prop only; and the flags of check 7: a structure (one type, one
+# case, no indices, holding no value of itself) and K (a proposition of one type, one case without fields)
+class InductiveFacts {
+	block: InductiveBlock
+	nested: list<Term>
+	level: Level
+	indices: list<int>
+	fields: list<list<int>>
+	recursive: list<list<list<int>>>
+	any_motive: bool
+	structure: bool
+	k: bool
+}
+
+# What iota reads of a recursor: its type and that type's cases, by name, with each case's count of fields; the
+# counts of the binders it takes before the major premise; one computation rule per case, a closed function of the
+# parameters, the motives, the minor premises and the case's fields; and K (the block's flag)
+class RecursorFacts {
+	of: text
+	cases: list<text>
+	fields: list<int>
+	parameters: int
+	motives: int
+	minors: int
+	indices: int
+	rules: list<Term>
+	k: bool
+}
+
 # A declaration: its name, the names of its level parameters, its type, and what it is
 class Declaration { name: text; levels: list<text>; type: Term; kind: DeclarationKind }
 
@@ -49,13 +105,64 @@ unfolding(d: Declaration): Term? := match d.kind {
 class Environment {
 	declarations: map<text, Declaration> = {}
 	places: map<text, int> = {}
+	# the axioms each declaration rests on, through everything its type and its value name
+	axioms: map<text, list<text>> = {}
 }
 declaration(e: Environment, name: text): Declaration? := e.declarations.get(name)
 place(e: Environment, name: text): int := e.places.get(name) ?? 0
+# another environment holding the same declarations, which may grow without this one growing
+copied(e: Environment): Environment := {
+	copy = Environment()
+	copy.declarations.update(e.declarations)
+	copy.places.update(e.places)
+	copy.axioms.update(e.axioms)
+	copy
+}
+# Every axiom a declaration rests on (`axioms of name`): an axiom rests on itself, any other declaration on what the
+# names in its type and its value rest on, an opaque value's names too
+axioms_of(e: Environment, name: text): list<text> := e.axioms.get(name) ?? []
+# what a new declaration of these terms rests on, recorded under its name; `own` is yes for an axiom
+rests_on(e: Environment, name: text, terms: list<Term>, own: bool) := {
+	named: map<text, bool> = {}
+	for t in terms { constants_named(t, named) }
+	resting: list<text> = if own then [name] else []
+	for used in named.keys() {
+		for axiom in axioms_of(e, used) { if not resting.contains(axiom) { resting += [axiom] } }
+	}
+	e.axioms[name] = resting
+}
+# the constants a term names, each once, gathered into a map whose keys they are
+constants_named(t: Term, named: map<text, bool>) := {
+	match t.shape {
+		Constant(name, levels) => { named[name] = yes }
+		Apply(function, argument) => { constants_named(function, named); constants_named(argument, named) }
+		Lambda(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
+		Pi(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
+		LetIn(binder, type, value, body) => { constants_named(type, named); constants_named(value, named); constants_named(body, named) }
+		Projection(structure, field, of) => { named[structure] = yes; constants_named(of, named) }
+		_ => ø
+	}
+}
 # a declaration becomes part of the environment; typing.wap's `declared` checks it first and is the only caller
 added(e: Environment, d: Declaration) := {
 	e.places[d.name] = #e.places + 1
 	e.declarations[d.name] = d
+}
+
+# The checks every declaration passes before its type is read, an inductive block's names and levels too: its names
+# are not declared yet, its level parameters are distinct, and its terms are closed
+names_new(e: Environment, names: list<text>) := {
+	for at in 1 to #names {
+		if declaration(e, names#at) is not ø or names.take(at - 1).contains(names#at) { refused(NAME_TAKEN, "${names#at} is declared already") }
+	}
+}
+levels_distinct(levels: list<text>) := {
+	for at in 1 to #levels {
+		if levels.take(at - 1).contains(levels#at) { refused(LEVEL_PARAMETER, "the level parameter ${levels#at} is named twice") }
+	}
+}
+closed(t: Term, name: text) := {
+	if t.loose > 0 or t.holds_free { refused(NOT_CLOSED, "${name} holds a variable bound nowhere") }
 }
 
 # --- the state of one check

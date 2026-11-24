@@ -1,0 +1,200 @@
+# A program in the explicit spellings read into the kernel's terms and declarations (notes/theory.md "The explicit
+# spellings"): every argument, every level and every type is written, and each spelling is read as its term directly.
+#
+# A name is looked up among the binders around it, innermost first, then among the declarations; anything else is
+# refused. A level name that nothing binds is a level parameter of its statement, in the order of first appearance.
+use "terms.wap"
+use "levels.wap"
+use "environment.wap"
+use "../../kernel/forms.wap"
+
+# the words of the spellings: sorts, levels and the statements' first words
+PROP_WORD := "Prop"
+TYPE_WORD := "Type"
+SORT_WORD := "Sort"
+MAX_WORD := "max"
+IMAX_WORD := "imax"
+AXIOM_WORD := "axiom"
+LAW_WORD := "law"
+OPAQUE_WORD := "opaque"
+DECLARATION_WORDS := [AXIOM_WORD, LAW_WORD, OPAQUE_WORD]
+QUESTION_WORDS := ["type", "of"]
+# the operators of the spellings
+FUNCTION_TYPE := "->"
+FUNCTION := "=>"
+DEFINE := ":="
+LET := "="
+LEVEL_ADD := "+"
+DOT := "."
+# the name of a binder written without one, `A -> B`
+NO_NAME := ""
+
+# What a statement says: a declaration to check and add, or the question for a term's type, with the level
+# parameters it names
+enum Statement {
+	Declares(declaration: Declaration)
+	AsksType(of: Term, levels: list<text>)
+}
+
+# The state of reading one statement: the declarations a name may be, and the level parameters met so far
+class Reading {
+	environment: Environment
+	levels: list<text> = []
+}
+
+# One statement of an explicit program: `type of e`, or a declaration, its head before `:=` and its value after it
+statement_read(e: Environment, statement: Node): Statement := {
+	r = Reading(e)
+	question = after_words(statement, QUESTION_WORDS)
+	if question is not ø {
+		of = term_read(r, question!, [])
+		return AsksType(of, r.levels)
+	}
+	match statement {
+		Call(called, arguments) => if text(called) == DEFINE and #arguments == 2 then Declares(declaration_read(r, arguments#1, arguments#2)) else Declares(declaration_read(r, statement, ø))
+		_ => Declares(declaration_read(r, statement, ø))
+	}
+}
+# A declaration from its head, `axiom name(x: A): B`, `law name(x: A): B`, `name: B`, and its value if any: the
+# parameters make its type a function type and its value a function
+declaration_read(r: Reading, head: Node, value: Node?): Declaration := {
+	word = DECLARATION_WORDS.find(word => after_words(head, [word]) is not ø) ?? ""
+	written = if word == "" then head else after_words(head, [word])!
+	if (word == AXIOM_WORD) != (value is ø) { unreadable(head) }
+	match written {
+		Key(named, Op.Colon, type) => {
+			parameters = parameters_of(named)
+			written_type = bound_read(r, parameters, type, [], yes)
+			if value is ø { return Declaration(name_of(named), r.levels, written_type, Axiom) }
+			written_value = bound_read(r, parameters, value!, [], no)
+			kind = if word == LAW_WORD then Theorem(written_value) else if word == OPAQUE_WORD then Opaque(written_value) else Defined(written_value)
+			Declaration(name_of(named), r.levels, written_type, kind)
+		}
+		_ => unreadable(head)
+	}
+}
+# A statement without the words it starts with, ø for one starting otherwise. The words stand in the leftmost phrase,
+# which an operator written after them holds: `type of (x: A) -> x` is `(type of (x: A)) -> x`
+after_words(n: Node, words: list<text>): Node? := match n {
+	List(items, Bracket.None, Separator.Space) => if #items > #words and items.take(#words).map(item => text(item)) == words then phrase_of(items.drop(#words)) else ø
+	Call(called, arguments) => {
+		first = after_words(arguments#1, words) ?? return ø
+		Call(called, [first] + arguments.drop(1))
+	}
+	Key(left, op, right) => {
+		first = after_words(left, words) ?? return ø
+		Key(first, op, right)
+	}
+	_ => ø
+}
+phrase_of(items: list<Node>): Node := if #items == 1 then items#1 else List(items, Bracket.None, Separator.Space)
+# the name a declaration's head declares, and the parameters written after it
+name_of(head: Node): text := match head {
+	Key(name, Op.None, List(items, Bracket.Round, separator)) => text(name)
+	_ => text(head)
+}
+parameters_of(head: Node): list<Node> := match head {
+	Key(name, Op.None, List(items, Bracket.Round, separator)) => items
+	_ => []
+}
+
+# The term a node writes, inside binders of these names, the innermost last
+term_read(r: Reading, n: Node, scope: list<text>): Term := match n {
+	Symbol(name) => name_read(r, name, scope)
+	Number(value) => numeral(value as int)
+	Call(called, arguments) => operation_read(r, text(called), arguments, scope, n)
+	Key(written, Op.None, List(items, Bracket.Round, separator)) => applied_read(r, written, items, scope)
+	Key(written, Op.None, List(items, Bracket.Square, separator)) => constant(text(written), items.map(level => level_read(r, level)))
+	List(items, Bracket.Round, separator) => if #items == 1 then term_read(r, items#1, scope) else unreadable(n)
+	List(items, Bracket.Curly, Separator.Semicolon) => let_read(r, items, scope)
+	_ => unreadable(n)
+}
+# a name: a binder's variable, a sort, or a declared constant written without levels
+name_read(r: Reading, name: text, scope: list<text>): Term := {
+	place = scope.reverse().index_of(name)
+	if place > 0 { return bound(place - 1) }
+	if name == PROP_WORD { return PROP }
+	if name == TYPE_WORD { return type_at(Zero) }
+	if declaration(r.environment, name) is ø { refused(UNKNOWN_NAME, "${name} is neither a binder around it nor declared") }
+	constant(name, [])
+}
+# `Type(u)`, `Sort(u)`, or a function applied to its arguments, the first one first
+applied_read(r: Reading, written: Node, arguments: list<Node>, scope: list<text>): Term := {
+	word = text(written)
+	if #arguments == 1 and word == TYPE_WORD { return type_at(level_read(r, arguments#1)) }
+	if #arguments == 1 and word == SORT_WORD { return universe(level_read(r, arguments#1)) }
+	apply_all(term_read(r, written, scope), arguments.map(argument => term_read(r, argument, scope)))
+}
+# a function type, a function, or a dotted name: `(x: A) -> B`, `A -> B`, `(x: A) => b`, `And.intro`
+operation_read(r: Reading, operator: text, operands: list<Node>, scope: list<text>, n: Node): Term := {
+	if operator == DOT { return term_read(r, dotted(operands#1, operands#2), scope) }
+	if #operands != 2 or not (operator in [FUNCTION_TYPE, FUNCTION]) { unreadable(n) }
+	bound_read(r, binders_of(operands#1), operands#2, scope, operator == FUNCTION_TYPE)
+}
+# the binders a function type or a function writes before its arrow; a domain written alone has no name
+binders_of(n: Node): list<Node> := match n {
+	List(items, Bracket.Round, separator) => if items.all(item => is_binder(item)) then items else [n]
+	_ => [n]
+}
+is_binder(n: Node): bool := match n {
+	Key(name, Op.Colon, type) => yes
+	_ => no
+}
+# The body under the binders, each binder's domain read inside the binders before it: a function type, or a function
+bound_read(r: Reading, binders: list<Node>, body: Node, scope: list<text>, function_type: bool): Term := {
+	if binders is empty { return term_read(r, body, scope) }
+	binder = binders#1
+	name = binder_name(binder)
+	domain = term_read(r, binder_type(binder), scope)
+	inner = bound_read(r, binders.drop(1), body, scope + [name], function_type)
+	if function_type then pi(name, domain, inner) else lambda(name, domain, inner)
+}
+binder_name(binder: Node): text := match binder {
+	Key(name, Op.Colon, type) => text(name)
+	_ => NO_NAME
+}
+binder_type(binder: Node): Node := match binder {
+	Key(name, Op.Colon, type) => type
+	_ => binder
+}
+# `{ x: A = v; b }`: each binding's value read before its name is bound
+let_read(r: Reading, items: list<Node>, scope: list<text>): Term := {
+	if #items == 1 { return term_read(r, items#1, scope) }
+	match items#1 {
+		Call(called, arguments) => if text(called) == LET and #arguments == 2 and is_binder(arguments#1) then {
+			name = binder_name(arguments#1)
+			let_in(name, term_read(r, binder_type(arguments#1), scope), term_read(r, arguments#2, scope), let_read(r, items.drop(1), scope + [name]))
+		} else unreadable(items#1)
+		_ => unreadable(items#1)
+	}
+}
+# a dotted name as one name, its levels and arguments kept: `And.recursor[0](a)`
+dotted(left: Node, right: Node): Node := match right {
+	Key(inner, Op.None, written) => Key(dotted(left, inner), Op.None, written)
+	_ => Symbol("${text(left)}${DOT}${text(right)}")
+}
+
+# A level: `0`, `2`, `u`, `u + 1`, `max(u, v)`, `imax(u, v)`; a name is a level parameter of the statement
+level_read(r: Reading, n: Node): Level := match n {
+	Number(value) => level_above(Zero, value as int)
+	Symbol(name) => {
+		if not (name in r.levels) { r.levels += [name] }
+		Parameter(name)
+	}
+	Call(called, arguments) => if text(called) == LEVEL_ADD and #arguments == 2 then level_above(level_read(r, arguments#1), level_steps(arguments#2)) else unreadable(n)
+	Key(written, Op.None, List(items, Bracket.Round, separator)) => level_function_read(r, text(written), items, n)
+	_ => unreadable(n)
+}
+level_steps(n: Node): int := match n {
+	Number(value) => value as int
+	_ => unreadable(n)
+}
+level_function_read(r: Reading, word: text, items: list<Node>, n: Node): Level := {
+	if #items != 2 or not (word in [MAX_WORD, IMAX_WORD]) { unreadable(n) }
+	left = level_read(r, items#1)
+	right = level_read(r, items#2)
+	if word == MAX_WORD then Max(left, right) else Imax(left, right)
+}
+
+# a form the explicit spellings do not have
+unreadable(n: Node) := refused(NOT_EXPLICIT, "${text(n)} is none of the explicit spellings")
