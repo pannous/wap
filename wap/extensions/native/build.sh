@@ -22,6 +22,9 @@ shift 3
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$here/../../../scripts/lib/wap-host.sh"
 library="$(cd -P "$here/../../../lib" && pwd -P)"
+# a call in last place is wasm's return_call, which wasm2c writes correctly only after 1.0.42: the Homebrew keg
+# wabt-head (a local tap) stands in for wabt until then
+# TODO (card tail-call-slowdown) at wabt 1.0.43: brew unpin wabt-head && brew uninstall wabt-head && brew upgrade wabt && brew link wabt
 wasm2c=$(command -v wasm2c) || { echo "no wasm2c on the PATH (brew install wabt)" >&2; exit 1; }
 wabt="$(cd -P "$(dirname "$(readlink -f "$wasm2c")")/.." && pwd -P)"
 building="$executable.build"
