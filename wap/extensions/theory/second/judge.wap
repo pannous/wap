@@ -1,0 +1,225 @@
+# The second checker's judgements (notes/theory.md "A second opinion"): a term's type, two terms' equality and a
+# declaration's admission, by the rules of notes/coc-plan.md 6.3 to 6.6, written apart from the kernel and without
+# anything it keeps between questions. A refusal raises its reason.
+use magnitude
+use "expressions.wap"
+use "read.wap"
+use "blocks.wap"
+use "bindings.wap"
+
+# A name the environment knows: its level parameters, type, the value it unfolds to (ø: it unfolds to nothing), its
+# place in the order of declaring, and what more it computes by (blocks.wap, bindings.wap)
+class Known { name: text; levels: list<text>; type: Expr; value: Expr?; place: int; role: Role }
+enum Role {
+	# a declaration of this kind as the export writes it: axiom, def, thm or opaque
+	Stated(kind: text)
+	# a case of a family, the minor-th of its block, with as many fields
+	CaseOf(family: text, minor: int, fields: int)
+	# a family of the block at this place in the environment's blocks, and the recursor of the k-th one
+	FamilyOf(block: int)
+	RecursorOf(block: int, family: int)
+	# a constant of the quotients, computing on the made value at this place among its arguments, 0 for none
+	QuotientOf(major: int)
+}
+# what the numbers statement bound: the number type and its cases, the truth values' type and cases, equality
+class Numbers { number: text; zero: text; successor: text; truth: text; yes_case: text; no_case: text; equality: text }
+
+class Environment {
+	known: map<text, Known> = {}
+	# the blocks as written, in order: a family's role names its block's place here
+	blocks: list<Block> = []
+	numbers: Numbers? = ø
+	# the axioms each name rests on, itself for an axiom
+	axioms: map<text, list<text>> = {}
+	# a function's name to the word of the shortcut it computes by
+	shortcuts: map<text, text> = {}
+}
+# a judge works for one declaration: the level parameters it may name and the locals it went into
+class Judge { environment: Environment; levels: list<text>; locals: list<Expr> = [] }
+
+known(j: Judge, name: text): Known := j.environment.known.get(name) ?? raise("${name} is not declared")
+added(e: Environment, name: text, levels: list<text>, type: Expr, value: Expr?, role: Role) := {
+	if e.known.has(name) { raise "${name} is declared twice" }
+	if #levels.unique() != #levels { raise "${name} names a level parameter twice" }
+	e.known[name] = Known(name, levels, type, value, #e.known + 1, role)
+}
+
+# a local of a type: the variable of a binder the judge goes into
+fresh(j: Judge, type: Expr): Expr := {
+	j.locals += [type]
+	Local(#j.locals)
+}
+# a binder's body opened by a fresh local of its domain, given with the local's id
+class Opened { local: int; body: Expr }
+opened(j: Judge, domain: Expr, body: Expr): Opened := {
+	variable = fresh(j, domain)
+	Opened(#j.locals, instantiate(body, variable))
+}
+
+# --- typing
+
+levels_known(j: Judge, level: Universe) := {
+	for name in level_names(level) {
+		if not j.levels.contains(name) { raise "the level ${name} is no level parameter here" }
+	}
+}
+infer(j: Judge, t: Expr): Expr := match t {
+	Var(i) => raise "a variable bound nowhere: ${i}"
+	Local(id) => j.locals#id
+	Sort(u) => { levels_known(j, u); Sort(Next(u)) }
+	Const(name, us) => {
+		k = known(j, name)
+		if #us != #k.levels { raise "${name} takes ${#k.levels} levels and is given ${#us}" }
+		for u in us { levels_known(j, u) }
+		with_levels(k.type, k.levels, us)
+	}
+	App(f, x) => match whnf(j, infer(j, f)) {
+		Pi(domain, body) => { checked(j, x, domain); instantiate(body, x) }
+		_ => raise "${head_name(f)} is given an argument and is no function"
+	}
+	Lam(domain, body) => {
+		sort_of(j, domain)
+		inside = opened(j, domain, body)
+		Pi(domain, abstract(infer(j, inside.body), inside.local))
+	}
+	Pi(domain, body) => {
+		from = sort_of(j, domain)
+		Sort(MostUnlessZero(from, sort_of(j, opened(j, domain, body).body)))
+	}
+	Let(type, value, body) => {
+		sort_of(j, type)
+		checked(j, value, type)
+		infer(j, instantiate(body, value))
+	}
+	Number(n) => Const((j.environment.numbers ?? raise("the number ${digits(n)} has no type: no numbers are bound")).number, [])
+	Field(structure, place, of) => field_type(j, structure, place, of)
+}
+# a term has a type: its own type equals it
+checked(j: Judge, t: Expr, type: Expr) := {
+	if not convertible(j, infer(j, t), type) { raise "a term of ${head_name(infer(j, t))} stands where a ${head_name(type)} belongs" }
+}
+# the level of the sort a type lies in
+sort_of(j: Judge, type: Expr): Universe := match whnf(j, infer(j, type)) {
+	Sort(u) => u
+	_ => raise "a term stands where a type belongs"
+}
+is_proposition(j: Judge, type: Expr): bool := surely_zero(settled(sort_of(j, type)))
+
+# --- computing
+
+# a term computed at its head without unfolding a definition: beta, let and what a role computes by
+whnf_core(j: Judge, t: Expr): Expr := {
+	head = head_of(t)
+	given = arguments_of(t)
+	match head {
+		Lam(domain, body) => if given is empty then t else whnf_core(j, apply_all(instantiate(body, given#1), given.drop(1)))
+		Let(type, value, body) => whnf_core(j, apply_all(instantiate(body, value), given))
+		Field(structure, place, of) => {
+			made = field_taken(j, structure, place, of) ?? return t
+			whnf_core(j, apply_all(made, given))
+		}
+		Const(name, us) => {
+			stepped = role_step(j, name, us, given) ?? return t
+			whnf_core(j, stepped)
+		}
+		_ => t
+	}
+}
+# a term with its head constant unfolded, ø when it unfolds to nothing; a shortcut on numbers fires first
+unfolded(j: Judge, t: Expr): Expr? := match head_of(t) {
+	Const(name, us) => {
+		fired = shortcut_step(j, name, arguments_of(t))
+		if fired is not ø { return fired }
+		k = known(j, name)
+		value = k.value ?? return ø
+		apply_all(with_levels(value!, k.levels, us), arguments_of(t))
+	}
+	_ => ø
+}
+whnf(j: Judge, t: Expr): Expr := {
+	core = whnf_core(j, t)
+	next = unfolded(j, core) ?? return core
+	whnf(j, next)
+}
+# where the head constant was declared, 0 for a head that unfolds to nothing
+unfolding_place(j: Judge, t: Expr): int := match head_of(t) {
+	Const(name, us) => { k = known(j, name); if k.value is ø then 0 else k.place }
+	_ => 0
+}
+
+# --- equality
+
+convertible(j: Judge, a: Expr, b: Expr): bool := {
+	if alike(a, b) { return yes }
+	left = whnf_core(j, a)
+	right = whnf_core(j, b)
+	if proofs_alike(j, left, right) { return yes }
+	while yes {
+		if alike(left, right) or same_shape(j, left, right) { return yes }
+		left_place = unfolding_place(j, left)
+		right_place = unfolding_place(j, right)
+		if left_place == 0 and right_place == 0 { break }
+		if left_place >= right_place { left = whnf_core(j, unfolded(j, left) ?? left) }
+		if right_place >= left_place { right = whnf_core(j, unfolded(j, right) ?? right) }
+	}
+	# the rules tried last, each both ways: a number opened into its case, eta for functions, eta for structures
+	last: list<(Judge, Expr, Expr) -> bool> = [number_opened, function_eta, structure_eta, fieldless_alike]
+	last.any(rule => rule(j, left, right) or rule(j, right, left))
+}
+
+# two proofs of one proposition
+proofs_alike(j: Judge, a: Expr, b: Expr): bool := {
+	type = infer(j, a)
+	is_proposition(j, type) and convertible(j, type, infer(j, b))
+}
+# two terms of one shape whose parts are equal; applications' heads compared without unfolding
+same_shape(j: Judge, a: Expr, b: Expr): bool := match a {
+	Sort(u) => match b { Sort(v) => level_equal(u, v); _ => no }
+	Const(name, us) => match b { Const(other, vs) => name == other and levels_equal(us, vs); _ => no }
+	Lam(d, body) => match b { Lam(e, other) => binders_alike(j, d, body, e, other); _ => no }
+	Pi(d, body) => match b { Pi(e, other) => binders_alike(j, d, body, e, other); _ => no }
+	Field(s, i, x) => match b { Field(r, k, y) => i == k and convertible(j, x, y); _ => no }
+	App(f, x) => match b {
+		App(g, y) => {
+			mine = arguments_of(a)
+			theirs = arguments_of(b)
+			same_shape(j, head_of(a), head_of(b)) and #mine == #theirs and (1 .. #mine + 1).all(at => convertible(j, mine#at, theirs#at))
+		}
+		_ => no
+	}
+	_ => alike(a, b)
+}
+binders_alike(j: Judge, d: Expr, body: Expr, e: Expr, other: Expr): bool := {
+	if not convertible(j, d, e) { return no }
+	variable = fresh(j, d)
+	convertible(j, instantiate(body, variable), instantiate(other, variable))
+}
+# `x => f(x)` equals f: a function and a term that is no function, both applied to one local
+function_eta(j: Judge, function: Expr, other: Expr): bool := match function {
+	Lam(domain, body) => match other {
+		Lam(d, b) => no
+		_ => { variable = fresh(j, domain); convertible(j, instantiate(body, variable), App(other, variable)) }
+	}
+	_ => no
+}
+
+# --- declarations
+
+admitted(e: Environment, d: Declared) := {
+	j = Judge(e, d.levels)
+	if loose(d.type, 0) { raise "${d.name}'s type holds a variable bound nowhere" }
+	level = sort_of(j, d.type)
+	if d.kind == "thm" and not surely_zero(settled(level)) { raise "${d.name} is a theorem of no proposition" }
+	if d.kind == "axiom" and d.value is not ø or d.kind != "axiom" and d.value is ø { raise "${d.name} is a ${d.kind} with a value missing or too many" }
+	if d.value is not ø {
+		if loose(d.value!, 0) { raise "${d.name}'s value holds a variable bound nowhere" }
+		if not convertible(j, infer(j, d.value!), d.type) { raise "${d.name}'s value does not have its type" }
+	}
+	added(e, d.name, d.levels, d.type, if d.kind == "opaque" then ø else d.value, Stated(d.kind))
+	rests_on(e, [d.name], (if d.kind == "axiom" then [d.name] else []) + resting(e, [d.type] + (if d.value is ø then [] else [d.value!])))
+}
+# the axioms these terms rest on through the names they use
+resting(e: Environment, terms: list<Expr>): list<text> := terms.flat_map(constants_of).unique().flat_map(name => e.axioms.get(name) ?? []).unique()
+rests_on(e: Environment, names: list<text>, axioms: list<text>) := {
+	for name in names { e.axioms[name] = axioms }
+}
