@@ -27,6 +27,8 @@ RESULT_UNKNOWN = "result_unknown"
 # the word making an enum's value the Node of its text where a Node is wanted (nodes.wap), and the case it builds
 SYMBOL_WORD = "symbol"
 SYMBOL_CASE = "Symbol"
+# the annotation the class rule writes on a protocol's record (sugar/records.wap)
+PROTOCOL_ANNOTATION = "protocol"
 
 # A call: its arguments typed, each expecting its parameter's written type when only one definition takes that many
 # arguments; then the function it means, typed for these argument types
@@ -362,13 +364,14 @@ type_weight(type: Node?, records: Records) as int := {
 	3 + (type_parts(type) ?? []).drop(1).map(part => type_weight(part, records)).sum()
 }
 
-# Protocols (wiki/trait.md, decision traits-are-protocols): a type of words a value can do, `trait shape { area() }`,
-# a Record of function-typed fields and no cases. A value fits one when for each word a function of that name takes
-# the value's type first and the word's parameters after; a function of a protocol parameter is typed for each type
-# given, so `area(s)` in its body is the given type's own area.
+# Protocols (wiki/trait.md): a class of required words, members without a body, `class shape { area() }`, its record
+# annotated `@protocol` by the class rule (sugar/records.wap), each field a word whose function type takes the protocol
+# first. A value fits one when for each word a function of that name takes the value's type first and the word's
+# parameters after; a function of a protocol parameter is typed for each type given, so `area(s)` in its body is the
+# given type's own area.
 protocol_named(records: Records, type: Node?) as Node? := {
 	record = record_named(records, type)
-	if record == ø or not cases_of(record) is empty or fields_of(record) is empty or not fields_of(record).all(field => function_parts(declared_type(field)) != ø) { return ø }
+	if record == ø or not annotations_of(record).any(said => text(said) == PROTOCOL_ANNOTATION) { return ø }
 	record
 }
 # whether a value of the given type fits the protocol wanted: no protocol wanted, or every word of it done for the type
@@ -406,19 +409,29 @@ words_missing(definitions: list<Signature>, types: list, s: TypingState) as text
 		if #definition.parameters == #types {
 			for at in 1 to #types {
 				protocol = protocol_named(s.records, definition.parameters#at)
-				if protocol != ø { lacking += fields_of(protocol).filter(word => not does_word(types#at, word, s)).map(word => "${types#at} is no ${record_name(protocol)}: define ${declared_name(word)}(x: ${types#at}${", …" * parameter_count(word)})") }
+				if protocol != ø { lacking += words_lacking(types#at, protocol, s) }
 			}
 		}
 	}
 	if lacking is empty then "" else "; " + lacking.join("; ")
 }
+# a function named as a protocol is its conversion, `x as shape`, and a class's claim of it, `class square: shape {…}`:
+# it takes a typed value whose type does the protocol's words
+claim_checked(claim: Signature, s: TypingState) := {
+	protocol = if #claim.parameters == 1 then protocol_named(s.records, symbol(claim.name)) else ø
+	given = if protocol == ø then ø else claim.parameters#1 ?? refused(claim.definer, "a function named as the protocol ${claim.name} takes a type doing it: `${claim.name}(x: square)`")
+	lacking = if given == ø then [] else words_lacking(given!, protocol!, s)
+	if lacking is not empty { refused(claim.definer, lacking.join("; ")) }
+}
+# the required words of a protocol a type does not do, each as the fix-it defining it
+words_lacking(given: Node, protocol: Record, s: TypingState) as list<text> := fields_of(protocol).filter(word => not does_word(given, word, s)).map(word => "${given} is no ${record_name(protocol)}: define ${declared_name(word)}(x: ${given}${", …" * (parameter_count(word) - 1)})")
 does_word(given: Node, word: Node, s: TypingState) as bool := definitions_named(text(declared_name(word)), s).any(definition => does_as(definition, given, parameter_count(word)))
-# how many parameters a protocol's word takes besides the value's own, its field a function type (protocol_named checks it)
+# how many parameters a protocol's required word takes, the value's own first
 parameter_count(word: Node) as int := #((function_parts(declared_type(word)) ?? refused(word, "a protocol's word is a function type")).parameters)
 # whether a definition takes a value of this type first, then as many parameters as a protocol's word
 does_as(definition: Signature, given: Node, arity: int) as bool := {
 	types = definition.parameters
-	#types == arity + 1 and (types#1 == ø or same_type(types#1, given))
+	#types == arity and (types#1 == ø or same_type(types#1, given))
 }
 
 # whether the Nodes a definition takes, two or more, are all values read as one: values that are no Nodes never meet as
