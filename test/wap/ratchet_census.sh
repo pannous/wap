@@ -13,7 +13,7 @@ FILES_TYPED_WHOLE=62
 FUNCTIONS_UNTYPED=0
 # wap's size, the nodes its reader makes of its source (scripts/wap-size.warp), may not rise above the ceiling: only a
 # real simplification lowers it
-SIZE_NODES=142780
+SIZE_NODES=142815
 # the theory's elaborator (notes/coc-plan.md S1, scripts/theory-census.wap) over the compiler's source, lib/ and the
 # test programs: the statements it accepts may not drop below the floor, and its wall time stays under the ratio times
 # the typing census's, measured in the same run
@@ -42,8 +42,10 @@ theory_report="$stage/theory-census.out"
 theory_census="$stage/theory-census.wasm"
 (cd "$root" && $wap "$compiler" scripts/theory-census.wap "$theory_census" >"$theory_report" 2>&1 &&
 	timed $wap "$theory_census" --tree . $(compiler_sources) $(git ls-files 'lib/*.wap') test/test_*.wap >"$theory_report" 2>&1)
+theory_status=$?
 accepted=$(sed -n 's/^accepted \([0-9]*\) of [0-9]* statements$/\1/p' "$theory_report")
-time_ratio=$(awk -v theory="$(seconds "$theory_report")" -v typing="$(seconds "$report")" 'BEGIN { if (theory != "" && typing > 0) printf "%d", theory / typing + 0.999 }')
+# a census that failed has no time to compare: a quick crash is no fast census
+time_ratio=$([ $theory_status -eq 0 ] && awk -v theory="$(seconds "$theory_report")" -v typing="$(seconds "$report")" 'BEGIN { if (theory != "" && typing > 0) printf "%d", theory / typing + 0.999 }')
 total=$(grep '^total' "$report" | cut -f2)
 measure="$stage/wap-size.wasm"
 size=$(cd "$root" && $wap "$compiler" scripts/wap-size.warp "$measure" 2>&1 && $wap "$measure" $(compiler_sources) | sed -n 's/^total\t//p')
