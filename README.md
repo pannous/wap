@@ -1,6 +1,15 @@
 # 𖣲 Wap
 
 **WebAssembly Programming language**  
+<!-- Other potential names:  vale, wade, Wage, wage, wail, wake, waler, Wales, walk, wall, wane, ware, wave, weal, whale, wile wallie waf? wag waft, waif -->
+<!-- wax way warrant waw 𐪅 ! ﻭ و ﻮ ࢱ ܘ  waver waft waka wadi warbler 🐦 wawa 💦 💧 🌊 🌢 🜄 -->
+<!-- 𓈞 well 𓈟 well wag wat watt wand 🪄 𓂦  -->
+<!-- ω  Ⲱ 𓅳 𐤅 ו ܘ ﻭ ﻭ ወ 𓅱= hUhn  ω 𓍢 乌 wū 𒑱 𒉿 𒉼 无 (旡) wu ø 毋 (母, ⺟) wu 巫 witch 乌 ω ὠ ὡ ῶ ὦ ὥ ᾠ Ω Ὠ Ὡ Ω͂ Ὦ Ὥ  -->
+<!-- 𐒓 𐡅 𐡥 𐢈 𐣥 𐩥 𐪅 𐫇 𐭅 𐭥 𐮅 𐺤 𐼇 𐼴 𐽳 𐾶 𐾷 𐿥 -->
+<!-- **WebAssembly language**    weal vs wheal   wale / wail vs whale ≈ wile while  wane vs vane -->
+<!-- ware WebAssembly reasoning -->
+<!-- wave WebAssembly ...  -->
+<!-- W∃∀L  ⩖∃∀⌊ ω∃∀𝓁 𝗐∃∀𝗅  ∃∀  ∃∀  ∃∀  ∃∀  𝕨∃∀𝕝   𝔴∃∀𝔩  𝖜∃∀𝖑    common weal = wealth ++  weal ≈ real uwu ;) -->
 
 A data format that is also a programming language, compiled straight to Wasm GC.
 
