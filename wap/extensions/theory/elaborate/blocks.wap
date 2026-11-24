@@ -9,6 +9,10 @@
 # cases a type of the block stands for its declaration at the found parameters, so a case writes only the others:
 # `refl: Equal(a, a)`. What a call finds: a type its found parameters, a case all the parameters and its found
 # fields, a recursor the parameters and the motives.
+#
+# A trait is a class of its operations (instances.wap): `trait Orderable { less(a: T, b: T): bool }` is
+# `class Orderable(T) { less: (a: T, b: T) -> bool }`, its letters its written parameters, read from the operations
+# before the header.
 use "../terms.wap"
 use "../levels.wap"
 use "../environment.wap"
@@ -25,18 +29,28 @@ use "unify.wap"
 use "declare.wap"
 
 CLASS_WORD := "class"
+TRAIT_WORD := "trait"
 # the rule the elaborator's own refusals of a block name
 BLOCK := "block"
 
 # a case as written: its name, its fields, and its result type where one is written
 class CaseWritten { name: text; fields: list<Node>; result: Node? }
-# the enum or class a statement writes: its head `Name(p: A): type` and its cases
-class BlockWritten { head: Node; cases: list<CaseWritten> }
+# the enum, class or trait a statement writes: its head `Name(p: A): type` and its cases
+class BlockWritten { head: Node; cases: list<CaseWritten>; trait: bool = no }
 block_written(statement: Node): BlockWritten? := {
 	enum_form = enum_written(statement)
 	if enum_form is not ø { return BlockWritten(enum_form!.head, enum_form!.cases.map(case_written)) }
+	trait_form = before_cases(after_words(statement, [TRAIT_WORD]) ?? return class_written(statement)) ?? return ø
+	BlockWritten(trait_form.head, [CaseWritten(name_of(trait_form.head), trait_form.cases.map(operation_field), ø)], yes)
+}
+class_written(statement: Node): BlockWritten? := {
 	class_form = before_cases(after_words(statement, [CLASS_WORD]) ?? return ø) ?? return ø
 	BlockWritten(class_form.head, [CaseWritten(name_of(class_form.head), class_form.cases, ø)])
+}
+# an operation of a trait as its field: `less(a: T, b: T): bool` as `less: (a: T, b: T) -> bool`
+operation_field(n: Node): Node := {
+	operation = case_written(n)
+	Key(symbol(operation.name), Op.Colon, Call(symbol(FUNCTION_TYPE), [List(operation.fields, Bracket.Round, Separator.Comma), operation.result ?? refused(BLOCK, "the operation ${n} writes no result type")]))
 }
 # `zero`, `successor(n: nat)`, `zero: Even(0)`, `step(e: Even(n)): Even(n + 2)`
 case_written(n: Node): CaseWritten := match n {
@@ -60,7 +74,7 @@ block_elaborated(p: Theory, statements: list<Node>) := {
 	shared = parameters_of(head_named(written_blocks#1.head))
 	if written_blocks.any(written => spelled(parameters_of(head_named(written.head))) != spelled(shared)) { refused(BLOCK, "the enums ${names.join(", ")} name each other, so they are one block, and each writes the same parameters") }
 	x.header = yes
-	written = shared.map(parameter => gone_into(x, named_binder(parameter), ø))
+	written = shared.map(parameter => gone_into(x, named_binder(parameter), ø)) + trait_letters(x, written_blocks#1)
 	headers = written_blocks.map(written_block => header_elaborated(x, written_block.head))
 	found = x.letters
 	parameters = found + written
@@ -80,11 +94,20 @@ block_elaborated(p: Theory, statements: list<Node>) := {
 		before += #cases#at
 	}
 	inductive_declared(p.environment, InductiveBlock(x.reading.levels, #parameters, block_types))
+	if written_blocks#1.trait { p.traits[names#1] = written_blocks#1.cases#1.fields.map(field => named_binder(field).name) }
 	for at in 1 to #names {
 		p.found[kernel_names#at] = #found
 		p.found[recursor_name(kernel_names#at)] = #parameters + #names
 		for case in cases#at { p.found[case.name] = #parameters + case.found }
 	}
+}
+# a trait's letters, read from its operations: its written parameters
+trait_letters(x: Elaborating, written: BlockWritten): list<Term> := {
+	if not written.trait { return [] }
+	for field in written.cases#1.fields { elaborated(x, named_binder(field).type!, any_sort(x)) }
+	letters = x.letters
+	x.letters = []
+	letters
 }
 # the type after an enum's parameters: what its head writes after the colon, else Type
 header_elaborated(x: Elaborating, head: Node): Term := match head {
@@ -96,15 +119,17 @@ header_elaborated(x: Elaborating, head: Node): Term := match head {
 case_elaborated(x: Elaborating, type_name: text, type: Term, level: Level, written: list<Term>, case: CaseWritten): CaseRead := {
 	before = #x.letters
 	fields = case.fields.map(field => gone_into(x, named_binder(field), ø))
-	# a field's type whose level nothing fixed lies in the block's sort, as the other fields may: `item(first: T)` of a
-	# Type takes T: Type
-	if not is_zero(level) { for field in fields { level_answered(x.el, level_filled(x.el, sort_level(filled(x.el, type_of(x.el.c, filled(x.el, type_of(x.el.c, field)))))), level) } }
+	# a level of a field's type that nothing fixed is the block's, as the other fields' may be: `item(first: T)` of a
+	# Type takes T: Type, and so does `less: T -> T -> bool`
+	if not is_zero(level) { for field in fields { for name in level_holes_in(field_level(x, field)) { level_answered(x.el, Parameter(name), level) } } }
 	result = if case.result is ø then apply_all(type, written) else elaborated(x, case.result!, any_sort(x))
 	letters = x.letters.drop(before)
 	x.letters = x.letters.take(before)
 	unscoped(x.el, letters + fields)
 	CaseRead("${type_name}${DOT}${case.name}", #letters, closed_filled(x.el, result, letters + fields, no))
 }
+# the level of the universe a field's type lies in
+field_level(x: Elaborating, field: Term): Level := level_filled(x.el, sort_level(filled(x.el, type_of(x.el.c, filled(x.el, type_of(x.el.c, field))))))
 # the level of the sort a type reaches after its binders: Zero of `nat -> Prop`
 level_reached(x: Elaborating, type: Term): Level := {
 	parts = pi_parts(x, type) ?? return sort_level(computed(x.el.c, filled(x.el, type)))
