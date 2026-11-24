@@ -3,17 +3,19 @@ use "../theory/terms.wap"
 use "../theory/environment.wap"
 use "../theory/compute.wap"
 use "../theory/inductive.wap"
+use "../theory/elaborate/state.wap"
 
-# what a prover is asked: the statement under its parameters, each a hypothesis of the checker
-class Goal { c: Checker; parameters: list<Term>; statement: Term }
+# what a prover is asked: the statement under its parameters, each a binder in scope of the elaboration whose holes
+# the provers answer
+class Goal { el: Elaboration; parameters: list<Term>; statement: Term }
 
-# a statement gone into: each parameter of its function type a hypothesis, the rest the goal
-goal_of(c: Checker, statement: Term): Goal := {
-	goal = Goal(c, [], statement)
+# a statement gone into: each parameter of its function type a binder in scope, the rest the goal
+goal_of(el: Elaboration, statement: Term): Goal := {
+	goal = Goal(el, [], statement)
 	while yes {
-		match computed(c, goal.statement).shape {
+		match computed(el.c, goal.statement).shape {
 			Pi(binder, domain, body) => {
-				parameter = hypothesis(c, binder, domain)
+				parameter = scoped(el, binder, domain)
 				goal.parameters += [parameter]
 				goal.statement = instantiated(body, parameter)
 			}
@@ -25,6 +27,10 @@ goal_of(c: Checker, statement: Term): Goal := {
 
 # an equation `Equal(T, left, right)` taken apart: the equality applied, its levels, the type and the two sides
 class Equation { equality: text; levels: list<Level>; type: Term; left: Term; right: Term }
+# the statement that a and b are equal by the equality and at the type of an equation
+stated(equation: Equation, a: Term, b: Term): Term := apply_all(constant(equation.equality, equation.levels), [equation.type, a, b])
+# the proof by `refl` that a value equals itself, at the type of an equation
+reflexivity(c: Checker, equation: Equation, value: Term): Term := apply_all(constant(reflexive(c, equation.equality), equation.levels), [equation.type, value])
 # a statement computed to an equation of a type like the prelude's Equal; ø for any other
 equation_of(c: Checker, statement: Term): Equation? := {
 	t = computed(c, statement)
@@ -41,3 +47,24 @@ reflexive(c: Checker, equality: text): text := match declared_named(c.environmen
 	Inductive(facts) => facts.block.types#1.cases#1.name
 	_ => raise "${equality} is no equality"
 }
+
+# An earlier law at holes: its proof applied to a hole for each parameter and its levels, and what it then concludes
+class LawInstance { proof: Term; holes: list<Term>; conclusion: Term }
+instance_of(el: Elaboration, law: Declaration): LawInstance := {
+	levels = law.levels.map(level => level_hole(el))
+	instance = LawInstance(constant(law.name, levels), [], with_levels(law.type, law.levels, levels))
+	while yes {
+		match instance.conclusion.shape {
+			Pi(binder, domain, body) => {
+				found = hole(el, binder, domain)
+				instance.holes += [found]
+				instance.proof = apply(instance.proof, found)
+				instance.conclusion = instantiated(body, found)
+			}
+			_ => return instance
+		}
+	}
+	instance
+}
+# the laws proved so far, the provers' facts
+proved_laws(e: Environment): list<Declaration> := e.declarations.keys().map(name => e.declarations#name).filter(d => d.kind is Theorem)

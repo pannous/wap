@@ -1,0 +1,137 @@
+# Proof by rewriting (wiki/proof.md "Ways to prove"): both sides of an equation rewritten by earlier laws, a part
+# matching a law's left side replaced by its right side, until the two sides compute to the same. Without `by` a law
+# rewrites only where it orients: its left side is bigger than its right and holds all its parameters, so each step
+# shrinks the term and needs nothing the match does not give. The proof is built from the equality's recursor alone:
+# the left side's steps carried forward from `refl`, then the right side's steps carried back
+use "../theory/terms.wap"
+use "../theory/environment.wap"
+use "../theory/typing.wap"
+use "../theory/equal.wap"
+use "../theory/recursors.wap"
+use "../theory/elaborate/state.wap"
+use "../theory/elaborate/unify.wap"
+use "goals.wap"
+
+# the steps each side may take before the prover gives up on it
+REWRITE_LIMIT := 64
+# the names of the variables a carried proof's motive binds
+CARRIED_VALUE := "y"
+CARRIED_PROOF := "e"
+
+# An earlier law that rewrites, and the function its left side applies to how many arguments, which a part must
+# apply alike before the law is matched against it
+class Oriented { law: Declaration; function: text; count: int }
+# One rewrite: a proof of the part's equation, and the term around the part, given what stands in the part
+class Rewrite { equation: Equation; proof: Term; around: (Term) -> Term }
+# A side rewritten: the term it became and the steps that made it
+class Rewritten { term: Term; steps: list<Rewrite> }
+
+by_rewriting(goal: Goal): Term? := {
+	equation = equation_of(goal.el.c, goal.statement) ?? return ø
+	rules = proved_laws(goal.el.c.environment).map(law => rule_of(goal.el, law)).compact()
+	if rules is empty { return ø }
+	left = rewritten(goal, rules, equation.left)
+	right = rewritten(goal, rules, equation.right)
+	if #left.steps + #right.steps == 0 or not equal(goal.el.c, left.term, right.term) { return ø }
+	# a proof of `left == t`, t the left side rewritten and then the right side's steps undone
+	forward = left.steps.fold(reflexivity(goal.el.c, equation, equation.left), (proof, step) => continued(goal, equation, step, proof))
+	right.steps.reverse().fold(forward, (proof, step) => continued(goal, equation, reversed(goal, step), proof))
+}
+# a proof of `left == t` carried along a rewrite of a part of t
+continued(goal: Goal, equation: Equation, step: Rewrite, proof: Term): Term := carried(goal, step, proof, t => stated(equation, equation.left, step.around(t)))
+
+# a law as a rule where it orients; ø where it does not
+rule_of(el: Elaboration, law: Declaration): Oriented? := {
+	instance = instance_of(el, law)
+	equation = equation_of(el.c, instance.conclusion) ?? return ø
+	held = holes_in(el, equation.left)
+	if term_size(el, equation.left) <= term_size(el, equation.right) or not instance.holes.all(found => hole_id(found) in held) { return ø }
+	match head(equation.left).shape {
+		Constant(name, levels) => Oriented(law, name, #arguments(equation.left))
+		_ => ø
+	}
+}
+# how many terms a term is made of, a hole counted as one
+term_size(el: Elaboration, t: Term): int := if is_hole_applied(el, t) then 1 else parts(t).fold(1, (size, part) => size + term_size(el, part))
+is_hole_applied(el: Elaboration, t: Term): bool := match head(t).shape {
+	Free(id) => el.holes.has(id)
+	_ => no
+}
+hole_id(found: Term): int := variable_id(head(found))
+
+# a side rewritten step by step until no rule matches a part of it or the limit is reached
+rewritten(goal: Goal, rules: list<Oriented>, side: Term): Rewritten := {
+	done = Rewritten(side, [])
+	while #done.steps < REWRITE_LIMIT {
+		step = step_in(goal, rules, done.term, t => t) ?? return done
+		done.steps += [step]
+		done.term = step.around(step.equation.right)
+	}
+	done
+}
+# the first rewrite of a term or of one of its parts, outermost first; around gives the whole term of a part
+step_in(goal: Goal, rules: list<Oriented>, t: Term, around: (Term) -> Term): Rewrite? := {
+	for rule in rules {
+		step = rewrite_at(goal, rule, t, around)
+		if step is not ø { return step }
+	}
+	match t.shape {
+		Apply(function, argument) => step_in(goal, rules, function, inner => around(apply(inner, argument))) ?? step_in(goal, rules, argument, inner => around(apply(function, inner)))
+		_ => ø
+	}
+}
+# a rule's law matched against a term, the proof that it equals the law's right side there; ø where it does not
+# match or changes nothing, the holes of the try taken back
+rewrite_at(goal: Goal, rule: Oriented, t: Term, around: (Term) -> Term): Rewrite? := {
+	if not applies_alike(t, rule) { return ø }
+	el = goal.el
+	kept = found_so_far(el)
+	instance = instance_of(el, rule.law)
+	law = equation_of(el.c, instance.conclusion)!
+	if matched(el, law.left, t) {
+		proof = filled(el, instance.proof)
+		equation = equation_of(el.c, filled(el, instance.conclusion))!
+		if not open(el, proof) and not same(equation.left, equation.right) { return Rewrite(equation, proof, around) }
+	}
+	back_to(el, kept)
+	ø
+}
+# a law's left side matched against a part as written: a hole takes the part it stands at, a piece without holes
+# computes to the same, and the rest is alike piece by piece; matching never computes a piece with holes, which
+# would let a law's left side match any term it computes from
+matched(el: Elaboration, pattern: Term, t: Term): bool := {
+	p = filled(el, pattern)
+	if not open(el, p) { return equal(el.c, p, t) }
+	if is_hole_applied(el, p) { return unified(el, p, t) }
+	match p.shape {
+		Apply(function, argument) => match t.shape {
+			Apply(other_function, other_argument) => matched(el, function, other_function) and matched(el, argument, other_argument)
+			_ => no
+		}
+		Constant(name, levels) => match t.shape {
+			Constant(other, other_levels) => name == other and #levels == #other_levels and paired(levels, other_levels, (a, b) => levels_unified(el, a, b)).all(fits => fits)
+			_ => no
+		}
+		_ => no
+	}
+}
+applies_alike(t: Term, rule: Oriented): bool := match head(t).shape {
+	Constant(name, levels) => name == rule.function and #arguments(t) == rule.count
+	_ => no
+}
+
+# a proof of `motive(a)` carried along a step's proof of `a == b` to a proof of `motive(b)`, by the equality's
+# recursor, the motive a proposition
+carried(goal: Goal, step: Rewrite, start: Term, motive: (Term) -> Term): Term := {
+	c = goal.el.c
+	value = hypothesis(c, CARRIED_VALUE, step.equation.type)
+	along = hypothesis(c, CARRIED_PROOF, stated(step.equation, step.equation.left, value))
+	recursor = constant(recursor_name(step.equation.equality), [Zero] + step.equation.levels)
+	apply_all(recursor, [step.equation.type, step.equation.left, closed_over(c, motive(value), [value, along], yes), start, step.equation.right, step.proof])
+}
+# a step turned round: a proof of `b == a` from its proof of `a == b`, carried from `a == a`
+reversed(goal: Goal, step: Rewrite): Rewrite := {
+	e = step.equation
+	turned = Equation(e.equality, e.levels, e.type, e.right, e.left)
+	Rewrite(turned, carried(goal, step, reflexivity(goal.el.c, e, e.left), t => stated(e, t, e.left)), step.around)
+}
