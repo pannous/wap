@@ -21,6 +21,9 @@ all of them keep. The plan says what the rules are; this note says where they li
 | `nested.wap` | a block nested in another inductive type made plain | 7, nested types | theory-inductive-checks |
 | `recursors.wap` | recursors made, their computation rules | 7, checks 6 and 7 | theory-recursors |
 | `quotients.wap` | the statement `quotients(Equal)`: the quotient and its ways out | 6.4, 6.6 | theory-quotients |
+| `prelude/logic.wap` | the logic as an explicit program: False, True, And, Or, Not, Equal, Exists, bool, Decidable | L1 | theory-prelude-logic |
+| `prelude/quotient.wap` | the quotients bound, their axiom, function extensionality proved | K5 | theory-quotients |
+| `prelude/numbers.wap` | nat with its shortcuts and the theorems that license them, the comparisons, int | L2 | theory-prelude-numbers |
 
 The files use each other freely: computing, equality and typing call one another.
 
