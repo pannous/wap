@@ -201,7 +201,11 @@ adds is how a candidate fits and where its instances come from.
   this case", to its enum; a part to its union, `T` to `T?`; any value to `any`; and what the prelude declares
   between its own types, the number tower. Between two types the path of conversions must be the only one, else the
   refusal `conversion` names both. A conversion lifts through a list, an optional value and a map's values as a map
-  over them.
+  over them. A bool where a proposition is wanted is the proposition that it is yes (prelude/conversions.wap), so
+  `text where #it == 1` is a condition by nat's test of equality. A conversion fits only when its fit is decided
+  now: one whose unification waits on a hole or a level not yet found is no fit.
+- **Naming a type.** `type X(…) = T` is the definition `X(…) := T` (wap/sugar/definitions.wap): `type char = text
+  where #it == 1`, `type vector(T, n: nat) = list<T> where #it == n`.
 - **Going down** needs a proof. Where a `T where c` is wanted and a `T` is given, the term is the pair of the value
   and a proof of `c` at it, and the proof is an obligation, discharged by the first of these that works (plan 3.9):
   1. computing: the decision of the condition computes to yes; computing to no is the refusal `condition`;
