@@ -1,9 +1,12 @@
-# The program's side of a C function it calls, lib's foreign line `getenv(name: text): text from 'c'` (its rule:
+# The standard module foreign: the program's side of a C function it calls, a foreign line `getenv(name: text): text from 'c'` (its rule:
 # extensions/c/foreign.wap; the section that describes it for the native warp: extensions/c/functions.wap). A text goes to C
 # as the address of its bytes and a NUL, the texts of one call one after another in the memory from BYTES_AT; a text C
 # gives back is copied from where its pointer points, an empty one for NULL. An int32 crossing to C is an address of the
-# module's memory, which the native warp gives C as its pointer.
-use "host.wap"
+# module's memory, which the native warp gives C as its pointer. A module whose foreign lines call C uses it; outside the
+# types module, so only a program that calls C imports C's memmove, free, strnlen and memcpy, which a host without C
+# (wasmtime) lacks.
+# (the types module's host machinery, beside this library wherever wap is: in the compiler's folder)
+use "../types/host.wap"
 
 # a call's out-pointers (`sqlite3 **`), each a C pointer's slot from BYTES_AT, its texts after them
 OUT_SLOTS := 4
@@ -123,7 +126,7 @@ c_bytes(xs: list<int>): int32 := {
 	global c_bytes_count = #xs
 	c_address(at)
 }
-# a typed list as C takes it, a pointer to its items packed at their width (list_items.wap items_handed); its byte
+# a typed list as C takes it, a pointer to its items packed at their width (items_handed); its byte
 # count the `length` parameter after it gets
 c_items(xs: list<T>): int32 := {
 	global c_bytes_count = #xs * item_bytes(xs)
@@ -157,3 +160,29 @@ c_double(x: float32): float := float(x)
 c_flag(b: bool): int := if b then 1 else 0
 c_bool(n: int): bool := n % BYTE_RANGE != 0
 BYTE_RANGE := 256
+
+# A list's items handed to C (c_items): their own address where the list holds its items in the memory
+# (types/memory_lists.wap items_address), else the address of their copy, packed at their width as C reads an array of
+# them, as a GC array has no address, and copied back into the list once the call returns (items_returned), as C may
+# write into them. The memory may move when it grows: no C side may keep it.
+items_handed(xs: list<T>): int := {
+	global handed_at
+	if items_address(xs) != 0 { return items_address(xs) }
+	width = item_bytes(xs)
+	at = c_reserved(#xs * width)
+	for place in 0 upto #xs { item_placed(at + place * width, xs[place]) }
+	handed_at.add(at)
+	at
+}
+# the list's items as C left them in their copy, the first of the call's copies still to be read back
+items_returned(xs: list<T>) := {
+	global handed_at
+	if items_address(xs) != 0 { return }
+	at = handed_at#1
+	handed_at = handed_at.drop(1)
+	for place in 0 upto #xs { xs[place] = item_found(xs, at + place * item_bytes(xs)) }
+}
+# where the copies of the lists handed to the C call running are, in the order of its parameters
+handed_at: list<int> = []
+item_placed(at: int, item: T) := prim item.store(at, item)
+item_found(xs: list<T>, at: int): T := prim item.load(at)
