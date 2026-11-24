@@ -6,9 +6,11 @@ use "../terms.wap"
 use "../environment.wap"
 use "../compute.wap"
 use "../typing.wap"
+use "../show.wap"
 use "../levels.wap"
 use "../explicit.wap"
 use "../../../kernel/forms.wap"
+use "../../../core/type_notation.wap"
 use "state.wap"
 use "unify.wap"
 use "read.wap"
@@ -18,6 +20,9 @@ use "match.wap"
 SUM := "Sum"
 LEFT := "left"
 RIGHT := "right"
+# the prelude's type of nothing, what ø is where a type is wanted, and its one value, ø where a value is
+NOTHING := "Unit"
+NOTHING_VALUE := "unit"
 
 # `A or B` reaches the elaborator as the spelling of a condition, If(A, yes, B) (sugar/conditions.wap), since `or` is
 # no word of the prelude: where the condition is a type, neither a bool nor a proposition, the union is its one
@@ -32,13 +37,42 @@ is_type(x: Elaborating, t: Term): bool := match computed(x.el.c, filled(x.el, ty
 	_ => no
 }
 
-# the union of types in its normal form
+# The union of types in its normal form: the parts other than nothing ordered by their key, nothing last, at the
+# level of the part before it, as an optional value `T?` is Sum(T, Unit) at T's level
 union_of(x: Elaborating, types: list<Term>): Term := {
+	found = types.flat_map(type => summands(x, type))
 	parts: list<Term> = []
-	for part in types.flat_map(type => summands(x, type)).sorted(by: part => part.hash) {
+	for part in found.filter(part => not is_nothing(x, part)).sorted(by: part => part.hash) {
 		if not parts.any(seen => same(seen, part)) { parts += [part] }
 	}
-	summed(x, parts)
+	nothings = found.filter(part => is_nothing(x, part))
+	if nothings is empty { return summed(x, parts) }
+	last = if parts is empty then nothings#1 else nothing_type(x, level_of(x.el.c, parts.last))
+	if not nothings.all(each => unified(x.el, each, last)) { refused(VALUE_TYPE, "${nothings.map(each => shown(filled(x.el, each))).join(" and ")} are two kinds of nothing") }
+	summed(x, parts + [last])
+}
+# `T?`, the union of T and nothing; ø for any other form
+optional_written(x: Elaborating, n: Node): Term? := {
+	base = base_of_optional(n) ?? return ø
+	union_of(x, [elaborated(x, base!, any_sort(x)), nothing_type(x, level_hole(x.el))])
+}
+# ø: the type of nothing where a type is wanted, else its one value, at the level of the nothing a union wanted holds
+nothing_elaborated(x: Elaborating, wanted: Term?): Term := {
+	if wanted is ø { return nothing_value(x, [level_hole(x.el)]) }
+	type = computed(x.el.c, filled(x.el, wanted!))
+	if is_sort(type) { return nothing_type(x, level_hole(x.el)) }
+	held = summands(x, type).find(part => is_nothing(x, part))
+	nothing_value(x, if held is ø then [level_hole(x.el)] else type_levels(held!))
+}
+nothing_value(x: Elaborating, levels: list<Level>): Term := constant("${nothing_name(x)}${DOT}${NOTHING_VALUE}", levels)
+is_sort(t: Term): bool := match t.shape {
+	Sort(level) => yes
+	_ => no
+}
+nothing_type(x: Elaborating, level: Level): Term := constant(nothing_name(x), [level])
+is_nothing(x: Elaborating, t: Term): bool := match t.shape {
+	Constant(name, levels) => name == nothing_name(x)
+	_ => no
 }
 # the parts a type is the union of: a sum's parts' parts, any other type computed itself
 summands(x: Elaborating, type: Term): list<Term> := {
@@ -73,3 +107,4 @@ case_of(x: Elaborating, case: text, union: Term, value: Term): Term := apply_all
 
 # the enum of sums where the program reads: its own where it declares one, else the prelude's
 sum_name(x: Elaborating): text := kernel_name(x.theory, SUM)
+nothing_name(x: Elaborating): text := kernel_name(x.theory, NOTHING)
