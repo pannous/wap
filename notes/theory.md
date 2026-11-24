@@ -18,6 +18,7 @@ all of them keep. The plan says what the rules are; this note says where they li
 | `show.wap` | a term shown in wap notation | below | theory-explicit |
 | `check.wap` | the door: a program checked statement by statement | below | theory-explicit |
 | `inductive.wap` | an inductive block checked | 7, checks 1 to 5 | theory-inductive-checks |
+| `nested.wap` | a block nested in another inductive type made plain | 7, nested types | theory-inductive-checks |
 | `recursors.wap` | recursors made, their computation rules | 7, checks 6 and 7 | theory-recursors |
 
 The files use each other freely: computing, equality and typing call one another.
@@ -50,8 +51,10 @@ The files use each other freely: computing, equality and typing call one another
 - `Environment`, `declaration(e, name)`, `place(e, name)` (later declared, larger), `added(e, d)`, `copied(e)`.
 - `names_new(e, names)`, `levels_distinct(levels)`, `closed(t, name)`: the checks before a declaration's type is read.
 - `InductiveBlock` (its levels, its count of parameters, its `BlockType`s, each with its `WrittenCase`s) as written,
-  and `InductiveFacts`, what checks 1 to 5 found of it: its level, each type's indices, each case's fields and
-  recursive fields, whether it is taken apart into any universe, whether it is a structure, whether K holds.
+  and `InductiveFacts`, what checks 1 to 5 found of it: the block made plain (its types first, then one `Name#k`
+  for each container), each container as a function of the block's parameters (`nested`), its level, each type's
+  indices, each case's fields and recursive fields, whether it is taken apart into any universe, whether it is a
+  structure, whether K holds.
 - `Checker`: the state of one check, made by `checker(e, levels)`. `hypothesis(c, binder, type)` gives the free
   variable of a binder gone into, `hypothesis_of(c, id)` its name and type. `stepped(c)` counts a step of computing.
   `Memory`, `remembered`, `remember`: results kept by term.
@@ -81,8 +84,16 @@ The files use each other freely: computing, equality and typing call one another
 
 **inductive.wap**
 - `inductive_declared(e, block)`: the block checked (7, checks 1 to 5), its types and cases added, its facts given
-  for the recursors. Its rules: `enum header`, `case type`, `parameters`, `case result`, `field universe`,
-  `strict positivity`. A type of the block nested in another inductive type is refused by strict positivity.
+  for the recursors; each type and case rests on the axioms its type names. Binders are entered as written: a header
+  or case type written as no function type where one is wanted is refused. Its rules: `enum header`, `case type`,
+  `parameters`, `case result`, `field universe`, `strict positivity`.
+
+**nested.wap**
+- `unnested(c, block, parameters)`: each container a type of the block is nested in, `list(Tree)`, becomes one more
+  type of the block, with the container's cases copied in at its levels and parameters, and every occurrence of it is
+  replaced by that type; the plain block goes through checks 1 to 5 unchanged. A container holding a type of the
+  block in an index, or a variable of the case in a parameter, is refused by `strict positivity`; so is one that uses
+  its parameter negatively, when the plain block is checked.
 
 **explicit.wap, show.wap, check.wap**
 - `statement_read(e, statement)`: one statement of an explicit program as a `Statement`: `Declares(declaration)` or
