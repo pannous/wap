@@ -20,6 +20,9 @@ the team, crash resume), notes/roles.md (what the other roles do).
 - Procedure changes are persisted before they are announced (AGENTS.md "Talking").
 - User decisions you hear: a language decision goes into the notes/decisions.md inbox (one line, ≤160 chars, naming the card that absorbs it), any other on its card as a note; write them yourself, never route them through the Interviewer. Grep both before forwarding a question.
 - Anything needed from the user goes to wap-interviewer once, never repeated in your replies.
+- Rare edge cases never reach the user (user 2026-11-24, via wap-interviewer): a seldom pattern (the `+=` order, seen
+  once, worked around with a local) takes the option with no core cost plus a Footguns line if needed, decided by the
+  Interviewer or by me and logged on its card. Only patterns that recur go to wap-interviewer as questions.
 - A discussion stays a discussion: a design idea, "X should be …",
   "we may even …", or "let's discuss" gets my view in prose and nothing else. No worker message, no card, no
   decisions.md entry until the user says to do it. Unsure whether it's an order: it's a discussion.
