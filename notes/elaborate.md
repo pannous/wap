@@ -34,8 +34,9 @@ obligations) and E8 (conditions lifted).
 - **Writes** declarations into the theory's `Environment` through `declared` and `inductive_declared`, and
   nothing else. A term it hands over holds no hole.
 - **The door** `elaborate/door.wap --tree <root> program.wap` loads the prelude (`wap/extensions/theory/prelude/`): its explicit files
-  checked, then `operators.wap` elaborated, the operators declared by their spellings as wap's types module declares
-  them (`+(m: nat, n: nat): nat := add(m, n)`). It elaborates the program statement by statement, and prints as the kernel's door does: nothing for an accepted declaration, the
+  checked, then `operators.wap` and `any.wap` elaborated (`PRELUDE_ELABORATED`, elaborate/file.wap): the operators
+  declared by their spellings as wap's types module declares them (`+(m: nat, n: nat): nat := add(m, n)`), and `any`,
+  the enum holding every value, with the conversions into it. It elaborates the program statement by statement, and prints as the kernel's door does: nothing for an accepted declaration, the
   value's type for `type of e`, a refusal as `refused by <rule>: …`. The kernel's own door, `check.wap`, stays the
   door of the explicit programs.
 
@@ -258,6 +259,34 @@ adds is how a candidate fits and where its instances come from.
   function is refused until the call lifts the caller into the computation (bind); `! IO, FFI` with a comma waits in
   test_theory_effects_wanted.wap, as the reader puts the comma around the whole definition.
 
+## Sums (E7)
+
+- **`A or B` of two types is their union**, the prelude's `Sum(A, B)` (logic.wap), cases `left(a)` and `right(b)`
+  (`elaborate/sums.wap`). The spelling arrives as a condition, If(A, yes, B); a condition that is a type, neither a
+  bool nor a proposition, has the union as its one reading (`union_written`), until `or` is a word of the prelude.
+- **One normal form**: sums inside a union flattened, each part computed, kept once and ordered by its term's key,
+  then summed from the right; a union of one part is that part. So `id(nat) or bool`, `bool or nat` and
+  `nat or bool or nat` are one type.
+- **A value of a part is a value of the union** (`injected`, last in made_of's chain after the conversions and the
+  subsets): it is held by `left` where its type is the first part, else by `right` of its injection into the rest.
+- **Optional values are unions with nothing**: ø is the prelude's Unit where a type is wanted, its value `unit`
+  elsewhere, at the level of the nothing the union wanted holds. `T?` is `T or ø`, and nothing is ordered last at the
+  level of the part before it, so `nat?`, `nat or ø` and the prelude's `optional(nat)` = Sum(nat, Unit) are one type.
+  An optional of a union, `(A or B)?`, flattens to Sum(A, Sum(B, Unit)), which is not `optional(A or B)` written
+  with the parameter (Sum(Sum(A, B), Unit)): a normal form by sorting does not commute with putting a union in for T.
+- **A call on a union distributes over its cases** (sums.wap `distributed`): only where no declaration fits, the first
+  argument typed a Sum is matched, each arm the same call on the case's value; a union of three parts distributes
+  again inside its `right` arm, and a second union argument in turn. The match's type is the type wanted, else the
+  union of the arms' types (`nat` where every arm gives one). A match on an enum whose type takes universes (the
+  prelude's Sum, list) unifies each parameter with the recursor's domain, so its level holes are found.
+- **`any` is a data node** (prelude/any.wap): an enum of nothing, a bool, an int, a text and a list of anys, each a
+  value of it by an overload of `convert`. A conversion fits only where the value's type is its binder's, so a level
+  hole in ø's Unit fits nothing else. The way out of an any, a check when the program runs, waits for effects (E5).
+- **A match on one of several enums that name each other** (a mutual block, or a nested one like `any` and its
+  list): the block's recursor takes one motive and minors per type; the subject's own get the motive and the arms, the
+  other types' a motive giving nothing (Unit at the motives' universe) and minors giving its value. A hypothesis rides
+  the field its motive is applied to, so recursion is on fields of the subject's own type.
+
 ## Conditions lifted (E8)
 
 A type may hold a list where a condition holds of itself, `class Quad { parts: vector(Quad, 4) }`, though the kernel
@@ -298,6 +327,7 @@ refuses a type of the block under a subset's condition (strict positivity): the 
 | `elaborate/obligations.wap` | going down: prove or check | E4 |
 | `elaborate/statements.wap` | blocks, lets, a choice's rest, counted loops, returns | E5 |
 | `elaborate/effects.wap` | computation types, `effects of`, effect bounds, recursions that may not end | E5 |
+| `elaborate/sums.wap` | unions of types as sums, their normal form | E7 |
 | `elaborate/lifted.wap` | conditions lifted out of recursive types: the plain block, its bool, the subset | E8 |
 
 ## Rules every file keeps
