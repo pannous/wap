@@ -27,6 +27,8 @@ PARAMETERS := "parameters"
 CASE_RESULT := "case result"
 FIELD_UNIVERSE := "field universe"
 STRICT_POSITIVITY := "strict positivity"
+NO_NUMBERS := "no numbers"
+NOT_A_STRUCTURE := "not a structure"
 
 refused(rule: text, found: text) := raise REFUSED + rule + ": " + found
 
@@ -84,6 +86,8 @@ unfolding(d: Declaration): Term? := match d.kind {
 class Environment {
 	declarations: map<text, Declaration> = {}
 	places: map<text, int> = {}
+	# the axioms each declaration rests on, through everything its type and its value name
+	axioms: map<text, list<text>> = {}
 }
 declaration(e: Environment, name: text): Declaration? := e.declarations.get(name)
 place(e: Environment, name: text): int := e.places.get(name) ?? 0
@@ -92,7 +96,33 @@ copied(e: Environment): Environment := {
 	copy = Environment()
 	copy.declarations.update(e.declarations)
 	copy.places.update(e.places)
+	copy.axioms.update(e.axioms)
 	copy
+}
+# Every axiom a declaration rests on (`axioms of name`): an axiom rests on itself, any other declaration on what the
+# names in its type and its value rest on, an opaque value's names too
+axioms_of(e: Environment, name: text): list<text> := e.axioms.get(name) ?? []
+# what a new declaration of these terms rests on, recorded under its name; `own` is yes for an axiom
+rests_on(e: Environment, name: text, terms: list<Term>, own: bool) := {
+	named: map<text, bool> = {}
+	for t in terms { constants_named(t, named) }
+	resting: list<text> = if own then [name] else []
+	for used in named.keys() {
+		for axiom in axioms_of(e, used) { if not resting.contains(axiom) { resting += [axiom] } }
+	}
+	e.axioms[name] = resting
+}
+# the constants a term names, each once, gathered into a map whose keys they are
+constants_named(t: Term, named: map<text, bool>) := {
+	match t.shape {
+		Constant(name, levels) => { named[name] = yes }
+		Apply(function, argument) => { constants_named(function, named); constants_named(argument, named) }
+		Lambda(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
+		Pi(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
+		LetIn(binder, type, value, body) => { constants_named(type, named); constants_named(value, named); constants_named(body, named) }
+		Projection(structure, field, of) => { named[structure] = yes; constants_named(of, named) }
+		_ => ø
+	}
 }
 # a declaration becomes part of the environment; typing.wap's `declared` checks it first and is the only caller
 added(e: Environment, d: Declaration) := {

@@ -1,0 +1,72 @@
+# A term computed to its head (notes/coc-plan.md 6.4; this folder's files: notes/theory.md): beta (a function
+# applied to an argument), zeta (a let put into its body) and delta (a definition or theorem replaced by its value).
+# Only the head is computed: the arguments stay as they are, equality and typing compute them when they need them.
+# Eta is no step of computing; equality applies both sides instead (6.5).
+
+use "terms.wap"
+use "environment.wap"
+
+# t computed until its head is no beta, zeta or delta step
+computed(c: Checker, t: Term): Term := {
+	kept = not t.holds_free
+	if kept {
+		earlier = remembered(c.heads, t)
+		if earlier is not ø { return earlier }
+	}
+	result = computed_folded(c, t)
+	while yes {
+		next_value = unfolded(c, result) ?? break
+		result = computed_folded(c, next_value)
+	}
+	if kept { remember(c.heads, t, result) }
+	result
+}
+
+# t computed by beta and zeta alone, so the caller chooses what unfolds. The chain of applications is taken apart
+# once per step: a function applied to k arguments eats k binders at once
+computed_folded(c: Checker, t: Term): Term := {
+	result = t
+	while yes {
+		leading = head(result)
+		given = arguments(result)
+		match leading.shape {
+			LetIn(binder, type, value, body) => { result = apply_all(instantiated(body, value), given) }
+			Lambda(binder, domain, body) => {
+				if given is empty { break }
+				result = beta(leading, given)
+			}
+			_ => break
+		}
+		stepped(c)
+	}
+	result
+}
+# a function of nested binders applied to arguments: as many binders as there are arguments eaten at once, the
+# arguments it does not take applied to what is left
+beta(function: Term, given: list<Term>): Term := {
+	body = function
+	eaten = 0
+	while eaten < #given {
+		match body.shape {
+			Lambda(binder, domain, inner) => { body = inner; eaten += 1 }
+			_ => break
+		}
+	}
+	apply_all(instantiated_all(body, given.take(eaten)), given.drop(eaten))
+}
+
+# t with its head constant replaced by its value at the levels it is used at, ø when the head unfolds to nothing:
+# an axiom, an opaque constant, a variable, a sort, a number
+unfolded(c: Checker, t: Term): Term? := {
+	leading = head(t)
+	match leading.shape {
+		Constant(name, levels) => {
+			d = declaration(c.environment, name)
+			if d is ø { refused(UNKNOWN_NAME, name) }
+			value = unfolding(d) ?? return ø
+			stepped(c)
+			apply_all(with_levels(value, d.levels, levels), arguments(t))
+		}
+		_ => ø
+	}
+}
