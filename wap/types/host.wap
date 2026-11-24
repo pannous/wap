@@ -13,14 +13,17 @@ BYTES_AT := 16
 # WASI: the folders the host opens for a program, the current one and the root (core/native/driver.warp), so a path
 # starting with / opens in the second; links followed; the rights to read and seek; seek from the start or the end
 CURRENT_FOLDER := 3
+ROOT_FOLDER := 4
 FOLLOW_LINKS := 1
+# a link's target read at most this long; links followed by hand at most this often in one path
+LINK_BYTES := 4096
+LINK_HOPS := 40
 READ_AND_SEEK := 6
 # WASI: open flags to create a missing file and empty one that is there; the right to write
 CREATED_OR_EMPTIED := 9
 WRITE_RIGHT := 64
 FROM_START := 0
 FROM_END := 2
-SLASH := 47
 # WASI: the open flag of a folder and the right to read its entries; an entry: where the next one starts (its first
 # word), its name's length at 16, its name after the header; the bytes read at once
 FOLDER_FLAG := 2
@@ -84,6 +87,19 @@ fd_readdir(folder: int, entries_at: int, length: int, cookie: int, used_at: int)
 clock_time_get(clock: int, precision: int, time_at: int): int := prim clock_time_get(clock, precision, time_at)
 random_get(at: int, count: int): int := prim random_get(at, count)
 poll_oneoff(subscriptions_at: int, events_at: int, count: int, given_at: int): int := prim poll_oneoff(subscriptions_at, events_at, count, given_at)
+# WASI calls no primitive is named after, imported as another module's functions are
+path_readlink(folder: int, path_at: int, length: int, target_at: int, room: int, used_at: int): int := {
+	answer: int32 = prim foreign("wasi_snapshot_preview1", "path_readlink", int32(folder), int32(path_at), int32(length), int32(target_at), int32(room), int32(used_at))
+	int(answer)
+}
+fd_prestat_get(folder: int, prestat_at: int): int := {
+	answer: int32 = prim foreign("wasi_snapshot_preview1", "fd_prestat_get", int32(folder), int32(prestat_at))
+	int(answer)
+}
+fd_prestat_dir_name(folder: int, name_at: int, length: int): int := {
+	answer: int32 = prim foreign("wasi_snapshot_preview1", "fd_prestat_dir_name", int32(folder), int32(name_at), int32(length))
+	int(answer)
+}
 # a clock's time in nanoseconds, asked to a precision: WASI's clock_time_get puts it at 0, as two words
 clock_nanos(clock: int, precision: int): int := {
 	clock_time_get(clock, precision, 0)
@@ -104,14 +120,59 @@ zero_ended(at: int): text := {
 	while memory_byte(end) != 0 { end += 1 }
 	memory_text(at, end - at)
 }
-# the file at a path opened with these flags and rights, relative to the current folder or from the root (/…); ø for a
-# path it cannot open
+# the file at a path opened with these flags and rights, relative to the current folder or from the root (/…), else
+# from the root by its real path; ø for a path it cannot open
 opened_at(written: text, flags: int, rights: int): int? := {
 	path = home_expanded(written)
-	rooted = if byte_count(path) > 0 and byte_at(path, 0) == SLASH then 1 else 0
-	place(bytes_between(path, rooted, byte_count(path)))
-	if path_open(CURRENT_FOLDER + rooted, FOLLOW_LINKS, BYTES_AT, byte_count(path) - rooted, flags, rights, 0, 0, MOVED_AT) != 0 { return ø }
+	rooted = if path.starts_with("/") then 1 else 0
+	opened_in(CURRENT_FOLDER + rooted, path[rooted ..], flags, rights) ?? opened_in(ROOT_FOLDER, (real_path(path) ?? return ø)[1 ..], flags, rights)
+}
+opened_in(folder: int, path: text, flags: int, rights: int): int? := {
+	place(path)
+	if path_open(folder, FOLLOW_LINKS, BYTES_AT, byte_count(path), flags, rights, 0, 0, MOVED_AT) != 0 { return ø }
 	memory_word(MOVED_AT)
+}
+# a path made absolute, its links followed and its `.` and `..` gone: the host's WASI (wasmtime's) follows no link to
+# an absolute path and no `..` out of the folder it opened, so a path that needs them is opened from the root by this;
+# ø when the host names the current folder by no absolute path, or the links go round
+real_path(path: text): text? := {
+	pending = (if path.starts_with("/") then path else (current_folder() ?? return ø) + "/" + path).split("/")
+	real: list<text> = []
+	hops = 0
+	while pending is not empty {
+		part = pending#1
+		pending = pending.drop(1)
+		if part == ".." { real = real.take(max(#real - 1, 0)) }
+		else if part != "" and part != "." {
+			target = link_target("/" + (real + [part]).join("/")) ?? ""
+			if target == "" { real += [part] }
+			else {
+				hops += 1
+				if hops > LINK_HOPS { return ø }
+				if target.starts_with("/") { real = [] }
+				pending = target.split("/") + pending
+			}
+		}
+	}
+	"/" + real.join("/")
+}
+# the target of the link at an absolute path, ø when it is no link
+link_target(path: text): text? := {
+	length = byte_count(path) - 1
+	at = scratch(length + LINK_BYTES)
+	memory_placed(at, path[1 ..])
+	if path_readlink(ROOT_FOLDER, at, length, at + length, LINK_BYTES, MOVED_AT) != 0 { return ø }
+	memory_text(at + length, memory_word(MOVED_AT))
+}
+# the current folder's absolute path, as the host names the first folder it opens (WASI's prestat: the name's length
+# at 4); ø when the host names it otherwise (".")
+current_folder(): text? := {
+	if fd_prestat_get(CURRENT_FOLDER, MOVED_AT) != 0 { return ø }
+	length = memory_word(MOVED_AT + 4)
+	at = scratch(length)
+	fd_prestat_dir_name(CURRENT_FOLDER, at, length)
+	name = memory_text(at, length)
+	if name.starts_with("/") then name else ø
 }
 # the file opened, a path it cannot open raising the refusal and the path
 opened(path: text, flags: int, rights: int, refusal: text): int := opened_at(path, flags, rights) ?? raise(refusal + path)
