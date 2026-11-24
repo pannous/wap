@@ -6,7 +6,8 @@
 #   wap/extensions/native/build.sh [--standalone] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]
 # --standalone: the parts of the compiler's seed folder (scripts/lib/wap-beside.sh WAP_PARTS) built into the executable,
 # which the native wap unpacks once into its cache folder (main.c wap_seed, linking.wap seed_folder_found) in place of
-# a wap-seed/ folder beside it
+# a wap-seed/ folder beside it; and each library -l<name> whose static library lib<name>.a is in a -L folder linked
+# whole into it (its functions are found by name, so no reference pulls them in): one file, needing only the system's
 # the arguments after the executable are the C compiler's, the libraries the program's C functions are in:
 # `-Llib -lwarp_wasmtime -Wl,-rpath,@executable_path/lib` for the native wap (driver.wap)
 # The compiler runs on the native wap on PATH, else on wasmtime (scripts/lib/wap-host.sh). The build's files go in
@@ -27,6 +28,28 @@ standalone=""
 [ $# -ge 3 ] || { echo "usage: $0 [$STANDALONE_OPTION] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]" >&2; exit 2; }
 compiler=$1 program=$2 executable=$3
 shift 3
+# whole_archive <static library>: the linker's arguments that link all of it
+whole_archive() {
+	case $(uname -s) in
+		Darwin) echo "-Wl,-force_load,$1" ;;
+		*) echo "-Wl,--whole-archive,$1,--no-whole-archive" ;;
+	esac
+}
+# the C compiler's arguments of a standalone build: each -l<name> with a lib<name>.a in a -L folder replaced by it whole
+statically_linked() {
+	local argument folder folders=() static
+	for argument in "$@"; do case $argument in -L*) folders+=("${argument#-L}") ;; esac; done
+	for argument in "$@"; do
+		static=""
+		case $argument in -l*) for folder in ${folders[@]+"${folders[@]}"}; do [ -f "$folder/lib${argument#-l}.a" ] && static=$folder/lib${argument#-l}.a && break; done ;; esac
+		if [ -n "$static" ]; then whole_archive "$static"; else echo "$argument"; fi
+	done
+}
+if [ -n "$standalone" ] && [ $# -gt 0 ]; then
+	linked=()
+	while IFS= read -r argument; do linked+=("$argument"); done < <(statically_linked "$@")
+	set -- "${linked[@]}"
+fi
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$here/../../../scripts/lib/wap-host.sh"
 library="$(cd -P "$here/../../../lib" && pwd -P)"

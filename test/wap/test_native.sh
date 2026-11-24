@@ -266,4 +266,6 @@ check "wap verify gives each axiom and law its verdict, from any folder" "$(cd "
 native_wap_built "$stage/standalone" --standalone >/dev/null && rm -rf "$stage/standalone/wap-seed"
 check "a standalone wap runs a program and verifies a file with no seed folder beside it" "$(cd "$stage" && HOME="$stage/home" "$stage/standalone/wap" hello.wap 2>&1 && HOME="$stage/home" "$stage/standalone/wap" verify axiom_only.wap 2>&1)" "Hello
 choice: Axiom"
+# and wasmtime's static library beside the shared one (warp's scripts/wasmtime-c-api.sh) is linked into it whole
+check "a standalone wap needs no library but the system's" "$(otool -L "$stage/standalone/wap" | tail -n +2 | grep -vc libSystem)" "0"
 exit $((failures > 0))
