@@ -15,6 +15,7 @@ use "state.wap"
 use "read.wap"
 use "recursion.wap"
 use "instances.wap"
+use "effects.wap"
 use "../../prove/prove.wap"
 
 # the names a level hole left in a declaration's type becomes, the first one not written already; past them a name
@@ -40,6 +41,8 @@ statement_elaborated(p: Theory, statement: Node) := match statement {
 		if typed is not ø { return print shown(asked_type(p, typed!)) }
 		resting = asked_about(AXIOMS_QUESTION_WORDS, word, arguments)
 		if resting is not ø { return print axioms_shown(p.environment, text(resting!)) }
+		effecting = asked_about(EFFECTS_QUESTION_WORDS, word, arguments)
+		if effecting is not ø { return print effects_asked(p, text(effecting!)) }
 		if word in DECLARATION_WORDS and #arguments == 1 { return declaration_elaborated(p, word, arguments#1) }
 		if word == EXPORT_WORD and #arguments == 1 { return write(text(arguments#1), exported(p.environment)) }
 		unelaborated(statement)
@@ -76,9 +79,17 @@ definition_elaborated(p: Theory, word: text, named: Node, parameters: list<Node>
 	x.recursing = Recursion(name, written)
 	assumed = value is not ø and text(value!) == ASSUME_WORD
 	by_laws = if value is ø then ø else laws_named(p, value!)
-	body = if value is ø or assumed or by_laws is not ø then ø else elaborated(x, value!, result)
+	given = if value is ø then ø else bounded(x, value!, parameters)
+	kept = found_so_far(x.el)
+	diverged = no
+	body = if value is ø or assumed or by_laws is not ø then ø else try { elaborated(x, given!.body, result) } catch e {
+		if not may_not_end(e) { raise e.message }
+		back_to(x.el, kept)
+		diverged = yes
+		diverging(x, word, name, result, e)
+	}
 	instances_filled(x)
-	type = result ?? type_of(x.el.c, filled(x.el, body!))
+	type = if diverged then computation(x, [DIV], result!) else result ?? type_of(x.el.c, filled(x.el, body!))
 	variables = x.letters + written
 	closed_type = closed_filled(x.el, type, variables, no)
 	terms = finished(x, [closed_type] + (if body is ø then [] else [closed_filled(x.el, body!, variables, yes)]))
@@ -88,7 +99,8 @@ definition_elaborated(p: Theory, word: text, named: Node, parameters: list<Node>
 	if by_laws is not ø and proof is ø { refused(UNPROVED_BY, "${name} is not proved by ${by_laws!.map(law => law.name).join(", ")}: name in `by` the laws its steps need") }
 	if word == LAW_WORD and proof is ø and not assumed { p.unproved_laws[name] = terms#1 } else {
 		key = overload_key(x, name, written)
-		declared(p.environment, Declaration(key, x.reading.levels, terms#1, declaration_kind(word, proof)))
+		if given is not ø { within_bound(x, name, terms#1, given!.bound) }
+		declared(p.environment, Declaration(key, x.reading.levels, terms#1, declaration_kind(if diverged then OPAQUE_WORD else word, proof)))
 		p.found[key] = #x.letters
 	}
 }

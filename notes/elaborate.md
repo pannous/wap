@@ -243,6 +243,20 @@ adds is how a candidate fits and where its instances come from.
   test_theory_statements_wanted.wap.
 - Statements are read as kernel forms (Block, Set, If, Return, While, Break, Continue), which the tree's rules
   write; the elaborator names no statement word.
+- **Effects are a type**: `T ! IO` is the prelude's `Eff(e, T)`, e the `Effects.set` of a yes or no for each effect
+  (`elaborate/effects.wap`). The effects' words are the fields of that one case, read from the prelude, so the
+  elaborator names none; Pure is none of them. A word in another case is that effect, with a got-it note.
+- **A recursion that may not end is Div**: where the recursion is neither structural nor by a measure, the
+  definition becomes an opaque constant of `T ! Div`, `never(div, T)`, under the name the program wrote: it never
+  unfolds, so it proves nothing and rests on no axiom, and it runs by its body. Its result type must be written. A
+  law or theorem that may not end, or a proof by a value of a computation type, is the refusal `effect`: a proof
+  must be pure.
+- **`effects of f`** prints the effects f's type ends in, by the syntax of its type (a computation type is named,
+  never unfolded): Pure, one effect, or several in brackets.
+- **`f(x) := … ! Pure`** bounds f's effects: an effect of its type past the bound is the refusal `effect`, and a bound
+  on a value that is no function is a misplaced effect constraint. A call of a function with effects inside another
+  function is refused until the call lifts the caller into the computation (bind); `! IO, FFI` with a comma waits in
+  test_theory_effects_wanted.wap, as the reader puts the comma around the whole definition.
 
 ## Conditions lifted (E8)
 
@@ -283,6 +297,7 @@ refuses a type of the block under a subset's condition (strict positivity): the 
 | `elaborate/convert.wap` | the conversions, the path between two types, lifting through containers | E4 |
 | `elaborate/obligations.wap` | going down: prove or check | E4 |
 | `elaborate/statements.wap` | blocks, lets, a choice's rest, counted loops, returns | E5 |
+| `elaborate/effects.wap` | computation types, `effects of`, effect bounds, recursions that may not end | E5 |
 | `elaborate/lifted.wap` | conditions lifted out of recursive types: the plain block, its bool, the subset | E8 |
 
 ## Rules every file keeps

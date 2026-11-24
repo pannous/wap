@@ -1,0 +1,135 @@
+# Effects (notes/elaborate.md "Effects (E5)", notes/coc-plan.md 3.8 and 9): what a function may do beyond computing a
+# value is part of its type. `T ! IO` is the prelude's Eff(e, T), e the set of the effects named: a yes or no for each
+# field of the prelude's Effects case, whose fields are the effects' words, none of them listed here. A recursion that
+# is neither structural nor by a measure may not end: it is an opaque constant of `T ! Div`, which never unfolds, so it
+# proves nothing and rests on no axiom; it runs by its body as written.
+use "../terms.wap"
+use "../environment.wap"
+use "../compute.wap"
+use "../typing.wap"
+use "../show.wap"
+use "../explicit.wap"
+use "../../../kernel/forms.wap"
+use "../../../core/type_notation.wap"
+use "state.wap"
+use "read.wap"
+use "conditions.wap"
+use "lifted.wap"
+use "blocks.wap"
+use "recursion.wap"
+
+# `T ! IO`, `f(x) := … ! Pure`: the mark of effects, and the question `effects of f`
+EFFECT_MARK := "!"
+EFFECTS_QUESTION_WORDS := ["effects", "of"]
+# the prelude's effect sets, their one case, the computation types and the computation that never returns
+EFFECTS := "Effects"
+EFFECT_SET := "set"
+COMPUTATION := "Eff"
+NEVER := "never"
+# no effect at all, and the effect of what may not end
+PURE_WORD := "Pure"
+DIV := "Div"
+# the elaborator's rule a computation where none may be, or a function past its written bound, is refused by
+EFFECT := "effect"
+
+# the effects' words: the fields of the Effects case, in order
+effect_words(x: Elaborating): list<text> := {
+	set = "${kernel_name(x.theory, EFFECTS)}${DOT}${EFFECT_SET}"
+	binder_names((declaration(x.theory.environment, set) ?? refused(UNKNOWN_NAME, "nothing declares ${set}, whose fields are the effects")).type)
+}
+binder_names(t: Term): list<text> := match t.shape {
+	Pi(binder, domain, body) => [binder] + binder_names(body)
+	_ => []
+}
+# the effects words name: Pure none, any other the effect of that word, its case aside, which a note says
+effects_written(x: Elaborating, words: list<Node>): list<text> := words.flat_map(word => effect_named(x, text(word)))
+effect_named(x: Elaborating, word: text): list<text> := {
+	known = [PURE_WORD] + effect_words(x)
+	found = known.find(effect => lower(effect) == lower(word)) ?? refused(EFFECT, "${word} is no effect: the effects are ${known.join(", ")}")
+	if found! != word { eprint("got it: ${word} is ${found!}") }
+	if found! == PURE_WORD then [] else [found!]
+}
+# the set of these effects, a yes or no for each
+effect_set(x: Elaborating, effects: list<text>): Term := apply_all(constant("${kernel_name(x.theory, EFFECTS)}${DOT}${EFFECT_SET}", []), effect_words(x).map(word => bool_value(x, if effects.contains(word) then YES else NO)))
+# `T ! effects`: the computations with those effects that give a T
+computation(x: Elaborating, effects: list<text>, type: Term): Term := {
+	level = sort_level(computed(x.el.c, filled(x.el, type_of(x.el.c, filled(x.el, type)))))
+	apply_all(constant(kernel_name(x.theory, COMPUTATION), [level]), [effect_set(x, effects), type])
+}
+# the computation of these effects that never returns, a T
+never_given(x: Elaborating, effects: list<Term>, type: Term): Term := {
+	level = sort_level(computed(x.el.c, filled(x.el, type_of(x.el.c, filled(x.el, type)))))
+	apply_all(constant(kernel_name(x.theory, NEVER), [level]), [effects#1, type])
+}
+# What `T ! IO` writes, the mark glued to its subject and the effects' words after it, a list by spaces: those two;
+# ø for any other form
+class Marked { subject: Node; words: list<Node> }
+effect_marked(n: Node): Marked? := match unwrapped(n) {
+	List(items, bracket, Separator.Space) => match unwrapped(items#1) {
+		Call(mark, subject) => if text(mark) == EFFECT_MARK and #subject == 1 and #items > 1 then Marked(subject#1, items.drop(1).flat_map(items_or_one)) else ø
+		_ => ø
+	}
+	_ => ø
+}
+# `T ! IO` read: the computations of the type with the effects named; ø for a form with no mark
+computation_read(x: Elaborating, n: Node): Term? := {
+	marked = effect_marked(n)
+	if marked is ø { return ø }
+	type = elaborated(x, marked!.subject, ø)
+	if not is_sort(computed(x.el.c, filled(x.el, type_of(x.el.c, filled(x.el, type))))) {
+		refused(EFFECT, "misplaced effect constraint: ${text(marked!.subject)} is no type, and `! …` bounds a function's effects or names a computation's type")
+	}
+	computation(x, effects_written(x, marked!.words), type)
+}
+is_sort(t: Term): bool := match t.shape {
+	Sort(level) => yes
+	_ => no
+}
+
+# the effects a function's type gives: those of the computation it ends in, none where it ends in no computation
+effects_given(x: Elaborating, type: Term): list<text> := {
+	result = ended_in(filled(x.el, type))
+	if result_name(result) != kernel_name(x.theory, COMPUTATION) { return [] }
+	set = arguments(computed(x.el.c, arguments(result)#1))
+	words = effect_words(x)
+	(1 to #words).list().filter(at => result_name(computed(x.el.c, set#at)) == "${kernel_name(x.theory, BOOL)}${DOT}${YES}").map(at => words#at)
+}
+# what a type gives after its binders, as written: a computation type is named, never unfolded
+ended_in(type: Term): Term := match type.shape {
+	Pi(binder, domain, body) => ended_in(body)
+	_ => type
+}
+# effects as wiki/effects.md writes them: Pure, one effect, or several in brackets
+effects_shown(effects: list<text>): text := if effects is empty then PURE_WORD else if #effects == 1 then effects#1 else "(${effects.join(" ")})"
+# `effects of f`: the effects the declaration's type gives
+effects_asked(p: Theory, name: text): text := {
+	x = elaborating(p)
+	effects_shown(effects_given(x, declared_named(p.environment, kernel_name(p, name)).type))
+}
+
+# A definition's body and the bound written after it, `f(x) := … ! Pure`; the body alone where none is written
+class Bounded { body: Node; bound: list<text>? }
+bounded(x: Elaborating, value: Node, parameters: list<Node>): Bounded := {
+	marked = effect_marked(value)
+	if marked is ø or parameters is empty then Bounded(value, ø) else Bounded(marked!.subject, effects_written(x, marked!.words))
+}
+# a function's effects within its written bound, else refused naming what it does past it
+within_bound(x: Elaborating, name: text, type: Term, bound: list<text>?) := {
+	if bound is ø { return }
+	past = effects_given(x, type).filter(effect => not bound!.contains(effect))
+	if past is not empty { refused(EFFECT, "${name} is declared ! ${effects_shown(bound!)} but has ${effects_shown(past)}") }
+}
+# a computation where a value is wanted: refused, since what has effects is used only inside another computation
+computation_refused(x: Elaborating, t: Term, given: Term) := {
+	if result_name(ended_in(given)) != kernel_name(x.theory, COMPUTATION) { return }
+	refused(EFFECT, "${shown_for(x.el.c, filled(x.el, t))} has ${effects_shown(effects_given(x, given))}, so it is used only inside another computation")
+}
+# whether a refusal is of a recursion that may not end, which makes the function Div instead
+may_not_end(e: Error): bool := e.message.starts_with(REFUSED + RECURSION)
+# A definition whose recursion may not end: an opaque constant of its result's computations with Div, the
+# computation that never returns its value; a proof may not, and a result must be written for the computation's type
+diverging(x: Elaborating, word: text, name: text, result: Term?, refusal: Error): Term := {
+	if word in PROVED_WORDS or word == LAW_WORD { refused(EFFECT, "${name} may not end (${DIV}): a proof must be pure. ${refusal.message}") }
+	if result is ø { raise refusal.message + ": write its result type, so it is a computation that may not end" }
+	never_given(x, [effect_set(x, [DIV])], result!)
+}
