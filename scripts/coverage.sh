@@ -50,7 +50,10 @@ commit=$(sed -n 's/^wap.wasm of \([0-9a-f]*\) .*/\1/p' <<<"$version")
 library="$(dirname "$(sed -n '1s/.*(\(.*\))$/\1/p' <<<"$version")")/lib"
 [ -d "$library" ] || { echo "coverage.sh: no library beside the installed wap's compiler ($library)" >&2; exit 2; }
 modules=$(find "$library" -maxdepth 1 \( -name '*.warp' -o -name '*.wap' \) | sort)
-samples=$(find -L "$tree/samples" -name '*.warp' | sort)
+samples=$(find -L "$tree/samples" \( -name '*.warp' -o -name '*.wap' \) | sort)
+[ "${1:-}" = --runnable ] && { printf '%s
+%s
+' "$modules" "$samples"; exit 0; }
 lines=$({
 	xargs -P "$RUNS_AT_ONCE" -I{} bash -c 'module_covered "$1"' _ {} <<<"$modules"
 	xargs -P "$RUNS_AT_ONCE" -I{} bash -c 'covered sample "$1"' _ {} <<<"$samples"

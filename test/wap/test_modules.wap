@@ -1,0 +1,119 @@
+# wap's modules: `use "file"` brings in a file's definitions and runs its statements first (notes/backbone.md "Stage
+# languages", declared; core/analyze/declarations.wap)
+use file
+use "../check.wap"
+use "scripted.wap"
+
+write(staged("speak.wap"), "say(t: text) := print(t)\nsay(\"loaded\")\n")
+write(staged("greet.wap"), "use \"speak.wap\"\ngreeting = \"hi\"\nwelcome() := say(greeting)\n")
+check("a used module's function, its statements run first", ran("use_one", "use \"speak.wap\"\nsay(\"Hello\")"), "loaded\nHello")
+check("a module uses its own modules and variables", ran("use_nested", "use \"greet.wap\"\nwelcome()"), "loaded\nhi")
+check("a module used twice runs once", ran("use_twice", "use \"greet.wap\"\nuse \"speak.wap\"\nwelcome()\nsay(\"both\")"), "loaded\nhi\nboth")
+write(staged("ping.wap"), "use \"pong.wap\"\nping() := print(\"ping\")\nserve() := rally()\n")
+write(staged("pong.wap"), "use \"ping.wap\"\npong() := print(\"pong\")\nrally() := {\n	ping()\n	pong()\n}\n")
+check("modules may use each other", ran("use_each_other", "use \"ping.wap\"\nserve()"), "ping\npong")
+# a module may hold only rules
+write(staged("doubling.wap"), "rule twice $x => $x + $x\n")
+check("a module of rules only", ran("use_rules", "use \"doubling.wap\"\nprint \"used\""), "used")
+# a used module's rules build the language the program is written in (wiki kernel.md)
+check("a used module's rule", ran("use_rule", "use \"doubling.wap\"\ntwice 4"), "8")
+# a used module's enums and classes are the program's to use; a program's own case hides the module's
+write(staged("trees.wap"), "enum Tree { Leaf(value: int), Named(name: text), Nothing }\nclass Box { n: int }\n")
+check("a used module's case with fields", ran("use_cases", "use \"trees.wap\"\nprint match Named(\"x\") { Named(name) => name; _ => \"o\" }"), "x")
+check("a used module's class and bare case", ran("use_class", "use \"trees.wap\"\nb = Box(2)\nt = Tree.Nothing\nprint text(b.n + 3)"), "5")
+check("a program's own case hides the module's", ran("use_hidden_case", "use \"trees.wap\"\nenum Side { Leaf, Root }\nprint text(Side.Leaf == Leaf)"), "yes")
+check("a used module's case matched with its field", ran("use_case_field", "use \"trees.wap\"\nleaf = Leaf(3)\nprint match leaf { Leaf(v) => text(v + 1); _ => \"o\" }"), "4")
+write(staged("pairs.wap"), "pattern Pair = (Pair $left: Node $right: Node)\n")
+check("a used module's pattern builds its shape", ran("use_pattern", "use \"pairs.wap\"\nn = Pair(Text(\"a\"), Number(1))\nprint text(match n { List(items, bracket, separator) => #items; _ => 0 })"), "3")
+check("a pattern builds its shape, a rest hole taking a list", ran("pattern_rest", "pattern Run = (Run $first: Node $rest...: Node)\nn = Run(Text(\"a\"), [Text(\"b\"), Text(\"c\")])\nprint text(match n { List(items, bracket, separator) => #items; _ => 0 })"), "4")
+check("a pattern held in a map is a Node wherever one is wanted", ran("pattern_in_map", "pattern Pair = (Pair $a: Node $b: Node)\nshown(n: Node) as text := text(n)\nheld: map<text, Pair> = {}\nheld[\"p\"] = Pair(Text(\"x\"), Text(\"y\"))\nfor each in held.values { print shown(each) }"), "(Pair \"x\" \"y\")")
+check("a pattern's rest hole read as its part", ran("pattern_rest_part", "pattern Run = (Run $first: Node $rest...: Node)\ncount_rest(r: Run) as int := #r.rest\nprint text(count_rest(Run(Text(\"a\"), [Text(\"b\"), Text(\"c\")])))"), "2")
+check("a used module's pattern takes its shape apart in an arm", ran("use_pattern_arm", "use \"pairs.wap\"\nn = Pair(Text(\"a\"), Number(1))\nprint text(match n { Pair(Text(t), right) => t; _ => \"no\" })"), "a")
+check("a pattern's rest hole takes the rest of its shape in an arm", ran("pattern_rest_arm", "pattern Run = (Run $first: Node $rest...: Node)\nn = Run(Text(\"a\"), [Text(\"b\"), Text(\"c\")])\nprint text(match n { Run(first, rest) => #rest; _ => 0 })"), "2")
+ensured_folder(staged("inner"))
+write(staged("inner/loud.wap"), "use \"../speak.wap\"\nshout() := say(\"HEY\")\n")
+check("a module in a folder uses one beside its folder, loaded once", ran("use_up", "use \"inner/loud.wap\"\nuse \"speak.wap\"\nshout()"), "loaded\nHEY")
+# a name means local > parameter > program > used module > types; two used modules defining one name clash
+write(staged("a.wap"), "twice(n: int) as int := n * 2\nshow(n: int) as text := \"a \" + text(n)\n")
+write(staged("b.wap"), "twice(n: int) as int := n + n\n")
+check("a used module's word hides the types module's of the same parameters", ran("module_over_types", "use \"a.wap\"\nprint(show(3))"), "a 3")
+check("a.twice is the used module a's word, beside the program's own twice", ran("module_named", "use \"a.wap\"\ntwice(n: int) as int := n * 10\nprint(text(a.twice(3)))\nprint(text(twice(3)))"), "6\n30")
+check("two used modules defining one name are refused naming both, even where nothing calls it", matches_of(ran("module_clash", "use \"a.wap\"\nuse \"b.wap\"\nprint(\"x\")"), "a.wap line [0-9]* and b.wap line [0-9]* both define twice").join("\n"), "a.wap line 1 and b.wap line 1 both define twice")
+write(staged("c.wap"), "twice(n: int) as int := n * 2\n")
+check("two used modules defining one word identically are no clash", ran("module_identical", "use \"a.wap\"\nuse \"c.wap\"\nprint(text(twice(4)))"), "8")
+check("a variable named like a used module is the variable: a.twice() is twice(a)", ran("module_hidden", "use \"a.wap\"\na = 7\nprint(text(a.twice()))"), "14")
+# a type's name means the record its code sees: a used module's class beside the program's own of that name
+write(staged("boxes.wap"), "class Box { n: int }\nboxed(n: int) as text := text(Box(n).n)\n")
+check("a used module's code keeps its own class where the program declares another of that name", ran("module_class", "use \"boxes.wap\"\nclass Box { name: text }\nprint(boxed(3))\nprint(Box(\"x\").name)"), "3\nx")
+# a case name two enums share: the case taking as many values as the call gives, though another hides it by scope
+write(staged("tokens.wap"), "enum Token { Atom, Key }\n")
+check("a call of a case name picks the case taking its values: Key(a, op, b) is Node's beside a used module's fieldless Key", ran("case_by_count", "use \"tokens.wap\"\nshown(n: Node) as text := match n { Key(left, op, right) => \"key\"; _ => \"other\" }\ntoken = Key\nprint(shown(Key(symbol(\"a\"), Op.Colon, Number(1))))\nprint(if token == Token.Key then \"token\" else \"other\")"), "key\ntoken")
+check("a module is one module however often a program names it", ran("use_named_twice", "use \"speak.wap\"\nuse \"speak.wap\"\nsay(\"once\")"), "loaded\nonce")
+# include (wiki/use.md): a file's text in place, as it is, so its words are the program's own, and a use inside it
+# is read beside the included file
+ensured_folder(staged("parts"))
+write(staged("parts/twice.wap"), "use \"../speak.wap\"\ntwice(x: int) as int := x * 2\n")
+check("an included file's definitions are the program's own; its use is found beside it", ran("included", "include \"parts/twice.wap\"\nsay(text(twice(21)))"), "loaded\n42")
+# a module exports each function under its header line (wiki/wasm-representation.md "Export names"), so a host calls
+# one overload by that name
+check("a host calls an exported overload by its header line", called_export("overloads", "add(a: int, b: int = 1) as int := a + b\nadd(a: text, b: text) as text := a + b", "add(a: int, b: int = 1) → int", ["2", "3"]), "5")
+check("a program uses a compiled module as it uses its source", ran_using("compiled", "add(a: int, b: int = 1) as int := a + b\ntwice(t: text) as text := t + t", "uses_compiled", "print text(add(2, 3) + add(4))\nprint twice(\"ab\")"), "10\nabab")
+check("a compiled module that exports no function declares nothing", ran_using("no_functions", "x = 1", "uses_no_functions", "print(\"ok\")"), "ok")
+# a module compiled once carries what wasm erases as source in its wap section (wiki/wasm-representation.md): a class,
+# a generic function and a value travel along, the functions compiled once are called through its exports
+check("a compiled module's classes, generic functions and values work in the program using it", ran_using("carried", "class P { n: int, name: text }\nnames(ps: list<P>) as text := ps.map(p => p.name).join(\",\")\nmade(n: int) as P := P(n, \"p\" + text(n))\nsecond(xs: list<T>) as T := xs#2\nLIMIT = 7", "uses_carried", "print names([made(1), P(2, \"q\")])\nprint second([\"a\", \"b\"])\nprint text(LIMIT)"), "p1,q\nb\n7")
+# a value assigned twice is one global, exported once
+check("a value a compiled module assigns twice is one value in the program using it", ran_using("twice", "LIMIT = 7\nLIMIT = 8", "uses_twice", "print text(LIMIT)"), "8")
+# the program changes a used module's variable, which the module's own functions then read
+check("a program changes a used module's variable", ran("reassign_used", "use \"greet.wap\"\ngreeting = greeting + \"!\"\nwelcome()"), "loaded\nhi!")
+# a word's one function is exported under its plain word too
+check("a host calls a word's one function by its plain word", called_export("plain", "twice(x: int) as int := x * 2\nadd(a: int, b: int) as int := a + b\nadd(a: text, b: text) as text := a + b", "twice", ["21"]), "42")
+check("a program uses a compiled module whose one function is exported by its plain word too", ran_using("plain_twice", "twice(x: int) as int := x * 2", "uses_plain_twice", "print(text(twice(21)))"), "42")
+# a recursive record's recursion group holds only the types that refer to it, so a list or text the module shares
+# with the program is the program's own type
+check("a program calls a list and a text function of a module declaring a recursive record", ran_using("recursive_module", "class Tree { kids: list<Tree>; name: text }\ntotal(xs: list<int>) as int := xs.sum()\nshout(t: text) as text := t + \"!\"\nsize(t: Tree) as int := 1 + t.kids.map(size).sum()", "uses_recursive_module", "print(text(total([1, 2, 3])))\nprint(shout(\"hi\"))\nprint(text(size(Tree([Tree([], \"b\")], \"a\"))))"), "6\nhi!\n2")
+# a used module raises by the library's tag, so the program's main catches it though it calls nothing of the library
+check("a raise in a used compiled module is caught by the program", ran_using("raising", "positive(x: int) as int := if x > 0 then x else raise \"not positive\"", "uses_raising", "print(text(positive(-1)))"), "not positive")
+# a used compiled module's top level runs once before the program, so a value it computes is set when the program reads it
+check("a value a used compiled module computes at its top level is set for the program", ran_using("answering", "answer = [40, 2].sum()", "uses_answering", "print(text(answer))"), "42")
+# wiki/use.md "folder, package and project scope": use folder brings in every source file beside the using one
+ensured_folder(staged("shapes"))
+write(staged("shapes/square.wap"), "area(side: int) as int := side * side\n")
+check("use folder brings in a word of a file beside it", ran("shapes/main", "use folder\nprint(text(area(3)))"), "9")
+# wiki/use.md "Library folders": use name brings in the module of that name, here the one beside the program
+check("use name brings in the module of that name beside the program", ran("use_name", "use speak\nsay(\"by name\")"), "loaded\nby name")
+check("use name brings in a standard module from the library beside the compiler", ran("use_library", "use ordering\nprint(text(natural_compare(\"a2\", \"a10\") < 0))"), "yes")
+# the library's own module comes before one of that name in its folders: lib/regex.wap, not lib/crates/regex.warp (wiki/use.md)
+check("use name finds the library's own module before its folders'", ran("use_library_root", "use regex\nprint(text(escaped_code(\"n\")))"), "10")
+# a folder right in the library holds modules too, lib/native's C bindings among them; import is use
+check("import name brings in a module from a folder of the library", ran("use_library_folder", "import z\nprint(text(compressBound(100)))"), "113")
+# ini: keys before any section stay at the top level beside the sections (lib/ini.wap, card lib-ini-toml)
+check("ini keeps the keys before any section", ran("use_ini", "use ini\nprint to_ini(parse_ini(\"top = 1\n[db]\nhost = x\"))"), "top = 1\n\n[db]\nhost = x")
+# list: the standard list words beyond the types module's, typed (lib/list.wap)
+check("the list module's words take typed lists", ran("use_list", "use list\nprint text(chunk([1, 2, 3, 4, 5], 2))\nprint text(median([3, 1, 2, 4]))\nprint text(combinations([1, 2, 3], 2))"), "[[1, 2], [3, 4], [5]]\n2.5\n[[1, 2], [1, 3], [2, 3]]")
+# path's glob classes and machine_math's powers of two (lib/path.warp, lib/machine_math.warp, notes/lib_coverage.md)
+check("path globs a class of letters, machine_math raises two", ran("use_path_math", "use path\nuse machine_math\nprint text(path_matches(\"b.txt\", \"[a-c].txt\"))\nprint text(round(two_to(10.0)))"), "yes\n1024")
+# a library word given an any reaches its definition for the type the any holds (decision any-values, warp-reviewer)
+check("a library word takes an any holding its type", ran("use_any", "use ini\na: any = parse_ini(\"top = 1\")\nprint to_ini(a)"), "top = 1")
+# a module's alias lines name its words other ways, in the module and in the files using it (wiki/alias.md)
+write(staged("trig.wap"), "sine(x: int) := x * 2\nalias sin => sine\nalias magnitude <= mag\nmagnitude(x: int) := x + 1\ntwice_sin(x: int) := sin(x) * 2\n")
+check("a module's alias reads in the module and the file using it", ran("use_alias", "use \"trig.wap\"\nprint(sin(3))\nprint(mag(3))\nprint(twice_sin(1))"), "6\n4\n4")
+# an alias of a rule's word starts that rule's phrase too (wiki/alias.md, wiki/declaration.md)
+check("an alias of a rule's word starts its phrase", ran("alias_rule", "alias fun => def\nfun halved(n: float) { n / 2 }\nprint halved(3.0)"), "1.5")
+# a word whose definition takes a raw parameter, in a used file, takes its braced block verbatim (wiki/dsl.md)
+write(staged("pages.wap"), "html(page: raw): text := page.trim()\n")
+check("a used file's raw word takes its block verbatim", ran("raw_used", "use \"pages.wap\"\npage = html { <p>it's {here}</p> }\nprint page"), "<p>it's {here}</p>")
+# a used module's global is a name of the files using it, as its other variables, typed ones too (wiki/use.md)
+write(staged("counting.wap"), "class Counter { n: int = 0 }\nglobal counter = Counter()\n")
+write(staged("next_count.wap"), "use \"counting.wap\"\nnext_count(): int := counter.n + 1\n")
+check("a global declared with its type is written and read", ran("typed_global", "global n: int = 0\nn = 3\nprint n"), "3")
+write(staged("tally.wap"), "global tally: int = 0\ntallied() := { tally = tally + 3 }\n")
+check("a used module's global declared with its type is written and read", ran("use_typed_global", "use \"tally.wap\"\ntallied()\nprint(tally)"), "3")
+check("a used module's global reads in the modules using it", ran("use_global", "use \"counting.wap\"\nuse \"next_count.wap\"\ncounter.n = 4\nprint(next_count())"), "5")
+# a standard module's word named without its `use` brings the module in, the hint naming the module (wiki/use.md "Library folders")
+check("a standard word without its use runs, the hint naming its module's use", ran("unused_standard", "print(text(is_prime(7)))").split(": ").drop(2).join(": "), "is_prime comes from math: write use math\nyes")
+# a used module's global keeps its place among the module's globals, whatever the module using it adds of its own
+ensured_folder(staged("kept"))
+write(staged("kept/names.wap"), "global names: list<text> = []\nnamed(t: text) := names.add(t)\n")
+write(staged("kept/socket.wap"), "use \"names.wap\"\nsetsockopt(fd: i32, level: i32, name: i32, value: bytes, size: length): i32 from 'c'\n")
+check("a module runs whose used module's module has a global, beside a C binding of its own", ran("kept_global", "use \"kept/socket.wap\"\nprint 1"), "1")

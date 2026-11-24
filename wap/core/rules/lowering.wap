@@ -36,6 +36,7 @@ use "../type_notation.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/surface.wap"
 use "../parse/cascade.wap"
+use "../parse/operator_table.wap"
 use "patterns.wap"
 use "matcher.wap"
 use "termination.wap"
@@ -141,13 +142,16 @@ with_result(definition: Define, result: Node) as Node := match definition { Defi
 
 # what a head's brackets hold: `()` nothing, `(a, b)` its items, `(a)` or `(a b)` one argument
 # a map's or an instance's fields, `{a: 1, b: 2}`, each value lowered: data, not a block
-fields_lowered(language: Language, items: list, separator: Separator, n: Node) as Node := List(items.flat_map(row_items).map(field => field_lowered(language, field, n)), Bracket.Curly, separator)
+fields_lowered(language: Language, items: list, separator: Separator, n: Node) as Node := List(items.flat_map(written_fields).map(field => field_lowered(language, field, n)), Bracket.Curly, separator)
 # a key, or a row of keys
 is_fields(item: Node) as bool := match item {
 	Key(name, Op.Colon, value) => yes
-	List(row, Bracket.None, Separator.Comma) => row.all(is_fields)
+	List(row, Bracket.None, separator) => separator in FIELD_ROWS and row.all(is_fields)
 	_ => no
 }
+# the rows fields are written in: with commas, or keys written tight without, `{x:1 y:2}` (wiki/map.md)
+FIELD_ROWS = [Separator.Comma, Separator.Semicolon, Separator.Space]
+written_fields(item: Node) as list<Node> := match item { List(row, Bracket.None, separator) => if separator in FIELD_ROWS then row.flat_map(written_fields) else [item]; _ => [item] }
 # an instance's field, `x: 1`, its value lowered
 # a call's argument lowered: a named one, `by: f`, its value
 # a call's arguments, a block where every definition of the word takes code there a function of no parameters, run by
@@ -155,14 +159,17 @@ is_fields(item: Node) as bool := match item {
 # definition takes a function of one parameter there, a function of it: `filter(xs, it > 1)`
 call_arguments_lowered(language: Language, head: Node, arguments: list) as list<Node> := (1 to #arguments).map(at => {
 	argument = arguments#at
-	if is_code_block(argument) and takes_code(language, head, at, #arguments, 0) then Fn(parameter_list(language, Empty), lowered(language, argument)) else if names_it(argument) and takes_code(language, head, at, #arguments, 1) then it_function(language, argument) else argument_lowered(language, argument)
+	if is_deferred(argument) and takes_code(language, head, at, #arguments, 0, is_code_block(argument)) then Fn(parameter_list(language, Empty), lowered(language, argument)) else if names_it(argument) and takes_code(language, head, at, #arguments, 1, no) then it_function(language, argument) else argument_lowered(language, argument)
 })
 is_code_block(n: Node) as bool := match n { List(items, Bracket.Curly, separator) => not items.all(is_fields); _ => no }
+# what a code place runs later: a block or any other code, `go f(3)`; a name or a function value is passed as it is
+is_deferred(n: Node) as bool := is_code_block(n) or not (n is symbol or match n { Call(called, parts) => FUNCTION_ARROWS.contains(text(called)); _ => no })
 # whether every declaration of a word taking this many arguments takes code at this place: a block, or a function of
-# that many parameters
-takes_code(language: Language, head: Node, at: int, count: int, taking: int) as bool := {
+# that many parameters; for code written in braces one such declaration is enough, typing then chooses it
+takes_code(language: Language, head: Node, at: int, count: int, taking: int, braced: bool) as bool := {
 	declared = (if head is symbol and language.declarations.by_name.has(text(head)) then language.declarations.by_name[text(head)] else []).filter(signature => #signature.parameters == count)
-	declared is not empty and declared.all(signature => wants_code(signature.parameters#at, taking))
+	wanting = declared.filter(signature => wants_code(signature.parameters#at, taking))
+	wanting is not empty and (braced or #wanting == #declared)
 }
 wants_code(type: Node?, taking: int) as bool := (taking == 0 and type == symbol(BLOCK_WORD)) or #((function_parts(type) ?? return no).parameters) == taking
 
@@ -179,6 +186,8 @@ names_it(n: Node) as bool := match n {
 it_function(language: Language, code: Node) as Node := Fn(parameter_list(language, symbol(IT_WORD)), lowered(language, code))
 argument_lowered(language: Language, argument: Node) as Node := match argument {
 	Key(name, Op.Colon, value) => if name is symbol then field_lowered(language, argument, argument) else lowered(language, argument)
+	# among a call's arguments `b = 1` names the parameter as `b: 1` does, and assigns nothing (wiki/argument.md)
+	Call(called, parts) => if text(called) == ASSIGNMENT and parts#1 is symbol then field_lowered(language, refitted(Key(parts#1, Op.Colon, parts#2), argument), argument) else lowered(language, argument)
 	_ => lowered(language, argument)
 }
 field_lowered(language: Language, field: Node, n: Node) as Node := match field {

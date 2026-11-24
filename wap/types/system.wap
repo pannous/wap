@@ -6,13 +6,24 @@ use "host.wap"
 # the text of the file at a path, relative to the current folder or from the root (/…)
 read(path: text): text := {
 	file = opened(path, 0, READ_AND_SEEK, "cannot read ")
-	fd_seek(file, 0, FROM_END, MOVED_AT)
-	size = memory_word(MOVED_AT)
+	size = bytes_in(file)
 	fd_seek(file, 0, FROM_START, MOVED_AT)
 	at = scratch(size)
 	got = bytes_read(file, at, size)
 	fd_close(file)
 	memory_text(at, got)
+}
+# the bytes of the file at a path, counted without reading them
+file_length(path: text): int := {
+	file = opened(path, 0, READ_AND_SEEK, "cannot read ")
+	size = bytes_in(file)
+	fd_close(file)
+	size
+}
+# an open file's bytes, the place it is left at its end
+bytes_in(file: int): int := {
+	fd_seek(file, 0, FROM_END, MOVED_AT)
+	memory_word(MOVED_AT)
 }
 # whether a file or folder is at the path; "" names none (python's os.path.exists)
 exists(path: text): bool := {
@@ -77,13 +88,14 @@ home_expanded(path: text): text := if path == "~" or path.starts_with("~/") then
 home_folder(): text := started_env("HOME") ?? raise("~ is the home folder, and this run has none ($HOME is unset)")
 # milliseconds since 1970 by the wall clock
 wall_clock_ms(): int := clock_nanos(WALL_CLOCK, NANOS_PER_MILLI) ÷ NANOS_PER_MILLI
+# the program ended, its exit status the code (WASI proc_exit)
+exit(code: int) := prim proc_exit(code)
 # the program paused for ms milliseconds: WASI's poll_oneoff on one subscription to the monotonic clock
 sleep_ms(ms: int) := {
 	at = scratch(SUBSCRIPTION_BYTES + EVENT_BYTES + 8)
 	for word in 0 upto SUBSCRIPTION_BYTES ÷ 4 { set_memory_word(at + 4 * word, 0) }
 	set_memory_word(at + CLOCK_AT, MONOTONIC_CLOCK)
-	set_memory_word(at + TIMEOUT_AT, ms * NANOS_PER_MILLI % WORD_RANGE)
-	set_memory_word(at + TIMEOUT_AT + 4, ms * NANOS_PER_MILLI ÷ WORD_RANGE)
+	set_memory_int(at + TIMEOUT_AT, ms * NANOS_PER_MILLI)
 	poll_oneoff(at, at + SUBSCRIPTION_BYTES, 1, at + SUBSCRIPTION_BYTES + EVENT_BYTES)
 }
 # n bytes of the host's randomness (WASI random_get), for secrets: each XORed with a byte of the monotonic clock's
@@ -112,6 +124,8 @@ folder_of(file: text): text := {
 	parts = file.split("/")
 	if #parts == 1 then "." else parts[.. #parts - 1].join("/")
 }
+# the bytes of the file at a path, NULs and all, as write_bytes writes them
+read_bytes(path: text): list<int> := read(path).bytes
 # a text written to the file at a path, made anew or emptied first
 write(path: text, content: text) := {
 	file = opened(path, CREATED_OR_EMPTIED, WRITE_RIGHT, "write: cannot open ")
@@ -126,3 +140,10 @@ write_bytes(path: text, bytes: list<int>) := {
 	# TODO (card void-function-result) the return goes once a function without a written result type gives nothing
 	return
 }
+# the next bytes of standard input, up to `count` of them, as a text: "" at the input's end (os's input and stdin)
+standard_input(count: int): text := {
+	at = scratch(count)
+	memory_text(at, bytes_read(STANDARD_INPUT, at, count))
+}
+# a text written to the standard output without a line end after it: a prompt
+prompted(t: text) := write(t, STANDARD_OUTPUT, no)

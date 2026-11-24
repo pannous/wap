@@ -1,0 +1,78 @@
+# The standard module shell (wiki/script.md, part of `use script`), in plain wap: the basic Unix commands as words with
+# wap results, lists and texts instead of printed output. `~` is the home folder in every path, as in every file word. ls, pwd, cat, echo,
+# mkdir, cp, mv, touch, head, tail, wc, grep, sort_lines, unique_lines, find_files, file_size, which and rm run
+# natively and on a page's files where its host has them.
+use foreign
+use file
+use path
+use text
+# TODO (card use-root-first) `use regex` once lib/ is searched before lib/crates/
+use "regex.wap"
+
+# the lines head and tail give when no count is named
+SHOWN_LINES := 10
+
+getcwd(buffer: handle, size: i64): owned_text from 'c'
+utimes(path: text, times: handle): i32 from 'c'
+
+# the names in a folder, the working one by default, sorted and without the hidden ones
+ls(folder: text = "."): list<text> := list_files(folder).filter(name => not name.starts_with(".")).sorted
+# the working folder (C's getcwd, which makes its own buffer when given none)
+pwd(): text := getcwd(0, 0)
+cat(path: text): text := read(path)
+echo(value: any) := print(value)
+# a folder made with the folders above it, where missing
+mkdir(folder: text) := ensured_folder(folder)
+# where a file copied or moved to `to` lands: into a folder, keeping its name, else at to itself
+landing(from: text, to: text): text := if is_folder(to) then path_join(to, basename(from)) else to
+cp(from: text, to: text) := write(landing(from, to), cat(from))
+mv(from: text, to: text) := {
+	if rename(home_expanded(from), home_expanded(landing(from, to))) != 0 { raise "mv: cannot move ${from} to ${to}" }
+}
+# an empty file made where missing, else its time of change set to now
+touch(path: text) := {
+	file = home_expanded(path)
+	if not exists(file) then write(file, "") else if utimes(file, 0) != 0 then raise("touch: cannot touch ${path}")
+}
+# a file's lines without their line ends, no empty one after a final line end
+text_lines(path: text): list<text> := {
+	lines = file_lines(path)
+	if #lines > 0 and lines.last == "" then lines.take(#lines - 1) else lines
+}
+head(path: text, n: int = SHOWN_LINES): list<text> := text_lines(path).take(n)
+tail(path: text, n: int = SHOWN_LINES): list<text> := {
+	lines = text_lines(path)
+	lines.drop(max(0, #lines - n))
+}
+# `wc("a.txt")` is {lines: 3, words: 5, bytes: 20}
+wc(path: text): map<text, int> := {
+	lines = text_lines(path)
+	{lines: #lines, words: lines.map(line => #words(line)).sum, bytes: file_size(path)}
+}
+sort_lines(path: text): list<text> := text_lines(path).sorted
+unique_lines(path: text): list<text> := text_lines(path).unique()
+# the lines of a file, or the texts of a list, the regular expression matches
+grep(pattern: text, path: text): list<text> := grep(pattern, text_lines(path))
+grep(pattern: text, lines: list<text>): list<text> := lines.filter(line => first_match(line, pattern) != ø)
+# the paths below a folder whose name matches the wildcards * and ?, sorted, hidden folders skipped
+find_files(folder: text, pattern: text): list<text> := paths_named(folder, pattern).sorted
+paths_named(folder: text, pattern: text): list<text> := {
+	found: list<text> = []
+	for name in list_files(folder) {
+		path = path_join(folder, name)
+		if path_matches(name, pattern) { found.add(path) }
+		if not name.starts_with(".") and is_folder(path) { found = found + paths_named(path, pattern) }
+	}
+	found
+}
+# the bytes of a file, or of all the files below a folder, as du counts them
+file_size(path: text): int := if is_folder(path) then list_files(path).map(name => file_size(path_join(path, name))).sum else file_length(path)
+# the path of the program a command runs, ø when no folder of the PATH has it
+which(name: text): text? := {
+	if name.contains("/") { return if exists(name) then name else ø }
+	folders = (started_env("PATH") ?? "").split(":").filter(folder => folder != "" and exists(path_join(folder, name)))
+	if folders is empty then ø else path_join(folders[0], name)
+}
+# a file or an empty folder moved to the Trash, with remove_file's guard rails; each path of a list so
+rm(path: text) := remove_file(path)
+rm(paths: list<text>) := { for path in paths { remove_file(path) } }

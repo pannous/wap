@@ -47,71 +47,16 @@ operated_form(language: Language, n: Node) as Node := match n {
 	List(items, Bracket.None, Separator.None) => phrase_read(language, glued_tokens(language, items))
 	# an operator's declaration is no phrase of operators, only its items are read: `suffix operator ³ := …` declares ³,
 # never applies it
-	List(items, Bracket.None, Separator.Space) => if declaration_words(language, items) is empty then phrase_read(language, tokens_of(language, items)) else List(items.map(item => operated(language, item)), Bracket.None, Separator.Space)
+	List(items, Bracket.None, Separator.Space) => colon_block(language, items, rule_led(language, items)) ?? (if declaration_words(language, items) is empty then phrase_read(language, tokens_of(language, items)) else List(items.map(item => operated(language, item)), Bracket.None, Separator.Space))
 	List(items, bracket, Separator.Space) => in_brackets(phrase_read(language, tokens_of(language, items)), bracket)
+	# a row led by a block rule's word, `for key, value in m: print key`, gives its last item the colon block
+	List(items, Bracket.None, Separator.Comma) => List(items[.. #items - 1].map(item => operated(language, item)) + [colon_block(language, phrase_items(items.last), rule_led(language, phrase_items(items#1))) ?? operated(language, items.last)], Bracket.None, Separator.Comma)
 	List(items, bracket, separator) => List(items.map(item => operated(language, item)), bracket, separator)
-	Key(left, Op.Colon, right) => chosen(operated(language, left), operated(language, right))
+	Key(left, Op.Colon, right) => colon_read(language, left, right)
 	Key(left, Op.None, right) => Key(operated(language, left), Op.None, operated(language, right))
 	Key(left, op, right) => key_read(language, n, left, op as text, right)
 	Symbol(spelling) => word_read(language, n, spelling)
 	_ => n
-}
-
-# `c ? a : b`: the reader keys `c ? a` with b; the colon closes the choice left open at the key's end, (Call ? c a b),
-# also as a phrase's last argument, `print c ? a : b`; any other colon key stays a key
-chosen(left: Node, right: Node) as Node := match left {
-	Call(called, arguments) => if open_choice(left) then Call(called, arguments + [right]) else Key(left, Op.Colon, right)
-	List(items, Bracket.None, Separator.Space) => if open_choice(items.last) then List(items[.. #items - 1] + [chosen(items.last, right)], Bracket.None, Separator.Space) else Key(left, Op.Colon, right)
-	_ => Key(left, Op.Colon, right)
-}
-open_choice(n: Node) as bool := match n { Call(called, arguments) => spelling_written(called) == CHOICE and #arguments == 2; _ => no }
-
-# a key the reader built by an operator (`a = 1`, the colon's rules) applied as that infix operator: (Call = a 1)
-key_read(language: Language, n: Node, left: Node, spelling: text, right: Node) as Node := {
-	use = reading_as(language, placed_like(symbol(spelling), n), Fixity.Infix)
-	if use == ø { refused(n, "no infix operator " + spelling + " in the operator table") }
-	infix_call(language, use.spelling, operated(language, left), operated(language, right))
-}
-
-# An infix operator applied: (Call + a b). A compound assignment of the table, `x += 1`, is the assignment it means,
-# x = x + 1, (Call = x (Call + x 1)); its written spelling stays a fact, so `wap format` prints `x += 1` again
-infix_call(language: Language, spelling: text, left: Node, right: Node) as Node := {
-	if is_assignment(language, spelling) and arrow_parts(language, left) != ø { return arrow_assigned(language, spelling, left, right) }
-	phrase = if is_assignment(language, spelling) then rule_phrase(language, left) else ø
-	if phrase != ø { return phrase_assigned(language, spelling, phrase, right) }
-	if compound_assignment(language, spelling) != spelling { return Call(symbol(spelling), [left, right]) }
-	with_fact(Call(symbol(ASSIGNMENT), [left, Call(symbol(spelling[.. #spelling - 1]), [left, right])]), COMPOUND, symbol(spelling))
-}
-
-is_assignment(language: Language, spelling: text) as bool := spelling == ASSIGNMENT or compound_assignment(language, spelling) == spelling
-
-# the words of a phrase, a single code its one word
-phrase_items(n: Node) as list := match n { List(items, Bracket.None, Separator.Space) => items; _ => [n] }
-# A rule's phrase is no place to assign to either: `if c then xs[0] = 5 else xs.add(2)` assigns to its last word, the
-# value running to the next word the rule's phrase continues with, `if c then (xs[0] = 5) else xs.add(2)`; so does
-# `… else x = 2`
-phrase_assigned(language: Language, spelling: text, words: list, value: Node) as Node := {
-	after = phrase_items(value)
-	cut = 0
-	while cut < #after and not continuation_item(language, after#(cut + 1), words) { cut = cut + 1 }
-	given = if cut == 1 then after#1 else List(after[.. cut], Bracket.None, Separator.Space)
-	List(words[.. #words - 1] + [infix_call(language, spelling, words.last, given)] + after[cut ..], Bracket.None, Separator.Space)
-}
-# the words of a phrase that holds a word of a rule's phrase, `if`, `else`, ø for any other code
-rule_phrase(language: Language, n: Node) as list? := match n {
-	List(items, Bracket.None, Separator.Space) => if items.filter(item => rule_word(language, item)) is not empty then items else ø
-	_ => ø
-}
-rule_word(language: Language, n: Node) as bool := n is symbol and (language.phrase_words.leading.has(spelling_written(n)) or language.phrase_words.inner.has(spelling_written(n)))
-
-# An arrow is no place to assign to: `1 => y = 2` assigns in the arrow's result, `1 => (y = 2)`, as a match arm or a
-# function's body means it
-arrow_assigned(language: Language, spelling: text, arrow: Call, value: Node) as Node := match arrow {
-	Call(called, parts) => with_facts_of(Call(called, [parts#1, infix_call(language, spelling, parts#2, value)]), arrow)
-}
-arrow_parts(language: Language, n: Node) as list? := match n {
-	Call(called, parts) => if #parts == 2 and group_of(language, spelling_written(called), Fixity.Infix) == parameters_group then parts else ø
-	_ => ø
 }
 
 # a word standing alone, by its canonical spelling
@@ -148,8 +93,7 @@ tokens_read(language: Language, tokens: list) as Node := {
 			prefix = if operand_after(language, next) != ø then reading_as(language, token.item, Fixity.Prefix) else ø
 			if prefix == ø and called_after_infix(language, token, next, after, pending, tokens[.. i - 1]) {
 				last = i + 1
-				takes_block = language.phrase_words.leading[spelling_written(token.item)] == yes
-				while last < #tokens and (takes_block or not is_block(tokens#(last + 1).item)) { last = last + 1 }
+				while last < #tokens and (leads_block(language, spelling_written(token.item)) or not is_block(tokens#(last + 1).item)) { last += 1 }
 				operands.add(tokens_read(language, tokens[i - 1 .. last]))
 				expecting_operand = no
 				i = last
@@ -160,7 +104,7 @@ tokens_read(language: Language, tokens: list) as Node := {
 				note_discouraged(token.item, spelling_written(token.item))
 				pending.add(prefix)
 			}
-			i = i + 1
+			i += 1
 		} else {
 			use = operator_after_operand(language, token, next)
 			if use == ø {
@@ -172,7 +116,7 @@ tokens_read(language: Language, tokens: list) as Node := {
 				note_discouraged(token.item, spelling_written(token.item))
 				arrive(language, use, operands, pending)
 				if use.fixity == Fixity.Postfix { applied(language, use, operands) } else { pending.add(use); expecting_operand = yes }
-				i = i + 1
+				i += 1
 			}
 		}
 	}
@@ -230,6 +174,9 @@ juxtaposition_before(token: Spaced) as Use :=
 
 is_block(n: Node) as bool := match n { List(items, Bracket.Curly, separator) => yes; _ => no }
 spelling_written(item: Node) as text := match item { Symbol(name) => name; _ => "" }
+# the words of a phrase, a single code its one word
+phrase_items(n: Node) as list := match n { List(items, Bracket.None, Separator.Space) => items; _ => [n] }
+rule_word(language: Language, n: Node) as bool := n is symbol and (language.phrase_words.leading.has(spelling_written(n)) or language.phrase_words.inner.has(spelling_written(n)))
 
 # Before an incoming operator waits, every pending one that binds tighter is applied. Two of one group apply by its
 # grouping; two groups with no relation are refused, as is a chain of a group that refuses chaining.

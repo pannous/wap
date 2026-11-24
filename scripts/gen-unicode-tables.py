@@ -7,7 +7,7 @@ version from https://www.unicode.org/Public/<VERSION>/ucd/ into a directory (dat
     python3 scripts/gen-unicode-tables.py <that directory>
 The raw UCD files are not committed."""
 import sys, os
-VERSION = "15.1.0"
+VERSION = "17.0.0"
 if len(sys.argv) != 2: sys.exit("usage: scripts/gen-unicode-tables.py <directory of the UCD files>")
 ucd = sys.argv[1]
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -17,9 +17,13 @@ def lines(name):
         if l: yield l
 first = open(os.path.join(ucd, "NormalizationTest.txt"), encoding="utf-8").readline()
 assert VERSION in first, first
-ccc = {}; decomp = {}; upper = {}; lower = {}
+ccc = {}; decomp = {}; upper = {}; lower = {}; letters = []; first_letter = None
 for l in lines("UnicodeData.txt"):
     f = l.split(";"); cp = int(f[0], 16)
+    # the letters (categories L*), a First>/Last> pair a range of them
+    if f[2].startswith("L"):
+        if f[1].endswith("First>"): first_letter = cp
+        else: letters.extend(range(first_letter if f[1].endswith("Last>") else cp, cp + 1))
     if f[1].endswith("First>") or f[1].endswith("Last>"): continue  # ranges (Hangul, CJK) have no ccc or mapping
     if int(f[3]): ccc[cp] = int(f[3])
     if f[12]: upper[cp] = [int(f[12], 16)]
@@ -36,6 +40,13 @@ for cp in sorted(ccc):
 out = []; end = 0
 for s, n, c in runs: out.append("%d %d %d" % (s - end, n, c)); end = s + n
 ccc_text = " ".join(out)
+# letters as runs: gap from the previous run's end, length
+out = []; end = 0; i = 0
+while i < len(letters):
+    j = i + 1
+    while j < len(letters) and letters[j] == letters[j - 1] + 1: j += 1
+    out.append("%d %d" % (letters[i] - end, j - i)); end = letters[j - 1] + 1; i = j
+letter_text = " ".join(out)
 # decompositions: gap from the previous key, 0 canonical or 1 compatibility, then the code points; a run of
 # consecutive keys each to one code point at the same distance is "gap flag *count delta"
 out = []; last = 0; keys = sorted(decomp); i = 0
@@ -89,7 +100,8 @@ data = '''# Written by scripts/gen-unicode-tables.py (Unicode %s), do not edit: 
 # code point at one distance written "gap flag *count distance". exclusions: CompositionExclusions.txt. folding: runs
 # (gap from the last run's last code point, count, stride, delta) of CaseFolding.txt's one-to-one C+F mappings, then
 # its F mappings to several code points (code point, those). upper and lower: the full case mappings the same way,
-# UnicodeData.txt's simple ones and SpecialCasing.txt's unconditional ones
+# UnicodeData.txt's simple ones and SpecialCasing.txt's unconditional ones. letters: runs (gap from the last run's
+# end, length) of the code points of categories L*
 unicode_version := "%s"
 unicode_ccc_text(): text := "%s"
 unicode_decomposition_text(): text := "%s"
@@ -100,7 +112,8 @@ unicode_upper_text(): text := "%s"
 unicode_upper_multi_text(): text := "%s"
 unicode_lower_text(): text := "%s"
 unicode_lower_multi_text(): text := "%s"
-''' % (VERSION, VERSION, ccc_text, decomp_text, excl_text, fold_text, multi_text, upper_text, upper_multi_text, lower_text, lower_multi_text)
+unicode_letter_text(): text := "%s"
+''' % (VERSION, VERSION, ccc_text, decomp_text, excl_text, fold_text, multi_text, upper_text, upper_multi_text, lower_text, lower_multi_text, letter_text)
 open(os.path.join(root, "lib", "unicode_data.wap"), "w", encoding="utf-8").write(data)
 print("lib/unicode_data.wap", len(data.encode()), "bytes;", len(runs), "ccc runs,", len(decomp), "decompositions,", len(folding), "foldings,", len(upper), "upper,", len(lower), "lower")
 

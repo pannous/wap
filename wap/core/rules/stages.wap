@@ -59,9 +59,15 @@ rules_loaded(language: Language, code: Node) as Node := match code {
 sequence_rule(statement: Node) as Node := match statement {
 	List(items, Bracket.None, separator) => if separator != Separator.Semicolon and separator != Separator.Comma then statement else match items#1 {
 		Call(called, arguments) => if spelling_written(called) == RULE_ARROW and #arguments == 2 then Call(called, [arguments#1, List([arguments#2] + items[1 ..], Bracket.None, separator)]) else statement
-		_ => statement
+		_ => comma_headed(items, separator) ?? statement
 	}
 	_ => statement
+}
+# `rule for $k, $v in $m $body => …`: the row starts with the rule's word and ends with its `=>`, so the row before the
+# arrow is the rule's pattern (wiki/inventions.md `for key, value in map`)
+comma_headed(items: list, separator: Separator) as Node? := match items.last {
+	Call(called, arguments) => if spelling_written(called) == RULE_ARROW and #arguments == 2 and declares(phrase_items(items#1)) then Call(called, [List([phrase_items(items#1)#1, List([List(phrase_items(items#1)[1 ..], Bracket.None, Separator.Space)] + items[1 .. #items - 1] + [arguments#1], Bracket.None, separator)], Bracket.None, Separator.Space), arguments#2]) else ø
+	_ => ø
 }
 
 # a rule or pattern statement taken in, what it leaves in the code: a pattern its builder, a rule nothing; ø for any
@@ -79,6 +85,7 @@ declaration_taken(language: Language, called: text, arguments: list) as list<Nod
 	if called == DEFINITION and keyword == PATTERN_WORD and #words == 2 { return [pattern_builder(declare_pattern(language, words#2, arguments#2))] }
 	if called == RULE_ARROW and keyword == RULE_WORD {
 		guarded = #words > 3 and spelling_written(words#(#words - 1)) == WHERE_WORD and not is_hole(words.last)
+		if guarded and spelling_written(words.last) == "" { refused(arguments#1, "a rule's guard is one word after `where`, `where unbound`: this one has more, and a rule never drops a guard it cannot read") }
 		pattern = if guarded then words[1 .. #words - 2] else words[1 ..]
 		rule_added(language, arguments#1, if #pattern == 1 then pattern#1 else List(pattern, Bracket.None, Separator.Space), arguments#2, if guarded then spelling_written(words.last) else "")
 		return []
@@ -263,16 +270,20 @@ marked_typed(code: Node) as Node := if code is Empty then code else with_fact(co
 # a call of a function the program defines, `f(x)`, is the program's own: no rule of that glued head rewrites it, the
 # program's word wins (phrase rules, `print x`, still fire)
 programs_own(language: Language, n: Node, head: text) as bool := match n { Key(left, Op.None, group) => left is symbol and language.defined_words.has(spelling_written(left)) and head.starts_with(spelling_written(left) + " "); _ => no }
+# what of a phrase the program wrote, where a refusal of it points: the phrase where it has a place, else its first part
+# that has one (a phrase an earlier rule built, `c_type int`, holds the program's own `int` or the place it came from)
+written_of(n: Node) as Node? := if line_of(n) != ø then n else direct_parts(n).map(written_of).find(found => found != ø)
 # the code the most specific fitting rule builds from it, as a list of that one code, empty when none fits; of two
-# equally specific ones the one under the more specific head, else they are refused
+# equally specific ones the one under the more specific head, else they are refused; a block glued to the phrase's
+# end tried apart when no rule fits it glued (lines.wap apart)
 rule_applied(language: Language, rules: Rules, n: Node) as list<Node> := {
 	# the most specific fitting rule so far
 	best: Rule? = ø
-	best_bindings = {}
+	best_bindings: map<text, Node> = {}
 	for head in heads_of(language, n) {
 		if rules.by_head.has(head) and not programs_own(language, n, head) {
 			for rule in rules.by_head[head] {
-				bindings = {}
+				bindings: map<text, Node> = {}
 				if (rule.fact == "" or fact_of(n, rule.fact) == True) and matches(rule.matcher, n, bindings) {
 					if best != ø and best!.specificity == rule.specificity and best!.head == rule.head { refused(n, "two rules fit equally: ${best!.written} and ${rule.written}") }
 					if best == ø or rule.specificity > best!.specificity { best = rule; best_bindings = bindings }
@@ -280,9 +291,9 @@ rule_applied(language: Language, rules: Rules, n: Node) as list<Node> := {
 			}
 		}
 	}
-	chosen = best ?? return []
+	chosen = best ?? return (if apart(n) == ø then [] else rule_applied(language, rules, apart(n)!))
 	refusal = refusal_of(chosen.template)
-	if refusal != ø { refused(n, refusal) }
+	if refusal != ø { refused(placed_like(n, written_of(n) ?? n), refusal) }
 	taken_holes = if matcher_stage(chosen.matcher) == TYPED_STAGE then typed_holes(best_bindings) else best_bindings
 	result = built(language, chosen.template, with_bound_names(taken_holes, chosen))
 	taken = if chosen.fact == "" or result is Empty then result else with_fact(result, chosen.fact, False)

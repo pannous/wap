@@ -21,7 +21,11 @@ joined_settling(a: Node?, b: Node?, s: TypingState) as Node? := {
 joined_of(n: Node, parts: list, s: TypingState, expected: Node? = ø) as Node := if parts.all(jumps) then jumping(n) else with_type_of(n, parts_type(parts, s, expected))
 # the type joining the parts that finish; none where no value is wanted, a statement's whose value is dropped; a call
 # of the function being typed, its result not known yet, gives it none (calls.wap shaped_typed)
-parts_type(parts: list, s: TypingState, expected: Node? = ø) as Node? := if expected == EMPTY_SYMBOL then expected else joined_all(parts.filter(part => not jumps(part) and fact_of(part, RESULT_UNKNOWN) == ø).map(value_type), s)
+# of a wanted type that every part gets to as it is, that type: an int's and a float's arm each boxed where a number is
+parts_type(parts: list, s: TypingState, expected: Node? = ø) as Node? := {
+	finished = parts.filter(part => not jumps(part) and fact_of(part, RESULT_UNKNOWN) == ø).map(value_type)
+	if expected == EMPTY_SYMBOL or wants_value(expected) and finished.all(type => type != ø and (same_type(type!, expected!) or boxed_fit(type!, expected!))) then expected else joined_all(finished, s)
+}
 # whether a place wants a value: neither unknown nor a dropped statement's
 wants_value(expected: Node?) as bool := expected != ø and expected != EMPTY_SYMBOL
 # the parts that finish each as their joined type has it: `1` of `if c then 1 else ø` boxed as an int?
@@ -102,6 +106,8 @@ conversion(given: Node?, wanted: Node?, s: TypingState) as Conversion? := {
 	if given == INT_SYMBOL and wanted == FLOAT_SYMBOL { return Conversion.Widened }
 	optional = base_of_optional(wanted)
 	if reads_as(optional ?? wanted, given, s.records) { return Conversion.Read }
+	# a list whose items read as the wanted items, `["x", "n"]` of chars where a list<text> is
+	if given_item != ø and wanted_item != ø and reads_as(wanted_item!, given_item!, s.records) { return Conversion.Read }
 	# an optional where one is wanted whose value is as it is: a list<int>? where a list? is
 	if optional != ø and base_of_optional(given) != ø and conversion(base_of_optional(given), optional, s) == Conversion.Same { return Conversion.Same }
 	if optional != ø and (given == EMPTY_SYMBOL or conversion(given, optional, s) == Conversion.Same) { return Conversion.Wrapped }
@@ -114,6 +120,9 @@ conversion(given: Node?, wanted: Node?, s: TypingState) as Conversion? := {
 converted(n: Node, wanted: Node, s: TypingState, at: Node, place: text) as Node := {
 	# code that never finishes gives nothing to convert
 	if jumps(n) { return n }
+	# where ø is wanted no value is: a value given is dropped, `f(): ø := { x = 2 }`, code giving none is as it is
+	if wanted == EMPTY_SYMBOL { return if valued(value_type(n)) then placed_like(Block([n, Block([])]), n) else n }
+	if value_type(n) == ø and not has_fact(n, RESULT_UNKNOWN) { return converted(empty_given(n), wanted, s, at, place) }
 	given = value_type(n) ?? refused(at, "this gives no value, ${place} ${type_text(wanted)}")
 	# a function value converts by its function, typed for the wanted function type
 	way = conversion(given, wanted, s) ?? refused(at, "this gives ${type_text(given)}, ${place} ${type_text(wanted)}")
@@ -121,6 +130,9 @@ converted(n: Node, wanted: Node, s: TypingState, at: Node, place: text) as Node 
 	if way == Conversion.Narrowed { return narrowed_call(n, wanted, at, s) }
 	if way == Conversion.Checked then with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [n]), n), wanted) else repacked(n, way, wanted, s)
 }
+# code giving no value gives ø wherever a value is wanted, `answer(f())` and `y: int? = f()` of an f giving nothing;
+# a call whose result is not known yet waits
+empty_given(code: Node) as Node := if value_type(code) != ø or jumps(code) or has_fact(code, RESULT_UNKNOWN) then code else with_type_of(placed_like(Block([code, with_type_of(Empty, EMPTY_SYMBOL)]), code), EMPTY_SYMBOL)
 # a value converted the static way it gets where the wanted type is: read, boxed or wrapped, widened; an ø wrapped
 # into an optional is of the optional, whatever form gives it: `if c then ø else ø` an int? where one is wanted
 repacked(n: Node, way: Conversion, wanted: Node, s: TypingState) as Node := match way {
@@ -161,7 +173,7 @@ bare_fit(given: Node, wanted: Node, records: Records) as bool := {
 	not cases_of(record) is empty
 }
 # any value where any is wanted, an int or a float where a number is
-boxed_fit(given: Node, wanted: Node) as bool := wanted == ANY_SYMBOL or wanted == symbol(NUMBER_TYPE) and given in [INT_SYMBOL, FLOAT_SYMBOL]
+boxed_fit(given: Node, wanted: Node) as bool := wanted == ANY_SYMBOL or wanted == NUMBER_SYMBOL and given in passing_types(wanted)
 # whether a type's values are held as they are, not by reference: put where a reference is wanted, each goes in its box
 is_plain(type: Node?) as bool := type is symbol and text(type) in [INT_TYPE, FLOAT_TYPE, BOOL_TYPE, CHAR_TYPE]
 # two types written alike, whatever their positions: `int`, `list<int>`, `(float) -> float`

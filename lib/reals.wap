@@ -1,0 +1,260 @@
+# The standard module reals (wiki/Footguns.md "Exact real numbers"): `use reals`. A Real is a number kept exact beyond
+# the fractions: a sum of terms c·√r·πᵖ, each a rational c of lib/exact.wap, a whole radicand r without square factors
+# and a power p of π in halves. exact_pi and exact_tau are π and τ, real(n) and real(x) make one of an int or an Exact,
+# √ takes the root of one. + - * and whole powers ^ stay exact, / by a single term too; √3 * √3 is 3, π/2 stays π/2,
+# √2 + √3 stays √2 + √3, (√2 + √3)² is 5 + 2√6. text(x) writes it as read: 2π, 3√2, √π, 3/π, √2/π, 2 + 2π.
+# float(x) is the nearest float, digits(x, count) its first count significant digits, exact; == compares the terms,
+# < and > their floats, refusing where those cannot tell two different values apart.
+use exact
+use math
+
+# a sum of more unlike terms than this, or a radicand past this, is refused: a loop adding roots would grow its sum a
+# term a step, each step slower
+LARGEST_EXACT_TERMS := 32
+LARGEST_EXACT_RADICAND := 1000000000000
+# the square factors taken out of a root: those of the primes up to this
+LARGEST_SQUARE_FACTOR := 100
+# digits' working precision beyond the digits shown
+GUARD_DIGITS := 20
+SUPERSCRIPT_DIGITS := "⁰¹²³⁴⁵⁶⁷⁸⁹"
+
+# coefficient · √radicand · π^(pi_halves / 2); the radicand has no square factor
+class Term { coefficient: Exact, pi_halves: int, radicand: int }
+# the sum of its terms: no two alike, none zero, the rational one first; zero has none
+class Real { terms: list<Term> }
+
+# --- making reals
+
+real(x: Exact): Real := summed([Term(x, 0, 1)])
+real(n: int): Real := real(exact(n))
+exact_pi := Real([Term(exact(1), 2, 1)])
+exact_tau := Real([Term(exact(2), 2, 1)])
+
+# whether two terms differ only in their coefficient
+alike(a: Term, b: Term): bool := a.pi_halves == b.pi_halves and a.radicand == b.radicand
+is_rational(t: Term): bool := t.pi_halves == 0 and t.radicand == 1
+# the terms added up: alike ones merged, zeros dropped, the rational one first, the others in their order
+summed(terms: list<Term>): Real := {
+	kept: list<Term> = []
+	for term in terms {
+		at = kept.index_where(other => alike(other, term))
+		if at == 0 { kept.add(term) } else { kept[at - 1] = Term(kept#at.coefficient + term.coefficient, term.pi_halves, term.radicand) }
+	}
+	nonzero = kept.filter(term => not (term.coefficient == 0))
+	ordered = nonzero.filter(is_rational) + nonzero.filter(term => not is_rational(term))
+	if #ordered > LARGEST_EXACT_TERMS { raise "reals: a sum of ${#ordered} unlike terms is past ${LARGEST_EXACT_TERMS}: take float(x)" }
+	Real(ordered)
+}
+# c·√r·πᵖ with the square factors of r taken out
+term_of(coefficient: Exact, pi_halves: int, radicand: int): Term := {
+	if radicand > LARGEST_EXACT_RADICAND { raise "reals: √${radicand} is past ${LARGEST_EXACT_RADICAND}: take float(x)" }
+	outside = 1
+	inside = radicand
+	factor = 2
+	while factor <= LARGEST_SQUARE_FACTOR and factor * factor <= inside {
+		while inside % (factor * factor) == 0 {
+			outside *= factor
+			inside = inside ÷ (factor * factor)
+		}
+		factor += 1
+	}
+	whole = √float(inside)
+	if round(whole) * round(whole) == inside { return Term(coefficient * outside * round(whole), pi_halves, 1) }
+	Term(coefficient * outside, pi_halves, inside)
+}
+
+# --- arithmetic
+
+-(x: Real): Real := Real(x.terms.map(term => Term(-term.coefficient, term.pi_halves, term.radicand)))
++(a: Real, b: Real): Real := summed(a.terms + b.terms)
+-(a: Real, b: Real): Real := a + -b
+# two roots without square factors share their common factor g: √(g·a)·√(g·b) is g·√(a·b)
+times(a: Term, b: Term): Term := {
+	common = gcd(a.radicand, b.radicand)
+	term_of(a.coefficient * b.coefficient * common, a.pi_halves + b.pi_halves, (a.radicand ÷ common) * (b.radicand ÷ common))
+}
+*(a: Real, b: Real): Real := {
+	products: list<Term> = []
+	for left in a.terms { for right in b.terms { products.add(times(left, right)) } }
+	summed(products)
+}
+# 1 / (c·√r·πᵖ) is √r / (c·r) · π⁻ᵖ: the root rises above the fraction line
+reciprocal(x: Real): Real := {
+	if x.terms is empty { raise "division by zero" }
+	if #x.terms > 1 { raise "reals: dividing by the sum ${text(x)} has no exact result: take float(x)" }
+	t = x.terms[0]
+	Real([Term(exact(1) / (t.coefficient * t.radicand), 0 - t.pi_halves, t.radicand)])
+}
+/(a: Real, b: Real): Real := a * reciprocal(b)
+# a whole power by squaring: √3² is 3, π² is π², (√2 + √3)² is 5 + 2√6; a negative one the reciprocal's
+^(x: Real, k: int): Real := {
+	if k < 0 { return reciprocal(x ^ (0 - k)) }
+	result = real(1)
+	square = x
+	rest = k
+	while rest > 0 {
+		if rest % 2 == 1 { result = result * square }
+		rest = rest ÷ 2
+		if rest > 0 { square = square * square }
+	}
+	result
+}
+# √(n/d · πᵖ) is √(n·d)/d · π^(p/2): a perfect square's root whole, any other kept; refused for a sum, a root under a
+# root, an odd power of √π and a negative number
+√(x: Real): Real := {
+	if x.terms is empty { return x }
+	t = x.terms[0]
+	if #x.terms > 1 or t.radicand != 1 or t.pi_halves % 2 != 0 or t.coefficient < exact(0) {
+		raise "reals: √(${text(x)}) has no exact value: take √float(x)"
+	}
+	n = numerator(t.coefficient)
+	d = denominator(t.coefficient)
+	if n * d > exact(LARGEST_EXACT_RADICAND) { raise "reals: √(${text(x)}) is past ${LARGEST_EXACT_RADICAND}: take √float(x)" }
+	Real([term_of(exact(1) / d, t.pi_halves ÷ 2, int(n * d))])
+}
+
+# TODO (card library-widening) one widening instead of these pairs
+# an int on either side is the real it is
++(a: Real, b: int): Real := a + real(b)
++(a: int, b: Real): Real := real(a) + b
+-(a: Real, b: int): Real := a - real(b)
+-(a: int, b: Real): Real := real(a) - b
+*(a: Real, b: int): Real := a * real(b)
+*(a: int, b: Real): Real := real(a) * b
+/(a: Real, b: int): Real := a / real(b)
+/(a: int, b: Real): Real := real(a) / b
+
+# --- comparing
+
+==(a: Real, b: Real): bool := (a - b).terms is empty
+!=(a: Real, b: Real): bool := not (a == b)
+==(a: Real, b: int): bool := a == real(b)
+# -1, 0 or 1: equal terms are equal, others by their difference's float, refused where it is too small to tell
+order(a: Real, b: Real): int := {
+	difference = a - b
+	if difference.terms is empty { return 0 }
+	gap = float(difference)
+	if gap == 0.0 { raise "reals: ${text(a)} and ${text(b)} are too close to order by their floats" }
+	if gap < 0.0 then -1 else 1
+}
+<(a: Real, b: Real): bool := order(a, b) < 0
+
+# --- floats and digits
+
+float(t: Term): float := float(t.coefficient) * sqrt(float(t.radicand)) * π ^ (t.pi_halves ÷ 2) * (if t.pi_halves % 2 == 1 then sqrt(π) else 1.0)
+float(x: Real): float := x.terms.map(term => float(term)).sum
+
+# the first count significant digits, rounded: each term in whole numbers at a scale of GUARD_DIGITS beyond them, π by
+# Machin's formula, π = 16·atan(1/5) - 4·atan(1/239). digits(exact_pi, 30) is 3.14159265358979323846264338328
+digits(x: Real, count: int): text := {
+	approximate = float(x)
+	if approximate == 0.0 { return "0" }
+	leading = decimal_magnitude(abs(approximate))
+	scale_digits = max(count - leading, 0) + GUARD_DIGITS
+	scale = exact(10) ^ scale_digits
+	pi_scaled = exact(16) * atan_scaled(5, scale) - exact(4) * atan_scaled(239, scale)
+	total = x.terms.fold(exact(0), (sum, term) => sum + term_scaled(term, scale, pi_scaled))
+	decimals = count - 1 - leading
+	shown = rounded_shifted(abs(total), scale_digits - decimals)
+	(if total < exact(0) then "-" else "") + (if decimals > 0 then point_placed(shown, decimals) else text(shown * exact(10) ^ (0 - decimals)))
+}
+# the power of ten of a positive float's leading digit: 8.28 is 0, 0.05 is -2, 314.1 is 2
+decimal_magnitude(f: float): int := {
+	power = 0
+	rest = f
+	while rest >= 10.0 { rest = rest / 10.0; power += 1 }
+	while rest < 1.0 { rest = rest * 10.0; power -= 1 }
+	power
+}
+# atan(1/inverse) times the scale, whole: the series 1/x - 1/(3x³) + 1/(5x⁵) - …
+atan_scaled(inverse: int, scale: Exact): Exact := {
+	power = scale ÷ exact(inverse)
+	total = power
+	n = 1
+	while not (power == 0) {
+		power = power ÷ exact(inverse * inverse)
+		step = power ÷ exact(2 * n + 1)
+		total = if n % 2 == 1 then total - step else total + step
+		n += 1
+	}
+	total
+}
+# a term times the scale, whole: its coefficient, root and power of π each at that scale
+term_scaled(t: Term, scale: Exact, pi_scaled: Exact): Exact := {
+	root = whole_root(scale * scale * t.radicand)
+	whole_power = t.pi_halves ÷ 2
+	powered = scale
+	for i in 0 upto abs(whole_power) { powered = if whole_power > 0 then powered * pi_scaled ÷ scale else powered * scale ÷ pi_scaled }
+	if t.pi_halves % 2 == 1 { powered = powered * whole_root(pi_scaled * scale) ÷ scale }
+	numerator(t.coefficient) * (root * powered ÷ scale) ÷ denominator(t.coefficient)
+}
+# ⌊√n⌋ of a whole number, by Newton's steps from above
+whole_root(n: Exact): Exact := {
+	if n < exact(2) { return n }
+	guess = exact(10) ^ ((#text(n) + 1) ÷ 2)
+	next = (guess + n ÷ guess) ÷ exact(2)
+	while next < guess {
+		guess = next
+		next = (guess + n ÷ guess) ÷ exact(2)
+	}
+	guess
+}
+# n / 10^shift rounded half up, whole
+rounded_shifted(n: Exact, shift: int): Exact := if shift <= 0 then n * exact(10) ^ (0 - shift) else (n + exact(5) * exact(10) ^ (shift - 1)) ÷ exact(10) ^ shift
+# the digits of n with a decimal point before its last `decimals`: 828318 with 5 is 8.28318
+point_placed(n: Exact, decimals: int): text := {
+	written = text(n)
+	while #written <= decimals { written = "0" + written }
+	written[0:#written - decimals] + "." + written[#written - decimals:]
+}
+
+# --- text
+
+# 2 + 2π, √2 - π/2: a negative term after the first written with a minus
+text(x: Real): text := {
+	if x.terms is empty { return "0" }
+	shown = term_text(x.terms[0])
+	for t in x.terms.drop(1) {
+		shown += if t.coefficient < exact(0) then " - " + term_text(Term(-t.coefficient, t.pi_halves, t.radicand)) else " + " + term_text(t)
+	}
+	shown
+}
+# 2π, 3√2, √π, √(2π), 3/π, √2/π, 3π/4: a negative power of π below the fraction line
+term_text(t: Term): text := {
+	half = t.pi_halves % 2 == 1
+	whole = t.pi_halves ÷ 2
+	inside = (if t.radicand == 1 then "" else "${t.radicand}") + (if half then "π" else "")
+	radical = if inside == "" then "" else if t.radicand != 1 and half then "√(" + inside + ")" else "√" + inside
+	n = numerator(t.coefficient)
+	d = denominator(t.coefficient)
+	if whole < 0 {
+		below = power_text("π", 0 - whole)
+		above = if radical == "" then text(n) else if n == 1 then radical else if n == -1 then "-" + radical else text(n) + radical
+		return above + "/" + (if d == 1 then below else "(" + text(d) + below + ")")
+	}
+	power = (if whole == 0 then "" else power_text("π", whole)) + radical
+	over = if d == 1 then "" else "/" + text(d)
+	if power == "" then text(t.coefficient)
+	else if n == 1 then power + over
+	else if n == -1 then "-" + power + over
+	else text(n) + power + over
+}
+# a base raised to a power in superscript digits: π, π², π⁻¹
+power_text(base: text, power: int): text := if power == 1 then base else base + superscript(power)
+superscript(n: int): text := if n < 0 then "⁻" + superscript(0 - n) else if n < 10 then SUPERSCRIPT_DIGITS#(n + 1) else superscript(n ÷ 10) + superscript(n % 10)
+
+# --- the circle's functions
+
+# sin and cos of a whole number of half π, exact: sin(π) is 0, cos(π) -1; refused for any other real
+sin(x: Real): Real := real(half_turn_sine(quarter_turns(x)))
+cos(x: Real): Real := real(half_turn_sine(quarter_turns(x) + 1))
+# x as a whole number of π/2
+quarter_turns(x: Real): int := {
+	turns = x / exact_pi * 2
+	if not (turns.terms is empty) and (#turns.terms > 1 or not is_rational(turns.terms[0]) or not is_whole(turns.terms[0].coefficient)) {
+		raise "reals: sin and cos of ${text(x)} have no exact value: take sin(float(x))"
+	}
+	if turns.terms is empty then 0 else int(turns.terms[0].coefficient)
+}
+# sin(n·π/2): 0, 1, 0, -1 around the circle
+half_turn_sine(n: int): int := [0, 1, 0, -1][((n % 4) + 4) % 4]

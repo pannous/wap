@@ -1,0 +1,75 @@
+# The keys the reader built read as code (core/parse/operators.wap operated_form): a colon after a block-taking rule's
+# phrase its block, the colon of a choice, an assignment and where it goes in a rule's phrase or an arrow
+use folder
+use "../errors.wap"
+use "../stage.wap"
+use "../../kernel/forms.wap"
+use "../../types/operators.wap"
+use "../language.wap"
+
+# a phrase led by the word of a rule taking a block takes what follows its colon as that block: `for n in xs: print n`,
+# `if c: f()` (wiki/for.md)
+rule_led(language: Language, items: list) as bool := #items > 1 and leads_block(language, spelling_written(items#1))
+leads_block(language: Language, word: text) as bool := language.phrase_words.leading.has(word) and language.phrase_words.leading[word]
+colon_read(language: Language, left: Node, right: Node) as Node := {
+	read = chosen(operated(language, left), operated(language, right))
+	if read is Key and rule_led(language, phrase_items(left)) then operated(language, with_block(phrase_items(left), right)) else read
+}
+colon_block(language: Language, items: list, led: bool) as Node? := match items.last { Key(last, Op.Colon, body) => if led and not is_hole_word(last) then operated(language, with_block(items[.. #items - 1] + [last], body)) else ø; _ => ø }
+with_block(items: list, body: Node) as Node := List(items + [if is_block(body) then body else List([body], Bracket.Curly, Separator.None)], Bracket.None, Separator.Space)
+
+# `c ? a : b`: the reader keys `c ? a` with b; the colon closes the choice left open at the key's end, (Call ? c a b),
+# also as a phrase's last argument, `print c ? a : b`; any other colon key stays a key
+chosen(left: Node, right: Node) as Node := match left {
+	Call(called, arguments) => if open_choice(left) then Call(called, arguments + [right]) else Key(left, Op.Colon, right)
+	List(items, Bracket.None, Separator.Space) => if open_choice(items.last) then List(items[.. #items - 1] + [chosen(items.last, right)], Bracket.None, Separator.Space) else Key(left, Op.Colon, right)
+	_ => Key(left, Op.Colon, right)
+}
+open_choice(n: Node) as bool := match n { Call(called, arguments) => spelling_written(called) == CHOICE and #arguments == 2; _ => no }
+
+# a key the reader built by an operator (`a = 1`, the colon's rules) applied as that infix operator: (Call = a 1)
+key_read(language: Language, n: Node, left: Node, spelling: text, right: Node) as Node := {
+	use = reading_as(language, placed_like(symbol(spelling), n), Fixity.Infix)
+	if use == ø { refused(n, "no infix operator " + spelling + " in the operator table") }
+	infix_call(language, use.spelling, operated(language, left), operated(language, right))
+}
+
+# An infix operator applied: (Call + a b). A compound assignment of the table, `x += 1`, is the assignment it means,
+# x = x + 1, (Call = x (Call + x 1)); its written spelling stays a fact, so `wap format` prints `x += 1` again
+infix_call(language: Language, spelling: text, left: Node, right: Node) as Node := {
+	if is_assignment(language, spelling) and arrow_parts(language, left) != ø { return arrow_assigned(language, spelling, left, right) }
+	phrase = if is_assignment(language, spelling) then rule_phrase(language, left) else ø
+	if phrase != ø { return phrase_assigned(language, spelling, phrase, right) }
+	if compound_assignment(language, spelling) != spelling { return Call(symbol(spelling), [left, right]) }
+	with_fact(Call(symbol(ASSIGNMENT), [left, Call(symbol(spelling[.. #spelling - 1]), [left, right])]), COMPOUND, symbol(spelling))
+}
+
+is_assignment(language: Language, spelling: text) as bool := spelling == ASSIGNMENT or compound_assignment(language, spelling) == spelling
+
+# A rule's phrase is no place to assign to either: `if c then xs[0] = 5 else xs.add(2)` assigns to its last word, the
+# value running to the next word the rule's phrase continues with, `if c then (xs[0] = 5) else xs.add(2)`; so does
+# `… else x = 2`
+phrase_assigned(language: Language, spelling: text, words: list, value: Node) as Node := {
+	after = phrase_items(value)
+	cut = 0
+	while cut < #after and not continuation_item(language, after#(cut + 1), words) { cut += 1 }
+	given = if cut == 1 then after#1 else List(after[.. cut], Bracket.None, Separator.Space)
+	List(words[.. #words - 1] + [assigned_last(language, spelling, words.last, given)] + after[cut ..], Bracket.None, Separator.Space)
+}
+# a block's last statement is the place a phrase's assignment goes to: `for x in xs: total = total + x`
+assigned_last(language: Language, spelling: text, place: Node, value: Node) as Node := match place { List(items, Bracket.Curly, separator) => List(items[.. #items - 1] + [assigned_last(language, spelling, items.last, value)], Bracket.Curly, separator); _ => infix_call(language, spelling, place, value) }
+# the words of a phrase that holds a word of a rule's phrase, `if`, `else`, ø for any other code
+rule_phrase(language: Language, n: Node) as list? := match n {
+	List(items, Bracket.None, Separator.Space) => if items.filter(item => rule_word(language, item)) is not empty then items else ø
+	_ => ø
+}
+
+# An arrow is no place to assign to: `1 => y = 2` assigns in the arrow's result, `1 => (y = 2)`, as a match arm or a
+# function's body means it
+arrow_assigned(language: Language, spelling: text, arrow: Call, value: Node) as Node := match arrow {
+	Call(called, parts) => with_facts_of(Call(called, [parts#1, infix_call(language, spelling, parts#2, value)]), arrow)
+}
+arrow_parts(language: Language, n: Node) as list? := match n {
+	Call(called, parts) => if #parts == 2 and group_of(language, spelling_written(called), Fixity.Infix) == parameters_group then parts else ø
+	_ => ø
+}

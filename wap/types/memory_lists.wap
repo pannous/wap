@@ -1,6 +1,7 @@
 # How a list holds its items in a native build (build.sh), which takes this file for types/list_items.wap, as wasm2c
 # takes no GC type: a list is the address of its header in the module's memory, [count u32][room u32][items u32], the
-# items 8 bytes each in a block of their own (core/emit/primitives.wap item.load), so a list grows in place, its block
+# items each at its type's width in a block of their own (core/emit/primitives.wap item.load, item.bytes), packed as C
+# reads an array of them, so a list grows in place, its block
 # copied to a larger one, and every name holding it sees the item added. The memory comes from text_bytes.wap's
 # memory_taken.
 # DEBT: a list's memory is never freed, nor its old block when it grows: fine for the native wap's driver and short
@@ -9,6 +10,7 @@
 use "text_bytes.wap"
 
 HEADER_BYTES := 12
+# the most bytes an item takes, which a block reserves for each, and a record's field
 ITEM_BYTES := 8
 ROOM_FIRST := 4
 
@@ -20,9 +22,14 @@ list_at(at: int): list<int> := prim i32.wrap_i64(at)
 #(xs: list): int := memory_word(list_address(xs))
 room(xs: list): int := memory_word(list_address(xs) + 4)
 items_at(xs: list): int := memory_word(list_address(xs) + 8)
+# the bytes each item of the list takes: its type's width
+item_bytes(xs: list<T>): int := prim item.bytes(xs)
+# where a list's items are in the memory, packed at their width as C reads an array of them (lib/foreign.wap
+# items_handed)
+items_address(xs: list<T>): int := items_at(xs)
 # a list's item at a place, counting from 1, `xs#2`, and given a value, `xs#2 = 5`
-#(xs: list<T>, at: int): T := prim item.load(items_at(xs) + (at - 1) * ITEM_BYTES)
-set(at: int, of: list<T>, to: T) := prim item.store(items_at(of) + (at - 1) * ITEM_BYTES, to)
+#(xs: list<T>, at: int): T := prim item.load(items_at(xs) + (at - 1) * item_bytes(xs))
+set(at: int, of: list<T>, to: T) := prim item.store(items_at(of) + (at - 1) * item_bytes(of), to)
 # an empty list with room for `count` items: what a list literal starts from (core/analyze/data.wap built_in_memory)
 reserved(count: int): list<int> := {
 	at = memory_taken(HEADER_BYTES)
@@ -36,7 +43,7 @@ add(xs: list<T>, item: T) := {
 	if count == room(xs) {
 		larger = if count == 0 then ROOM_FIRST else count * 2
 		block = memory_taken(larger * ITEM_BYTES)
-		for at in 0 upto count * ITEM_BYTES { set_memory_byte(block + at, memory_byte(items_at(xs) + at)) }
+		for at in 0 upto count * item_bytes(xs) { set_memory_byte(block + at, memory_byte(items_at(xs) + at)) }
 		set_memory_word(list_address(xs) + 4, larger)
 		set_memory_word(list_address(xs) + 8, block)
 	}

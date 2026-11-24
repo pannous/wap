@@ -1,0 +1,184 @@
+# The standard module foreign: the program's side of a C function it calls, a foreign line `getenv(name: text): text from 'c'` (its rule:
+# extensions/c/foreign.wap; the section that describes it for the native warp: extensions/c/functions.wap). A text goes to C
+# as the address of its bytes and a NUL, the texts of one call one after another in the memory from BYTES_AT; a text C
+# gives back is copied from where its pointer points, an empty one for NULL. An int32 crossing to C is an address of the
+# module's memory, which the native warp gives C as its pointer. A module whose foreign lines call C uses it; outside the
+# types module, so only a program that calls C imports C's memmove, free, strnlen and memcpy, which a host without C
+# (wasmtime) lacks.
+# (the types module's host machinery, beside this library wherever wap is: in the compiler's folder)
+use "../types/host.wap"
+
+# a call's out-pointers (`sqlite3 **`), each a C pointer's slot from BYTES_AT, its texts after them
+OUT_SLOTS := 4
+POINTER_BYTES := 8
+OUTS_END := BYTES_AT + OUT_SLOTS * POINTER_BYTES
+# where the next text of a C call goes; the out-pointers a call was given
+c_texts_end = OUTS_END
+c_outs = 0
+# the count of the call's last bytes, which a `length` parameter after them gets
+c_bytes_count = 0
+# the most bytes a text C gives back is read for
+C_TEXT_LIMIT := 1000000000
+# the most bytes of a struct ARM64's C passes in registers
+STRUCT_IN_REGISTERS := 16
+# the number before a run's first handle, far from any a program writes, so a number written by hand is no handle
+HANDLE_BASE := 700000000
+
+# the texts of a new call, placed from the start again
+c_call_started() := { global c_texts_end = OUTS_END; global c_outs = 0 }
+# a text as C takes it, the address of its bytes and a NUL: its own where texts are in the memory, else a copy placed
+c_text(t: text): int32 := c_address(c_text_at(t))
+# (a C function that writes into its text, mkstemps, writes into the text itself where texts are in the memory: give
+# it a text of its own, never a literal)
+c_text_at(t: text): int := if texts_in_memory() then text_address(t) else c_placed(t)
+# a text's bytes and a NUL placed after the call's others, where they start
+c_placed(t: text): int := {
+	at = c_reserved(byte_count(t) + 1)
+	memory_placed(at, t)
+	set_memory_byte(at + byte_count(t), 0)
+	at
+}
+# a list of texts as C's NULL-ended `char *[]` (argv, posix_spawn): their C pointers, each text's own or its copy's,
+# the memory's own address as C sees it added to each
+# DEBT: The pointers hold while the memory stays where it is, as wasmtime's reserved memory does; a host that moves the
+#   memory as it grows would leave them dangling.
+c_texts(ts: list<text>): int32 := {
+	at = c_reserved((#ts + 1) * POINTER_BYTES)
+	base = c_memory_seen()
+	slot = at
+	for t in ts {
+		set_memory_int(slot, base + c_text_at(t))
+		slot += POINTER_BYTES
+	}
+	set_memory_int(slot, 0)
+	c_address(at)
+}
+# `count` bytes after the call's others, the memory grown to hold them, where they start; new memory of their own where
+# texts are in the memory, whose memory past BYTES_AT a driver and its texts use (extensions/native/run.wap)
+c_reserved(count: int): int := {
+	if texts_in_memory() { return text_address(text_made(count)) }
+	global c_texts_end
+	at = c_texts_end
+	memory_holding(at - BYTES_AT + count)
+	global c_texts_end = at + count
+	at
+}
+# where C sees the memory's address 0: memmove gives back its destination as C's pointer
+c_memory_seen(): int := c_moved(c_address(BYTES_AT), c_address(BYTES_AT), 0) - BYTES_AT
+c_moved(destination: int32, source: int32, count: int): int := prim foreign("c", "memmove", destination, source, count)
+c_address(at: int): int32 := prim i32.wrap_i64(at)
+# an out-pointer for C to fill, the call's next slot, NULL until it does
+c_out(): int32 := {
+	global c_outs
+	at = BYTES_AT + c_outs * POINTER_BYTES
+	set_memory_int(at, 0)
+	global c_outs = c_outs + 1
+	c_address(at)
+}
+# The handles of this run (wiki/c.md): a C pointer as the number it crosses as, never an address wap computes with,
+# the same pointer always the same number, 0 for NULL; they end with the run
+c_pointers: list<int> = []
+c_handle_of(pointer: int): int := {
+	global c_pointers
+	if pointer == 0 { return 0 }
+	if c_pointers.index_of(pointer) == 0 { c_pointers.add(pointer) }
+	HANDLE_BASE + c_pointers.index_of(pointer)
+}
+# the C pointer of a handle; a number no C pointer of this run crossed as is refused
+c_pointer_of(handle: int): int := if handle == 0 then 0 else if handle > HANDLE_BASE and handle <= HANDLE_BASE + #c_pointers then c_pointers#(handle - HANDLE_BASE) else raise "${handle} is no handle of this run"
+# a handle C gives back: the pointer its first out-pointer holds when it has one, C's status naming a NULL one
+c_handle(status: int): int := {
+	global c_outs
+	if c_outs == 0 { return status }
+	pointer = memory_int(BYTES_AT)
+	if pointer == 0 { raise "C gave no pointer, its status ${status}" }
+	pointer
+}
+c_text_from(pointer: int): text := if pointer == 0 then "" else c_copied(pointer, c_length(pointer, C_TEXT_LIMIT))
+# a text C gives back as a pointer to its length (8 bytes) and its bytes, which the caller frees
+c_counted_text(pointer: int): text := {
+	if pointer == 0 { return "" }
+	c_copy(c_address(BYTES_AT), pointer, POINTER_BYTES)
+	copied = c_copied(pointer + POINTER_BYTES, memory_int(BYTES_AT))
+	c_free(pointer)
+	copied
+}
+# `count` bytes at a C pointer, as a text: copied straight into a new one where texts are in the memory, else through
+# the memory from BYTES_AT
+c_copied(pointer: int, count: int): text := {
+	at = scratch(count)
+	c_copy(c_address(at), pointer, count)
+	memory_text(at, count)
+}
+c_free(pointer: int) := prim foreign("c", "free", pointer)
+# a list of bytes as a C pointer to their copy, NULs and all; its count the `length` parameter after it gets
+c_bytes(xs: list<int>): int32 := {
+	at = c_reserved(#xs)
+	slot = at
+	for b in xs {
+		set_memory_byte(slot, b)
+		slot += 1
+	}
+	global c_bytes_count = #xs
+	c_address(at)
+}
+# a typed list as C takes it, a pointer to its items packed at their width (items_handed); its byte
+# count the `length` parameter after it gets
+c_items(xs: list<T>): int32 := {
+	global c_bytes_count = #xs * item_bytes(xs)
+	c_address(items_handed(xs))
+}
+c_length(pointer: int, limit: int): int := prim foreign("c", "strnlen", pointer, limit)
+c_copy(destination: int32, source: int, count: int): int := prim foreign("c", "memcpy", destination, source, count)
+# a C struct of that many bytes at a C pointer, given by value: as ARM64's C passes one of more than 16 bytes, a pointer
+# to a copy the caller makes; a smaller one, which crosses in registers, is refused
+# TODO (card native-other-platforms) x86-64's C passes such a struct on the stack, which this copy does not, and no host
+#   answers which machine it runs on (the types module's every import is answered by every host)
+c_struct(pointer: int, size: int): int := {
+	if size <= STRUCT_IN_REGISTERS { raise "a C struct of ${STRUCT_IN_REGISTERS} bytes or less crosses in registers, which wap's C calls do not do yet: bytes<${size}>" }
+	at = c_reserved(size)
+	c_copy(c_address(at), pointer, size)
+	c_memory_seen() + at
+}
+# a C int a function gives back, as the int it means
+c_number(n: int32): int := prim i64.extend_i32_s(n)
+# a C unsigned int, as the int it means
+c_unsigned(n: int32): int := prim i64.extend_i32_u(n)
+# a `char *` the caller owns (strdup's), as a text, freed
+c_owned_text(pointer: int): text := {
+	t = c_text_from(pointer)
+	if pointer != 0 { c_free(pointer) }
+	t
+}
+# C's float given back as a float: of one type, so the call it is given is typed by it (float has several)
+c_double(x: float32): float := float(x)
+# a bool as C's int and back, of which C defines the low byte
+c_flag(b: bool): int := if b then 1 else 0
+c_bool(n: int): bool := n % BYTE_RANGE != 0
+BYTE_RANGE := 256
+
+# A list's items handed to C (c_items): their own address where the list holds its items in the memory
+# (types/memory_lists.wap items_address), else the address of their copy, packed at their width as C reads an array of
+# them, as a GC array has no address, and copied back into the list once the call returns (items_returned), as C may
+# write into them. The memory may move when it grows: no C side may keep it.
+items_handed(xs: list<T>): int := {
+	global handed_at
+	if items_address(xs) != 0 { return items_address(xs) }
+	width = item_bytes(xs)
+	at = c_reserved(#xs * width)
+	for place in 0 upto #xs { item_placed(at + place * width, xs[place]) }
+	handed_at.add(at)
+	at
+}
+# the list's items as C left them in their copy, the first of the call's copies still to be read back
+items_returned(xs: list<T>) := {
+	global handed_at
+	if items_address(xs) != 0 { return }
+	at = handed_at#1
+	handed_at = handed_at.drop(1)
+	for place in 0 upto #xs { xs[place] = item_found(xs, at + place * item_bytes(xs)) }
+}
+# where the copies of the lists handed to the C call running are, in the order of its parameters
+handed_at: list<int> = []
+item_placed(at: int, item: T) := prim item.store(at, item)
+item_found(xs: list<T>, at: int): T := prim item.load(at)

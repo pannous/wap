@@ -16,7 +16,7 @@ NEWLINE := 10
 holds_code(set: CharSet, code: int): bool := set.ranges.any(range => code >= range[0] and code <= range[1]) != set.negated
 is_word_at(chars: list<char>, at: int): bool := at >= 0 and at < #chars and holds_code(CharSet(WORD_RANGES, no), ord(chars[at]))
 # the ranges of a class escape's letter (d, w, s, any case), ø for another letter
-escape_ranges(letter: text): list<list<int>>? := match letter.lower() {
+escape_ranges(letter: text): list<list<int>>? := match letter.ascii_lower() {
 	"d" => DIGIT_RANGES
 	"w" => WORD_RANGES
 	"s" => SPACE_RANGES
@@ -49,7 +49,7 @@ taken(r: Reader): text := {
 	r.at += 1
 	c
 }
-refused(r: Reader, why: text): any := raise "regex ${r.pattern}: ${why} at ${r.at + 1}"
+refused(r: Reader, why: text): never := raise "regex ${r.pattern}: ${why} at ${r.at + 1}"
 
 choice_of(r: Reader): Term := {
 	options = [sequence_of(r)]
@@ -113,7 +113,7 @@ escape_of(r: Reader): Term := {
 	if letter == "" { refused(r, "a pattern ending in a backslash") }
 	ranges = escape_ranges(letter)
 	if letter == "b" then term(WordBoundary, [])
-	else if ranges != ø then chars_term(CharSet(ranges!, letter != letter.lower()))
+	else if ranges != ø then chars_term(CharSet(ranges!, letter != letter.ascii_lower()))
 	else chars_term(CharSet([[escaped_code(letter), escaped_code(letter)]], no))
 }
 # [abc], [^a-z], [\d_]: a ] right after the opening is literal
@@ -203,7 +203,16 @@ repeat_into(p: Program, child: Term, least: int, most: int) := {
 		for split in splits { pointed(p, split, split + 1, #p.steps) }
 	}
 }
+# the programs of the patterns compiled so far: a pattern is compiled once, on its first use
+compiled_patterns: map<text, Program> = {}
 program_of(pattern: text): Program := {
+	known = compiled_patterns.get(pattern)
+	if known != ø { return known! }
+	compiled = compiled_program(pattern)
+	compiled_patterns[pattern] = compiled
+	compiled
+}
+compiled_program(pattern: text): Program := {
 	r = Reader(pattern, 0, 0)
 	tree = choice_of(r)
 	if r.at < #pattern { refused(r, "an unopened )") }
@@ -266,6 +275,7 @@ class Found { start: int, end: int, groups: list<text> }
 found_from(p: Program, chars: list<char>, from: int): Found? := {
 	empty = (0 upto 2 * p.groups + 2).map(i => -1)
 	for start in from upto #chars + 1 {
+		if not could_start(p, chars, start) { continue }
 		slots = run(p, chars, 0, start, empty)
 		if slots != ø {
 			ends = slots!
@@ -274,6 +284,16 @@ found_from(p: Program, chars: list<char>, from: int): Found? := {
 		}
 	}
 	ø
+}
+# whether a match could start at the place, by the program's first step after saving the start: a character the
+# step takes, or the text's start for ^; a start that fails here needs no run
+could_start(p: Program, chars: list<char>, start: int): bool := {
+	first = p.steps[1]
+	match first.op {
+		Step => start < #chars and holds_code(first.set, ord(chars[start]))
+		AtStart => start == 0
+		_ => yes
+	}
 }
 # every match, left to right, none overlapping; an empty match moves on by one
 every_found(t: text, pattern: text): list<Found> := {

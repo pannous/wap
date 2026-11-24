@@ -16,17 +16,14 @@ written = fd_write(1, 0, 1, 8)
 set_word(8, written)')" "Hello"
 # a C function the program imports, its pointer an address in the program's memory
 check "a native program calls C" "$(native_ran strlen 'strlen(s: int32): int := prim foreign("c", "strlen", s)
-exit(code: int) := prim proc_exit(code)
 name(): int32 := prim data_address("wap")
 exit(strlen(name()))' >/dev/null; echo $?)" "3"
 # a statement's value that is dropped is no value: an if or a match as a statement boxes nothing, so no GC type
-check "a native program with an if and a match as statements" "$(native_ran dropped 'exit(code: int) := prim proc_exit(code)
-c = yes
+check "a native program with an if and a match as statements" "$(native_ran dropped 'c = yes
 if c { 5 }
 match 3 { 3 => 1; _ => ø }
 exit(7)' >/dev/null; echo $?)" "7"
-check "a native program with an if as a while body's last statement" "$(native_ran dropped_loop 'exit(code: int) := prim proc_exit(code)
-k = 0
+check "a native program with an if as a while body's last statement" "$(native_ran dropped_loop 'k = 0
 n = 0
 while n < 5 {
 	n = n + 1
@@ -56,6 +53,7 @@ check "a native wap run of a program through a link" "$("$native_wap" "$stage/li
 mkdir -p "$stage/tested/test/wap" && printf '%s\n' 'echo "$@"' 'exit 3' >"$stage/tested/test/wap/run.sh" && chmod +x "$stage/tested/test/wap/run.sh"
 check "wap test runs the areas' tests" "$(cd "$stage/tested" && "$native_wap" test hello raise; echo "exit $?")" "--wait hello raise
 exit 3"
+check "wap build makes a program a native executable named as it" "$(cd "$tree" && "$native_wap" build "$stage/hello.wap" >/dev/null 2>&1 && "$stage/hello" 2>&1)" "Hello"
 # an argument that names no program file is code, run as a program is (core/native/warp.warp is_warp_file)
 check "wap runs code given in place of a file" "$("$native_wap" '1+1' 2>&1)" "2"
 # code given runs without a TMPDIR too, as under cron: its files go to the user's temporary folder
@@ -246,10 +244,14 @@ check "the console edits its line: arrows, Home/End, Ctrl+A/E, deletes, word mov
 24"
 # an enum of cases without fields in a native program, each case its tag (notes/native.md); an uncaught raise its text on
 # stderr and exit status 1
-check "a native program picks and compares an enum's cases" "$(native_ran coins 'exit(code: int) := prim proc_exit(code)
-enum Coin { Penny, Dime }
+check "a native program picks and compares an enum's cases" "$(native_ran coins 'enum Coin { Penny, Dime }
 pick(x: int): Coin := if x > 0 then Dime else Penny
 exit(if pick(1) == Dime then 3 else 4)' >/dev/null; echo $?)" "3"
 check "a native program's uncaught raise says its text and exits with 1" "$(native_ran raising 'raise "out of coins"'; echo "exit $?")" "out of coins
 exit 1"
+# a typed list in a native program hands C its own items, packed at their width: C sums them and writes into them
+printf '%s\n' '#include <stdint.h>' 'double sum_f32(float* p, int64_t bytes) { double s = 0; for (int64_t i = 0; i < bytes / 4; i++) s += p[i]; return s; }' 'void halved(float* p, int64_t bytes) { for (int64_t i = 0; i < bytes / 4; i++) p[i] /= 2; }' >"$stage/native_items.c"
+check "a native list<float32> crosses as C's floats, and C's writes are seen" "$(printf '%s\n' "sum_f32(xs: list<float32>, size: length): f64 from 'c'" "halved(xs: list<float32>, size: length): ø from 'c'" 'xs: list<float32> = [float32(0.5), float32(1.25), float32(4.0)]' 'halved(xs)' 'print(text(sum_f32(xs)) + " " + text(float(xs#2)))' >"$stage/native_items.wap" && "$tree/wap/extensions/native/build.sh" "$compiler" "$stage/native_items.wap" "$stage/native_items" "$stage/native_items.c" 2>&1 && "$stage/native_items" 2>&1)" "2.875 0.625"
+# a compiler run from source with no library beside it and no warm state yet, as from wap's own tree, still compiles
+check "a compiler with no library beside it compiles hello" "$(rm -rf "$stage/bare" && mkdir -p "$stage/bare" && cp -R "$tree/wap" "$stage/bare/" && : >"$stage/bare/wap/warm.packed" && : >"$stage/bare/wap/types.wasm" && cd "$stage" && printf '%s\n' 'print "Hello"' >bare_hello.wap && "$native_wap" "$stage/bare/wap/compiler.wap" bare_hello.wap bare_hello.wasm 2>&1 && "$native_wap" bare_hello.wasm 2>&1)" "Hello"
 exit $((failures > 0))

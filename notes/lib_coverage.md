@@ -37,8 +37,6 @@ blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** 
 | | shown_frames.warp:6 | no host word window_open |
 | | c.warp | no C function field_u8 in the executable |
 | found running modules | any program | `text(m)` of a map<text, int> traps (out of bounds) |
-| | lib/list.warp | an operator a used module declares, `[1] ∪ [2]`, is not lowered in the program |
-| | list.warp (fixed around) | an if-expression as a call's argument (above) |
 | | callbacks.warp | reading an item of a `list<function?>` / `list<function>`: the types module's list_item "gives no value" |
 | | unicode.warp:149 | no `upper(text)` in the types module |
 | | unicode.warp:18 … | an empty map takes text keys, so int-keyed tables write their types: `m = {}; m[3] = 4` is refused (lists take their element type from first use already); card empty-map, one token in core/analyze/data.wap:140 |

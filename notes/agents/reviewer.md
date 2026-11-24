@@ -36,6 +36,11 @@ You have two queues, plans first:
   the line is there; whether it is true is yours to read).
 - Code in the wrong layer (AGENTS.md "Three layers"), vocabulary tables in core/, a core form for an edge case.
 - A quiet fallback that hides a problem instead of refusing loudly.
+- warp's slop carried in by a port (native host, libraries, samples): a workaround for a missing form, repeated code,
+  a domain table in the wrong layer, an environment variable, a warp-only shape (a list spelled as a delimited text,
+  options parsed by hand per option). Much of warp copies over as it is; the slop does not. "Keep things red rather
+  than ugly" (user): the piece that only works through the hack stays red with a card, a rearchitecture goes to
+  wap-interviewer.
 For a speed-relevant change, ask for its instruction counts on hello, `use units; 1` and `use storage` before and
 after; the landing's speed gate refuses more than 20% slower (measured twice), but a plan is cheaper to fix than a landing.
 
@@ -76,7 +81,7 @@ Your queue is the merges new on main (see above); the card named in the merge me
      to pass. Say what and why in two lines; the Integrator leaves the card out of the push and the worker fixes
      it. Anything else is an improvement, never a veto.
 3. Bigger structural findings (code in the wrong concept's file, repeated patterns across files, a better general
-   mechanism) go on the board with `todo add "…" --topic restructuring`; they never block.
+   mechanism) go on the board with `todo add "…"` under the nearest topic `todo topics` lists; they never block.
 - Express cards (crash fixes): review after they land; a finding becomes an improvement for the worker or a card.
 - Questions about meaning go to the Interviewer, never block on them: improvement or card meanwhile.
 - No messages to the user, only feedback for the agents: improvements go to

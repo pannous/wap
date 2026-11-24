@@ -1,12 +1,12 @@
 # The standard module unicode (wiki/library-unicode.md): the normalization forms of UAX #15 and full case folding,
-# Unicode 15.1.0 (the version of lib/unicode_data.wap). nfc(t), nfd(t), nfkc(t), nfkd(t), unicode_normalize(t, "NFC"),
+# Unicode 17.0.0 (the version of lib/unicode_data.wap). nfc(t), nfd(t), nfkc(t), nfkd(t), unicode_normalize(t, "NFC"),
 # is_normalized(t, "NFKD"): full canonical or compatibility decomposition applied recursively, marks put in canonical
 # order by their combining class, then canonical composition with its blocking rule, skipping the full composition
 # exclusions (CompositionExclusions.txt, the singletons and the non-starter decompositions, derived from the tables).
 # Hangul syllables decompose and compose by arithmetic (UAX #15, Unicode 3.12), not by tables. casefold(t) is the full
 # case folding of CaseFolding.txt's statuses C and F ("Straße" to "strasse", "İ" to "i̇"); the Turkic mappings (status
-# T) are not applied. unicode_upper(t) and unicode_lower(t) are the full default case mappings, locale-independent
-# (UnicodeData.txt and SpecialCasing.txt's unconditional mappings: "straße" to "STRASSE"). codepoint_numbers(t) and text_of_codepoints(ns) go between texts and code point numbers.
+# T) are not applied. is_unicode_letter(c) tells a letter of any script. codepoint_numbers(t) and
+# text_of_codepoints(ns) go between texts and code point numbers.
 # The tables are built when the module loads, from lib/unicode_data.wap (scripts/gen-unicode-tables.py writes it).
 use unicode_data
 use text
@@ -41,7 +41,7 @@ classes_read(): map<int, int> := {
 	}
 	classes
 }
-combining_class(n: int): int := if combining_classes.has(n) then combining_classes[n] else 0
+combining_class(n: int): int := combining_classes.get(n) ?? 0
 
 # each decomposing code point's mapping, and whether it is a compatibility one
 class Decomposition { parts: list<int>, compatible: bool }
@@ -140,7 +140,7 @@ composed_pair(a: int, b: int): int := {
 	if a >= HANGUL_L and a < HANGUL_L + HANGUL_L_COUNT and b >= HANGUL_V and b < HANGUL_V + HANGUL_V_COUNT { return HANGUL_S + ((a - HANGUL_L) * HANGUL_V_COUNT + b - HANGUL_V) * HANGUL_T_COUNT }
 	if a >= HANGUL_S and a < HANGUL_S + HANGUL_S_COUNT and (a - HANGUL_S) % HANGUL_T_COUNT == 0 and b > HANGUL_T and b < HANGUL_T + HANGUL_T_COUNT { return a + b - HANGUL_T }
 	key = a * PAIR_BASE + b
-	if compositions.has(key) then compositions[key] else -1
+	compositions.get(key) ?? -1
 }
 # canonical composition of a decomposed, ordered sequence: a mark joins the last starter unless a starter, or a mark
 # of the same or a higher class, stands between them
@@ -172,7 +172,7 @@ nfkd(t: text): text := text_of_codepoints(decomposed(codepoint_numbers(t), yes))
 nfc(t: text): text := text_of_codepoints(composed(decomposed(codepoint_numbers(t), no)))
 nfkc(t: text): text := text_of_codepoints(composed(decomposed(codepoint_numbers(t), yes)))
 unicode_normalize(t: text, form: text): text := {
-	named = upper(form)
+	named = ascii_upper(form)
 	if named == "NFC" then nfc(t)
 	else if named == "NFD" then nfd(t)
 	else if named == "NFKC" then nfkc(t)
@@ -180,16 +180,38 @@ unicode_normalize(t: text, form: text): text := {
 	else raise "unicode_normalize: the form is NFC, NFD, NFKC or NFKD, not ${form}"
 }
 is_normalized(t: text, form: text): bool := unicode_normalize(t, form) == t
-# the full case folding, upper case and lower case of every code point they change
+# the full case folding of every code point that folds
 foldings: map<int, list<int>> = case_mapping(unicode_folding_text(), unicode_folding_multi_text())
-uppers: map<int, list<int>> = case_mapping(unicode_upper_text(), unicode_upper_multi_text())
-lowers: map<int, list<int>> = case_mapping(unicode_lower_text(), unicode_lower_multi_text())
 # the text with each code point the mapping changes replaced by what it maps to
 case_mapped(t: text, mapping: map<int, list<int>>): text := text_of_codepoints(codepoint_numbers(t).flat_map(n => mapping.get(n) ?? [n]))
 casefold(t: text): text := case_mapped(t, foldings)
-# the full default case mappings, locale-independent: "straße" is "STRASSE" in upper case, "İ" is "i̇" in lower case
-unicode_upper(t: text): text := case_mapped(t, uppers)
-unicode_lower(t: text): text := case_mapped(t, lowers)
+
+# the letters, Unicode's categories L*, as runs: each run's first code point and the one after its last, ascending
+class Runs { starts: list<int>, ends: list<int> }
+letter_runs: Runs = runs_read(unicode_letter_text())
+runs_read(t: text): Runs := {
+	numbers = numbers_in(t, " ")
+	runs = Runs([], [])
+	edge = 0
+	for i in 0 upto #numbers ÷ 2 {
+		runs.starts.add(edge + numbers[2 * i])
+		edge = edge + numbers[2 * i] + numbers[2 * i + 1]
+		runs.ends.add(edge)
+	}
+	runs
+}
+# whether a code point lies in one of the runs: the last run starting at or below it, found by halving
+in_runs(n: int, runs: Runs): bool := {
+	low = 0
+	high = #runs.starts
+	while low < high {
+		middle = (low + high) ÷ 2
+		if runs.starts[middle] <= n { low = middle + 1 } else { high = middle }
+	}
+	low > 0 and n < runs.ends[low - 1]
+}
+# whether a character is a letter of any script, as Unicode's categories L* say: "é", "ж", "中" are, "1", "-", "😀" not
+is_unicode_letter(c: text): bool := in_runs(ord(c.codepoints[0]), letter_runs)
 
 # NormalizationTest.txt's invariants for one line's five columns (lists of code points): the ones that fail, by
 # name, [] for a line that holds. For each form, the column each column's normal form must equal
