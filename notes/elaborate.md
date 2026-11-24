@@ -228,9 +228,14 @@ adds is how a candidate fits and where its instances come from.
   calling it. n choices in a row stay n joins, never 2^n copies; a return in a part skips the join.
 - **Only a name is given a value**: `xs#1 = 2` or `p.x = 2` is the refusal `statement` until updates of a part
   come in (a binding named by the source text would drop the write).
+- **A counted loop is a walk**: in `for i in 1 to n { body }; rest` the rest is read once as the loop's join, of the
+  names the body gives that the rest can see, and the loop is the number type's recursor down the count with the
+  motive `rounds → join's type`: no round left calls the join, a round binds its place to the successor of the rounds
+  before (so it counts 1 … n), reads the body and calls the walk of the rounds left. A continue is that call, a
+  break the join's; both pass the names the innermost round passes on (`Elaborating.round_given`). A loop over a list
+  waits for its subtypes, `while` for the effect of a walk that may not end.
 - **A return** is the block's value at once; the statements after it are never read.
-- Without rules the door sees blocks and lets only: `if` and `return` arrive as calls, which read.wap reads as calls.
-  Choices and returns reach statements.wap once the door reads with the tree's rules (E3); their lines wait in
+- `s#1: nat = n` is still accepted where it should be the refusal `statement`; its line waits in
   test_theory_statements_wanted.wap.
 - Statements are read as kernel forms (Block, Set, If, Return, While, Break, Continue), which the tree's rules
   write; the elaborator names no statement word.
@@ -251,7 +256,7 @@ adds is how a candidate fits and where its instances come from.
 | `elaborate/conditions.wap` | conditions, their decisions, the facts a branch knows | E3 |
 | `elaborate/convert.wap` | the conversions, the path between two types, lifting through containers | E4 |
 | `elaborate/obligations.wap` | going down: prove or check | E4 |
-| `elaborate/statements.wap` | blocks, lets, a choice's rest, returns | E5 |
+| `elaborate/statements.wap` | blocks, lets, a choice's rest, counted loops, returns | E5 |
 
 ## Rules every file keeps
 

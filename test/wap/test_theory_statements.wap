@@ -12,3 +12,36 @@ check("a name given a value of another type holds that type from there on", elab
 check("a name written with its type holds a value of it", elaborated("statements_typed", "f(n: nat): nat := { s: nat = n; nat.successor(s) }\ntype of f"), "nat -> nat")
 check("a value before the last statement is lost", refused_by(elaborated("statements_lost", "f(n: nat): nat := { n; n }")), "refused by statement")
 check("a block ending with a value given to a name gives no value", refused_by(elaborated("statements_set_last", "f(n: nat): nat := { s = n }")), "refused by statement")
+
+# a range walk: the loop and the rest of the block read as the number type's recursor over the rounds
+NAT_OPERATORS := "operator +(a: nat, b: nat): nat := add(a, b)\noperator -(a: nat, b: nat): nat := subtract(a, b)\n"
+SUM_TO := NAT_OPERATORS + "sum_to(n: nat): nat := { s = 0; for i in 1 to n { s = add(s, i) }; s }\n"
+check("a range walk is a function of its bound", elaborated("for_range", SUM_TO + "type of sum_to"), "nat -> nat")
+check("a range walk computes", elaborated("for_range_computes", SUM_TO + "law r: Equal[1](nat, sum_to(3), 6) := Equal.refl[1](nat, 6)"), "")
+check("a range walk over no number runs no round", elaborated("for_range_none", SUM_TO + "law r: Equal[1](nat, sum_to(0), 0) := Equal.refl[1](nat, 0)"), "")
+# a break calls the rest after the loop at once, a continue the round after; the statements after either are never read
+SUM_BEFORE := NAT_OPERATORS + "sum_before(n: nat, stop: nat): nat := { s = 0; for i in 1 to n { if equals(i, stop) { break }; s = add(s, i) }; s }\n"
+SUM_SKIPPING := NAT_OPERATORS + "sum_skipping(n: nat, skip: nat): nat := { s = 0; for i in 1 to n { if equals(i, skip) { continue }; s = add(s, i) }; s }\n"
+check("a break leaves the walk", elaborated("for_break", SUM_BEFORE + "law r: Equal[1](nat, sum_before(5, 3), 3) := Equal.refl[1](nat, 3)"), "")
+check("a continue skips the rest of its round", elaborated("for_continue", SUM_SKIPPING + "law r: Equal[1](nat, sum_skipping(4, 2), 8) := Equal.refl[1](nat, 8)"), "")
+check("a break outside a loop leaves nothing", refused_by(elaborated("for_break_outside", "f(n: nat): nat := { break; n }")), "refused by statement")
+
+# a choice before the rest of the block joins again: the rest read once, each part ending by calling it; a return skips it
+check("a choice's parts join again for the rest of the block", elaborated("statements_join", "f(n: nat): nat := {\n s = n\n if is_zero(n) { s = 5 } else { s = 7 }\n add(s, 1)\n}\nlaw a: Equal[1](nat, f(0), 6) := Equal.refl[1](nat, 6)\nlaw b: Equal[1](nat, f(3), 8) := Equal.refl[1](nat, 8)"), "")
+check("a choice without an else keeps the name's value", elaborated("statements_one_part", "f(n: nat): nat := {\n s = n\n if is_zero(n) { s = 5 }\n add(s, 1)\n}\nlaw a: Equal[1](nat, f(0), 6) := Equal.refl[1](nat, 6)\nlaw b: Equal[1](nat, f(3), 4) := Equal.refl[1](nat, 4)"), "")
+check("a return in a part skips the rest of the block", elaborated("statements_return", "f(n: nat): nat := {\n if is_zero(n) { return 9 }\n add(n, 1)\n}\nlaw a: Equal[1](nat, f(0), 9) := Equal.refl[1](nat, 9)\nlaw b: Equal[1](nat, f(3), 4) := Equal.refl[1](nat, 4)"), "")
+check("a name both parts give is seen after the choice", elaborated("statements_both", "f(n: nat): nat := {\n if is_zero(n) { t = 2 } else { t = 3 }\n t\n}\nlaw a: Equal[1](nat, f(0), 2) := Equal.refl[1](nat, 2)\nlaw b: Equal[1](nat, f(1), 3) := Equal.refl[1](nat, 3)"), "")
+check("choices in a row each see the one before", elaborated("statements_in_a_row", "f(n: nat): nat := {\n s = n\n if is_zero(s) { s = 1 }\n if is_zero(s) { s = 2 }\n if is_zero(s) { s = 3 }\n s\n}\nlaw a: Equal[1](nat, f(0), 1) := Equal.refl[1](nat, 1)"), "")
+check("a choice inside a choice joins too", elaborated("statements_nested", "f(n: nat): nat := {\n s = 1\n if is_zero(n) { if is_zero(s) { s = 2 } else { s = 3 } }\n add(s, 1)\n}\nlaw a: Equal[1](nat, f(0), 4) := Equal.refl[1](nat, 4)\nlaw b: Equal[1](nat, f(5), 2) := Equal.refl[1](nat, 2)"), "")
+check("a wrong value after a choice is refused", refused_by(elaborated("statements_join_wrong", "f(n: nat): nat := {\n s = n\n if is_zero(n) { s = 5 }\n s\n}\nlaw a: Equal[1](nat, f(0), 0) := Equal.refl[1](nat, 0)")), "refused by value type")
+check("a part of a value is never given a value as if it were a name", refused_by(elaborated("statements_part", "f(n: nat): nat := {\n s = n\n s#1 = n\n s\n}")), "refused by statement")
+
+# walks within walks and choices: what a loop gives is seen by the loop or choice around it, in the order of its rounds
+computes(name: text, program: text, call: text, value: text): text := elaborated(name, NAT_OPERATORS + program + "\nlaw r: Equal[1](nat, ${call}, ${value}) := Equal.refl[1](nat, ${value})")
+check("a loop in a loop gives to the rest after both", computes("for_nested", "nested(n: nat): nat := { s = 0; for i in 1 to n { for j in 1 to n { s = add(s, j) } }; s }", "nested(2)", "6"), "")
+check("a loop in a choice gives to the rest after the choice", computes("for_in_choice", "chosen(n: nat): nat := { s = 0; if is_zero(n) { s = 9 } else { for i in 1 to n { s = add(s, i) } }; s }", "chosen(3)", "6"), "")
+check("a break in an inner loop leaves only that loop", computes("for_inner_break", "inner_break(n: nat): nat := { s = 0; for i in 1 to n { for j in 1 to n { if equals(j, 2) { break }; s = add(s, j) } }; s }", "inner_break(3)", "3"), "")
+check("a loop gives every name its rounds give", computes("for_two_names", "both(n: nat): nat := { s = 0; c = 0; for i in 1 to n { s = add(s, i); c = add(c, 1) }; multiply(s, c) }", "both(3)", "18"), "")
+check("a return in a loop is the function's value", computes("for_return", "first_from(n: nat, limit: nat): nat := { for i in 1 to n { if at_most(limit, i) { return i } }; 0 }", "first_from(5, 2)", "2"), "")
+check("a loop that returns in no round gives the rest after it", computes("for_return_none", "first_from(n: nat, limit: nat): nat := { for i in 1 to n { if at_most(limit, i) { return i } }; 0 }", "first_from(1, 2)", "0"), "")
+check("a walk's rounds run from the start up", computes("for_order", "alternating(n: nat): nat := { s = 10; for i in 1 to n { s = subtract(i, s) }; s }", "alternating(3)", "1"), "")
