@@ -1,17 +1,20 @@
-# The program's side of a C function it calls, lib's foreign line `getenv(name: text): text from 'c'` (its rule:
+# The standard module foreign: the program's side of a C function it calls, a foreign line `getenv(name: text): text from 'c'` (its rule:
 # extensions/c/foreign.wap; the section that describes it for the native warp: extensions/c/functions.wap). A text goes to C
 # as the address of its bytes and a NUL, the texts of one call one after another in the memory from BYTES_AT, after those
 # of the calls it runs within; a text C gives back is copied from where its pointer points, an empty one for NULL. An
-# int32 crossing to C is an address of the module's memory, which the native warp gives C as its pointer.
-use "host.wap"
+# int32 crossing to C is an address of the module's memory, which the native warp gives C as its pointer. A module whose
+# foreign lines call C uses it; outside the types module, so only a program that calls C imports C's memmove, free,
+# strnlen and memcpy, which a host without C (wasmtime) lacks.
+# (the types module's host machinery, beside this library wherever wap is: in the compiler's folder)
+use "../types/host.wap"
 
 POINTER_BYTES := 8
 # how many callbacks of C run: a call made while none runs is outermost and starts from the beginning, so one that
 # raised before it ended leaves nothing behind
 c_callbacks_running = 0
 # The C call running: where its next text goes; its first out-pointer's slot (`sqlite3 **`), 0 when it has none; of
-# the copies of the lists handed to the calls running (list_items.wap handed_at), how many and where the running call's
-# still to be read back start
+# the copies of the lists handed to the calls running (handed_at), how many and where the running call's still to be
+# read back start
 c_texts_end = BYTES_AT
 c_outs = 0
 c_handed = 0
@@ -114,15 +117,11 @@ c_out(): int32 := {
 # The handles of this run (wiki/c.md): a C pointer as the number it crosses as, never an address wap computes with,
 # the same pointer always the same number, 0 for NULL; they end with the run
 c_pointers: list<int> = []
-c_handles: map<int, int> = {}
 c_handle_of(pointer: int): int := {
 	global c_pointers
 	if pointer == 0 { return 0 }
-	if not c_handles.has(pointer) {
-		c_pointers.add(pointer)
-		c_handles[pointer] = HANDLE_BASE + #c_pointers
-	}
-	c_handles[pointer]
+	if c_pointers.index_of(pointer) == 0 { c_pointers.add(pointer) }
+	HANDLE_BASE + c_pointers.index_of(pointer)
 }
 # the C pointer of a handle; a number no C pointer of this run crossed as is refused
 c_pointer_of(handle: int): int := if handle == 0 then 0 else if handle > HANDLE_BASE and handle <= HANDLE_BASE + #c_pointers then c_pointers#(handle - HANDLE_BASE) else raise "${handle} is no handle of this run"
@@ -162,7 +161,7 @@ c_bytes(xs: list<int>): int32 := {
 	global c_bytes_count = #xs
 	c_address(at)
 }
-# a typed list as C takes it, a pointer to its items packed at their width (list_items.wap items_handed); its byte
+# a typed list as C takes it, a pointer to its items packed at their width (items_handed); its byte
 # count the `length` parameter after it gets
 c_items(xs: list<T>): int32 := {
 	global c_bytes_count = #xs * item_bytes(xs)
@@ -196,3 +195,34 @@ c_double(x: float32): float := float(x)
 c_flag(b: bool): int := if b then 1 else 0
 c_bool(n: int): bool := n % BYTE_RANGE != 0
 BYTE_RANGE := 256
+
+# A list's items handed to C (c_items): their own address where the list holds its items in the memory
+# (types/memory_lists.wap items_address), else the address of their copy, packed at their width as C reads an array of
+# them, as a GC array has no address, and copied back into the list once the call returns (items_returned), as C may
+# write into them. The memory may move when it grows: no C side may keep it.
+items_handed(xs: list<T>): int := {
+	global handed_at
+	if items_address(xs) != 0 { return items_address(xs) }
+	width = item_bytes(xs)
+	at = c_reserved(#xs * width)
+	for place in 0 upto #xs { item_placed(at + place * width, xs[place]) }
+	global c_handed
+	handed_at = handed_at.take(c_handed)
+	handed_at.add(at)
+	c_handed = c_handed + 1
+	at
+}
+# the list's items as C left them in their copy, the first of the call's copies still to be read back
+items_returned(xs: list<T>) := {
+	global handed_at
+	global c_handed_from
+	if items_address(xs) != 0 { return }
+	at = handed_at#(c_handed_from + 1)
+	c_handed_from = c_handed_from + 1
+	for place in 0 upto #xs { xs[place] = item_found(xs, at + place * item_bytes(xs)) }
+}
+# where the copies of the lists handed to the C calls running are, in the order of their parameters, the innermost
+# call's last (c_handed)
+handed_at: list<int> = []
+item_placed(at: int, item: T) := prim item.store(at, item)
+item_found(xs: list<T>, at: int): T := prim item.load(at)
