@@ -6,13 +6,6 @@ An entry goes once decided (its decision then lives on its card, in the wiki or 
 
 ## The top debts still open (notes/debts.md); the "5" + 3 warning is parked (card digit-text-compile-warning)
 
-## Parked by the user (to discuss later)
-
-- Traits: `class Job { act: () -> int }` (function fields only) is read as a trait today, so `show(Job(…))`
-  recurses until the stack runs out (timers library). warp declared traits only by trait/protocol/interface,
-  structural conformance for those; a class of function fields stayed a class. Recommend: the same (0 core,
-  a port of warp's extensions/protocols.warp).
-
 ## Pending questions
 
 - wap-emitter: a C import clash is refused (A, about +3 core host.wap); a block argument with a defaulted
