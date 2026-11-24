@@ -14,6 +14,10 @@ use "analyze/library.wap"
 use "analyze/types.wap"
 use "rules/typed.wap"
 use "rules/declared.wap"
+use "stage.wap"
+use "bindings.wap"
+use "parse/cascade.wap"
+use "analyze/modules.wap"
 
 # the patterns of the kernel forms and the rules of the spellings every program may use, loaded as data
 RULES_FILE = "types/rules.wap"
@@ -118,15 +122,39 @@ used_module(language: Language, code: Node) as Module := {
 module_key(file: text) as text := normalized_path(file)
 declared_module(language: Language, code: Node) as Module := module_declared(declared_operated(language, code))
 # a declared module lowered and bound inside the modules it uses and the types module's declarations
-prepared(language: Language, module: Module, modules: list<Module>, types: Module) as Block := bound_program(lowered_module(language, module, modules, types), library_around(module, types), modules_of_uses(module, modules))
+# and the standard library's words beyond, a word of a module it does not use bound to that module (standard_brought)
+prepared(language: Language, module: Module, modules: list<Module>, types: Module) as Block := bound_program(lowered_module(language, module, modules, types), library_around(module, types), modules_of_uses(module, modules), language.standard)
 # a declared module lowered, the declaration rules first (stage 2), reading what the module, the modules it uses and
 # the types module declare
 lowered_module(language: Language, module: Module, modules: list<Module>, types: Module) as Block := {
 	uses = modules_of_uses(module, modules)
 	lowered_program(language, declared_rewritten(language, module, library_around(module, types) + uses.flat_map(used => used.signatures)))
 }
-# the modules a declared module uses
-modules_of_uses(module: Module, modules: list<Module>) as list<Module> := module.uses.map(file => module_of(file, modules))
+# the modules a declared module uses, of a standard module it names without its `use` only the words it names
+modules_of_uses(module: Module, modules: list<Module>) as list<Module> := module.uses.map(file => narrowed(module_of(file, modules), module.named.filter(name => standard_file(name) == file).map(name => text(name))))
+narrowed(used: Module, words: list<text>) as Module := if words is empty then used else Module(used.file, used.code, used.uses, used.signatures.filter(signature => signature.name in words))
+# A standard module's word named without its `use` (wiki/use.md "Library folders"): the modules again, each standard
+# module named brought in before them and used by the module naming it, with a note; a module with rules refused, its
+# rules would change what the code means unasked
+standard_brought(language: Language, modules: list<Module>, named: list<Node>) as list<Module> := {
+	files = named.map(standard_file).unique
+	for file in files { if ruled(operated_file(language, file)) { refused(named.find(name => standard_file(name) == file)!, "${file_module_name(file)} has rules, which change what code means: write use ${file_module_name(file)}") } }
+	for word in named.map(name => text(name)).unique {
+		name = named.find(first => text(first) == word)!
+		module = file_module_name(standard_file(name))
+		hint(place_of(name) + "${name} comes from ${module}: write use ${module}")
+	}
+	brought = files.flat_map(file => used_modules(language, operated_file(language, file)) + [used_module(language, operated_file(language, file))]).unique.filter(module => not modules.any(other => other.file == module.file))
+	brought + modules.map(module => standard_used(module, named.filter(name => file_of(name) == module.file)))
+}
+# the names code binds to a standard module's word
+standard_named(n: Node) as list<Node> := if is_kind_word(fact_of(n, BINDING), DefinitionKind.Standard) then [n] else direct_parts(n).flat_map(standard_named)
+# the module a standard word was bound to
+standard_file(name: Node) as text := text(fact_of(name, DEFINED_AT)!)
+# a module using the standard modules whose words it names, seeing those words alone
+standard_used(module: Module, named: list<Node>) as Module := if named is empty then module else Module(module.file, module.code, module.uses + named.map(standard_file).unique, module.signatures, module.named + named)
+# whether operated code declares rules
+ruled(code: Node) as bool := top_level_statements(code).any(statement => match statement { Call(called, arguments) => spelling_written(called) == RULE_ARROW and #arguments == 2 and spelling_written(phrase_items(arguments#1)#1) == RULE_WORD; _ => no })
 # the library a module is bound inside: the types module's declarations, except in the types module, which declares them
 # itself
 library_around(module: Module, types: Module) as list<Signature> := if module.file == types.file then [] else types.signatures
@@ -148,6 +176,8 @@ library_code_of(language: Language, types: Module) as Library := {
 #   types module only.
 typed_modules(language: Language, modules: list<Module>, types: Module) as Block := {
 	whole = with_fact(modules_prepared(language, modules, types), SCRIPT, True)
+	named = standard_named(whole)
+	if named is not empty { return typed_modules(language, standard_brought(language, modules, named), types) }
 	own = module_key(modules.last.file) == module_key(types.file)
 	library_code = if own then Library(Block([]), scope_around([], [])) else library_code_of(language, types)
 	typed_by_rules(language, whole, if own then [] else types.signatures, library_code, modules.flat_map(module => module.signatures), modules.last.signatures)
