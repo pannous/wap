@@ -6,39 +6,48 @@ An entry goes once decided (its decision then lives in the wiki or notes/debts.m
 
 ## The top debts still open (notes/debts.md); the "5" + 3 warning is parked (card digit-text-compile-warning)
 
-### 2. Op comes from the operator table: each spelling once
+## Pending questions (ask at 10:00; core growth waits for the morning, notes/agents/night.md)
 
-- Debt: wap/nodes.wap:24. The Op enum spells 63 operators beside types/operators.wap's table, and 48 cases have no row
-  of their name. The note says it is paid "when old warp no longer reads wap's source". wap compiles itself from
-  its own seed now (wap-seed-*), so that condition may already hold; to be checked first (does any script or test
-  still compile wap's source with old warp?).
-- Shape: Op's cases are the table's operators by their English names (Add from `+`'s row "add"), declared from the
-  table by one rule or a declaration form, not written out. The 108 `Op.` uses in wap/ follow the renames (sub →
-  subtract, lt → less …). The compound assignments (`+=`) stay derived, as operator_table.wap does already.
-- Core: estimate −60 to −70 lines (the enum's spelled list goes), plus a mechanical rename across about 108 uses. A
-  declaration that builds an enum from table rows needs a rule able to write an enum from a list: estimate +5 to
-  +10 lines in rules/templates.wap, unless an `enum Op { (cases of operators)... }` template already works.
-- Against: a large rename churn across the compiler for no change in behavior; the seed must compile the renamed
-  source (one seed refresh in between).
-- No hook or library: the table is library data already. The duplicate is the core enum, so only core can drop it.
-- wap-reviewer 2026-11-23: misconception. Only 5 Op cases are named in wap/ (Colon 77, None 48, Assign 3, Define 2,
-  Add 2): no 108-use rename, and an enum built from the table makes core name library operators. Better shape: Op
-  keeps the structural cases the reader and kernel need (: . := = -> None), every other operator rides as its
-  spelling through Other; Op.Add's 2 uses go through the table row. Estimate −55 to −60, no enum-from-list rule.
-  Check first: does scripts/wap-census.warp (old warp) still parse nodes.wap?
+Built and held by wap-integrator; wap-reviewer sound per integrator; recommendation: OK each. Per entry still to
+show the user: the case against and why no library or hook does it (ask the branch owner before 10:00).
 
-### 4. A template's output has the shape its text parses to
+- foreign-globals-first 88f7063c, +8 core (core/emit/host.wap): every library global is imported before the
+  program's own, so a global imported late no longer renumbers the program's globals (test_modules kept_global).
+- valueless-argument 3e46a738, about +5 core: an argument, name or result that gives no value gives ø; a function
+  giving nothing, used as a C callback, answers 0.
+- is-equal 3b44e172, +3 core (analyze/names.wap): `x is y` with two variables compares their values (wiki/equality.md).
+- map-pair-loop ad1794e9 (wap-reader), +7 core (rules/stages, parse/operators, parse/keys): `for key, value in
+  scores { … }` walks a map's keys with their values (wiki/inventions.md "Typed iteration"); the rule walks the
+  library's `pairs(m)`, so `for i, x in xs` gives a list's places counted from 1 (as xs#1 and index_of do) with its
+  items. Plain wap can't parse the two-name head. wap-reviewer's fix is built in. Recommend: yes.
+- glued-block-head e85e5478 (wap-reader), +8 core (rules/stages +2, lines +6; matcher unchanged): `class
+  Point{x: int}` with the brace glued declares the class, as wiki/pattern-matching.md and type.md write it. Every
+  rule is tried on the phrase as written, then once with the glued block split off its end (class, enum, trait,
+  match). Option: write only `class Point {…}` in the wiki (0 core). wap-reviewer: sound; its nit is built in.
+  Recommend: yes.
+- module-alias-preload b739f052 (wap-reader), +13 core (core/language, parse/operator_table, parse/operators,
+  pipeline): a file's `alias sin => sine` beats the preload's sin and reaches only that file and the files that use
+  it. The user already decided the meaning (the alias wins, scoped); the OK asked is for the core lines. Careful
+  checks green. Recommend: OK.
+- wap-build e7ebfcb7 (wap-emitter), +12 in extensions/native (driver 9, commands 3): `wap build app.wap` makes a
+  native executable `app`; a .wap output name is refused so the source is never overwritten. The user OK'd about
+  5 lines via wap-lead; it came to 12 (9 without the refusal). Recommend: OK, with the refusal.
+- unclosed-text (wap-fixer, branch unclosed-text, built): code given on the command line or typed in the console
+  says `line 1:5: this text is never closed`, not the host's temp file path. Core: net +7 in core/errors.wap
+  (place_of leaves the file out for the path `-`); outside core: types/system.wap read("-") reads stdin once and
+  keeps it; driver and console pass code as stdin with `-`, no temp .wap files, run in the user's folder (reviewer's
+  nit built in). wap-reviewer: sound. Options: OK; Leave as is (the temp path stays in messages); Park.
+  Wiki diff to approve with it, wiki/cli.md "Running", added: "`wap -` (or `wap <compiler> - out.wasm`) reads the
+  program from standard input: `echo 'print 1' | wap -`. Code given in place of a file, on the command line, from
+  standard input or in the console, runs in the current folder, and its errors name only the line: `line 1:5: this
+  text is never closed`." Try (after the seed): /Users/me/dev/bin/wap 'x = "abc'
+## To present (keep or change, at 10:00)
 
-- Debt: sugar/records.wap:15, rules/templates.wap:27. A template writing `($head: $type := $body)` builds a Define,
-  while the same text in a program reaches the rules as its phrase. So a rule's output never fits another rule
-  written for the source text: a method's `as` and `:` forms are two rules, and the operator `as` result type
-  cannot be written as one rule.
-- Shape: a template is built by the reader and operator stage from its text, as the program is, and fires the rules
-  again (the termination check already guards that). The template builder's own Define and Set construction goes.
-- Core: estimate −10 to +10 lines: the builder's special cases go, a re-reading of the built phrase comes in.
-- Against: every sugar rule's output is read once more (compile time). The termination check must hold for chains
-  that now fire; stages.wap:235 (a rewrite looping forever hangs) becomes more likely, so it should be paid first
-  or with it.
-- No hook or library: the template builder is the rule engine's core.
-- wap-reviewer 2026-11-23: right goal, wrong place: read and normalize each template once when its rule is declared
-  (per build), not per firing; compile-time cost ≈ 0. Pay stages.wap:235 with it. Estimate −10 to +5.
+- template-shape: the approved "normalize templates at declare" wasn't needed. The fix is +2 lines in
+  core/rules/matcher.wap: a form pattern `rule q ($a + $b)` now fits the program's grouped `q (x + 1)`, while an
+  argument group `f(x + 1)` stays a group. `m() as T := body` now uses the same rule as `m(): T := body`.
+- one-primitive-table (night decision): the emitter keeps its if-chain for primitives; the one-table refactor cost
+  +181 nodes, so it was dropped. Undo: land branch one-primitive-table-2 26bf51c7 and raise the ceiling.
+- previous-line (night decision; extension growth, lands after the morning OK): in the console `f(x: int) := 1`
+  then `f(x: int) := 2` makes later lines call the new f (about 5 lines in extensions/native/console.wap); today it
+  is refused with the console's internal file names. Undo: keep the refusal, worded without those names.

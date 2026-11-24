@@ -24,4 +24,5 @@ read that file, notes/backbone.md and wap/compiler.wap at start.
 
 ## Talking
 - Sparse: you message only to route a request, answer a worker, or report to wap-supervisor what landed or is blocked.
+- Never an acknowledgement, "noted", thanks or status ping, and no reply to a message that needs no action: each message wakes a whole session at ~200k context. Requests to you arrive batched; batch yours too.
 - Questions for the user go to wap-interviewer, never to the user.
