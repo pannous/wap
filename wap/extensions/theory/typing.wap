@@ -1,0 +1,139 @@
+# A term's type, and a declaration checked (notes/coc-plan.md 6.3 and 6.6; this folder's files: notes/theory.md).
+#
+# Typing is the kernel's judgement: `type_of` gives a term's type or refuses, naming the rule the term breaks, and
+# `declared` lets a declaration into the environment only after its type and its value passed. Nothing is found
+# here: every level, every argument and every conversion stands in the term (6.8).
+#
+# A term given to `type_of` holds no loose variable: under a binder the body is typed with the binder's variable
+# replaced by a free one (environment.wap `hypothesis`), and the type found is made the binder's body again.
+
+use "terms.wap"
+use "levels.wap"
+use "environment.wap"
+use "compute.wap"
+use "equal.wap"
+use "show.wap"
+
+# The type of t (6.3). A term without free variables keeps its type for the rest of the check
+type_of(c: Checker, t: Term): Term := {
+	kept = not t.holds_free
+	if kept {
+		earlier = remembered(c.types, t)
+		if earlier is not ø { return earlier }
+	}
+	found = type_found(c, t)
+	if kept { remember(c.types, t, found) }
+	found
+}
+type_found(c: Checker, t: Term): Term := match t.shape {
+	Bound(index) => refused(NOT_CLOSED, "a variable bound nowhere reached typing")
+	Free(id) => hypothesis_of(c, id).type
+	# Sort(u) is a Sort(u + 1): no universe holds itself
+	Sort(level) => {
+		levels_declared(c, level)
+		universe(Successor(level))
+	}
+	Constant(name, levels) => constant_type(c, name, levels)
+	Apply(function, argument) => application_type(c, t)
+	# `(x: A) => b` is a `(x: A) -> B`, where B is the type of b
+	Lambda(binder, domain, body) => {
+		level_of(c, domain)
+		variable = hypothesis(c, binder, domain)
+		pi(binder, domain, abstracted(type_of(c, instantiated(body, variable)), variable_id(variable)))
+	}
+	# `(x: A) -> B` is a Sort(imax(u, v)) for A in Sort(u) and B in Sort(v): a function type that ends in a
+	# proposition is a proposition, every other one lies at the larger of the two levels
+	Pi(binder, domain, body) => {
+		from = level_of(c, domain)
+		to = level_of(c, instantiated(body, hypothesis(c, binder, domain)))
+		universe(imax_level(from, to))
+	}
+	# a let has the type of its body with the value put in
+	LetIn(binder, type, value, body) => {
+		level_of(c, type)
+		given = type_of(c, value)
+		if not equal(c, given, type) { refused(VALUE_TYPE, "${binder} is declared a ${shown(type)}, its value ${shown(value)} is a ${shown(given)}") }
+		type_of(c, instantiated(body, value))
+	}
+	Numeral(value) => refused(NO_NUMBERS, "the number ${value} belongs to no type: no numbers are declared")
+	Projection(structure, field, of) => refused(NOT_A_STRUCTURE, "${structure} is no structure, so it has no field ${field}")
+}
+# the id of a free variable
+variable_id(variable: Term): int := match variable.shape {
+	Free(id) => id
+	_ => 0
+}
+
+# The level of the sort a type lies in; what lies in no sort is no type
+level_of(c: Checker, type: Term): Level := {
+	sort = computed(c, type_of(c, type))
+	match sort.shape {
+		Sort(level) => level
+		_ => refused(NOT_A_TYPE, "${shown(type)} is a ${shown(sort)}, no type")
+	}
+}
+
+# every parameter a level names is one of the declaration's own
+levels_declared(c: Checker, level: Level) := {
+	for name in level_parameters(level) {
+		if not c.levels.contains(name) { refused(LEVEL_PARAMETER, "the level ${name} is no level parameter of this declaration") }
+	}
+}
+
+# a constant has its declared type at the levels it is given, which are exactly as many as it has parameters
+constant_type(c: Checker, name: text, levels: list<Level>): Term := {
+	d = declaration(c.environment, name)
+	if d is ø { refused(UNKNOWN_NAME, "nothing is named ${name}") }
+	if #levels != #d.levels { refused(LEVEL_COUNT, "${name} takes ${#d.levels} levels and is given ${#levels}") }
+	for level in levels { levels_declared(c, level) }
+	with_levels(d.type, d.levels, levels)
+}
+
+# `f(a)` has the result type of f with a put in: the type of f computes to a function type, and the type of a
+# equals its domain. A chain of applications is typed in one walk from its head
+application_type(c: Checker, t: Term): Term := {
+	applied = head(t)
+	type = type_of(c, applied)
+	for argument in arguments(t) {
+		function_type = computed(c, type)
+		match function_type.shape {
+			Pi(binder, domain, body) => {
+				given = type_of(c, argument)
+				if not equal(c, given, domain) { refused(ARGUMENT_TYPE, "${shown(argument)} is a ${shown(given)}, and ${shown(applied)} takes a ${shown(domain)}") }
+				type = instantiated(body, argument)
+			}
+			_ => refused(NOT_A_FUNCTION, "${shown(applied)} is a ${shown(function_type)}, no function, and is given ${shown(argument)}")
+		}
+		applied = apply(applied, argument)
+	}
+	type
+}
+
+# A declaration checked and then part of the environment (6.6): its name is new, its level parameters are distinct,
+# its terms are closed, its type is a type, and its value's type equals its type; a theorem's type is a proposition.
+# An inductive block comes in through inductive.wap, which makes its declarations itself
+declared(e: Environment, d: Declaration) := {
+	names_new(e, [d.name])
+	levels_distinct(d.levels)
+	closed(d.type, d.name)
+	c = checker(e, d.levels)
+	level = level_of(c, d.type)
+	match d.kind {
+		Axiom => rests_on(e, d.name, [d.type], yes)
+		Defined(value) => value_checked(c, d, value)
+		Theorem(value) => {
+			if not is_zero(simplified(level)) { refused(NOT_A_PROPOSITION, "${d.name} is a law of ${shown(d.type)}, which is a ${shown(universe(level))}, no proposition") }
+			value_checked(c, d, value)
+		}
+		Opaque(value) => value_checked(c, d, value)
+		_ => refused(UNKNOWN_NAME, "${d.name} is of a block, which inductive.wap declares")
+	}
+	added(e, d)
+}
+# a value has its declaration's type
+value_checked(c: Checker, d: Declaration, value: Term) := {
+	closed(value, d.name)
+	given = type_of(c, value)
+	if not equal(c, given, d.type) { refused(VALUE_TYPE, "${d.name} is declared a ${shown(d.type)}, its value ${shown(value)} is a ${shown(given)}") }
+	rests_on(c.environment, d.name, [d.type, value], no)
+}
