@@ -13,9 +13,7 @@ FILES_TYPED_WHOLE=62
 FUNCTIONS_UNTYPED=0
 # wap's size, the nodes its reader makes of its source (scripts/wap-size.warp), may not rise above the ceiling: only a
 # real simplification lowers it
-SIZE_NODES=136028
-# the compiler's own files: wap/extensions/theory stays outside the build until the switch (S3), which takes it in
-COMPILER_FILES=(':!wap/extensions/theory')
+SIZE_NODES=137303
 
 source "$(dirname "$0")/compile.sh"
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
@@ -31,10 +29,10 @@ census="$stage/wap-census.wasm"
 # the compiler's source finds its standard modules (`use foreign`) beside the census, as beside a compiler
 wap_beside_copied "$root" "$stage" || exit 1
 (cd "$root" && $wap "$compiler" scripts/wap-census.warp "$census" >"$report" 2>&1 &&
-	scripts/job-slot.sh $wap "$census" $(git ls-files 'wap/*.wap' "${COMPILER_FILES[@]}") >"$report" 2>&1)
+	scripts/job-slot.sh $wap "$census" $(compiler_sources) >"$report" 2>&1)
 total=$(grep '^total' "$report" | cut -f2)
 measure="$stage/wap-size.wasm"
-size=$(cd "$root" && $wap "$compiler" scripts/wap-size.warp "$measure" 2>&1 && $wap "$measure" $(git ls-files 'wap/*.wap' "${COMPILER_FILES[@]}") | sed -n 's/^total\t//p')
+size=$(cd "$root" && $wap "$compiler" scripts/wap-size.warp "$measure" 2>&1 && $wap "$measure" $(compiler_sources) | sed -n 's/^total\t//p')
 whole=$(echo "$total" | sed -n 's/^\([0-9]*\) of .* files typed whole.*/\1/p')
 counted=$(echo "$total" | sed -n 's/.*files typed whole, \([0-9]*\) of \([0-9]*\) functions typed.*/\2 - \1/p')
 untyped=$([ -n "$counted" ] && echo $(($counted)))

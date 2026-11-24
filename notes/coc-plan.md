@@ -973,18 +973,20 @@ Decided by the user (2026-11-24):
   function over the parent is elaborated again for each program's hierarchy.
 - **What a type holds**: unlike types join to their union, not to `any`; `T?` is T or ø and no longer also an Error,
   which is `T or Error` (section 4).
+- **`f == g` between two functions** says they give equal results for every argument. It is a statement, decided
+  when the program is compiled: in a law it is equality of functions, proved by the provers (computing, the normal
+  form of polynomials, every value of a small domain, induction); as a condition it is answered with a proof or a
+  counterexample, and refused where the compiler finds neither. Function values known only when the program runs
+  are refused. It is the rule of every condition that cannot be decided (E3).
+- **`===`** is the strict test the compiler writes for a type, field by field: no conversion before it
+  (`3 === 3.0` is no) and no `equals` of the program in it. It is refused on a quotient and on functions, and is
+  never the identity of two objects.
 
 Open, with the recommendation first and its cost in core; with the user through the interviewer:
 
-1. **`==` between two function values.** Recommended: a statement, not a test. In a law it is equality of
-   functions, proved by the provers (computing, the normal form of polynomials, every value of a small domain,
-   induction); as a condition it is answered when the program is compiled, with a proof or a counterexample, and
-   refused where the compiler finds neither. 0 core lines: it is the rule of every condition that cannot be decided.
-2. **`===`.** Recommended: the test the compiler writes for a type, with no conversion before it and no `equals` of
-   the program in it; refused on a quotient and on function values; never identity. 0 core lines.
-3. **W0 and `wap verify`.** Recommended: the Lean model and the Lean prover retire at milestones S3 and P3; until
+1. **W0 and `wap verify`.** Recommended: the Lean model and the Lean prover retire at milestones S3 and P3; until
    then they stay beside the new ones. 0 core lines.
-4. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
+2. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
    `refl`; `axiom`, `assume`; `by`, `chain`; `decreasing`; the axioms' names. Settled on the wiki pages.
 
 Decided by the plan, for the user to overrule: the rules are those of Lean 4's kernel with the four departures of

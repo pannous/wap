@@ -1,19 +1,26 @@
 # Definitional equality (notes/coc-plan.md 6.5; this folder's files: notes/theory.md): two terms are equal when the
-# first rule that applies says so. Both sides are computed by beta and zeta, then definitions unfold lazily, the
-# later-declared one first, until the heads agree; then the shapes are compared, and a function is compared with
-# any other term by applying both (eta). Proof irrelevance and eta for structures come with structures (K4).
+# first rule that applies says so. Both sides are computed by beta and zeta; two proofs of one proposition are equal;
+# then definitions unfold lazily, the later-declared one first, until the heads agree; then the shapes are compared,
+# and what is left is eta: a function is compared with any other term by applying both, a structure's constructor
+# with any other term of the structure by projecting it, and two terms of a structure without fields are equal.
+# A pair found equal is kept for the rest of the check: a free variable is never made twice, so the answer holds.
 
 use "terms.wap"
 use "levels.wap"
 use "environment.wap"
 use "compute.wap"
+use "typing.wap"
 use "numbers.wap"
 
 equal(c: Checker, a: Term, b: Term): bool := {
-	if same(a, b) { return yes }
+	if same(a, b) or kept_pair(c.equalities, a, b) or kept_pair(c.equalities, b, a) { return yes }
 	stepped(c)
-	left = computed_folded(c, a)
-	right = computed_folded(c, b)
+	found = equal_by_rules(c, computed_folded(c, a), computed_folded(c, b))
+	if found { remember(c.equalities, a, b) }
+	found
+}
+equal_by_rules(c: Checker, left: Term, right: Term): bool := {
+	if proofs_equal(c, left, right) { return yes }
 	while yes {
 		if same(left, right) or alike(c, left, right) { return yes }
 		left_place = unfolding_place(c, left)
@@ -22,7 +29,15 @@ equal(c: Checker, a: Term, b: Term): bool := {
 		if left_place >= right_place { left = computed_folded(c, unfolded(c, left) ?? left) }
 		if right_place >= left_place { right = computed_folded(c, unfolded(c, right) ?? right) }
 	}
-	numeral_opened(c, left, right) or numeral_opened(c, right, left) or eta(c, left, right) or eta(c, right, left)
+	both_ways(c, left, right, numeral_opened) or both_ways(c, left, right, eta) or both_ways(c, left, right, structure_eta) or fieldless_equal(c, left, right)
+}
+# a rule tried with its two terms in both orders
+both_ways(c: Checker, a: Term, b: Term, rule: (Checker, Term, Term) -> bool): bool := rule(c, a, b) or rule(c, b, a)
+
+# proof irrelevance: two proofs of one proposition are equal
+proofs_equal(c: Checker, a: Term, b: Term): bool := {
+	type = type_of(c, a)
+	is_proposition(c, type) and equal(c, type, type_of(c, b))
 }
 
 # where the head constant of a term was declared, 0 when it unfolds to nothing: of two, the later one unfolds first
@@ -105,4 +120,34 @@ eta(c: Checker, function: Term, other: Term): bool := match function.shape {
 is_function(t: Term): bool := match t.shape {
 	Lambda(binder, domain, body) => yes
 	_ => no
+}
+
+# eta for structures: a structure's constructor given all its fields equals a term of the same type whose
+# projections equal those fields (`p` equals `Pair.make(A, B, p.1, p.2)`)
+structure_eta(c: Checker, made: Term, other: Term): bool := {
+	name = match head(made).shape {
+		Constant(name, levels) => name
+		_ => return no
+	}
+	match (declaration(c.environment, name) ?? return no).kind {
+		Constructor(of, place, fields) => {
+			facts = structure_facts(c.environment, of) ?? return no
+			given = arguments(made)
+			parameters = facts.block.parameters
+			#given == parameters + fields and equal(c, type_of(c, made), type_of(c, other)) and (1 .. fields + 1).all(at => equal(c, given#(parameters + at), projection(of, at, other)))
+		}
+		_ => no
+	}
+}
+
+# unit eta: two terms of one structure without fields are equal
+fieldless_equal(c: Checker, a: Term, b: Term): bool := {
+	type = type_of(c, a)
+	facts = structure_of(c, type) ?? return no
+	facts.fields#1#1 == 0 and equal(c, type, type_of(c, b))
+}
+# the structure a type computes to, ø for any other type
+structure_of(c: Checker, type: Term): InductiveFacts? := match head(computed(c, type)).shape {
+	Constant(name, levels) => structure_facts(c.environment, name)
+	_ => ø
 }

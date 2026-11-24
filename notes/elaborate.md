@@ -15,12 +15,18 @@ obligations).
   the subject and a block of arrows. Lowering is the input of today's pipeline, which the elaborator replaces, so it
   lowers no enum form the kernel needs (parameters, result types). It does not read today's binding or typing
   facts: it resolves names itself. A type is read by the same function as a value: there is one reader of
-  expressions.
-- **Laws and axioms** arrive as their word called on the declaration (wap/sugar/definitions.wap): `law four: 2 + 2
-  == 4 := refl` as `law(Define(four: 2 + 2 == 4, (), refl))`, a proved law the definition of its proof;
-  `axiom int: Type` as `axiom(int: Type)`. A law or axiom without a value whose name takes parameters is one of a
+  expressions. Two forms are the reader's own, since a type is a value now:
+  - a type after a colon is not lowered (`Type(1)` is Key(Type, None, (1)) there and a call where a value
+    stands): the reader takes both;
+  - `->` is the function type wherever it stands and `=>` the one arrow of a function value (wiki/closure.md):
+    `(A: Type) -> A` where a value stands is the call of `->` on its binders and its result, never an Fn.
+- **Theorems, laws and axioms** arrive as their word called on the declaration (wap/sugar/definitions.wap):
+  `theorem four: 2 + 2 == 4 := refl` as `theorem(Define(four: 2 + 2 == 4, (), refl))`, a proved one the definition of
+  its proof; `axiom int: Type` as `axiom(int: Type)`. One without a value whose name takes parameters is one of a
   function type: `axiom f(x: A): B` arrives as `axiom(f: (x: A) -> B)`, the type lowered as a written one is.
-  `declaration_elaborated` (elaborate/declare.wap) takes both.
+  `declaration_elaborated` (elaborate/declare.wap) takes them all. A theorem without a proof is refused; a law
+  without one is elaborated and kept in `Theory.unproved_laws`, never declared, so a proof naming it is refused; an
+  axiom is an `Axiom`.
 - **Writes** declarations into the theory's `Environment` through `declared` and `inductive_declared`, and
   nothing else. A term it hands over holds no hole.
 - **The door** `elaborate/door.wap program.wap` loads the prelude (`wap/extensions/theory/prelude/`), elaborates the
@@ -35,33 +41,65 @@ of the kernel (`hypothesis(c, name, type)`) that the elaborator may answer; so t
 work on a term with holes as they are, a hole being a variable nothing is known of. A hole for a level is a level
 parameter whose name starts with `?`.
 
-`Elaboration` is the state of one declaration: the environment, a `Checker`, the names in scope (each a free
-variable), the holes with their answers, and the problems put off.
-- `hole(el, name, type)`: a new hole; `level_hole(el)`: a new level hole.
-- `filled(el, t)`: t with every answered hole replaced by its answer, levels too. A term is filled before it is
-  computed, compared or handed on.
-- `unified(el, a, b)`: whether a and b can be made equal, answering holes on the way. It follows equal.wap's rules
-  on filled terms and adds: a hole against a term is answered by it when the term names no variable made after the
-  hole and not the hole itself; a hole applied to distinct variables is answered by the function of them; two
-  levels are unified by answering a level hole that stands alone on one side. A problem none of this solves is put
-  off and tried again whenever a hole is answered.
-- At the end of a declaration every hole is answered, or the refusal `cannot find` names it by the name the
-  program would have written: "the T of identity cannot be found from its arguments".
+**A hole is a function of the binders in scope.** Under the binders `x` and `y` a hole of type `T` is made as a
+variable of type `(x: X) -> (y: Y) -> T`, and what the reader gets is that variable applied, `?h(x, y)`. So:
+- a binder that closes binds its variable inside `?h(x, y)` like anywhere else, also when the hole has no answer
+  yet; an answer found after the binder closed is still good;
+- an answer names no binder at all, only its own parameters and other holes. It is a closed function, put in
+  anywhere as it is. No order of making and no scope is asked when an answer is given: "names a binder" is the
+  whole test, and it is what keeps a variable from escaping its binder.
+
+`Elaboration` is the state of one declaration: a `Checker`, the binders in scope (their variables, the outermost
+first; a binder's name is its hypothesis's), the holes with their answers, and the problems put off.
+- `scoped(el, binder, type)`: a binder gone into, in scope from here; `unscoped(el, variables)`: binders left
+  again; `named(el, name)`: the innermost binder in scope of a name. The reader enters every binder so, a
+  definition's parameters and its letters too.
+- `hole(el, name, type)`: a new hole over the whole scope. `hole_over(el, name, type, variables)`: one over these
+  binders only, for a letter's type, which may depend on the letters before it and on nothing written.
+  `level_hole(el)`: a new level hole.
+- `filled(el, t)`: t with every answered hole replaced by its answer, levels too; an answered hole applied to its
+  arguments is the answer's body with them put in. It goes under a binder by a free variable, as the kernel does,
+  so what is put in is closed. A term is filled before it is computed, compared or handed on.
+- `unified(el, a, b)`: whether a and b can be made equal, answering holes on the way. Two terms without a hole are
+  the kernel's `equal`. With holes it follows equal.wap's rules on filled terms (the unfolding order, eta for
+  functions) and adds:
+  - **the pattern rule**: a hole applied to variables of binders, no two the same, against a term t is answered by
+    the function of those variables that gives t, when that function names neither the hole itself nor a binder;
+    the answer's type is unified with the hole's type, which is what finds a letter's level from its value. With
+    a hole on both sides the left one is tried first, then the right one;
+  - **waiting**: a hole applied to anything else (a value, a variable twice, another hole), and a pattern whose
+    other side still holds a hole and gave no answer, is a problem put off: the unification says yes, and the
+    problem is tried again whenever a hole is answered; an answer a waiting problem refuses is no answer;
+  - a pattern that finds no answer against a term without holes is a mismatch;
+  - two levels are unified by answering a level hole that stands alone on one side; other level problems wait for
+    the end of the declaration (`level_problems_hold`).
+  `found_so_far(el)` and `back_to(el, kept)` take a reading back: the answers, the problems and the scope.
+- At the end of a declaration every hole in what is handed to the kernel is answered, or the refusal `cannot find`
+  names it by the name the program would have written: "the T of identity cannot be found from its arguments". A
+  problem still waiting then is the kernel's to judge: it checks the filled term whole.
+
+Not in the unifier: no guess is made for a hole applied to values. `?F(?A)` against `list(int)` waits; taking it
+apart as `?F` against `list` and `?A` against `int` (first-order approximation) is what a letter standing for a
+type constructor needs, and it comes with the traits of E3, as a rule that says which of several answers is
+taken.
 
 ## Names
 
-- A name is looked up among the binders around it, then among the program's and the prelude's declarations.
+- A name is looked up among the binders around it (`named`), then among the program's and the prelude's
+  declarations.
 - A declaration's binders are of three kinds, kept beside the kernel's declaration (the kernel has no kinds):
   written, found (a letter), instance (a trait's, from E3 on). A call gives a hole for each found binder and reads
   an argument for each written one.
 - **Letters.** In a definition's header a one-letter name that nothing binds is a found binder of the definition,
-  in the order of first appearance, before the written ones. Its type is a hole: a letter used as a type gets
-  `Sort(?u)`, any other what its use says (`n` in `vector(T, n)` is a `nat`). A one-letter level name nothing binds
-  is a level parameter. Level holes left when the header is done become level parameters too.
+  in the order of first appearance, before the written ones, and in scope for the whole header and the body. Its
+  type is a hole: a letter used as a type gets `Sort(?u)`, any other what its use says (`n` in `vector(T, n)` is a
+  `nat`). That hole is made over the letters before it only, so a letter's type names no written binder: a found
+  binder whose type must name a parameter is written as a parameter. A one-letter level name nothing binds is a
+  level parameter. Level holes left when the header is done become level parameters too.
 - **Overloads.** Several declarations of one name are one overload set. A call tries each against its arguments
-  and the type wanted; exactly one must fit, none or several is the refusal `overload` naming them. In the
-  environment an overloaded name is written with its parameter types, `+(nat, nat)`; a name with one declaration
-  is bare.
+  and the type wanted, going back to what was found before each try; exactly one must fit, none or several is the
+  refusal `overload` naming them. In the environment the first declaration of a name keeps the bare name, and a
+  later one of that name is declared by the name with its parameter types, `size(text)`.
 
 ## Reading an expression
 
@@ -82,7 +120,7 @@ wanted before its later arguments are read, so they are read with more known.
 ## Declarations
 
 - `Define` with a type and a body: the header is read first (letters, levels), giving the declared type; the body
-  is read against it; holes are filled; then `declared`. A `law` is a `Theorem`, `axiom` an `Axiom`.
+  is read against it; holes are filled; then `declared`. A `theorem` or a proved `law` is a `Theorem`, `axiom` an `Axiom`.
 - An enum or a class: the names after the type's name are its parameters, the result type's binders its
   indices, the cases its cases; a class is a block of one type with one case named as the type. Enums that name
   each other are one block. The block goes to `inductive_declared`, then the recursors are made.
@@ -178,7 +216,7 @@ adds is how a candidate fits and where its instances come from.
 - The rules of notes/theory.md hold here too: closed terms only (a binder is entered by a free variable), names
   are hints, never `==` on a term, each file names what it uses.
 - Refuse, never guess: where two readings fit, both are named. The elaborator's refusals have their own rule
-  names: `cannot find`, `overload`, `covering`, `recursion`, `unknown name`; from E3 on `trait` and
+  names: `cannot find`, `overload`, `covering`, `recursion`, `unknown name`, `unproved theorem`, `unproved law`; from E3 on `trait` and
   `undecidable condition`; from E4 on `conversion`, `condition` and `unproved condition`.
 - Nothing here is trusted and nothing here may weaken a check: a term the kernel refuses is reported as the
   elaborator's bug, with the declaration, never retried another way.
