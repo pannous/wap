@@ -1,13 +1,13 @@
 #!/bin/bash
 # Spawns wap agent roles as Remote Control sessions in detached tmux (tmux name wap-<role>) and prints their URLs.
-#   notes/agents/start.sh                         the services, the lead and the stage owners (skips ones already running)
+#   notes/agents/start.sh                         the services and the stage owners (skips ones already running)
 #   notes/agents/start.sh <role>                  one of the SERVICES
 #   notes/agents/start.sh owner <stage>           the owner of one stage of OWNERS (wap-owner.md "Owners")
 #   notes/agents/start.sh worker <branch> "<task>"   a feature worker on that branch
 # The prompt of a role is notes/agents/<role>.md, read from origin/main by the session itself.
 REPO=/Users/me/dev/angles/wap
 SPAWN="$HOME/dev/bin/claude-remote.sh"
-SERVICES=(integrator interviewer fixer reviewer simplifier lead)
+SERVICES=(integrator interviewer fixer simplifier)  # the lead and the reviewer are the Supervisor (user 2026-11-24)
 OWNERS=(reader binding emitter native)
 
 supervisor_name() { echo "${WARP_SUPERVISOR:-the session that started you (see ListAgents)}"; }
