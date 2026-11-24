@@ -1,5 +1,5 @@
-# The door's accepted statements written for a second checker (notes/theory.md "A second opinion"): `export(
-# "file")` writes every statement accepted so far, in order, in wap's own names, one JSON record a line in the shape of
+# What the kernel accepted written for a second checker (notes/theory.md "A second opinion"): `export("file")`, in
+# either door, writes every statement the environment accepted so far, in order, in wap's own names, one JSON record a line in the shape of
 # lean4export's format: names, levels and terms each written once and numbered, a statement naming them by number.
 #
 #   {"in":1,"str":{"pre":0,"str":"nat"}}                         a name, nat; name 0 is the anonymous one
@@ -15,7 +15,6 @@ use text
 use magnitude
 use "terms.wap"
 use "environment.wap"
-use "explicit.wap"
 
 # the format's version, the first line's record
 META := "{\"meta\":{\"exporter\":{\"name\":\"wap\",\"version\":\"1\"},\"format\":{\"version\":\"3.1.0\"}}}"
@@ -33,10 +32,14 @@ class Export {
 	terms: map<text, int> = {}
 }
 
-# the export of these statements, its lines
-exported(statements: list<Statement>): text := {
+# the export of what an environment accepted, its lines
+exported(e: Environment): text := {
 	x = Export()
-	for statement in statements { statement_exported(x, statement) }
+	# a statement is written whole before it is added: the names, levels and terms it numbers go before it
+	for accepted in e.accepted {
+		record = "{${accepted_written(x, accepted)}}"
+		x.lines += [record]
+	}
 	x.lines.join("\n") + "\n"
 }
 
@@ -54,11 +57,12 @@ name_number(x: Export, name: text): int := if name == "" then ANONYMOUS else nam
 
 level_number(x: Export, level: Level): int := match level {
 	Successor(of) => numbered(x, x.levels, "il", 1, "\"succ\":${level_number(x, of)}")
-	Max(left, right) => numbered(x, x.levels, "il", 1, "\"max\":[${level_number(x, left)},${level_number(x, right)}]")
-	Imax(left, right) => numbered(x, x.levels, "il", 1, "\"imax\":[${level_number(x, left)},${level_number(x, right)}]")
+	Max(left, right) => levels_numbered(x, "max", left, right)
+	Imax(left, right) => levels_numbered(x, "imax", left, right)
 	Parameter(name) => numbered(x, x.levels, "il", 1, "\"param\":${name_number(x, name)}")
-	_ => ZERO_LEVEL
+	Zero => ZERO_LEVEL
 }
+levels_numbered(x: Export, record: text, left: Level, right: Level): int := numbered(x, x.levels, "il", 1, "\"${record}\":[${level_number(x, left)},${level_number(x, right)}]")
 
 term_number(x: Export, t: Term): int := numbered(x, x.terms, "ie", 0, match t.shape {
 	Bound(index) => "\"bvar\":${index}"
@@ -78,27 +82,17 @@ numbers_written(numbers: list<int>): text := "[${numbers.join(",")}]"
 # what every declared name's record starts with: its name, level parameters and type
 named_written(x: Export, name: text, levels: list<text>, type: Term): text := "\"name\":${name_number(x, name)},\"levelParams\":${numbers_written(levels.map(level => name_number(x, level)))},\"type\":${term_number(x, type)}"
 
-statement_exported(x: Export, statement: Statement) := {
-	record = match statement {
-		Declares(d) => declaration_written(x, d)
-		DeclaresBlock(block) => "\"inductive\":{\"levelParams\":${numbers_written(block.levels.map(level => name_number(x, level)))},\"numParams\":${block.parameters},\"types\":[${block.types.map(type => "{${named_written(x, type.name, [], type.type)},\"ctors\":[${type.cases.map(case => "{\"name\":${name_number(x, case.name)},\"type\":${term_number(x, case.type)}}").join(",")}]}").join(",")}]}"
-		Binds(word, names) => "\"binds\":{\"word\":${double_quoted(word)},\"names\":${numbers_written(names.map(name => name_number(x, name)))}}"
-		_ => ""
-	}
-	if record != "" { x.lines += ["{${record}}"] }
+accepted_written(x: Export, accepted: Accepted): text := match accepted {
+	AcceptedDeclaration(d) => declaration_written(x, d)
+	AcceptedBlock(block) => "\"inductive\":{\"levelParams\":${numbers_written(block.levels.map(level => name_number(x, level)))},\"numParams\":${block.parameters},\"types\":[${block.types.map(type => "{${named_written(x, type.name, [], type.type)},\"ctors\":[${type.cases.map(case => "{\"name\":${name_number(x, case.name)},\"type\":${term_number(x, case.type)}}").join(",")}]}").join(",")}]}"
+	AcceptedBinding(word, names) => "\"binds\":{\"word\":${double_quoted(word)},\"names\":${numbers_written(names.map(name => name_number(x, name)))}}"
 }
-declaration_written(x: Export, d: Declaration): text := {
-	value = match d.kind {
-		Defined(value) => value
-		Theorem(value) => value
-		Opaque(value) => value
-		_ => ø
-	}
-	kind = match d.kind {
-		Axiom => DECLARATION_RECORDS#1
-		Defined(value) => DECLARATION_RECORDS#2
-		Theorem(value) => DECLARATION_RECORDS#3
-		_ => DECLARATION_RECORDS#4
-	}
-	"\"${kind}\":{${named_written(x, d.name, d.levels, d.type)}${if value is ø then "" else ",\"value\":${term_number(x, value!)}"}}"
+# a stated declaration's record by its kind, with its value when it has one
+declaration_written(x: Export, d: Declaration): text := match d.kind {
+	Axiom => declaration_record(x, DECLARATION_RECORDS#1, d, ø)
+	Defined(value) => declaration_record(x, DECLARATION_RECORDS#2, d, value)
+	Theorem(value) => declaration_record(x, DECLARATION_RECORDS#3, d, value)
+	Opaque(value) => declaration_record(x, DECLARATION_RECORDS#4, d, value)
+	_ => refused(NOT_EXPLICIT, "${d.name} was made by a block or the quotients, and an export writes those as their statement")
 }
+declaration_record(x: Export, kind: text, d: Declaration, value: Term?): text := "\"${kind}\":{${named_written(x, d.name, d.levels, d.type)}${if value is ø then "" else ",\"value\":${term_number(x, value!)}"}}"

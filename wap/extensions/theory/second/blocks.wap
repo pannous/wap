@@ -68,31 +68,34 @@ ending(j: Judge, type: Expr): Ending := {
 family_names(block: Block): list<text> := block.families.map(f => f.name)
 cases_of(block: Block): list<Case> := block.families.flat_map(f => f.cases)
 block_universes(block: Block): list<Universe> := block.levels.map(name => Named(name))
-binder_count(type: Expr): int := match type {
-	Pi(domain, body) => 1 + binder_count(body)
-	_ => 0
+# the types of a term's binders
+domains(t: Expr): list<Expr> := match t {
+	Pi(domain, body) => [domain] + domains(body)
+	_ => []
 }
+binder_count(type: Expr): int := #domains(type)
 indices_of(block: Block, family: int): int := binder_count(block.families#family.type) - block.parameters
 # the universe a family lies in: where its type ends
 family_level(j: Judge, family: Family): Universe := match telescope(j, family.type, -1).rest {
 	Sort(u) => u
 	_ => raise "${family.name} ends in no universe"
 }
-# the place of the family a term applies at the block's levels and these parameters, its indices free of the block;
-# 0 for any other term
-family_applied(block: Block, t: Expr, parameters: list<Expr>): int := {
-	at = family_names(block).index_of(head_name(t))
+# the place of the family a term applies at these levels and parameters, its indices free of the block; 0 for any
+# other term
+family_applied(block: Block, levels: list<Universe>, t: Expr, parameters: list<Expr>): int := {
+	name = head_name(t) ?? return 0
+	at = family_names(block).index_of(name)
 	if at == 0 { return 0 }
-	if not alike(head_of(t), Const(head_name(t), block_universes(block))) { raise "${head_name(t)} is used at other levels than its block's" }
+	if not alike(head_of(t), Const(name, levels)) { raise "${name} is used at other levels than its block's" }
 	xs = arguments_of(t)
-	if #xs != #parameters + indices_of(block, at) or not (1 .. #parameters + 1).all(p => alike(xs#p, parameters#p)) { raise "${head_name(t)} is used at other parameters than its block's" }
+	if #xs != #parameters + indices_of(block, at) or not (1 .. #parameters + 1).all(p => alike(xs#p, parameters#p)) { raise "${name} is used at other parameters than its block's" }
 	if xs.drop(#parameters).any(x => mentions(x, family_names(block))) { 0 } else { at }
 }
 # whether a field's type holds the block, strictly positively: only where its function type ends
 recursive(j: Judge, block: Block, field: Expr, parameters: list<Expr>): bool := {
 	if not mentions(field, family_names(block)) { return no }
 	end = ending(j, field)
-	if end.locals.any(v => mentions(j.locals#local_id(v), family_names(block))) or family_applied(block, end.result, parameters) == 0 { raise "a field holds its block where only its result may" }
+	if end.locals.any(v => mentions(j.locals#local_id(v), family_names(block))) or family_applied(block, block_universes(block), end.result, parameters) == 0 { raise "a field holds its block where only its result may" }
 	yes
 }
 
@@ -137,7 +140,7 @@ case_checked(j: Judge, block: Block, case: Case, family: text, parameters: list<
 		if not surely_zero(settled(level)) and not level_at_most(sort_of(j, type), level) { raise "${case.name} has a field above its block's universe" }
 		recursive(j, block, type, parameters)
 	}
-	if family_names(block)#family_applied(block, whnf(j, fields.rest), parameters) != family { raise "${case.name} makes no ${family}" }
+	if family_names(block)#family_applied(block, block_universes(block), whnf(j, fields.rest), parameters) != family { raise "${case.name} makes no ${family}" }
 	#fields.locals
 }
 # a Prop block's only case may be taken into any universe when each field is a proof or an index of its result
@@ -170,7 +173,7 @@ minor_type(j: Judge, block: Block, case: Case, k: int, parameters: list<Expr>, m
 	for v in fields.locals {
 		if mentions(j.locals#local_id(v), family_names(block)) {
 			end = ending(j, j.locals#local_id(v))
-			m = family_applied(block, end.result, parameters)
+			m = family_applied(block, block_universes(block), end.result, parameters)
 			hypotheses += [fresh(j, pis(j, end.locals, apply_all(motives#m, arguments_of(end.result).drop(block.parameters) + [apply_all(v, end.locals)])))]
 		}
 	}
@@ -187,8 +190,9 @@ recursor_step(j: Judge, block: Block, k: int, us: list<Universe>, xs: list<Expr>
 	if #xs < major_at { return ø }
 	levels = us.drop(#us - #block.levels)
 	major = case_made(j, block, k, levels, whnf(j, xs#major_at)) ?? return ø
-	if not block.families#k.cases.map(c => c.name).contains(head_name(major)) { return ø }
-	place = cases_of(block).map(c => c.name).index_of(head_name(major))
+	name = head_name(major) ?? return ø
+	if not block.families#k.cases.map(c => c.name).contains(name) { return ø }
+	place = cases_of(block).map(c => c.name).index_of(name)
 	case = cases_of(block)#place
 	parameters = xs.take(n)
 	fields = arguments_of(major).drop(n)
@@ -199,7 +203,7 @@ recursor_step(j: Judge, block: Block, k: int, us: list<Universe>, xs: list<Expr>
 			Pi(domain, body) => {
 				if mentions(domain, family_names(block)) {
 					end = ending(j, domain)
-					m = family_applied(block, end.result, parameters)
+					m = family_applied(block, levels, end.result, parameters)
 					hypotheses += [lams(j, end.locals, apply_all(Const(block.families#m.name + RECURSOR, us), xs.take(shared) + arguments_of(end.result).drop(n) + [apply_all(v, end.locals)]))]
 				}
 				rest = instantiate(body, v)
@@ -229,7 +233,7 @@ structure_named(j: Judge, name: text): Block? := match (j.environment.known.get(
 	FamilyOf(place) => {
 		block = j.environment.blocks#place
 		cases = cases_of(block)
-		if #block.families == 1 and #cases == 1 and indices_of(block, 1) == 0 and not mentions(cases#1.type, [name]) then block else ø
+		if #block.families == 1 and #cases == 1 and indices_of(block, 1) == 0 and not domains(cases#1.type).any(d => mentions(d, [name])) then block else ø
 	}
 	_ => ø
 }
@@ -238,7 +242,7 @@ structure_named(j: Judge, name: text): Block? := match (j.environment.known.get(
 field_type(j: Judge, structure: text, place: int, of: Expr): Expr := {
 	block = structure_named(j, structure) ?? raise("${structure} is no structure")
 	type = whnf(j, infer(j, of))
-	if head_name(type) != structure { raise "a ${head_name(type)} is projected as a ${structure}" }
+	if head_name(type) != structure { raise "a ${named(type)} is projected as a ${structure}" }
 	proof = is_proposition(j, type)
 	rest = given(with_levels(cases_of(block)#1.type, block.levels, match head_of(type) { Const(name, us) => us; _ => [] }), arguments_of(type))
 	for at in 1 to place {
@@ -262,7 +266,7 @@ field_taken(j: Judge, structure: text, place: int, of: Expr): Expr? := {
 }
 # a structure's case given all its fields equals a term of its type whose fields equal them
 structure_eta(j: Judge, made: Expr, other: Expr): bool := {
-	role = (j.environment.known.get(head_name(made)) ?? return no).role
+	role = (j.environment.known.get(head_name(made) ?? return no) ?? return no).role
 	match role {
 		CaseOf(family, minor, fields) => {
 			block = structure_named(j, family) ?? return no
@@ -275,6 +279,6 @@ structure_eta(j: Judge, made: Expr, other: Expr): bool := {
 # two terms of one structure without fields are equal
 fieldless_alike(j: Judge, a: Expr, b: Expr): bool := {
 	type = whnf(j, infer(j, a))
-	block = structure_named(j, head_name(type)) ?? return no
+	block = structure_named(j, head_name(type) ?? return no) ?? return no
 	binder_count(cases_of(block)#1.type) == block.parameters and convertible(j, type, infer(j, b))
 }
