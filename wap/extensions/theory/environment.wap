@@ -1,0 +1,246 @@
+# What the kernel holds while it checks (notes/coc-plan.md 6.6; this folder's files: notes/theory.md): the
+# declarations accepted so far, the binders it is inside of, its step count, and the one way it refuses.
+
+use "terms.wap"
+use "numbers.wap"
+
+# how many steps of computing a declaration's check may take before it is refused as "gave up": the same count on
+# every machine
+STEP_BUDGET := 10000000
+
+# The rules a refusal names, in plain words: `refused by argument type: int is a Type, and box takes a Type(1)`. A
+# test pins the rule, never the message after it
+REFUSED := "refused by "
+UNKNOWN_NAME := "unknown name"
+LEVEL_COUNT := "level count"
+LEVEL_PARAMETER := "level parameter"
+NOT_A_FUNCTION := "not a function"
+ARGUMENT_TYPE := "argument type"
+NOT_A_TYPE := "not a type"
+VALUE_TYPE := "value type"
+NOT_A_PROPOSITION := "not a proposition"
+NAME_TAKEN := "name taken"
+NOT_CLOSED := "not closed"
+GAVE_UP := "gave up"
+ENUM_HEADER := "enum header"
+CASE_TYPE := "case type"
+PARAMETERS := "parameters"
+CASE_RESULT := "case result"
+FIELD_UNIVERSE := "field universe"
+STRICT_POSITIVITY := "strict positivity"
+NO_NUMBERS := "no numbers"
+NOT_A_STRUCTURE := "not a structure"
+DATA_FROM_PROOF := "data out of a proof"
+NUMBERS := "numbers"
+SHORTCUT := "shortcut"
+NOT_EXPLICIT := "not explicit"
+QUOTIENTS := "quotients"
+
+refused(rule: text, found: text) := raise REFUSED + rule + ": " + found
+
+# --- declarations
+
+# What a declared name is: an axiom has its type alone; a definition and a theorem unfold to their value; an
+# opaque constant's value was checked and is never read again
+enum DeclarationKind {
+	Axiom
+	Defined(value: Term)
+	Theorem(value: Term)
+	Opaque(value: Term)
+	# a type of an inductive block, and one of its cases: the name of its type, its place among the type's cases, and
+	# how many fields it takes after the block's parameters
+	Inductive(facts: InductiveFacts)
+	Constructor(of: text, place: int, fields: int)
+	# the recursor of a type of a block (recursors.wap)
+	Recursor(facts: RecursorFacts)
+	# one of the quotient's four constants (quotients.wap)
+	Quotient(part: QuotientPart)
+}
+# the quotient type, the maker of its values, and the two ways out of it, which compute on a made value
+enum QuotientPart { Former, Of, Lift, Induct }
+
+# An inductive block as it is written (7): its level parameters and the count of parameters all its types share,
+# and its types, each with its cases. Inside the block a type of it is written as its constant at the block's level
+# parameters
+class WrittenCase { name: text; type: Term }
+class BlockType { name: text; type: Term; cases: list<WrittenCase> }
+class InductiveBlock { levels: list<text>; parameters: int; types: list<BlockType> }
+type_names(block: InductiveBlock): list<text> := block.types.map(type => type.name)
+# What checks 1 to 5 found of a block, so the recursors are made without finding it again: the block made plain,
+# its types first and then one for each container a type of it is nested in, and that container as a function of
+# the block's parameters (nested.wap); the universe its types lie in; each type's count of indices; each case's count
+# of fields and the places of the fields that hold a type of the block, by type and then by case; whether its
+# recursors may compute into any universe or into Prop only; and the flags of check 7: a structure (one type, one
+# case, no indices, holding no value of itself) and K (a proposition of one type, one case without fields)
+class InductiveFacts {
+	block: InductiveBlock
+	nested: list<Term>
+	level: Level
+	indices: list<int>
+	fields: list<list<int>>
+	recursive: list<list<list<int>>>
+	any_motive: bool
+	structure: bool
+	k: bool
+}
+
+# What iota reads of a recursor: its type and that type's cases, by name, with each case's count of fields; the
+# counts of the binders it takes before the major premise; one computation rule per case, a closed function of the
+# parameters, the motives, the minor premises and the case's fields; and K (the block's flag)
+class RecursorFacts {
+	of: text
+	cases: list<text>
+	fields: list<int>
+	parameters: int
+	motives: int
+	minors: int
+	indices: int
+	rules: list<Term>
+	k: bool
+}
+
+# A declaration: its name, the names of its level parameters, its type, and what it is
+class Declaration { name: text; levels: list<text>; type: Term; kind: DeclarationKind }
+
+# the facts of a structure a name declares (7, check 7: one type, one case, no indices, holding no value of
+# itself), ø for any other name
+structure_facts(e: Environment, name: text): InductiveFacts? := match (e.declarations.get(name) ?? return ø).kind {
+	Inductive(facts) => if facts.structure and facts.block.types#1.name == name then facts else ø
+	_ => ø
+}
+
+# the value a use of the declaration unfolds to (6.4 delta), ø for one that never unfolds
+unfolding(d: Declaration): Term? := match d.kind {
+	Defined(value) => value
+	Theorem(value) => value
+	_ => ø
+}
+
+# The declarations accepted so far, and each one's place in the order of declaring, from 1: of two definitions the
+# later one unfolds first (6.5)
+class Environment {
+	declarations: map<text, Declaration> = {}
+	places: map<text, int> = {}
+	# the axioms each declaration rests on, through everything its type and its value name
+	axioms: map<text, list<text>> = {}
+	# the number type and the shortcuts, once the numbers statement bound them (numbers.wap)
+	numbers: Numbers? = ø
+}
+declaration(e: Environment, name: text): Declaration? := e.declarations.get(name)
+# the declaration of a name that must be declared, else refused
+declared_named(e: Environment, name: text): Declaration := {
+	d = declaration(e, name)
+	if d is ø { refused(UNKNOWN_NAME, "nothing is named ${name}") }
+	d!
+}
+place(e: Environment, name: text): int := e.places.get(name) ?? 0
+# another environment holding the same declarations, which may grow without this one growing
+copied(e: Environment): Environment := {
+	copy = Environment()
+	copy.declarations.update(e.declarations)
+	copy.places.update(e.places)
+	copy.axioms.update(e.axioms)
+	copy.numbers = e.numbers
+	copy
+}
+# Every axiom a declaration rests on (`axioms of name`): an axiom rests on itself, any other declaration on what the
+# names in its type and its value rest on, an opaque value's names too
+axioms_of(e: Environment, name: text): list<text> := e.axioms.get(name) ?? []
+# what a new declaration of these terms rests on, recorded under its name; `own` is yes for an axiom
+rests_on(e: Environment, name: text, terms: list<Term>, own: bool) := {
+	named: map<text, bool> = {}
+	for t in terms { constants_named(t, named) }
+	resting: list<text> = if own then [name] else []
+	for used in named.keys() {
+		for axiom in axioms_of(e, used) { if not resting.contains(axiom) { resting += [axiom] } }
+	}
+	e.axioms[name] = resting
+}
+# the constants a term names, each once, gathered into a map whose keys they are
+constants_named(t: Term, named: map<text, bool>) := {
+	match t.shape {
+		Constant(name, levels) => { named[name] = yes }
+		Apply(function, argument) => { constants_named(function, named); constants_named(argument, named) }
+		Lambda(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
+		Pi(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
+		LetIn(binder, type, value, body) => { constants_named(type, named); constants_named(value, named); constants_named(body, named) }
+		Projection(structure, field, of) => { named[structure] = yes; constants_named(of, named) }
+		_ => ø
+	}
+}
+# a declaration becomes part of the environment; typing.wap's `declared` checks it first and is the only caller
+added(e: Environment, d: Declaration) := {
+	e.places[d.name] = #e.places + 1
+	e.declarations[d.name] = d
+}
+
+# The checks every declaration passes before its type is read, an inductive block's names and levels too: its names
+# are not declared yet, its level parameters are distinct, and its terms are closed
+names_new(e: Environment, names: list<text>) := {
+	for at in 1 to #names {
+		if declaration(e, names#at) is not ø or names.take(at - 1).contains(names#at) { refused(NAME_TAKEN, "${names#at} is declared already") }
+	}
+}
+levels_distinct(levels: list<text>) := {
+	for at in 1 to #levels {
+		if levels.take(at - 1).contains(levels#at) { refused(LEVEL_PARAMETER, "the level parameter ${levels#at} is named twice") }
+	}
+}
+closed(t: Term, name: text) := {
+	if t.loose > 0 or t.holds_free { refused(NOT_CLOSED, "${name} holds a variable bound nowhere") }
+}
+
+# --- the state of one check
+
+# a binder the kernel is inside of: its name, for showing, and its type
+class Hypothesis { binder: text; type: Term }
+# a term and what a walk made of it, kept so the walk is not done again
+class Kept { of: Term; result: Term }
+# results by their term's hash; terms of one hash are told apart by `same`
+class Memory { kept: map<int, list<Kept>> = {} }
+remembered(memory: Memory, of: Term): Term? := {
+	for kept in memory.kept.get(of.hash) ?? [] { if same(kept.of, of) { return kept.result } }
+	ø
+}
+remember(memory: Memory, of: Term, result: Term) := {
+	memory.kept[of.hash] = (memory.kept.get(of.hash) ?? []) + [Kept(of, result)]
+}
+# whether b was kept as a result of a: a pair kept, such as two terms found equal
+kept_pair(memory: Memory, a: Term, b: Term): bool := (memory.kept.get(a.hash) ?? []).any(kept => same(kept.of, a) and same(kept.result, b))
+
+# The state of the check of one declaration or one question: the environment, the declaration's level parameters,
+# the binders gone into, the steps taken, what compute.wap keeps of closed terms and typing.wap of any term, and the
+# pairs equal.wap found equal
+class Checker {
+	environment: Environment
+	levels: list<text> = []
+	hypotheses: list<Hypothesis> = []
+	steps: int = 0
+	budget: int = STEP_BUDGET
+	heads: Memory = Memory()
+	types: Memory = Memory()
+	equalities: Memory = Memory()
+}
+checker(e: Environment, levels: list<text>): Checker := Checker(e, levels)
+
+# The free variable of a binder the kernel goes into (terms.wap: locally nameless): `(x: A) => b` is checked as
+# `instantiated(b, hypothesis(c, "x", A))`
+hypothesis(c: Checker, binder: text, type: Term): Term := {
+	c.hypotheses += [Hypothesis(binder, type)]
+	free(#c.hypotheses)
+}
+# the type and the name of a free variable the checker made
+hypothesis_of(c: Checker, id: int): Hypothesis := c.hypotheses#id
+# a term under the checker's free variables closed over them again, the first outermost: as a function type, or as a
+# function
+closed_over(c: Checker, t: Term, variables: list<Term>, function: bool): Term := variables.reverse().fold(t, (inner, variable) => {
+	hypothesis = hypothesis_of(c, variable_id(variable))
+	body = abstracted(inner, variable_id(variable))
+	if function then lambda(hypothesis.binder, hypothesis.type, body) else pi(hypothesis.binder, hypothesis.type, body)
+})
+
+# One step of computing counted; past the budget the check gave up, which is a refusal, never an acceptance
+stepped(c: Checker) := {
+	c.steps += 1
+	if c.steps > c.budget { refused(GAVE_UP, "the check took more than ${c.budget} steps") }
+}

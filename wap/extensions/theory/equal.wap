@@ -1,0 +1,153 @@
+# Definitional equality (notes/coc-plan.md 6.5; this folder's files: notes/theory.md): two terms are equal when the
+# first rule that applies says so. Both sides are computed by beta and zeta; two proofs of one proposition are equal;
+# then definitions unfold lazily, the later-declared one first, until the heads agree; then the shapes are compared,
+# and what is left is eta: a function is compared with any other term by applying both, a structure's constructor
+# with any other term of the structure by projecting it, and two terms of a structure without fields are equal.
+# A pair found equal is kept for the rest of the check: a free variable is never made twice, so the answer holds.
+
+use "terms.wap"
+use "levels.wap"
+use "environment.wap"
+use "compute.wap"
+use "typing.wap"
+use "numbers.wap"
+
+equal(c: Checker, a: Term, b: Term): bool := {
+	if same(a, b) or kept_pair(c.equalities, a, b) or kept_pair(c.equalities, b, a) { return yes }
+	stepped(c)
+	found = equal_by_rules(c, computed_folded(c, a), computed_folded(c, b))
+	if found { remember(c.equalities, a, b) }
+	found
+}
+equal_by_rules(c: Checker, left: Term, right: Term): bool := {
+	if proofs_equal(c, left, right) { return yes }
+	while yes {
+		if same(left, right) or alike(c, left, right) { return yes }
+		left_place = unfolding_place(c, left)
+		right_place = unfolding_place(c, right)
+		if left_place == 0 and right_place == 0 { break }
+		if left_place >= right_place { left = computed_folded(c, unfolded(c, left) ?? left) }
+		if right_place >= left_place { right = computed_folded(c, unfolded(c, right) ?? right) }
+	}
+	both_ways(c, left, right, numeral_opened) or both_ways(c, left, right, eta) or both_ways(c, left, right, structure_eta) or fieldless_equal(c, left, right)
+}
+# a rule tried with its two terms in both orders
+both_ways(c: Checker, a: Term, b: Term, rule: (Checker, Term, Term) -> bool): bool := rule(c, a, b) or rule(c, b, a)
+
+# proof irrelevance: two proofs of one proposition are equal
+proofs_equal(c: Checker, a: Term, b: Term): bool := {
+	type = type_of(c, a)
+	is_proposition(c, type) and equal(c, type, type_of(c, b))
+}
+
+# where the head constant of a term was declared, 0 when it unfolds to nothing: of two, the later one unfolds first
+unfolding_place(c: Checker, t: Term): int := match head(t).shape {
+	Constant(name, levels) => {
+		d = declaration(c.environment, name)
+		if d is ø or unfolding(d) is ø then 0 else place(c.environment, name)
+	}
+	_ => 0
+}
+
+# a number equals a term of the number type that is no number when the case it stands for equals that term
+numeral_opened(c: Checker, number: Term, other: Term): bool := {
+	value = literal(number) ?? return no
+	n = c.environment.numbers ?? return no
+	literal(other) is ø and equal(c, opened(n, value), other)
+}
+
+# two terms of one shape with equal parts: sorts at equal levels, equal numbers, one free variable, constants of one
+# name at equal levels, binders with equal domains and bodies, projections of one field, applications of alike heads
+# to equal arguments: heads are compared without unfolding, the loop in `equal` unfolds the later one with its arguments
+alike(c: Checker, a: Term, b: Term): bool := match a.shape {
+	Sort(level) => match b.shape {
+		Sort(other) => levels_equal(level, other)
+		_ => no
+	}
+	Numeral(value) => match b.shape {
+		Numeral(other) => value == other
+		_ => no
+	}
+	Free(id) => match b.shape {
+		Free(other) => id == other
+		_ => no
+	}
+	Constant(name, levels) => match b.shape {
+		Constant(other, other_levels) => name == other and pairwise(levels, other_levels, levels_equal)
+		_ => no
+	}
+	Lambda(binder, domain, body) => match b.shape {
+		Lambda(other_binder, other_domain, other_body) => bodies_equal(c, binder, domain, body, other_domain, other_body)
+		_ => no
+	}
+	Pi(binder, domain, body) => match b.shape {
+		Pi(other_binder, other_domain, other_body) => bodies_equal(c, binder, domain, body, other_domain, other_body)
+		_ => no
+	}
+	Projection(structure, field, of) => match b.shape {
+		Projection(other_structure, other_field, other_of) => field == other_field and equal(c, of, other_of)
+		_ => no
+	}
+	Apply(function, argument) => match b.shape {
+		Apply(other_function, other_argument) => {
+			alike(c, head(a), head(b)) and pairwise(arguments(a), arguments(b), (one, other) => equal(c, one, other))
+		}
+		_ => no
+	}
+	_ => no
+}
+
+# two lists of one length whose items at each place pass the test
+pairwise(a: list<T>, b: list<T>, test: (T, T) -> bool): bool := #a == #b and (1 .. #a + 1).all(at => test(a#at, b#at))
+
+# two binders: equal domains, then equal bodies under one fresh variable
+bodies_equal(c: Checker, binder: text, domain: Term, body: Term, other_domain: Term, other_body: Term): bool := {
+	if not equal(c, domain, other_domain) { return no }
+	variable = hypothesis(c, binder, domain)
+	equal(c, instantiated(body, variable), instantiated(other_body, variable))
+}
+
+# eta for functions: `x => f(x)` equals `f`, a function compared with a term that is no function by applying both to
+# one variable; two functions were compared by their binders already
+eta(c: Checker, function: Term, other: Term): bool := match function.shape {
+	Lambda(binder, domain, body) => {
+		if is_function(other) { return no }
+		variable = hypothesis(c, binder, domain)
+		equal(c, instantiated(body, variable), apply(other, variable))
+	}
+	_ => no
+}
+is_function(t: Term): bool := match t.shape {
+	Lambda(binder, domain, body) => yes
+	_ => no
+}
+
+# eta for structures: a structure's constructor given all its fields equals a term of the same type whose
+# projections equal those fields (`p` equals `Pair.make(A, B, p.1, p.2)`)
+structure_eta(c: Checker, made: Term, other: Term): bool := {
+	name = match head(made).shape {
+		Constant(name, levels) => name
+		_ => return no
+	}
+	match (declaration(c.environment, name) ?? return no).kind {
+		Constructor(of, place, fields) => {
+			facts = structure_facts(c.environment, of) ?? return no
+			given = arguments(made)
+			parameters = facts.block.parameters
+			#given == parameters + fields and equal(c, type_of(c, made), type_of(c, other)) and (1 .. fields + 1).all(at => equal(c, given#(parameters + at), projection(of, at, other)))
+		}
+		_ => no
+	}
+}
+
+# unit eta: two terms of one structure without fields are equal
+fieldless_equal(c: Checker, a: Term, b: Term): bool := {
+	type = type_of(c, a)
+	facts = structure_of(c, type) ?? return no
+	facts.fields#1#1 == 0 and equal(c, type, type_of(c, b))
+}
+# the structure a type computes to, ø for any other type
+structure_of(c: Checker, type: Term): InductiveFacts? := match head(computed(c, type)).shape {
+	Constant(name, levels) => structure_facts(c.environment, name)
+	_ => ø
+}

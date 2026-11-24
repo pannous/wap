@@ -1,0 +1,153 @@
+# A term computed to its head (notes/coc-plan.md 6.4; this folder's files: notes/theory.md): beta (a function
+# applied to an argument), zeta (a let put into its body) and delta (a definition or theorem replaced by its value).
+# Only the head is computed: the arguments stay as they are, equality and typing compute them when they need them.
+# Eta is no step of computing; equality applies both sides instead (6.5).
+
+use "terms.wap"
+use "environment.wap"
+use "numbers.wap"
+use "typing.wap"
+use "equal.wap"
+use "quotients.wap"
+
+# t computed until its head is no beta, zeta or delta step
+computed(c: Checker, t: Term): Term := {
+	kept = not t.holds_free
+	if kept {
+		earlier = remembered(c.heads, t)
+		if earlier is not ø { return earlier }
+	}
+	result = computed_folded(c, t)
+	while yes {
+		next_value = unfolded(c, result) ?? break
+		result = computed_folded(c, next_value)
+	}
+	if kept { remember(c.heads, t, result) }
+	result
+}
+
+# t computed by beta and zeta alone, so the caller chooses what unfolds, and by the steps of an elimination (a
+# recursor, a quotient's way out, a projection) whose value is computed whole to find the case it was made by. The
+# chain of applications is taken apart once per step: a function applied to k arguments eats k binders at once
+computed_folded(c: Checker, t: Term): Term := {
+	result = t
+	while yes {
+		leading = head(result)
+		given = arguments(result)
+		match leading.shape {
+			LetIn(binder, type, value, body) => { result = apply_all(instantiated(body, value), given) }
+			Lambda(binder, domain, body) => {
+				if given is empty { break }
+				result = beta(leading, given)
+			}
+			Constant(name, levels) => { result = eliminated(c, name, levels, given) ?? break }
+			Projection(structure, field, of) => { result = apply_all(field_of(c, structure, field, of) ?? break, given) }
+			_ => break
+		}
+		stepped(c)
+	}
+	result
+}
+# a recursor or a quotient's way out applied to a made value, computed one step; ø for any other head
+eliminated(c: Checker, name: text, levels: list<Level>, given: list<Term>): Term? := {
+	d = declaration(c.environment, name) ?? return ø
+	match d.kind {
+		Recursor(facts) => iota(c, facts, rule => with_levels(rule, d.levels, levels), given)
+		Quotient(part) => quotient_step(c, part, given)
+		_ => ø
+	}
+}
+# A recursor applied to a case (iota, notes/coc-plan.md 7): the case's computation rule at the recursor's levels,
+# applied to the recursor's parameters, motives and minor premises, to the case's fields and to the arguments left
+# over; ø for a major premise that computes to no case of its type and stands for none
+iota(c: Checker, facts: RecursorFacts, at_levels: Term -> Term, given: list<Term>): Term? := {
+	shared = facts.parameters + facts.motives + facts.minors
+	taken = shared + facts.indices
+	if #given <= taken { return ø }
+	major = as_case(c, computed(c, given#(taken + 1)))
+	place = case_place(facts, major)
+	if place == 0 {
+		major = case_standing(c, facts, major) ?? return ø
+		place = 1
+	}
+	apply_all(at_levels(facts.rules#place), given.take(shared) + case_fields(major, facts.fields#place) + given.drop(taken + 1))
+}
+# a case's fields: the last of its arguments, after its type's parameters
+case_fields(value: Term, count: int): list<Term> := arguments(value).drop(#arguments(value) - count)
+# the place of a term's head among the recursor's cases, 0 for no case of its type
+case_place(facts: RecursorFacts, t: Term): int := match head(t).shape {
+	Constant(case, levels) => facts.cases.index_of(case)
+	_ => 0
+}
+# The case a value of a type with one case stands for when it is no case application (6.4), built at the parameters
+# of the value's type; ø for a value that stands for none. K: a proof of a proposition whose case has no fields is
+# that case when their types are equal. A structure's value that is no proof is its case given the value's
+# projections; a proof is never taken apart, since its fields may be data
+case_standing(c: Checker, facts: RecursorFacts, value: Term): Term? := {
+	if not facts.k and structure_facts(c.environment, facts.of) is ø { return ø }
+	type = computed(c, type_of(c, value))
+	levels = match head(type).shape {
+		Constant(name, levels) => if name == facts.of then levels else return ø
+		_ => return ø
+	}
+	case = apply_all(constant(facts.cases#1, levels), arguments(type).take(#arguments(type) - facts.indices))
+	if facts.k { return if equal(c, type_of(c, case), type) then case else ø }
+	if is_proposition(c, type) { return ø }
+	apply_all(case, (1 .. facts.fields#1 + 1).map(at => projection(facts.of, at, value)))
+}
+# A field of a structure value made by its case (6.4): the case's argument at the field's place after the structure's
+# parameters; ø for a value that computes to no case application
+field_of(c: Checker, structure: text, field: int, of: Term): Term? := {
+	facts = structure_facts(c.environment, structure) ?? return ø
+	shared = facts.block.parameters
+	made = computed(c, of)
+	if not made_by(made, facts.block.types#1.cases#1.name, shared + facts.fields#1#1) { return ø }
+	arguments(made)#(shared + field)
+}
+# A quotient's lift or induct applied to a value made by quotient.of (6.4): its function applied to the value the
+# made one was made from and to the arguments left over; ø for the parts that never compute, or a value not made by
+# quotient.of
+quotient_step(c: Checker, part: QuotientPart, given: list<Term>): Term? := {
+	major = quotient_major(part)
+	if major == 0 or #given < major { return ø }
+	made = computed(c, given#major)
+	if not made_by(made, QUOTIENT_OF, 3) { return ø }
+	apply_all(given#QUOTIENT_FUNCTION, [arguments(made)#3] + given.drop(major))
+}
+# whether a term is the named constant applied to exactly so many arguments
+made_by(t: Term, name: text, count: int): bool := #arguments(t) == count and match head(t).shape {
+	Constant(head_name, levels) => head_name == name
+	_ => no
+}
+# a function of nested binders applied to arguments: as many binders as there are arguments eaten at once, the
+# arguments it does not take applied to what is left
+beta(function: Term, given: list<Term>): Term := {
+	body = function
+	eaten = 0
+	while eaten < #given {
+		match body.shape {
+			Lambda(binder, domain, inner) => { body = inner; eaten += 1 }
+			_ => break
+		}
+	}
+	apply_all(instantiated_all(body, given.take(eaten)), given.drop(eaten))
+}
+
+# t with its head constant replaced by its value at the levels it is used at, ø when the head unfolds to nothing:
+# an axiom, an opaque constant, a variable, a sort, a number. A shortcut on two numbers fires before its function
+# unfolds
+unfolded(c: Checker, t: Term): Term? := {
+	leading = head(t)
+	match leading.shape {
+		Constant(name, levels) => {
+			fired = shortcut_fired(c, t)
+			if fired is not ø { return fired }
+			d = declaration(c.environment, name)
+			if d is ø { refused(UNKNOWN_NAME, name) }
+			value = unfolding(d) ?? return ø
+			stepped(c)
+			apply_all(with_levels(value, d.levels, levels), arguments(t))
+		}
+		_ => ø
+	}
+}
