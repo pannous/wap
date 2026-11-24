@@ -3,8 +3,9 @@
 The elaborator of notes/coc-plan.md (section 8) turns a program as it is written into complete terms and hands
 every declaration to the kernel (notes/theory.md). It lies in `wap/extensions/theory/elaborate/` until the switch
 and is reached through a door of its own, `elaborate/door.wap`. It is not trusted: whatever it builds, the kernel's
-`declared` and `inductive_declared` judge. This note is the contract for its first two milestones, E1 (arguments
-found) and E2 (enums, classes, match, recursion).
+`declared` and `inductive_declared` judge. This note is the contract for its first four milestones: E1 (arguments
+found), E2 (enums, classes, match, recursion), E3 (operators, traits, conditions) and E4 (subtypes and
+obligations).
 
 ## What it reads and writes
 
@@ -94,6 +95,59 @@ wanted before its later arguments are read, so they are read with more known.
   below a value).
 - The body a function runs by is its recursion as written; it is kept for erase (plan 9.7) once S2 exists.
 
+## Operators, traits and conditions (E3)
+
+No new mechanism carries an operator: `a + b` is the call of the word `+`, an overload set like any other. What E3
+adds is how a candidate fits and where its instances come from.
+
+- **Fitting.** An argument fits a parameter when its type unifies with the parameter's, or converts to it (E4's
+  conversions; E3 needs the number tower's). Of the candidates that fit, one without a conversion beats one with,
+  fewer conversions beat more; two left is the refusal `overload`. So `x + y` of a `nat` and an `int` is the `int`
+  one, and `3 + 4` the `nat` one, with no rule about operators.
+- **Numbers.** A number read against a wanted type other than the prelude's `nat` is the conversion of the number
+  to that type; with no type wanted it is a `nat`.
+- **Traits.** A trait is a structure with a field per operation: `Comparable(T)` holds `compare: T -> T -> int`. A
+  definition that uses a trait's operation on a value of a letter's type gets a binder of the kind instance for
+  that trait at that letter, written (`T is Comparable`) or not. A call fills an instance binder by search: the
+  structure built from the program's and the prelude's functions of those names at the type the letter got. No such
+  function is the refusal `trait`, naming the trait and the definition to write. A law written inside a trait is a
+  field, and an instance must bring its proof; the prelude states the laws of its own traits beside them, so a
+  script is never asked for one.
+- **`==`.** `==` is the operation of the trait of equality tests, answering yes or no. For every enum and class
+  blocks.wap makes the test and the proof that it says yes exactly for equal values. In a place that wants a
+  proposition (a law, a condition's fact, an obligation) `a == b` at such a type reads as `Equal(a, b)`; at a type
+  with its own `equals`, and at the floats, it reads as "the test answers yes".
+- **Conditions.** The condition of `if`, `while` and of a `bool` place is a proposition with a decision: a value of
+  `Decidable(c)`, found by the same search (comparisons of numbers and texts, `and`, `or`, `not` of decided ones,
+  a `bool` being yes). None found is the refusal `undecidable condition`. A value of another type used as a
+  condition converts to a proposition by its trait of truth (a list: it is not empty). Inside the branch taken the
+  condition is a fact in scope, a variable whose type is the proposition, and its negation in the other branch:
+  E4's obligations read them.
+
+## Subtypes and obligations (E4)
+
+- **Subset types.** `T where c` is `subset(T, it => c)`, a structure of the prelude with the fields `value` and
+  `proof`. `where` is one word with two definitions, told apart by their first argument as overloads are: a list's
+  filter, and this one, whose first argument is a type. `type vector(T, n: nat) = list<T> where #it == n` is a
+  definition whose value is a type.
+- **Conversions.** These are automatic, each a function the elaborator puts in where the type wanted differs from
+  the type given: a subset to its parent (`value`); a `type X < T` to `T`; a case, as a type the subset "it is
+  this case", to its enum; a part to its union, `T` to `T?`; any value to `any`; and what the prelude declares
+  between its own types, the number tower. Between two types the path of conversions must be the only one, else the
+  refusal `conversion` names both. A conversion lifts through a list, an optional value and a map's values as a map
+  over them.
+- **Going down** needs a proof. Where a `T where c` is wanted and a `T` is given, the term is the pair of the value
+  and a proof of `c` at it, and the proof is an obligation, discharged by the first of these that works (plan 3.9):
+  1. computing: the decision of the condition computes to yes; computing to no is the refusal `condition`;
+  2. a fact in scope whose type unifies with the obligation: a parameter's own condition, a condition of an `if` or
+     `match` arm around the place, a proved law;
+  3. the provers (P2 on);
+  4. a check when the program runs, where the condition has a decision: the value becomes `T or Error`, which E5's
+     effects carry as Fail. Until E5 this step is the refusal `unproved condition`;
+  5. the refusal `unproved condition`, naming the condition. `! Pure` and `--strict` stop after step 3.
+- `x as S` is going down with step 4 always allowed. `x is S` is the decision of the condition at x, a `bool`.
+- A provers' search is counted in steps like the kernel's work, so what is proved does not depend on the machine.
+
 ## Files
 
 | file | holds | milestone |
@@ -106,13 +160,18 @@ wanted before its later arguments are read, so they are read with more known.
 | `elaborate/blocks.wap` | `Record` to inductive blocks, the definitions made for each enum | E2 |
 | `elaborate/match.wap` | `Case` to recursors, covering, patterns split | E2 |
 | `elaborate/recursion.wap` | recursion to recursors | E2 |
+| `elaborate/instances.wap` | the search that fills an instance binder: traits, decisions | E3 |
+| `elaborate/conditions.wap` | conditions, their decisions, the facts a branch knows | E3 |
+| `elaborate/convert.wap` | the conversions, the path between two types, lifting through containers | E4 |
+| `elaborate/obligations.wap` | going down: prove or check | E4 |
 
 ## Rules every file keeps
 
 - The rules of notes/theory.md hold here too: closed terms only (a binder is entered by a free variable), names
   are hints, never `==` on a term, each file names what it uses.
 - Refuse, never guess: where two readings fit, both are named. The elaborator's refusals have their own rule
-  names: `cannot find`, `overload`, `covering`, `recursion`, `unknown name`.
+  names: `cannot find`, `overload`, `covering`, `recursion`, `unknown name`; from E3 on `trait` and
+  `undecidable condition`; from E4 on `conversion`, `condition` and `unproved condition`.
 - Nothing here is trusted and nothing here may weaken a check: a term the kernel refuses is reported as the
   elaborator's bug, with the declaration, never retried another way.
 - Tests are lines of the pages' test files through the door: a program in, what the door says out.
