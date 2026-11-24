@@ -177,7 +177,7 @@ class Stride { element: text, bytes: int }
 FIELD_STRIDES := [Stride("f32", 4), Stride("i32", 4), Stride("u32", 4), Stride("atomic<", 4), Stride("vec2", 8), Stride("vec3", 16), Stride("vec4", 16)]
 FIELD_KEY := "field "
 
-# wgpu-native's functions, and C's copies: memcpy of a list's int32 cells, memmove of C memory
+# wgpu-native's functions, and C's copies: a list's int32 cells written into C memory, C memory copied
 # A callback info is 40 bytes given by value (`bytes<40>`), as C takes the struct.
 wgpuCreateInstance(descriptor: handle): handle from 'wgpu_native'
 wgpuInstanceRequestAdapter(instance: handle, options: handle, info: bytes<40>): i64 from 'wgpu_native'
@@ -246,8 +246,8 @@ wgpuSurfacePresent(surface: handle): i32 from 'wgpu_native'
 wgpuSurfaceRelease(surface: handle): ø from 'wgpu_native'
 wgpuDeviceCreateSampler(device: handle, descriptor: handle): handle from 'wgpu_native'
 wgpuSamplerRelease(sampler: handle): ø from 'wgpu_native'
-memcpy(into: handle, source: list<int32>, size: length): handle from 'c'
-memmove(into: handle, source: handle, size: i64): handle from 'c'
+set_field_bytes(struct: handle, offset: i64, data: list<int32>, size: length): ø from 'c'
+bcopy(source: handle, into: handle, size: i64): ø from 'c'
 fopen(path: text, mode: text): handle from 'c'
 fread(into: handle, size: i64, n: i64, file: handle): i64 from 'c'
 fclose(file: handle): i32 from 'c'
@@ -796,7 +796,7 @@ cells_kept(name: text, cells: list<int>, usage: int): int := cells_written(kept_
 cells_written(buffer: int, cells: list<int>): int := {
 	size = #cells * 4
 	staged = calloc(1, size)
-	memcpy(staged, [int32(cell) for cell in cells])
+	set_field_bytes(staged, 0, [int32(cell) for cell in cells])
 	wgpuQueueWriteBuffer(gpu.queue, buffer, 0, staged, size)
 	free(staged)
 	buffer
@@ -1397,7 +1397,7 @@ host_gpu_render(shader: text, width: int, height: int, values: any): list<int> :
 pixel_words(memory: int, width: int, height: int, stride: int): list<int> := [color_word(field_u32(memory, row * stride + col * PIXEL_BYTES)) for row in 0 .. height for col in 0 .. width]
 # a pixel's RGBA bytes read as one little-endian word, as a color word (alpha, red, green, blue from the highest byte):
 # red and blue change places
-color_word(rgba: int): int := both_bits(rgba, ALPHA_GREEN) + (both_bits(rgba, BYTE) << 16) + both_bits(shift_right(rgba, 16), BYTE)
+color_word(rgba: int): int := (rgba & ALPHA_GREEN) + ((rgba & BYTE) << 16) + ((rgba >>> 16) & BYTE)
 # a readback buffer and the address of its rows, mapped until the caller unmaps the buffer; the address 0 and
 # gpu.failure where they cannot be read
 class Readback { buffer: int, mapped: int }
@@ -1436,7 +1436,7 @@ shader_painted(shader: text, width: int, height: int, values: any, pixels: int):
 	mapped = read.mapped
 	if mapped != 0 {
 		stride = copy_stride(width)
-		for row in 0 .. height { memmove(pointer_moved(pixels, row * width * PIXEL_BYTES), pointer_moved(mapped, row * stride), width * PIXEL_BYTES) }
+		for row in 0 .. height { bcopy(pointer_moved(mapped, row * stride), pointer_moved(pixels, row * width * PIXEL_BYTES), width * PIXEL_BYTES) }
 		wgpuBufferUnmap(read.buffer)
 	}
 	drawing_released(drawing)
@@ -1686,7 +1686,7 @@ cell_read(cell: Cell, mapped: int, index: int): any := match cell {
 array_buffer(array: StorageArray): int := cells_kept(array.name, array_cells(array), BUFFER_STORAGE + BUFFER_COPY_SRC)
 array_cells(array: StorageArray): list<int> := {
 	cells = [cell_bits(array.cell, x) for x in array.given]
-	if array.cell == F16 then halves_paired(cells) else cells
+	if array.cell == Cell.F16 then halves_paired(cells) else cells
 }
 # two-byte cells two to a word, the first in the low half, as WGSL's array<f16> holds them
 halves_paired(halves: list<int>): list<int> := [halves[2 * w] + (if 2 * w + 1 < #halves then halves[2 * w + 1] << HALF_BITS else 0) for w in 0 .. (#halves + 1) /! 2]
