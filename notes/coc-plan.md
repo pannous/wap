@@ -298,7 +298,7 @@ theory needs the syntax changed. What goes is looseness in what a type means.
 | index, divide, unwrap raise at run time | obligations: proved where the compiler can, checked otherwise (3.9) | fewer checks, same safety |
 | a unit mismatch is found at run time | at compile time where the units are written; `quantity("5 km")` still checks at run time | dimensions are type arguments |
 | `f == g` on functions: by hash, by polynomial normal form, else "undecidable" | a proposition; the same methods are provers, extensionality is a theorem | the answer comes with a proof |
-| `int`: 64 bits and wrapping on some wiki pages, unbounded on others | each number type is one mathematical object (open decision 1) | a law must mean one thing |
+| `int`: 64 bits and wrapping on some wiki pages, unbounded on others | each number type is one mathematical object: `int` the whole numbers, `i64` the wrapping one | a law must mean one thing |
 | `wap verify` proves with Lean | with wap's own provers and kernel | no second system |
 | W0, the model of wap's types in Lean | the kernel is the model; `wap types` shows a program's terms | one definition of wap's types |
 | `type(x)` asks at run time | known at compile time; for an `any` it reads the node's kind | types are gone at run time |
@@ -460,7 +460,8 @@ One step at a time, to the head of the term:
   constructor without fields, like `Equal`) the value need not be a constructor: the constructor is built from the
   value's type and used once its type equals the value's type;
 - **projection**: a field of a constructor application is that argument;
-- **quotient**: `lift(f, respects, quotient.of(a))` computes to `f(a)`, and `induct(h, quotient.of(a))` to `h(a)`;
+- **quotient**: `quotient.lift(f, respects, quotient.of(a))` computes to `f(a)`, and
+  `quotient.induct(h, quotient.of(a))` to `h(a)`;
 - **numbers**: where a rule asks for a constructor, a number is zero or the successor of the number before it, one
   step at a time; the shortcuts of 6.7 compute arithmetic on two numbers at once.
 
@@ -493,7 +494,7 @@ that runs out of the budget is refused as "gave up", never accepted, and the cou
 | theorem | as a definition, and its type is a proposition |
 | opaque | as a definition; its value is never unfolded |
 | inductive block | section 7 |
-| quotient | once, naming the equality type, whose shape is checked; it adds `quotient`, `quotient.of`, `lift` and `induct` with fixed types |
+| quotient | once, naming the equality type, whose shape is checked; it adds `quotient`, `quotient.of`, `quotient.lift` and `quotient.induct` with fixed types |
 | numbers | once, naming the number type and the truth values, whose shapes are checked, and for each shortcut its function and the theorems that license it (6.7) |
 
 For all of them: the name is new, the level parameters are distinct, no undeclared level parameter and no free or
@@ -956,33 +957,34 @@ Decided by the user (2026-11-24):
 - A name can be given a value of another type; from there on it holds that type, and where two paths meet, their
   union. A name declared with `let`, `const` or a written type keeps its type (section 4, 9.5).
 - The theory's refusal tests are exempt from "no refusal tests": they pin `refused by <rule>`, never the message.
+- **`int`** is the whole numbers, as wiki/laws.md promises; `i64` is the wrapping type, the whole numbers up to
+  2^64. The emitter keeps a fast path with a test for overflow.
+- **Classical logic** is not in the prelude: it declares two axioms, `proposition_extensionality` and
+  `quotient_sound`; excluded middle and choice come only with `use classical`, and every report names them. A
+  condition of an `if` must be decidable either way.
+- **An obligation nobody proved** is checked when the program runs, is listed by `wap check`, and gives the function
+  the effect Fail; `! Pure` and `--strict` refuse instead (3.9).
+- **`==`** is the type's own test. The derived test (enums, classes, lists, texts, whole numbers) is proved to be
+  equality, so laws rewrite with it; a class's own `equals` and the floats' `==` stay tests; a type is a quotient
+  only where `quotient(…)` is written (3.5, 3.6).
+- **`extends`** makes a closed sum: a place typed by the parent holds the class or any of its extensions, a value of
+  an extension converts into that sum (never down to the parent's fields alone, which would be a second path), and
+  the method is picked by the case when the program runs (3.10). A hierarchy is closed where it is compiled; a
+  function over the parent is elaborated again for each program's hierarchy.
+- **What a type holds**: unlike types join to their union, not to `any`; `T?` is T or ø and no longer also an Error,
+  which is `T or Error` (section 4).
 
-Open, each with the recommendation first and its cost in core. They go to the user through the interviewer.
+Open, with the recommendation first and its cost in core; with the user through the interviewer:
 
-1. **What `int` is.** The wiki has it both unbounded and 64 bits wrapping. Recommended: `int` is the whole numbers,
-   as wiki/laws.md promises ("proved for wap's mathematical integers"), and `i64` is the wrapping type, the whole
-   numbers up to 2^64. 0 core lines either way beyond the emitter's test for overflow on its fast path.
-2. **Classical logic.** Recommended: the prelude declares two axioms, `proposition_extensionality` and
-   `quotient_sound`; excluded middle and choice come only with `use classical`, and every report names them. A
-   condition of an `if` must be decidable either way. 0 core lines.
-3. **An obligation nobody proved.** Recommended: checked when the program runs, listed by `wap check`, the effect
-   Fail; `! Pure` and `--strict` refuse instead (3.9). The other way: always refuse until the program writes `as` or
-   an `if`. 0 core lines of difference.
-4. **`==`.** Recommended: `==` is the type's own test; the derived test (enums, classes, lists, texts, whole
-   numbers) is proved to be equality, so laws rewrite with it; a class's own `equals` and the floats' `==` stay
-   tests; a type is a quotient only where `quotient(…)` is written (3.5, 3.6). The other way, every own `equals`
-   makes a quotient, forces proofs on scripts. Still to be said on the wiki: what `===` and `==` between function
-   values mean. 0 core lines.
-5. **`extends`.** Recommended: a place typed by the parent holds the sum of the class and its extensions, a value
-   of an extension converts into that sum (never down to the parent's fields alone, which would be a second path),
-   and dispatch at run time is the sum rule (3.10). A hierarchy is closed where it is compiled, and its price is
-   that a function over the parent is elaborated again for each program's hierarchy. The other way, an open
-   hierarchy decided by a tag at run time, needs a mechanism of its own in core.
-6. **What a type holds.** Recommended: unlike types join to their union, not to `any`; `T?` is T or ø and no longer
-   also an Error, which is `T or Error` (section 4). 0 core lines.
-7. **W0 and `wap verify`.** Recommended: the Lean model and the Lean prover retire at milestones S3 and P3; until
+1. **`==` between two function values.** Recommended: a statement, not a test. In a law it is equality of
+   functions, proved by the provers (computing, the normal form of polynomials, every value of a small domain,
+   induction); as a condition it is answered when the program is compiled, with a proof or a counterexample, and
+   refused where the compiler finds neither. 0 core lines: it is the rule of every condition that cannot be decided.
+2. **`===`.** Recommended: the test the compiler writes for a type, with no conversion before it and no `equals` of
+   the program in it; refused on a quotient and on function values; never identity. 0 core lines.
+3. **W0 and `wap verify`.** Recommended: the Lean model and the Lean prover retire at milestones S3 and P3; until
    then they stay beside the new ones. 0 core lines.
-8. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
+4. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
    `refl`; `axiom`, `assume`; `by`, `chain`; `decreasing`; the axioms' names. Settled on the wiki pages.
 
 Decided by the plan, for the user to overrule: the rules are those of Lean 4's kernel with the four departures of
