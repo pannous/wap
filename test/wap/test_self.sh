@@ -15,11 +15,13 @@ loaded() {
 
 # every file of wap's own, but the compiler (stage 2 below compiles it whole), the files every program meets beside it
 # already, the types module's (compiled as a program, their words would be defined twice, which a program may not:
-# wiki/function.md, own-type-overloads, user 2026-11-23) and the native extension's programs, which run only built to
-# machine code (wap/extensions/native)
-NOT_ALONE=(wap/compiler.wap wap/nodes.wap)
-MET_OR_NATIVE=(-e '^wap/types/' -e '^wap/extensions/native/')
-files=($(cd "$root" && git ls-files 'wap/*.wap' | grep -v -x -F "${NOT_ALONE[@]/#/-e}" | grep -v "${MET_OR_NATIVE[@]}"))
+# wiki/function.md, own-type-overloads, user 2026-11-23), the native extension's programs, which run only built to
+# machine code (wap/extensions/native), and the theory's door with its prelude: the door is a program that takes the
+# file it checks, and the prelude is that file, written in the explicit spellings only the door reads
+# (notes/theory.md "The door"); both run in test/wap/test_theory*.wap
+NOT_ALONE=(wap/compiler.wap wap/nodes.wap wap/extensions/theory/check.wap)
+NOT_MODULES=(-e '^wap/types/' -e '^wap/extensions/native/' -e '^wap/extensions/theory/prelude/')
+files=($(cd "$root" && git ls-files 'wap/*.wap' | grep -v -x -F "${NOT_ALONE[@]/#/-e}" | grep -v "${NOT_MODULES[@]}"))
 for file in "${files[@]}"; do
 	check "wap compiles $file and the result loads" "$(loaded "$file")" "loads"
 done
