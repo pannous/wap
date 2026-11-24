@@ -1,0 +1,100 @@
+# Definitional equality (notes/coc-plan.md 6.5; this folder's files: notes/theory.md): two terms are equal when the
+# first rule that applies says so. Both sides are computed by beta and zeta, then definitions unfold lazily, the
+# later-declared one first, until the heads agree; then the shapes are compared, and a function is compared with
+# any other term by applying both (eta). Proof irrelevance and eta for structures come with structures (K4).
+
+use "terms.wap"
+use "levels.wap"
+use "environment.wap"
+use "compute.wap"
+
+equal(c: Checker, a: Term, b: Term): bool := {
+	if same(a, b) { return yes }
+	stepped(c)
+	left = computed_folded(c, a)
+	right = computed_folded(c, b)
+	while yes {
+		if same(left, right) or alike(c, left, right) { return yes }
+		left_place = unfolding_place(c, left)
+		right_place = unfolding_place(c, right)
+		if left_place == 0 and right_place == 0 { break }
+		if left_place >= right_place { left = computed_folded(c, unfolded(c, left) ?? left) }
+		if right_place >= left_place { right = computed_folded(c, unfolded(c, right) ?? right) }
+	}
+	eta(c, left, right) or eta(c, right, left)
+}
+
+# where the head constant of a term was declared, 0 when it unfolds to nothing: of two, the later one unfolds first
+unfolding_place(c: Checker, t: Term): int := match head(t).shape {
+	Constant(name, levels) => {
+		d = declaration(c.environment, name)
+		if d is ø or unfolding(d) is ø then 0 else place(c.environment, name)
+	}
+	_ => 0
+}
+
+# two terms of one shape with equal parts: sorts at equal levels, equal numbers, one free variable, constants of one
+# name at equal levels, binders with equal domains and bodies, projections of one field, applications of equal heads
+# to equal arguments
+alike(c: Checker, a: Term, b: Term): bool := match a.shape {
+	Sort(level) => match b.shape {
+		Sort(other) => levels_equal(level, other)
+		_ => no
+	}
+	Numeral(value) => match b.shape {
+		Numeral(other) => value == other
+		_ => no
+	}
+	Free(id) => match b.shape {
+		Free(other) => id == other
+		_ => no
+	}
+	Constant(name, levels) => match b.shape {
+		Constant(other, other_levels) => name == other and pairwise(levels, other_levels, levels_equal)
+		_ => no
+	}
+	Lambda(binder, domain, body) => match b.shape {
+		Lambda(other_binder, other_domain, other_body) => bodies_equal(c, binder, domain, body, other_domain, other_body)
+		_ => no
+	}
+	Pi(binder, domain, body) => match b.shape {
+		Pi(other_binder, other_domain, other_body) => bodies_equal(c, binder, domain, body, other_domain, other_body)
+		_ => no
+	}
+	Projection(structure, field, of) => match b.shape {
+		Projection(other_structure, other_field, other_of) => field == other_field and equal(c, of, other_of)
+		_ => no
+	}
+	Apply(function, argument) => match b.shape {
+		Apply(other_function, other_argument) => {
+			equal(c, head(a), head(b)) and pairwise(arguments(a), arguments(b), (one, other) => equal(c, one, other))
+		}
+		_ => no
+	}
+	_ => no
+}
+
+# two lists of one length whose items at each place pass the test
+pairwise(a: list<T>, b: list<T>, test: (T, T) -> bool): bool := #a == #b and (1 .. #a + 1).all(at => test(a#at, b#at))
+
+# two binders: equal domains, then equal bodies under one fresh variable
+bodies_equal(c: Checker, binder: text, domain: Term, body: Term, other_domain: Term, other_body: Term): bool := {
+	if not equal(c, domain, other_domain) { return no }
+	variable = hypothesis(c, binder, domain)
+	equal(c, instantiated(body, variable), instantiated(other_body, variable))
+}
+
+# eta for functions: `x => f(x)` equals `f`, a function compared with a term that is no function by applying both to
+# one variable; two functions were compared by their binders already
+eta(c: Checker, function: Term, other: Term): bool := match function.shape {
+	Lambda(binder, domain, body) => {
+		if is_function(other) { return no }
+		variable = hypothesis(c, binder, domain)
+		equal(c, instantiated(body, variable), apply(other, variable))
+	}
+	_ => no
+}
+is_function(t: Term): bool := match t.shape {
+	Lambda(binder, domain, body) => yes
+	_ => no
+}
