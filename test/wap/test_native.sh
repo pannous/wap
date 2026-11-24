@@ -285,4 +285,12 @@ moved: (int) -> int = x => x + step
 twice(f: (int) -> int, x: int): int := f(f(x))
 negated(x: int): int := 0 - x
 print "${twice(moved, 1)} ${twice(negated, 5)} ${moved(10)} ${[1, 2, 3].contains(2)}"')" "7 5 13 yes"
+# an optional is held in the memory: a plain value in its box, a record as itself, ø told apart from both
+check "a native optional holds a number, a record or ø" "$(native_ran optionals 'class Pair { left: int; right: int }
+paired(n: int): Pair? := if n > 0 then Pair(left: n, right: n * 2) else ø
+half(x: float): float? := if x > 0.0 then x / 2.0 else ø
+b: int? = 4
+c: int? = 4
+d: int? = ø
+print "${half(5.0) ?? 0.0} ${half(-1.0) ?? 9.5} ${paired(3)!.right} ${if paired(0) then "some" else "none"} ${b == c} ${b == d} ${d is ø}"')" "2.5 9.5 6 none yes no yes"
 exit $((failures > 0))
