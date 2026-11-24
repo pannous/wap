@@ -1,10 +1,11 @@
 # Unification (notes/elaborate.md "Holes"): whether two terms can be made equal, answering holes on the way.
 #
 # Two terms without a hole are the kernel's to compare (equal.wap). With holes the walk is the same, rule for rule,
-# and adds what a hole allows: a hole standing alone is answered by the other side, when that side names neither
-# the hole itself nor the variable of a binder gone into after the hole was made; the answer's type is unified with
-# the hole's type, which is what finds a letter's level from its value. A hole applied to arguments waits as a
-# problem put off, tried again whenever a hole is answered. A reading that fails leaves no answer behind.
+# and adds what a hole allows: a hole applied to variables of binders, no two the same, is answered by the function
+# of those variables that gives the other side, when that function names neither the hole itself nor any other
+# binder; the answer's type is unified with the hole's type, which is what finds a letter's level from its value.
+# A hole applied to anything else waits as a problem put off, tried again whenever a hole is answered. A reading
+# that fails leaves no answer behind.
 #
 # Nothing here is trusted. An answer that should not have been given makes a term the kernel refuses.
 
@@ -21,7 +22,8 @@ unified(el: Elaboration, a: Term, b: Term): bool := {
 	left = filled(el, a)
 	right = filled(el, b)
 	if same(left, right) { return yes }
-	if not open(el, left) and not open(el, right) { return equal(el.c, left, right) }
+	# two closed terms are the kernel's to judge; an ill-typed one, as an overload tried may give, is no match
+	if not open(el, left) and not open(el, right) { return try { equal(el.c, left, right) } catch e { mismatch(e) } }
 	kept = found_so_far(el)
 	if made_equal(el, left, right) { return yes }
 	back_to(el, kept)
@@ -35,17 +37,11 @@ made_equal(el: Elaboration, a: Term, b: Term): bool := {
 	left = computed_folded(el.c, a)
 	right = computed_folded(el.c, b)
 	if same(left, right) { return yes }
-	left_hole = unanswered(el, head(left))
-	right_hole = unanswered(el, head(right))
-	if left_hole is not ø and arguments(left) is empty { return answered(el, left_hole, right) }
-	if right_hole is not ø and arguments(right) is empty { return answered(el, right_hole, left) }
-	if left_hole is not ø or right_hole is not ø {
-		el.problems += [Problem(left, right)]
-		return yes
-	}
+	if is_hole(el, head(left)) or is_hole(el, head(right)) { return hole_made_equal(el, left, right) }
 	kept = found_so_far(el)
 	if alike_made(el, left, right) { return yes }
 	back_to(el, kept)
+	if eta_made(el, left, right) or eta_made(el, right, left) { return yes }
 	# two unlike heads: the later-declared one unfolds, as in the kernel's equality
 	left_place = unfolding_place(el.c, left)
 	right_place = unfolding_place(el.c, right)
@@ -53,6 +49,40 @@ made_equal(el: Elaboration, a: Term, b: Term): bool := {
 	next_left = if left_place >= right_place then unfolded(el.c, left) ?? left else left
 	next_right = if right_place >= left_place then unfolded(el.c, right) ?? right else right
 	made_equal(el, next_left, next_right)
+}
+
+# Two computed terms, one at least with a hole as its head: the left hole is answered by the right side, else the
+# right one by the left. What neither answers is a mismatch when the side a hole could not take holds no hole, and
+# waits otherwise: an answer found later may solve it
+hole_made_equal(el: Elaboration, left: Term, right: Term): bool := {
+	kept = found_so_far(el)
+	if function_answered(el, left, right) { return yes }
+	back_to(el, kept)
+	if function_answered(el, right, left) { return yes }
+	back_to(el, kept)
+	if (is_pattern(el, left) and not open(el, right)) or (is_pattern(el, right) and not open(el, left)) { return no }
+	el.problems += [Problem(left, right)]
+	yes
+}
+# whether a term is a hole applied to variables of binders, no two the same: what an answer can be found for
+is_pattern(el: Elaboration, t: Term): bool := {
+	given = arguments(t)
+	is_hole(el, head(t)) and given.all(each => is_binder_variable(el, each)) and #given.map(variable_id).unique() == #given
+}
+# a hole applied to its variables answered by the function of them that gives the other side
+function_answered(el: Elaboration, applied: Term, other: Term): bool := {
+	if not is_pattern(el, applied) { return no }
+	h = unanswered(el, head(applied)) ?? return no
+	answered(el, h, closed_filled(el, other, arguments(applied), yes))
+}
+# eta: a function against a term that is none, both applied to one fresh variable
+eta_made(el: Elaboration, function: Term, other: Term): bool := match function.shape {
+	Lambda(binder, domain, body) => {
+		if is_function(other) { return no }
+		variable = hypothesis(el.c, binder, filled(el, domain))
+		unified(el, instantiated(body, variable), apply(other, variable))
+	}
+	_ => no
 }
 
 # two terms of one shape whose parts can be made equal
@@ -102,13 +132,13 @@ bodies_unified(el: Elaboration, binder: text, domain: Term, body: Term, other_do
 	unified(el, instantiated(body, variable), instantiated(other_body, variable))
 }
 
-# A hole answered by a term: the term names neither the hole nor a binder gone into after the hole was made, and
-# its type can be made the hole's type. Then the problems put off are tried again
+# A hole answered by a term: the term names neither the hole nor a binder, and its type can be made the hole's
+# type. Then the problems put off are tried again
 answered(el: Elaboration, h: Hole, t: Term): bool := {
 	value = filled(el, t)
-	if holes_in(el, value).contains(h.id) or later_binder(el, value, h.id) { return no }
+	if holes_in(el, value).contains(h.id) or names_binder(el, value) { return no }
 	el.answers[h.id] = value
-	typed = try { unified(el, hypothesis_of(el.c, h.id).type, type_of(el.c, value)) } catch refusal { no }
+	typed = try { unified(el, hypothesis_of(el.c, h.id).type, type_of(el.c, value)) } catch e { mismatch(e) }
 	if not typed { return no }
 	waiting = el.problems
 	el.problems = []
