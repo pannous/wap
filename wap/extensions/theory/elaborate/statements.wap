@@ -1,0 +1,90 @@
+# Statements read as terms (coc-plan 9.5, notes/elaborate.md "Statements and effects"): a block is its statements in
+# order, each one binding what the rest of the block reads. A value given to a name is a new binding of it,
+# `s = s + 1` a let whose body is the rest, so its type may change. A choice before the rest of the block joins
+# again: the rest is read once, as a function of the names the parts give (the join), and each part ends by calling
+# it, so a return in a part skips it. A return gives the block's value at once, and the statements after it are never
+# read. Choices and returns arrive as kernel forms once the door reads with the tree's rules (E3); until then only
+# blocks and lets reach this file.
+use "../terms.wap"
+use "../environment.wap"
+use "../typing.wap"
+use "../../../kernel/forms.wap"
+use "state.wap"
+use "read.wap"
+
+# the elaborator's own rule a refusal names
+STATEMENT := "statement"
+# the join's name, one no program writes
+JOIN := "the rest of the block"
+
+# A block of the type wanted: its first statement, the rest of the block after it
+statements_elaborated(x: Elaborating, statements: list<Node>, wanted: Term?): Term := {
+	if statements is empty { refused(STATEMENT, "an empty block gives no value: write the value last") }
+	first = statements#1
+	rest = statements.drop(1)
+	match first {
+		Return(value) => elaborated(x, value, wanted)
+		Set(place, value) => if rest is empty then refused(STATEMENT, "${text(first)} gives no value: write the value after it") else let_elaborated(x, place_binder(place), value, rest, wanted)
+		If(condition, then_part, else_part) => if rest is empty then elaborated(x, first, wanted) else joined_elaborated(x, condition, statements_in(then_part), statements_in(else_part), rest, wanted)
+		_ => if rest is empty then elaborated(x, first, wanted) else refused(STATEMENT, "${text(first)} gives nothing the rest of the block reads: a value before the last is lost")
+	}
+}
+# a part of a choice as statements, an else-part left out none
+statements_in(part: Node): list<Node> := match part {
+	Block(statements) => statements
+	Empty => []
+	_ => [part]
+}
+
+# `name = value` and the rest of the block: a let of the name, which holds the value's type in the rest
+let_elaborated(x: Elaborating, binder: WrittenBinder, value_written: Node, rest: list<Node>, wanted: Term?): Term := {
+	type = if binder.type is not ø then elaborated(x, binder.type!, any_sort(x)) else ø
+	value = filled(x.el, elaborated(x, value_written, type))
+	held = filled(x.el, type ?? type_of(x.el.c, value))
+	variable = scoped(x.el, binder.name, held)
+	body = statements_elaborated(x, rest, wanted)
+	unscoped(x.el, [variable])
+	let_in(binder.name, held, value, abstracted(filled(x.el, body), variable_id(variable)))
+}
+
+# the name a value is given to, typed or not; a part of a value, `xs#1 = 2` or `xs#1: nat = 2`, is refused, never read as a name
+place_binder(place: Node): WrittenBinder := match place {
+	Symbol(name) => named_binder(place)
+	Key(Symbol(name), Op.Colon, type) => named_binder(place)
+	_ => refused(STATEMENT, "${text(place)} = … gives a part of a value: give the name the whole new value")
+}
+
+# A choice and the rest of the block: the rest read once as the join, a function of the names either part gives that
+# the rest can see (in scope before, or given by both parts), let-bound, and each part ending with its call
+joined_elaborated(x: Elaborating, condition: Node, then_part: list<Node>, else_part: list<Node>, rest: list<Node>, wanted: Term?): Term := {
+	then_given = names_given(then_part)
+	else_given = names_given(else_part)
+	given = unique(then_given + else_given).filter(name => named(x.el, name) is not ø or (then_given.contains(name) and else_given.contains(name)))
+	variables = given.map(name => scoped(x.el, name, type_before(x, name)))
+	body = statements_elaborated(x, rest, wanted)
+	unscoped(x.el, variables)
+	join = closed_filled(x.el, body, variables, yes)
+	join_type = type_of(x.el.c, join)
+	joining = scoped(x.el, JOIN, join_type)
+	called = Call(symbol(JOIN), given.map(symbol))
+	choice = elaborated(x, If(condition, Block(then_part + [called]), Block(else_part + [called])), wanted)
+	unscoped(x.el, [joining])
+	let_in(JOIN, filled(x.el, join_type), filled(x.el, join), abstracted(filled(x.el, choice), variable_id(joining)))
+}
+# a name's type before a choice, else a hole the parts' calls of the join answer
+type_before(x: Elaborating, name: text): Term := {
+	before = named(x.el, name)
+	if before is ø then hole(x.el, "the type of ${name}", any_sort(x)) else hypothesis_of(x.el.c, variable_id(before!)).type
+}
+# the names statements give a value, a choice's parts' included
+names_given(statements: list<Node>): list<text> := {
+	given: list<text> = []
+	for statement in statements {
+		given += match statement {
+			Set(place, value) => [place_binder(place).name]
+			If(condition, then_part, else_part) => names_given(statements_in(then_part)) + names_given(statements_in(else_part))
+			_ => []
+		}
+	}
+	given
+}

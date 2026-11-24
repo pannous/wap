@@ -187,9 +187,9 @@ adds is how a candidate fits and where its instances come from.
 
 ## Subtypes and obligations (E4)
 
-- **Subset types.** `T where c` is `subset(T, it => c)`, a structure of the prelude with the fields `value` and
-  `proof`. `where` is one word with two definitions, told apart by their first argument as overloads are: a list's
-  filter, and this one, whose first argument is a type. `type vector(T, n: nat) = list<T> where #it == n` is a
+- **Subset types.** `T where c` is `filter(T, it => c)`, whose value is `Subset(T, it => c)`, a structure of the
+  prelude with the fields `value` and `proof`. `where` is one word with two definitions, told apart by their first
+  argument as overloads are: a list's filter, and this one, whose first argument is a type. `type vector(T, n: nat) = list<T> where #it == n` is a
   definition whose value is a type.
 - **Conversions.** These are automatic, each a function the elaborator puts in where the type wanted differs from
   the type given: a subset to its parent (`value`); a `type X < T` to `T`; a case, as a type the subset "it is
@@ -206,8 +206,29 @@ adds is how a candidate fits and where its instances come from.
   4. a check when the program runs, where the condition has a decision: the value becomes `T or Error`, which E5's
      effects carry as Fail. Until E5 this step is the refusal `unproved condition`;
   5. the refusal `unproved condition`, naming the condition. `! Pure` and `--strict` stop after step 3.
-- `x as S` is going down with step 4 always allowed. `x is S` is the decision of the condition at x, a `bool`.
+  Where the obligation still has holes, two facts that fill them differently are the refusal `two facts`. Among
+  overloads, a candidate whose condition computes to no does not fit, as an ill-typed one does.
+- `x as S` is going down with step 4 always allowed. `x is S` is the decision of the condition at x, a `bool`; an
+  S without a condition is the refusal `not a subtype`.
 - A provers' search is counted in steps like the kernel's work, so what is proved does not depend on the machine.
+
+## Statements and effects (E5)
+
+- **A block is its statements in order**, each binding what the rest reads (`elaborate/statements.wap`). `x = v` is
+  a let of x whose body is the rest of the block, so a name given a value of another type holds that type from
+  there on; `x: T = v` reads v as a T. The last statement is the block's value; a value before it is the refusal
+  `statement` (it would be lost), and so is a block that ends by giving a name a value.
+- **A choice joins again**: in `if c { a } else { b }; rest` the rest is read once, as a function (the join) of the
+  names the parts give that the rest can see (named before the choice, or given by both parts), and each part ends by
+  calling it. n choices in a row stay n joins, never 2^n copies; a return in a part skips the join.
+- **Only a name is given a value**: `xs#1 = 2` or `p.x = 2` is the refusal `statement` until updates of a part
+  come in (a binding named by the source text would drop the write).
+- **A return** is the block's value at once; the statements after it are never read.
+- Without rules the door sees blocks and lets only: `if` and `return` arrive as calls, which read.wap reads as calls.
+  Choices and returns reach statements.wap once the door reads with the tree's rules (E3); their lines wait in
+  test_theory_statements_wanted.wap.
+- Statements are read as kernel forms (Block, Set, If, Return, While, Break, Continue), which the tree's rules
+  write; the elaborator names no statement word.
 
 ## Conditions lifted (E8)
 
@@ -247,6 +268,7 @@ refuses a type of the block under a subset's condition (strict positivity): the 
 | `elaborate/conditions.wap` | conditions, their decisions, the facts a branch knows | E3 |
 | `elaborate/convert.wap` | the conversions, the path between two types, lifting through containers | E4 |
 | `elaborate/obligations.wap` | going down: prove or check | E4 |
+| `elaborate/statements.wap` | blocks, lets, a choice's rest, returns | E5 |
 | `elaborate/lifted.wap` | conditions lifted out of recursive types: the plain block, its bool, the subset | E8 |
 
 ## Rules every file keeps
@@ -255,7 +277,7 @@ refuses a type of the block under a subset's condition (strict positivity): the 
   are hints, never `==` on a term, each file names what it uses.
 - Refuse, never guess: where two readings fit, both are named. The elaborator's refusals have their own rule
   names: `cannot find`, `overload`, `covering`, `recursion`, `unknown name`, `unproved theorem`, `unproved law`; from E3 on `trait` and
-  `undecidable condition`; from E4 on `conversion`, `condition` and `unproved condition`.
+  `undecidable condition`; from E4 on `conversion`, `condition`, `unproved condition`, `two facts` and `not a subtype`.
 - Nothing here is trusted and nothing here may weaken a check: a term the kernel refuses is reported as the
   elaborator's bug, with the declaration, never retried another way.
 - Tests are lines of the pages' test files through the door: a program in, what the door says out.
