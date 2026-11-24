@@ -19,7 +19,9 @@ LAW_WORD := "law"
 OPAQUE_WORD := "opaque"
 ENUM_WORD := "enum"
 DECLARATION_WORDS := [AXIOM_WORD, LAW_WORD, OPAQUE_WORD]
+PROJECTION_WORD := "projection"
 QUESTION_WORDS := ["type", "of"]
+AXIOMS_QUESTION_WORDS := ["axioms", "of"]
 # the operators of the spellings
 FUNCTION_TYPE := "->"
 FUNCTION := "=>"
@@ -36,6 +38,7 @@ enum Statement {
 	Declares(declaration: Declaration)
 	DeclaresBlock(block: InductiveBlock)
 	AsksType(of: Term, levels: list<text>)
+	AsksAxioms(of: text)
 }
 
 # The state of reading one statement: the declarations a name may be, the level parameters met so far, and the
@@ -91,7 +94,8 @@ words_in(n: Node): list<text> := match n {
 # One unit of a program: an inductive block, or one statement
 unit_read(e: Environment, unit: list<Node>): Statement := if enum_written(unit#1) is not ø then DeclaresBlock(block_read(e, unit)) else statement_read(e, unit#1)
 
-# One statement of an explicit program: `type of e`, or a declaration, its head before `:=` and its value after it
+# One statement of an explicit program: `type of e`, `axioms of name`, or a declaration, its head before `:=` and
+# its value after it
 statement_read(e: Environment, statement: Node): Statement := {
 	r = Reading(e)
 	question = after_words(statement, QUESTION_WORDS)
@@ -99,6 +103,8 @@ statement_read(e: Environment, statement: Node): Statement := {
 		of = term_read(r, question!, [])
 		return AsksType(of, r.levels)
 	}
+	axioms_question = after_words(statement, AXIOMS_QUESTION_WORDS)
+	if axioms_question is not ø { return AsksAxioms(text(axioms_question!)) }
 	match statement {
 		Call(called, arguments) => if text(called) == DEFINE and #arguments == 2 then Declares(declaration_read(r, arguments#1, arguments#2)) else Declares(declaration_read(r, statement, ø))
 		_ => Declares(declaration_read(r, statement, ø))
@@ -219,11 +225,13 @@ name_read(r: Reading, name: text, scope: list<text>): Term := {
 	if declaration(r.environment, name) is ø { refused(UNKNOWN_NAME, "${name} is neither a binder around it nor declared") }
 	constant(name, [])
 }
-# `Type(u)`, `Sort(u)`, or a function applied to its arguments, the first one first
+# `Type(u)`, `Sort(u)`, `projection(Pair, 1, p)` for a field of a structure value, or a function applied to its
+# arguments, the first one first
 applied_read(r: Reading, written: Node, arguments: list<Node>, scope: list<text>): Term := {
 	word = text(written)
 	if #arguments == 1 and word == TYPE_WORD { return type_at(level_read(r, arguments#1)) }
 	if #arguments == 1 and word == SORT_WORD { return universe(level_read(r, arguments#1)) }
+	if #arguments == 3 and word == PROJECTION_WORD { return projection(text(arguments#1), whole_read(arguments#2), term_read(r, arguments#3, scope)) }
 	apply_all(term_read(r, written, scope), arguments.map(argument => term_read(r, argument, scope)))
 }
 # a function type, a function, or a dotted name: `(x: A) -> B`, `A -> B`, `(x: A) => b`, `And.intro`
@@ -282,11 +290,11 @@ level_read(r: Reading, n: Node): Level := match n {
 		if not (name in r.levels) { r.levels += [name] }
 		Parameter(name)
 	}
-	Call(called, arguments) => if text(called) == LEVEL_ADD and #arguments == 2 then level_above(level_read(r, arguments#1), level_steps(arguments#2)) else unreadable(n)
+	Call(called, arguments) => if text(called) == LEVEL_ADD and #arguments == 2 then level_above(level_read(r, arguments#1), whole_read(arguments#2)) else unreadable(n)
 	Key(written, Op.None, List(items, Bracket.Round, separator)) => level_function_read(r, text(written), items, n)
 	_ => unreadable(n)
 }
-level_steps(n: Node): int := match n {
+whole_read(n: Node): int := match n {
 	Number(value) => value as int
 	_ => unreadable(n)
 }
