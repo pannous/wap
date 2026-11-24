@@ -18,6 +18,7 @@ use "../../../core/type_notation.wap"
 use "state.wap"
 use "unify.wap"
 use "match.wap"
+use "recursion.wap"
 
 # the elaborator's own rules, which a refusal names
 OVERLOAD := "overload"
@@ -42,6 +43,8 @@ class Elaborating {
 	reading: Reading
 	header: bool = no
 	letters: list<Term> = []
+	recursing: Recursion? = ø
+	below: list<Below> = []
 }
 elaborating(p: Theory): Elaborating := Elaborating(p, elaboration(p.environment, []), Reading(p.environment))
 
@@ -90,6 +93,7 @@ call_elaborated(x: Elaborating, called: Node, arguments: list<Node>, wanted: Ter
 name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?): Term := {
 	bound = named(x.el, name)
 	if bound is not ø { return given_arguments(x, bound!, type_of(x.el.c, bound!), arguments, wanted) }
+	if x.recursing is not ø and name == x.recursing!.name { return recursive_call_elaborated(x, arguments, wanted) }
 	if arguments is empty and name == PROP_WORD { return PROP }
 	if arguments is empty and name == TYPE_WORD { return type_at(Zero) }
 	candidates = x.theory.overloads.get(name) ?? (if declaration(x.theory.environment, name) is not ø then [name] else [])
@@ -184,17 +188,23 @@ gone_into(x: Elaborating, binder: WrittenBinder, expected: Term?): Term := {
 # A function type or a function over its binders: a function's binders take their types from the function type
 # wanted where they are left out
 bound_elaborated(x: Elaborating, binders: list<WrittenBinder>, body: Node, function: bool, wanted: Term?): Term := {
-	expected = if function then wanted else ø
+	entered = binders_entered(x, binders, if function then wanted else ø)
+	inner = elaborated(x, body, if function then entered.rest else any_sort(x))
+	unscoped(x.el, entered.variables)
+	closed_over(x.el.c, inner, entered.variables, function)
+}
+# binders gone into, in scope, and what the function type expected gives after them (ø: none expected)
+class Gone { variables: list<Term>; rest: Term? }
+binders_entered(x: Elaborating, binders: list<WrittenBinder>, expected: Term?): Gone := {
+	rest = expected
 	variables: list<Term> = []
 	for binder in binders {
-		parts = if expected is ø then ø else pi_parts(x, expected!)
+		parts = if rest is ø then ø else pi_parts(x, rest!)
 		variable = gone_into(x, binder, if parts is ø then ø else parts!.domain)
 		variables += [variable]
-		expected = if parts is ø then ø else instantiated(parts!.body, variable)
+		rest = if parts is ø then ø else instantiated(parts!.body, variable)
 	}
-	inner = elaborated(x, body, if function then expected else any_sort(x))
-	unscoped(x.el, variables)
-	closed_over(x.el.c, inner, variables, function)
+	Gone(variables, rest)
 }
 
 # a level as written; a name nothing binds is a level parameter of the declaration
