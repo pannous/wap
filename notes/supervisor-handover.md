@@ -19,8 +19,6 @@ Role: notes/agents/supervisor.md (plus lead.md, wap-owner.md). Read those first;
 
 ## Routine
 - Hourly watch round:
-  - run warp/scripts/vitals.py;
-  - republish data/vitals/wap-vitals.html to https://claude.ai/code/artifact/8b33d965-01c9-4a3b-9f75-d4597da4804e;
   - commit leftovers in wap and wap/wiki as "(user)";
   - give idle wiki workers their next page;
   - find idle workers (`ListAgents`; any session at an empty prompt for an hour) and send each its next card by name,
