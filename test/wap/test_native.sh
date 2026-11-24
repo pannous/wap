@@ -254,4 +254,5 @@ check "wap names the line of code given in place of a file" "$("$native_wap" 'x 
 check "the console names the line of an error" "$(printf '%s\n' 'x = "abc' | "$native_wap" 2>&1 | grep -c '^line 1:5: this text is never closed')" "1"
 printf '%s\n' 'twice(x: int) as int := x * 2' >"$stage/helper.wap"
 check "code given uses a file of the current folder" "$(cd "$stage" && "$native_wap" 'use "helper.wap"; twice(21)' 2>&1)" "42"
+check "wap - runs the program standard input gives" "$(printf '%s\n' 'print 1 + 1' | "$native_wap" - 2>&1)" "2"
 exit $((failures > 0))
