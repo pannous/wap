@@ -16,7 +16,7 @@ obligations).
 - **Laws and axioms** arrive as their word called on the declaration (wap/sugar/definitions.wap): `law four: 2 + 2
   == 4 := refl` as `law(Define(four: 2 + 2 == 4, (), refl))`, a proved law the definition of its proof;
   `axiom int: Type` as `axiom(int: Type)`. A law or axiom without a value whose name takes parameters is one of a
-  function type: `axiom f(x: A): B` arrives as `axiom(f: (x: A) -> B)`, the type lowered as written, a `Fn`.
+  function type: `axiom f(x: A): B` arrives as `axiom(f: (x: A) -> B)`, the type lowered as a written one is.
   `declaration_elaborated` (elaborate/declare.wap) takes both.
 - **Writes** declarations into the theory's `Environment` through `declared` and `inductive_declared`, and
   nothing else. A term it hands over holds no hole.
