@@ -285,6 +285,8 @@ arguments_given(x: Elaborating, function: Term, type: Term, arguments: list<Argu
 	for argument in arguments {
 		parts = pi_parts(x, rest) ?? refused(NOT_A_FUNCTION, "${shown(filled(x.el, given))} is a ${shown(filled(x.el, rest))}, no function, and is given ${argument_shown(x, argument)}")
 		value = match argument {
+			# an argument refused alone is read again for each candidate, and distributed reads them again: the trial
+			# limit refuses a program where that grows past it, as gave up
 			Unread(node) => elaborated(x, it_read(x, node, parts.domain), filled(x.el, parts.domain))
 			Elaborated(term) => made_of(x, term, filled(x.el, parts.domain))
 		}
@@ -307,10 +309,8 @@ term_alone(x: Elaborating, argument: Argument): Term := match argument {
 # parameter's type
 read_alone(x: Elaborating, node: Node): Argument := {
 	if names_it(node) { return Unread(node) }
-	kept = snapshot(x)
-	try { Elaborated(elaborated(x, node, ø)) } catch e {
+	try { guarded(x, snapshot(x), () => Elaborated(elaborated(x, node, ø))) } catch e {
 		if not e.message.starts_with(REFUSED) { raise e.message }
-		put_back(x, kept)
 		Unread(node)
 	}
 }
@@ -369,24 +369,35 @@ fits(trials: list<Trial>): list<text> := trials.filter(trial => trial.refusal is
 # than their own
 class Trial { candidate: text; refusal: text?; indirect: int }
 # each candidate given to an attempt, the answers it gives taken back
-trials_of(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<Trial> := candidates.map(candidate => {
-	kept = snapshot(x)
+trials_of(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<Trial> := candidates.map(candidate => undone(x, () => {
+	before = x.indirect
 	refusal = refusal_of(candidate, attempt)
-	trial = Trial(candidate, refusal, x.indirect - kept.indirect)
-	put_back(x, kept)
-	trial
-})
-# what an attempt may change, kept to be put back: the answers found, the arm being read, the letters, instance holes
-# and effects noted, the indirect steps counted
-class Snapshot { found: Found; arm: Arm; letters: int; instances: int; pending: int; indirect: int }
-snapshot(x: Elaborating): Snapshot := Snapshot(found_so_far(x.el), arm_kept(x), #x.letters, #x.instances, #x.pending, x.indirect)
+	Trial(candidate, refusal, x.indirect - before)
+}))
+# what a read may change, kept to be put back: the answers found, the arm being read, the letters, instance holes,
+# effects and lifts noted, the indirect steps counted, the course and the round read, the levels made
+class Snapshot { found: Found; arm: Arm; letters: int; instances: int; pending: int; lifts: int; indirect: int; without_course: text?; round_given: list<text>?; levels: int }
+snapshot(x: Elaborating): Snapshot := Snapshot(found_so_far(x.el), arm_kept(x), #x.letters, #x.instances, #x.pending, #x.lifts, x.indirect, x.without_course, x.round_given, #x.el.c.levels)
 put_back(x: Elaborating, kept: Snapshot) := {
 	back_to(x.el, kept.found)
 	arm_restored(x, kept.arm)
 	x.letters = x.letters.take(kept.letters)
 	x.instances = x.instances.take(kept.instances)
 	x.pending = x.pending.take(kept.pending)
+	x.lifts = x.lifts.take(kept.lifts)
 	x.indirect = kept.indirect
+	x.without_course = kept.without_course
+	x.round_given = kept.round_given
+	x.el.c.levels = x.el.c.levels.take(kept.levels)
+}
+# what an attempt gives; where it raises, all it found is put back first
+guarded(x: Elaborating, kept: Snapshot, attempt: () -> T): T := try { attempt() } catch e { put_back(x, kept); raise e.message }
+# what an attempt gives, all it found put back either way
+undone(x: Elaborating, attempt: () -> T): T := {
+	kept = snapshot(x)
+	given = guarded(x, kept, attempt)
+	put_back(x, kept)
+	given
 }
 # the trials that fit with the fewest indirect steps, and those that do not fit: a direct fit beats a fit through a
 # conversion, equal fits tie
