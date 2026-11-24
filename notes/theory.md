@@ -124,6 +124,9 @@ The files use each other freely: computing, equality and typing call one another
   hash of one are what "Costs" below measures. An optional value is tested with `is ø`.
 - **Each file names what it uses.** `use` is not transitive: a file that names a `Shape` case uses terms.wap
   itself, even when it also uses a file that does.
+- **A list is a value.** A list handed to a function is the function's own: `found += [x]` there never reaches
+  the caller. What a walk gathers it gives back as its result, or puts into a map or a field of a class, which the
+  caller shares.
 
 ## The explicit spellings
 
