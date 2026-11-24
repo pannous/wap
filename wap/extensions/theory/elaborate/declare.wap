@@ -1,0 +1,109 @@
+# A statement elaborated (notes/elaborate.md "Declaring"): a declaration's header read first, its letters becoming
+# found binders, then its value read against the header's type; what is still open when it is read whole is refused
+# as `cannot find`, and what is filled goes to the kernel, which judges it. `type of e` prints e's type, `export("file")`
+# writes what the kernel accepted so far (../export.wap).
+use "../terms.wap"
+use "../levels.wap"
+use "../environment.wap"
+use "../typing.wap"
+use "../show.wap"
+use "../explicit.wap"
+use "../export.wap"
+use "../../../kernel/forms.wap"
+use "../../../core/type_notation.wap"
+use "state.wap"
+use "read.wap"
+use "recursion.wap"
+
+# the names a level hole left in a declaration's type becomes, the first one not written already; past them a name
+# and a count
+LEVEL_NAMES := ["u", "v", "w"]
+# the refusal of a theorem without a proof
+UNPROVED_THEOREM := "unproved theorem"
+
+# A statement of a program in the lowered forms: a definition, an axiom, `type of e` or `export("file")`
+statement_elaborated(p: Theory, statement: Node) := match statement {
+	Define(named, parameters, value) => declaration_elaborated(p, "", statement)
+	Call(called, arguments) => {
+		word = text(called)
+		if word == QUESTION_WORDS#1 and #arguments == 2 and text(arguments#1) == QUESTION_WORDS#2 { return print shown(asked_type(p, arguments#2)) }
+		if word in DECLARATION_WORDS and #arguments == 1 { return declaration_elaborated(p, word, arguments#1) }
+		if word == EXPORT_WORD and #arguments == 1 { return write(text(arguments#1), exported(p.environment)) }
+		unelaborated(statement)
+	}
+	_ => unelaborated(statement)
+}
+
+# A declaration under its word (empty for a plain definition), `axiom name: type` or `theorem name(parameters): type := proof`: the
+# definition the word is called on, or a typed name without a value
+declaration_elaborated(p: Theory, word: text, n: Node) := match n {
+	Define(named, parameters, value) => definition_elaborated(p, word, named, items_or_one(parameters), value)
+	_ => definition_elaborated(p, word, n, [], ø)
+}
+
+# A declaration `name(parameters): type := value` elaborated and declared. Its header is read first, where a letter
+# nothing binds becomes a found binder; its type is the one written, else its value's. A theorem must be proved; a law
+# without a proof is a hint, kept beside the environment and never declared, so nothing can prove by it
+definition_elaborated(p: Theory, word: text, named: Node, parameters: list<Node>, value: Node?) := {
+	x = elaborating(p)
+	name = if is_binder(named) then binder_name(named) else text(named)
+	written_type = if is_binder(named) then binder_type(named) else ø
+	if written_type is ø and value is ø { unelaborated(named) }
+	if word == THEOREM_WORD and value is ø { refused(UNPROVED_THEOREM, "theorem ${name} has no proof: prove it after `:=`, or state it as a law, which may stay unproved") }
+	x.header = yes
+	written = parameters.map(parameter => gone_into(x, named_binder(parameter), ø))
+	result = if written_type is ø then ø else elaborated(x, written_type!, any_sort(x))
+	x.header = no
+	x.recursing = Recursion(name, written)
+	body = if value is ø then ø else elaborated(x, value!, result)
+	type = result ?? type_of(x.el.c, filled(x.el, body!))
+	variables = x.letters + written
+	closed_type = closed_filled(x.el, type, variables, no)
+	terms = finished(x, [closed_type] + (if body is ø then [] else [closed_filled(x.el, body!, variables, yes)]))
+	if word == LAW_WORD and body is ø { p.unproved_laws[name] = terms#1 } else {
+		key = overload_key(x, name, written)
+		declared(p.environment, Declaration(key, x.reading.levels, terms#1, declaration_kind(word, if body is ø then ø else terms#2)))
+		p.found[key] = #x.letters
+	}
+}
+
+# The name a declaration is declared by: its own, or for a second declaration of a name, the name and its parameters'
+# types, an overload of the name
+overload_key(x: Elaborating, name: text, written: list<Term>): text := {
+	p = x.theory
+	if declaration(p.environment, name) is ø { return name }
+	key = "${name}(${written.map(variable => shown(filled(x.el, type_of(x.el.c, variable)))).join(", ")})"
+	p.overloads[name] = (p.overloads.get(name) ?? [name]) + [key]
+	key
+}
+
+# The type of a term elaborated alone
+asked_type(p: Theory, n: Node): Term := {
+	x = elaborating(p)
+	t = elaborated(x, n, ø)
+	finished(x, [type_of(x.el.c, filled(x.el, t)), filled(x.el, t)])#1
+}
+
+# Terms read whole, filled: a hole without an answer, or a level problem that does not hold, cannot be found; a level
+# hole left in the leading terms (a declaration's type, a block's headers) becomes a level parameter, one left only
+# in the others cannot be found
+finished(x: Elaborating, terms: list<Term>, leading: int = 1): list<Term> := {
+	filled_terms = terms.map(t => filled(x.el, t))
+	open = filled_terms.flat_map(t => holes_in(x.el, t)).unique()
+	if open is not empty { refused(CANNOT_FIND, "${open.map(id => x.el.holes#id.name).join(", ")} cannot be found from what is written") }
+	if not level_problems_hold(x.el) { refused(CANNOT_FIND, "a universe level cannot be found from what is written") }
+	holes = level_holes_of(filled_terms.take(leading))
+	if filled_terms.drop(leading).any(t => term_level_holes(t).any(name => not (name in holes))) { refused(CANNOT_FIND, "a universe level cannot be found from what is written") }
+	names = holes.map(hole => level_named(x.reading))
+	filled_terms.map(t => with_levels(t, holes, names.map(name => Parameter(name))))
+}
+# the level holes left in filled terms, each once, in the order they are met
+level_holes_of(terms: list<Term>): list<text> := terms.flat_map(term_level_holes).unique()
+# a new level parameter of the reading, by the first name not taken
+level_named(r: Reading): text := {
+	at = 1
+	while level_name(at) in r.levels { at += 1 }
+	r.levels += [level_name(at)]
+	level_name(at)
+}
+level_name(at: int): text := if at <= #LEVEL_NAMES then LEVEL_NAMES#at else "${LEVEL_NAMES#1}${at}"

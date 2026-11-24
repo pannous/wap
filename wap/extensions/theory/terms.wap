@@ -1,0 +1,265 @@
+# The terms of wap's theory, what the kernel checks (notes/coc-plan.md 6.1; this folder's files and what each gives
+# the others: notes/theory.md). A term is complete: no hole, no overload, no argument left out.
+#
+# Variables are locally nameless: a variable bound inside a term is an index, counting the binders between it and
+# its own from 0, and a binder the kernel has gone into is a free variable with an id (environment.wap `local`).
+# A binder's name is a hint for showing a term and never read by a rule: two terms that differ in names only are the
+# same term.
+#
+# Each term keeps what its walkers would else compute again and again: its hash, how many binders around it its
+# loose variables reach (0: none), whether it holds a free variable and whether it holds a level parameter. So a
+# walk leaves every part alone that it cannot change, and two unlike terms are told apart by their hashes.
+
+use magnitude
+
+# a hash stays below this prime; a hash times the factor stays within an int
+HASH_MODULUS := 2147483647
+HASH_FACTOR := 16777619
+# what each kind of level and term starts its hash with
+LEVEL_ZERO_HASH := 1
+LEVEL_SUCCESSOR_HASH := 2
+LEVEL_MAX_HASH := 3
+LEVEL_IMAX_HASH := 4
+LEVEL_PARAMETER_HASH := 5
+BOUND_HASH := 11
+FREE_HASH := 12
+SORT_HASH := 13
+CONSTANT_HASH := 14
+APPLY_HASH := 15
+LAMBDA_HASH := 16
+PI_HASH := 17
+LET_HASH := 18
+NUMERAL_HASH := 19
+PROJECTION_HASH := 20
+
+mixed(hash: int, more: int): int := (hash * HASH_FACTOR + more) % HASH_MODULUS
+
+# --- levels
+
+# A universe level (6.2): a natural number once its parameters are given. Imax(left, right) is 0 where right is 0,
+# else the larger of the two
+enum Level {
+	Zero
+	Successor(of: Level)
+	Max(left: Level, right: Level)
+	Imax(left: Level, right: Level)
+	Parameter(name: text)
+}
+
+level_hash(level: Level): int := match level {
+	Zero => LEVEL_ZERO_HASH
+	Successor(of) => mixed(LEVEL_SUCCESSOR_HASH, level_hash(of))
+	Max(left, right) => mixed(mixed(LEVEL_MAX_HASH, level_hash(left)), level_hash(right))
+	Imax(left, right) => mixed(mixed(LEVEL_IMAX_HASH, level_hash(left)), level_hash(right))
+	Parameter(name) => mixed(LEVEL_PARAMETER_HASH, hashed(name, HASH_MODULUS))
+}
+# whether a level names a parameter
+level_open(level: Level): bool := match level {
+	Zero => no
+	Successor(of) => level_open(of)
+	Max(left, right) => level_open(left) or level_open(right)
+	Imax(left, right) => level_open(left) or level_open(right)
+	Parameter(name) => yes
+}
+# a level with each of the named parameters replaced by the level at its place; another parameter stays
+level_with(level: Level, names: list<text>, levels: list<Level>): Level := match level {
+	Zero => level
+	Successor(of) => Successor(level_with(of, names, levels))
+	Max(left, right) => Max(level_with(left, names, levels), level_with(right, names, levels))
+	Imax(left, right) => Imax(level_with(left, names, levels), level_with(right, names, levels))
+	Parameter(name) => { at = names.index_of(name); if at > 0 then levels#at else level }
+}
+# the level n steps above a level: `level_above(Zero, 2)` is the level 2
+level_above(level: Level, steps: int): Level := if steps <= 0 then level else level_above(Successor(level), steps - 1)
+
+# --- terms
+
+enum Shape {
+	# a variable bound in the term, by the number of binders between it and its own
+	Bound(index: int)
+	# a binder the kernel is inside of
+	Free(id: int)
+	# Prop is Sort(Zero), Type(u) is Sort(Successor(u))
+	Sort(level: Level)
+	# a declared name at its level arguments
+	Constant(name: text, levels: list<Level>)
+	Apply(function: Term, argument: Term)
+	# `(x: domain) => body`
+	Lambda(binder: text, domain: Term, body: Term)
+	# the function type `(x: domain) -> body`
+	Pi(binder: text, domain: Term, body: Term)
+	# `{ x: type = value; body }`
+	LetIn(binder: text, type: Term, value: Term, body: Term)
+	# a natural number without bound, the one literal (6.7)
+	Numeral(value: Magnitude)
+	# a field of a structure value, counted from 1
+	Projection(structure: text, field: int, of: Term)
+}
+class Term { shape: Shape; hash: int; loose: int; holds_free: bool; holds_parameter: bool }
+
+# how far the loose variables of a binder's body reach outside the binder
+outside(body: Term): int := max(body.loose - 1, 0)
+
+bound(index: int): Term := Term(Bound(index), mixed(BOUND_HASH, index), index + 1, no, no)
+free(id: int): Term := Term(Free(id), mixed(FREE_HASH, id), 0, yes, no)
+universe(level: Level): Term := Term(Sort(level), mixed(SORT_HASH, level_hash(level)), 0, no, level_open(level))
+constant(name: text, levels: list<Level>): Term := Term(Constant(name, levels), levels.fold(mixed(CONSTANT_HASH, hashed(name, HASH_MODULUS)), (hash, level) => mixed(hash, level_hash(level))), 0, no, levels.any(level => level_open(level)))
+apply(function: Term, argument: Term): Term := Term(Apply(function, argument), mixed(mixed(APPLY_HASH, function.hash), argument.hash), max(function.loose, argument.loose), function.holds_free or argument.holds_free, function.holds_parameter or argument.holds_parameter)
+lambda(binder: text, domain: Term, body: Term): Term := Term(Lambda(binder, domain, body), mixed(mixed(LAMBDA_HASH, domain.hash), body.hash), max(domain.loose, outside(body)), domain.holds_free or body.holds_free, domain.holds_parameter or body.holds_parameter)
+pi(binder: text, domain: Term, body: Term): Term := Term(Pi(binder, domain, body), mixed(mixed(PI_HASH, domain.hash), body.hash), max(domain.loose, outside(body)), domain.holds_free or body.holds_free, domain.holds_parameter or body.holds_parameter)
+let_in(binder: text, type: Term, value: Term, body: Term): Term := Term(LetIn(binder, type, value, body), mixed(mixed(mixed(LET_HASH, type.hash), value.hash), body.hash), max(max(type.loose, value.loose), outside(body)), type.holds_free or value.holds_free or body.holds_free, type.holds_parameter or value.holds_parameter or body.holds_parameter)
+numeral(value: Magnitude): Term := Term(Numeral(value), value.limbs.fold(NUMERAL_HASH, mixed), 0, no, no)
+numeral(value: int): Term := numeral(magnitude(value))
+projection(structure: text, field: int, of: Term): Term := Term(Projection(structure, field, of), mixed(mixed(PROJECTION_HASH, field), of.hash), of.loose, of.holds_free, of.holds_parameter)
+
+# the universe of propositions, and the universe of data at a level: `type_at(Zero)` is Type
+PROP := universe(Zero)
+type_at(level: Level): Term := universe(Successor(level))
+
+# a function applied to its arguments, the first one first
+apply_all(function: Term, arguments: list<Term>): Term := arguments.fold(function, (applied, argument) => apply(applied, argument))
+# what a chain of applications applies, and its arguments, the first one first: of `f(a)(b)`, f and [a, b]
+head(t: Term): Term := match t.shape {
+	Apply(function, argument) => head(function)
+	_ => t
+}
+arguments(t: Term): list<Term> := {
+	found: list<Term> = []
+	rest = t
+	while yes {
+		match rest.shape {
+			Apply(function, argument) => { found += [argument]; rest = function }
+			_ => break
+		}
+	}
+	found.reverse()
+}
+
+# the terms a term is made of, in the order it holds them
+parts(t: Term): list<Term> := match t.shape {
+	Apply(function, argument) => [function, argument]
+	Lambda(binder, domain, body) => [domain, body]
+	Pi(binder, domain, body) => [domain, body]
+	LetIn(binder, type, value, body) => [type, value, body]
+	Projection(structure, field, of) => [of]
+	_ => []
+}
+# the free variables a term holds, each once, in the order they first stand
+free_variables(t: Term): list<int> := if not t.holds_free then [] else match t.shape {
+	Free(id) => [id]
+	_ => parts(t).flat_map(free_variables).unique()
+}
+
+# --- substitution
+
+# The body of a binder with the binder's variable replaced by a value: of `(x: A) => b`, b with x := value. The
+# value holds no loose variable (the kernel goes under a binder by a free variable, environment.wap `local`), so
+# nothing in it is shifted
+instantiated(body: Term, value: Term): Term := {
+	if value.loose > 0 { raise "the kernel instantiates with closed values only, this one has a loose variable" }
+	placed(body, 0, value)
+}
+placed(t: Term, depth: int, value: Term): Term := {
+	if t.loose <= depth { return t }
+	match t.shape {
+		Bound(index) => if index == depth then value else bound(index - 1)
+		Apply(function, argument) => apply(placed(function, depth, value), placed(argument, depth, value))
+		Lambda(binder, domain, body) => lambda(binder, placed(domain, depth, value), placed(body, depth + 1, value))
+		Pi(binder, domain, body) => pi(binder, placed(domain, depth, value), placed(body, depth + 1, value))
+		LetIn(binder, type, held, body) => let_in(binder, placed(type, depth, value), placed(held, depth, value), placed(body, depth + 1, value))
+		Projection(structure, field, of) => projection(structure, field, placed(of, depth, value))
+		_ => t
+	}
+}
+
+# The body under several binders with all their variables replaced at once, the outermost binder's value first: of
+# `(x: A) => (y: B) => b`, b with x := values#1 and y := values#2. No value holds a loose variable
+instantiated_all(body: Term, values: list<Term>): Term := {
+	if values.any(value => value.loose > 0) { raise "the kernel instantiates with closed values only, one of these has a loose variable" }
+	placed_all(body, 0, values)
+}
+placed_all(t: Term, depth: int, values: list<Term>): Term := {
+	if t.loose <= depth { return t }
+	match t.shape {
+		Bound(index) => if index - depth < #values then values#(#values - (index - depth)) else bound(index - #values)
+		Apply(function, argument) => apply(placed_all(function, depth, values), placed_all(argument, depth, values))
+		Lambda(binder, domain, body) => lambda(binder, placed_all(domain, depth, values), placed_all(body, depth + 1, values))
+		Pi(binder, domain, body) => pi(binder, placed_all(domain, depth, values), placed_all(body, depth + 1, values))
+		LetIn(binder, type, held, body) => let_in(binder, placed_all(type, depth, values), placed_all(held, depth, values), placed_all(body, depth + 1, values))
+		Projection(structure, field, of) => projection(structure, field, placed_all(of, depth, values))
+		_ => t
+	}
+}
+
+# the id of a free variable
+variable_id(variable: Term): int := match variable.shape {
+	Free(id) => id
+	_ => 0
+}
+
+# What lies under a function type's first binders as they are written, their variables loose: with
+# `instantiated_all` a function type given its first arguments. A type with fewer binders is given back from where
+# they end
+body_under(t: Term, binders: int): Term := if binders <= 0 then t else match t.shape {
+	Pi(binder, domain, body) => body_under(body, binders - 1)
+	_ => t
+}
+
+# A term as the body of a binder: the free variable of that id becomes the binder's variable. The term holds no
+# loose variable
+abstracted(t: Term, id: int): Term := bound_from(t, 0, id)
+bound_from(t: Term, depth: int, id: int): Term := {
+	if not t.holds_free { return t }
+	match t.shape {
+		Free(held) => if held == id then bound(depth) else t
+		Apply(function, argument) => apply(bound_from(function, depth, id), bound_from(argument, depth, id))
+		Lambda(binder, domain, body) => lambda(binder, bound_from(domain, depth, id), bound_from(body, depth + 1, id))
+		Pi(binder, domain, body) => pi(binder, bound_from(domain, depth, id), bound_from(body, depth + 1, id))
+		LetIn(binder, type, held, body) => let_in(binder, bound_from(type, depth, id), bound_from(held, depth, id), bound_from(body, depth + 1, id))
+		Projection(structure, field, of) => projection(structure, field, bound_from(of, depth, id))
+		_ => t
+	}
+}
+
+# A term with each of the named level parameters replaced by the level at its place: a constant's type or value at
+# the levels a use gives it
+with_levels(t: Term, names: list<text>, levels: list<Level>): Term := {
+	if names is empty or not t.holds_parameter { return t }
+	match t.shape {
+		Sort(level) => universe(level_with(level, names, levels))
+		Constant(name, held) => constant(name, held.map(level => level_with(level, names, levels)))
+		Apply(function, argument) => apply(with_levels(function, names, levels), with_levels(argument, names, levels))
+		Lambda(binder, domain, body) => lambda(binder, with_levels(domain, names, levels), with_levels(body, names, levels))
+		Pi(binder, domain, body) => pi(binder, with_levels(domain, names, levels), with_levels(body, names, levels))
+		LetIn(binder, type, held, body) => let_in(binder, with_levels(type, names, levels), with_levels(held, names, levels), with_levels(body, names, levels))
+		Projection(structure, field, of) => projection(structure, field, with_levels(of, names, levels))
+		_ => t
+	}
+}
+
+# --- sameness
+
+# Whether two levels are written alike; whether they are equal as numbers is levels.wap's levels_equal
+level_same(a: Level, b: Level): bool := match a {
+	Zero => match b { Zero => yes; _ => no }
+	Successor(of) => match b { Successor(other) => level_same(of, other); _ => no }
+	Max(left, right) => match b { Max(other_left, other_right) => level_same(left, other_left) and level_same(right, other_right); _ => no }
+	Imax(left, right) => match b { Imax(other_left, other_right) => level_same(left, other_left) and level_same(right, other_right); _ => no }
+	Parameter(name) => match b { Parameter(other) => name == other; _ => no }
+}
+levels_same(a: list<Level>, b: list<Level>): bool := #a == #b and (1 .. #a + 1).all(place => level_same(a#place, b#place))
+
+# Whether two terms are the same tree, binder names aside. Definitional equality, which computes, is equal.wap's
+same(a: Term, b: Term): bool := a.hash == b.hash and same_shape(a.shape, b.shape)
+same_shape(a: Shape, b: Shape): bool := match a {
+	Bound(index) => match b { Bound(other) => index == other; _ => no }
+	Free(id) => match b { Free(other) => id == other; _ => no }
+	Sort(level) => match b { Sort(other) => level_same(level, other); _ => no }
+	Constant(name, levels) => match b { Constant(other, other_levels) => name == other and levels_same(levels, other_levels); _ => no }
+	Apply(function, argument) => match b { Apply(other_function, other_argument) => same(function, other_function) and same(argument, other_argument); _ => no }
+	Lambda(binder, domain, body) => match b { Lambda(other_binder, other_domain, other_body) => same(domain, other_domain) and same(body, other_body); _ => no }
+	Pi(binder, domain, body) => match b { Pi(other_binder, other_domain, other_body) => same(domain, other_domain) and same(body, other_body); _ => no }
+	LetIn(binder, type, value, body) => match b { LetIn(other_binder, other_type, other_value, other_body) => same(type, other_type) and same(value, other_value) and same(body, other_body); _ => no }
+	Numeral(value) => match b { Numeral(other) => value == other; _ => no }
+	Projection(structure, field, of) => match b { Projection(other_structure, other_field, other_of) => structure == other_structure and field == other_field and same(of, other_of); _ => no }
+}

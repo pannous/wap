@@ -28,9 +28,7 @@ group_named(language: Language, name: text) as Group := {
 # every group the named one binds tighter than, directly or through others; `path` names a cycle when it closes
 looser_groups(language: Language, name: text, path: list<text>) as list<text> := {
 	if path.contains(name) { raise "operator table: the precedence groups form a cycle: " + (path + [name]).join(" > ") }
-	found = []
-	for looser in group_named(language, name).tighter_than { found += [looser] + looser_groups(language, looser, path + [name]) }
-	found
+	group_named(language, name).tighter_than.flat_map(looser => [looser] + looser_groups(language, looser, path + [name]))
 }
 
 # group name → every group it binds tighter than: the topological order of the relations, read again whenever a
@@ -69,13 +67,23 @@ untyped(item: Node) as Node := match item { Key(head, Op.Colon, type) => if head
 # `operator ⊕ has precedence above|below *`, or `circumfix operator ‖ ‖`, its two glyphs; none for any other phrase
 declaration_words(language: Language, items: list) as list<text> := {
 	tokens = tokens_of(language, items)
-	words = tokens.map(token => declared_word(untyped(token.item)))
+	words = spelled_words(tokens)
 	start = if words#1 == operator_word then 1 else if #words > 1 and words#2 == operator_word then 2 else 0
 	if start == 0 or not declaring_words.any(row => row.word == words#1) and words#1 != CIRCUMFIX_WORD { return [] }
 	rest = words[start ..]
 	if words#1 == CIRCUMFIX_WORD { return if #rest == 2 and not rest.contains("") then [words#1] + rest else [] }
 	parameters = #rest == 2 and tokens.last.glued_before and is_bracketed(tokens.last.item)
 	if #rest == 1 or parameters or #rest == 5 and [precedence_above, precedence_below].contains(rest[1 .. 4]) then [words#1] + (if parameters then [rest#1] else rest) else []
+}
+
+# the words of a phrase's tokens, a word glued after another spelled with it: `operator ⊕s(a, b)` declares `⊕s`
+spelled_words(tokens: list) as list<text> := {
+	words: list<text> = []
+	for token in tokens {
+		word = declared_word(untyped(token.item))
+		words.add(if token.glued_before and not is_bracketed(token.item) and words is not empty then words.pop() + word else word)
+	}
+	words
 }
 
 # `[fixity] operator ⊕ …` declares ⊕; `operator ⊕ has precedence above|below *` places it
@@ -153,6 +161,8 @@ names_of(side: Node) as list<text> := match side {
 
 # the canonical word of a spelling written in that fixity: the spelling itself when no alias applies
 canonical(language: Language, spelling: text, fixity: Fixity) as text := {
+	read = language.reading.find(alias => alias.spelling == spelling)
+	if read != ø { return read!.canonical }
 	written = aliased(spelling, fixity)
 	if written != spelling { return written }
 	compound = compound_assignment(language, spelling)
@@ -198,8 +208,7 @@ operator_spelled(language: Language, spelling: text) as Operator? := {
 # the group an operator spelled so has in that fixity, "" when it has no such fixity
 group_of(language: Language, spelling: text, fixity: Fixity) as text := {
 	if fixity == Fixity.Infix and compound_assignment(language, spelling) == spelling { return compound_assignment_group }
-	operator = operator_spelled(language, spelling)
-	if operator == ø { return "" }
+	operator = operator_spelled(language, spelling) ?? return ""
 	match fixity { Fixity.Infix => operator.infix; Fixity.Prefix => operator.prefix; Fixity.Postfix => operator.postfix; _ => "" }
 }
 
@@ -215,22 +224,32 @@ reading_as(language: Language, item: Node, fixity: Fixity) as Use? := match item
 	_ => ø
 }
 
-# A file's alias lines (wiki/alias.md), `alias length => count` or `alias count <= length`, taken out of it: each row
-# joins the plain words a name nothing defines is read as, in the file and the files using it
-aliases_taken(program: Node) as Node := match program {
-	List(lines, Bracket.None, Separator.Newline) => refitted(List(lines.filter(line => not alias_added(line)), Bracket.None, Separator.Newline), program)
+# A file's alias lines (wiki/alias.md), `alias length => count` or `alias count <= length`, taken out of it before its
+# other lines are read: each row joins the aliases the file's words are read by (core/pipeline.wap operated_once),
+# and those of the files using it. Kept, for format, each is written back as its row reads
+aliases_taken(language: Language, program: Node, kept: bool = no) as Node := match program {
+	List(lines, Bracket.None, Separator.Newline) => refitted(List(lines.flat_map(line => alias_line_taken(language, line, kept)), Bracket.None, Separator.Newline), program)
 	_ => program
 }
+# an alias line's two sides are taken as written, never through the aliases read before it
+alias_line_taken(language: Language, line: Node, kept: bool) as list := {
+	if phrase_items(line)#1 != symbol(ALIAS_WORD) { return [line] }
+	reading = language.reading
+	language.reading = []
+	row = alias_read(operated(language, line))
+	language.reading = reading
+	found = row ?? return [line]
+	language.reading.add(found)
+	if kept then [with_fact(line, WRITTEN, Text("${ALIAS_WORD} ${found.spelling} ${ALIAS_ARROWS#1} ${found.canonical}"))] else []
+}
 # the line `alias (a => b)` as the arrow binds looser than the phrase or tighter, `alias (count <= length)`
-alias_added(line: Node) as bool := match line {
-	Call(called, arguments) => #arguments == 2 and is_alias_phrase(arguments#1) and alias_row(line, spelling_written(called), items_of(arguments#1)#2, arguments#2)
-	List(items, Bracket.None, Separator.Space) => is_alias_phrase(line) and match items#2 { Call(called, arguments) => #arguments == 2 and alias_row(line, spelling_written(called), arguments#1, arguments#2); _ => no }
-	_ => no
+alias_read(line: Node) as Alias? := match line {
+	Call(called, arguments) => if #arguments == 2 and is_alias_phrase(arguments#1) then alias_row(line, spelling_written(called), items_of(arguments#1)#2, arguments#2) else ø
+	List(items, Bracket.None, Separator.Space) => if is_alias_phrase(line) then (match items#2 { Call(called, arguments) => if #arguments == 2 then alias_row(line, spelling_written(called), arguments#1, arguments#2) else ø; _ => ø }) else ø
+	_ => ø
 }
 is_alias_phrase(n: Node) as bool := #items_of(n) == 2 and items_of(n)#1 == symbol(ALIAS_WORD)
-alias_row(line: Node, arrow: text, left: Node, right: Node) as bool := {
+alias_row(line: Node, arrow: text, left: Node, right: Node) as Alias := {
 	if not ALIAS_ARROWS.contains(arrow) { refused(line, "an alias points from the new name to its meaning: write alias ${left} => ${right}") }
-	row = if arrow == ALIAS_ARROWS#1 then Alias(text(left), text(right)) else Alias(text(right), text(left))
-	word_aliases.add(row)
-	yes
+	if arrow == ALIAS_ARROWS#1 then Alias(text(left), text(right)) else Alias(text(right), text(left))
 }

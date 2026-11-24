@@ -5,7 +5,7 @@
 #   warp wap/compiler.wap hello.wap hello.wasm      compile
 #   warp hello.wasm                                  run it
 #   warp wap/compiler.wap format hello.wap           print it in canonical warp spelling
-#   warp wap/compiler.wap format fix hello.wap       write it again without the functions nothing calls
+#   warp wap/compiler.wap optimize hello.wap         write it again without the functions nothing calls
 #
 # Its stages, each with one job and a declared input and output; a form outside a stage's input is refused, naming it:
 #   read      text → notation       core/parse/reader.wap
@@ -48,8 +48,7 @@ LIBRARY := embedded("types.wasm")
 SOURCES_OPTION = "--sources"
 WARM_COMMAND = "warm"
 FORMAT_COMMAND = "format"
-# `format fix <program>`: the program's functions nothing calls removed
-FIX_WORD = "fix"
+OPTIMIZE_COMMAND = "optimize"
 from_sources = #args > 0 and args#1 == SOURCES_OPTION
 given = if from_sources then args[1 ..] else args
 warm = not from_sources and WARM_STATE != ""
@@ -60,10 +59,11 @@ language = base_language()
 language.readers[".wasm"] = wasm_source
 language.readers[".wap"] = part_source
 if warm { warm_brought(language, program.folder, WARM_STATE) } else { language.standard = standard_words(language, program.folder) }
+language.use_free_modules = USE_FREE_MODULES
 rules_loaded(language, operated_file(language, in_folder(program.folder, C_FUNCTION_RULES)))
 rules_files_loaded(language, program.folder)
 if warm { rules_checked(language) }
-if #given < 2 { raise "usage: warp wap/compiler.wap [--sources] <program> <module.wasm>, format [fix] <program>, warm <state file>, or native <program> <module.wasm>" }
+if #given < 2 { raise "usage: warp wap/compiler.wap [--sources] <program> <module.wasm>, format <program>, optimize <program>, warm <state file>, or native <program> <module.wasm>" }
 # the library a compile reads: the module held where the compiler holds one; the warm state, written for the compiler
 # built next, holds the module beside it, the one that compiler holds; from sources, as the compilers bootstrap and a
 # native build compile (whose texts are not the GC ones the module holds), its source
@@ -84,11 +84,13 @@ compiled(file: text, module: text) as list := {
 
 # (the native `wap` compiles as the native warp does: the program's folder, its lib/ and runtime follow, unread here)
 # `native <program> <module.wasm>`: for a native build (wap/extensions/native/build.sh), each text in the memory
-# the program in the file in its canonical layout, without the definitions of these signatures
-formatted(file: text, gone: list<Signature>) as text := {
+# `format <program>`: the program in canonical warp, each reading typing decided spelled out (core/format.wap); code
+# typing refuses, a fragment or data, as it reads. Without the definitions of the signatures gone
+formatted(file: text, gone: list<Signature> = []) as text := {
+	try { typed_modules(language, declared_modules(language, file), types, file) } else ø
 	code = read_notation(language, file)
 	words_known(language, code)
-	statements_text(language, [groupings_written(language, without_definitions(operated_program(language, code), gone))], Bracket.None)
+	statements_text(language, [groupings_written(language, without_definitions(operated_program(language, code, aliases_kept: yes), gone))], Bracket.None)
 }
 # the program's own functions nothing calls: typed only once called, as a used module's are, typing leaves them out.
 # A file of definitions only, a library, has no caller to judge by: none of its functions is uncalled
@@ -100,15 +102,15 @@ uncalled(modules: list<Module>) as list<Signature> := {
 # a program without the statements defining these signatures, each written where its name is; the others stay, those
 # on their lines too
 without_definitions(program: Node, gone: list<Signature>) as Node := if gone is empty then program else with_facts_of(List(top_level_statements(program).filter(statement => not gone.any(signature => same_place(statement, signature.definer))), Bracket.None, Separator.Newline), program)
-# `format fix <program>`: the file written again without the functions nothing calls, each said
-fixed(file: text) := {
+# `optimize <program>`: the file written again without the functions nothing calls, each said
+optimized(file: text) := {
 	gone = uncalled(declared_modules(language, file))
 	for signature in gone { print "removed: ${signature.name}" }
 	write(file, formatted(file, gone))
 }
-if given#1 == FORMAT_COMMAND and given#2 == FIX_WORD { fixed(given#3) }
-else if given#1 == FORMAT_COMMAND { print formatted(given#2, []) }
-else if given#1 == WARM_COMMAND { write_bytes(given#2, bytes(warm_state(language, program.folder))) }
+if given#1 == FORMAT_COMMAND { print formatted(given#2) }
+else if given#1 == OPTIMIZE_COMMAND { optimized(given#2) }
+else if given#1 == WARM_COMMAND { write_bytes(given#2, bytes(warm_state(language, program.folder, types))) }
 else if given#1 == "native" { language.memory = NATIVE_MEMORY; write_bytes(given#3, compiled(given#2, given#3)) }
 else {
 	write_bytes(given#2, compiled(given#1, given#2))

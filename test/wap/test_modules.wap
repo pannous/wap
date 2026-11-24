@@ -41,6 +41,9 @@ check("a.twice is the used module a's word, beside the program's own twice", ran
 check("two used modules defining one name are refused naming both, even where nothing calls it", matches_of(ran("module_clash", "use \"a.wap\"\nuse \"b.wap\"\nprint(\"x\")"), "a.wap line [0-9]* and b.wap line [0-9]* both define twice").join("\n"), "a.wap line 1 and b.wap line 1 both define twice")
 write(staged("c.wap"), "twice(n: int) as int := n * 2\n")
 check("two used modules defining one word identically are no clash", ran("module_identical", "use \"a.wap\"\nuse \"c.wap\"\nprint(text(twice(4)))"), "8")
+write(staged("env_a.wap"), "use foreign\ngetenv(name: text): text from 'c'\nfa() := 1\n")
+write(staged("env_b.wap"), "use foreign\ngetenv(name: text): text from 'c'\nfb() := 2\n")
+check("two used modules taking one C function identically are no clash", ran("module_identical_c", "use \"env_a.wap\"\nuse \"env_b.wap\"\nprint(text(fa() + fb()))"), "3")
 check("a variable named like a used module is the variable: a.twice() is twice(a)", ran("module_hidden", "use \"a.wap\"\na = 7\nprint(text(a.twice()))"), "14")
 # a type's name means the record its code sees: a used module's class beside the program's own of that name
 write(staged("boxes.wap"), "class Box { n: int }\nboxed(n: int) as text := text(Box(n).n)\n")
@@ -69,6 +72,8 @@ check("a program changes a used module's variable", ran("reassign_used", "use \"
 # a word's one function is exported under its plain word too
 check("a host calls a word's one function by its plain word", called_export("plain", "twice(x: int) as int := x * 2\nadd(a: int, b: int) as int := a + b\nadd(a: text, b: text) as text := a + b", "twice", ["21"]), "42")
 check("a program uses a compiled module whose one function is exported by its plain word too", ran_using("plain_twice", "twice(x: int) as int := x * 2", "uses_plain_twice", "print(text(twice(21)))"), "42")
+# a word's overloads are exported under their plain word too, as their dispatcher, a function of any values
+check("a module exports a word's overloads under their plain word, as the dispatcher", then_ran(compiled("dispatched", "add(a: int, b: int) as int := a + b\nadd(a: text, b: text) as text := a + b"), () => text(lines_with(said(["wasm-objdump", "-x", "-j", "Export", module_of("dispatched")]), "\"add\""))), "1")
 # a recursive record's recursion group holds only the types that refer to it, so a list or text the module shares
 # with the program is the program's own type
 check("a program calls a list and a text function of a module declaring a recursive record", ran_using("recursive_module", "class Tree { kids: list<Tree>; name: text }\ntotal(xs: list<int>) as int := xs.sum()\nshout(t: text) as text := t + \"!\"\nsize(t: Tree) as int := 1 + t.kids.map(size).sum()", "uses_recursive_module", "print(text(total([1, 2, 3])))\nprint(shout(\"hi\"))\nprint(text(size(Tree([Tree([], \"b\")], \"a\"))))"), "6\nhi!\n2")
@@ -87,7 +92,7 @@ check("use name brings in a standard module from the library beside the compiler
 check("use name finds the library's own module before its folders'", ran("use_library_root", "use regex\nprint(text(escaped_code(\"n\")))"), "10")
 # a folder right in the library holds modules too, lib/native's C bindings among them; import is use
 check("import name brings in a module from a folder of the library", ran("use_library_folder", "import z\nprint(text(compressBound(100)))"), "113")
-# ini: keys before any section stay at the top level beside the sections (lib/ini.warp, card lib-ini-toml)
+# ini: keys before any section stay at the top level beside the sections (lib/ini.wap, card lib-ini-toml)
 check("ini keeps the keys before any section", ran("use_ini", "use ini\nprint to_ini(parse_ini(\"top = 1\n[db]\nhost = x\"))"), "top = 1\n\n[db]\nhost = x")
 # list: the standard list words beyond the types module's, typed (lib/list.wap)
 check("the list module's words take typed lists", ran("use_list", "use list\nprint text(chunk([1, 2, 3, 4, 5], 2))\nprint text(median([3, 1, 2, 4]))\nprint text(combinations([1, 2, 3], 2))"), "[[1, 2], [3, 4], [5]]\n2.5\n[[1, 2], [1, 3], [2, 3]]")
@@ -100,6 +105,9 @@ write(staged("trig.wap"), "sine(x: int) := x * 2\nalias sin => sine\nalias magni
 check("a module's alias reads in the module and the file using it", ran("use_alias", "use \"trig.wap\"\nprint(sin(3))\nprint(mag(3))\nprint(twice_sin(1))"), "6\n4\n4")
 # an alias of a rule's word starts that rule's phrase too (wiki/alias.md, wiki/declaration.md)
 check("an alias of a rule's word starts its phrase", ran("alias_rule", "alias fun => def\nfun halved(n: float) { n / 2 }\nprint halved(3.0)"), "1.5")
+# a module's alias reaches the files using it, never a file that does not (wiki/alias.md)
+write(staged("plain.wap"), "plain_sin(x: float) := sin(x)\n")
+check("a module's alias stays out of a file not using it", ran("alias_scoped", "use \"trig.wap\"\nuse \"plain.wap\"\nprint(sin(3))\nprint(plain_sin(3.0))"), "6\n0.1411200080598671")
 # a word whose definition takes a raw parameter, in a used file, takes its braced block verbatim (wiki/dsl.md)
 write(staged("pages.wap"), "html(page: raw): text := page.trim()\n")
 check("a used file's raw word takes its block verbatim", ran("raw_used", "use \"pages.wap\"\npage = html { <p>it's {here}</p> }\nprint page"), "<p>it's {here}</p>")
@@ -112,3 +120,10 @@ check("a used module's global declared with its type is written and read", ran("
 check("a used module's global reads in the modules using it", ran("use_global", "use \"counting.wap\"\nuse \"next_count.wap\"\ncounter.n = 4\nprint(next_count())"), "5")
 # a standard module's word named without its `use` brings the module in, the hint naming the module (wiki/use.md "Library folders")
 check("a standard word without its use runs, the hint naming its module's use", ran("unused_standard", "print(text(is_prime(7)))").split(": ").drop(2).join(": "), "is_prime comes from math: write use math\nyes")
+# a used module's global keeps its place among the module's globals, whatever the module using it adds of its own
+ensured_folder(staged("kept"))
+write(staged("kept/names.wap"), "global names: list<text> = []\nnamed(t: text) := names.add(t)\n")
+write(staged("kept/socket.wap"), "use \"names.wap\"\nsetsockopt(fd: i32, level: i32, name: i32, value: bytes, size: length): i32 from 'c'\n")
+check("a module runs whose used module's module has a global, beside a C binding of its own", ran("kept_global", "use \"kept/socket.wap\"\nprint 1"), "1")
+# the words of list, text and map are every program's: no hint (wiki/standard-library.md "list")
+check("a word of a module every program has runs without its use and without a hint", ran("prelude_standard", "print(text(#zip([1, 2], [3, 4])))"), "2")

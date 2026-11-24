@@ -1,0 +1,77 @@
+# The standard module ini (wiki/library-config-formats.md): `use ini`, INI configuration text read into a map and
+# written back. parse_ini(t) gives a map: each [section] a map of its keys, the keys before any section at the top
+# level beside them.
+# - a line is a [section], a key = value or key: value pair (the first = or : splits), blank, or a comment starting
+#   with ; or #; anything else is refused naming its line
+# - comments are whole lines only: a value keeps a ; or # inside it (url = http://x/#top)
+# - keys, values and section names are trimmed; keys keep their case; values stay texts, no numbers or booleans guessed
+# - a value wholly inside matching "…" or '…' loses those quotes, no escapes inside, so spaces at its ends can be kept
+# - a key twice in one section, or a section twice, is refused, as Python's strict configparser, never merged
+# - a section name is taken whole: [a.b] is the section "a.b", no nesting
+# to_ini(m) writes the top-level values first, then each map as a [section]; a map deeper down is refused
+use text
+use map
+use list
+
+COMMENT_MARKS := [";", "#"]
+# the marks between a key and its value, the first of them splitting
+SPLIT_MARKS := ["=", ":"]
+QUOTES := ["\"", "'"]
+
+# --- reading
+
+ini_refused(number: int, why: text): never := raise "ini line ${number}: ${why}"
+
+parse_ini(source: text): map<text, any> := {
+	root: map<text, any> = {}
+	section = root
+	lines = source.replace("\r\n", "\n").split("\n")
+	for number in 1 to #lines {
+		line = trim(lines#number)
+		if ignored(line) { continue }
+		if line.starts_with("[") {
+			if not line.ends_with("]") { ini_refused(number, "no closing ] in ${line}") }
+			name = trim(line[1:#line - 1])
+			if name == "" { ini_refused(number, "an empty section name") }
+			if root.has(name) { ini_refused(number, "the section ${name} twice") }
+			fresh: map<text, any> = {}
+			root[name] = fresh
+			section = fresh
+		} else {
+			at = split_place(line)
+			if at == 0 { ini_refused(number, "no = or : in ${line}") }
+			key = trim(line[0:at - 1])
+			if key == "" { ini_refused(number, "a value without a key") }
+			if section.has(key) { ini_refused(number, "the key ${key} twice") }
+			section[key] = unquoted(trim(line[at:]))
+		}
+	}
+	root
+}
+# a blank line or a comment
+ignored(line: text): bool := line is empty or COMMENT_MARKS.any(mark => line.starts_with(mark))
+# the character position from 1 of the line's first split mark, 0 when it has none
+split_place(line: text): int := {
+	places = SPLIT_MARKS.map(mark => find(line, mark)).filter(at => at > 0)
+	if places is empty then 0 else places.min
+}
+unquoted(value: text): text := if #value >= 2 and QUOTES.any(quote => value.starts_with(quote) and value.ends_with(quote)) then value[1:#value - 1] else value
+
+# --- writing
+
+to_ini(m: map<text, V>): text := {
+	split_keys = m.keys().partition(key => is_map(m[key]))
+	plain = split_keys#2.map(key => ini_line(key, m[key])).join("")
+	([plain] + split_keys#1.map(key => section_text(key, m[key]))).filter(part => part != "").join("\n")
+}
+section_text(name: text, section: map<text, W>): text := {
+	for key in section.keys() { if is_map(section[key]) { raise "to_ini: the section ${name} holds the map ${key}: INI has one level of sections" } }
+	"[${name}]\n" + section.keys().map(key => ini_line(key, section[key])).join("")
+}
+# key = value, the value quoted when its ends are spaces or a quote
+ini_line(key: text, value: any): text := {
+	written = "${value}"
+	if written.contains("\n") { raise "to_ini: the value of ${key} spans lines" }
+	kept = if written != trim(written) or QUOTES.any(quote => written.starts_with(quote)) then "\"${written}\"" else written
+	"${key} = ${kept}\n"
+}
