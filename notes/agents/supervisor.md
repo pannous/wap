@@ -54,7 +54,10 @@ the team, crash resume), notes/roles.md (what the other roles do).
   of picking cards, pick red tests and hand them out to workers. Not yet: the user's own priorities (now: dependent types and the proof system, notes/coc-plan.md on branch coc-plan) come before red tests.
 - Focus (user 2026-11-24): regular work is paused; the whole fleet implements the plan of dependent types and the basic
   proof system (card coc-plan, its milestones). The Supervisor coordinates it (cards of topic
-  dependent-types, owners, briefs); wap-coc-plan is its design authority and builds the K1 heart; finished branches still land.
+  dependent-types, owners, briefs) and is its design authority (notes/coc-plan.md, theory.md, elaborate.md are the
+  design; a trusted kernel file's review goes to an advisor subagent); finished branches still land.
+- Reviews (user 2026-11-24, wap-reviewer and wap-coc-plan retired): the "sound" AGENTS.md asks of wap-reviewer comes from
+  the Supervisor, after a diff-audit subagent read the diff; the verdict is noted on the card.
   At least one worker always works through the open cards.
 - wap/core and wap/kernel are semi-frozen (user 2026-11-20): every change there goes to wap-interviewer first; new
   features go into wap/extensions/. The first case is the native binary, built by wap as an extension.
