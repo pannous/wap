@@ -244,6 +244,31 @@ adds is how a candidate fits and where its instances come from.
   test_theory_statements_wanted.wap.
 - Statements are read as kernel forms (Block, Set, If, Return, While, Break, Continue), which the tree's rules
   write; the elaborator names no statement word.
+- **Effects are a type**: `T ! IO` is the prelude's `Eff(e, T)`, e the `Effects.set` of a yes or no for each effect
+  (`elaborate/effects.wap`). The effects' words are the fields of that one case, read from the prelude, so the
+  elaborator names none; a word in another case is that effect, with a got-it note. Pure is no word of a set, only what
+  `effects of` prints for none: purity is found, never written.
+- **A computation runs where its value is read**: a computation where a plain value is wanted, inside a function,
+  becomes a pending run (`Elaborating.pending`), its value a fresh variable read in its place. The nearest binder that
+  closes (a match arm, so a branch of a choice; a let's rest; a function) binds the runs opened inside it around its
+  body, the first outermost, by the prelude's `bind`; a value where a computation is wanted is its `pure`, a
+  computation of fewer effects `widened`. Where that binder's type is plain, its effects go to `Elaborating.lifts`
+  and the function's body is read again against its result's computations with them: so `if b then away(1) else 0`
+  is `nat ! Div`, its no branch `pure(…, 0)`, running nothing.
+- **A recursion that may not end is Div**: where nothing shows the end (the refusal `ending`, not a recursion's
+  wrong shape), the definition becomes an opaque constant of the result's computations with the prelude's
+  `diverging` effects joined in, `never(…)`, under the name the program wrote; its body as written is kept in
+  `Theory.run_bodies` for running it. It never unfolds, so it proves nothing and rests on no axiom. Its result type
+  must be written.
+- **A proof must be pure**: in a law or theorem no computation runs; one where a value is wanted is the refusal
+  `effect`, naming the chain from the proof. A law whose statement names a computation, or a function that gives
+  nothing (the prelude's Unit: called for what it does, never pure), is tested, never proved: with a proof it is
+  refused, without one the provers leave it.
+- **`effects of f`** prints the effects f's type ends in, by the syntax of its type (a computation type is named,
+  never unfolded): Pure, one effect, or several in brackets.
+- **`f(x) := … ! IO`** limits f's effects: an effect of its type past the limit is the refusal `effect`, and a limit
+  on a value that is no function is a misplaced effect constraint. `! IO, FFI` with a comma waits in
+  test_theory_effects_wanted.wap, as the reader puts the comma around the whole definition.
 
 ## Sums (E7)
 
@@ -312,6 +337,7 @@ refuses a type of the block under a subset's condition (strict positivity): the 
 | `elaborate/convert.wap` | the conversions, the path between two types, lifting through containers | E4 |
 | `elaborate/obligations.wap` | going down: prove or check | E4 |
 | `elaborate/statements.wap` | blocks, lets, a choice's rest, counted loops, returns | E5 |
+| `elaborate/effects.wap` | computation types, `effects of`, effect bounds, recursions that may not end | E5 |
 | `elaborate/sums.wap` | unions of types as sums, their normal form | E7 |
 | `elaborate/lifted.wap` | conditions lifted out of recursive types: the plain block, its bool, the subset | E8 |
 

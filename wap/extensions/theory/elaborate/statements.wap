@@ -14,6 +14,7 @@ use "../numbers.wap"
 use "../recursors.wap"
 use "state.wap"
 use "read.wap"
+use "effects.wap"
 use "match.wap"
 
 # the elaborator's own rule a refusal names
@@ -52,15 +53,20 @@ statements_in(part: Node): list<Node> := match part {
 }
 
 # `name = value` and the rest of the block: a let of the name, which holds the value's type in the rest
-let_elaborated(x: Elaborating, binder: WrittenBinder, value_written: Node, rest: list<Node>, wanted: Term?): Term := {
+# (the computation the value is runs around the let; the rest closes inside it, where its name is bound)
+let_elaborated(x: Elaborating, binder: WrittenBinder, value_written: Node, rest: list<Node>, wanted: Term?): Term := closed_over(x, wanted, () => {
 	type = if binder.type is not ø then elaborated(x, binder.type!, any_sort(x)) else ø
-	value = filled(x.el, elaborated(x, value_written, type))
+	read = elaborated(x, value_written, type)
+	value = filled(x.el, ran(x, read, type_of(x.el.c, filled(x.el, read)), ø) ?? read)
 	held = filled(x.el, type ?? type_of(x.el.c, value))
 	variable = scoped(x.el, binder.name, held)
-	body = statements_elaborated(x, rest, wanted)
+	body = rest_read(x, rest, wanted)
 	unscoped(x.el, [variable])
 	let_in(binder.name, held, value, abstracted(filled(x.el, body), variable_id(variable)))
-}
+})
+
+# the rest of a block after what binds names in it: a binder that closes, around which the computations run in it bind
+rest_read(x: Elaborating, rest: list<Node>, wanted: Term?): Term := closed_over(x, wanted, () => statements_elaborated(x, rest, wanted))
 
 # the name a value is given to, typed or not; a part of a value, `xs#1 = 2` or `xs#1: nat = 2`, is refused, never read as a name
 place_binder(place: Node): WrittenBinder := match place {
@@ -81,7 +87,7 @@ joined_elaborated(x: Elaborating, condition: Node, then_part: list<Node>, else_p
 # under a name; split reads the statement with it in scope, given the call that ends each path
 rejoined(x: Elaborating, name: text, given: list<text>, rest: list<Node>, wanted: Term?, split: (Node) -> Term): Term := {
 	variables = given.map(given_name => scoped(x.el, given_name, type_before(x, given_name)))
-	body = statements_elaborated(x, rest, wanted)
+	body = rest_read(x, rest, wanted)
 	unscoped(x.el, variables)
 	join = closed_filled(x.el, body, variables, yes)
 	join_type = type_of(x.el.c, join)
@@ -128,7 +134,7 @@ round_elaborated(x: Elaborating, numbers: Numbers, place: Node, body: list<Node>
 	round = scoped(x.el, ROUND, number)
 	around = x.round_given
 	x.round_given = given
-	run = statements_elaborated(x, [Set(place, symbol(ROUND))] + body + [Continue()], wanted)
+	run = rest_read(x, [Set(place, symbol(ROUND))] + body + [Continue()], wanted)
 	x.round_given = around
 	unscoped(x.el, [round])
 	rounds = let_in(ROUND, number, next(numbers, before), abstracted(filled(x.el, run), variable_id(round)))
