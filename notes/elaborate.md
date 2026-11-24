@@ -13,11 +13,13 @@ obligations).
   literals, Symbol), made by the compiler's own stages up to `lower`. It does not read today's binding or typing
   facts: it resolves names itself. A type is read by the same function as a value: there is one reader of
   expressions.
-- **Laws and axioms** arrive as their word called on the declaration (wap/sugar/definitions.wap): `law four: 2 + 2
-  == 4 := refl` as `law(Define(four: 2 + 2 == 4, (), refl))`, a proved law the definition of its proof;
-  `axiom int: Type` as `axiom(int: Type)`. A law or axiom without a value whose name takes parameters is one of a
+- **Theorems, laws and axioms** arrive as their word called on the declaration (wap/sugar/definitions.wap):
+  `theorem four: 2 + 2 == 4 := refl` as `theorem(Define(four: 2 + 2 == 4, (), refl))`, a proved one the definition of
+  its proof; `axiom int: Type` as `axiom(int: Type)`. One without a value whose name takes parameters is one of a
   function type: `axiom f(x: A): B` arrives as `axiom(f: (x: A) -> B)`, the type lowered as a written one is.
-  `declaration_elaborated` (elaborate/declare.wap) takes both.
+  `declaration_elaborated` (elaborate/declare.wap) takes them all. A theorem without a proof is refused; a law
+  without one is elaborated and kept in `Theory.unproved_laws`, never declared, so a proof naming it is refused; an
+  axiom is an `Axiom`.
 - **Writes** declarations into the theory's `Environment` through `declared` and `inductive_declared`, and
   nothing else. A term it hands over holds no hole.
 - **The door** `elaborate/door.wap program.wap` loads the prelude (`wap/extensions/theory/prelude/`), elaborates the
@@ -79,7 +81,7 @@ wanted before its later arguments are read, so they are read with more known.
 ## Declarations
 
 - `Define` with a type and a body: the header is read first (letters, levels), giving the declared type; the body
-  is read against it; holes are filled; then `declared`. A `law` is a `Theorem`, `axiom` an `Axiom`.
+  is read against it; holes are filled; then `declared`. A `theorem` or a proved `law` is a `Theorem`, `axiom` an `Axiom`.
 - `Record` (an enum or a class): the names after the type's name are its parameters, the result type's binders its
   indices, the cases its cases; a class is a block of one type with one case named as the type. Enums that name
   each other are one block. The block goes to `inductive_declared`, then the recursors are made.
@@ -175,7 +177,7 @@ adds is how a candidate fits and where its instances come from.
 - The rules of notes/theory.md hold here too: closed terms only (a binder is entered by a free variable), names
   are hints, never `==` on a term, each file names what it uses.
 - Refuse, never guess: where two readings fit, both are named. The elaborator's refusals have their own rule
-  names: `cannot find`, `overload`, `covering`, `recursion`, `unknown name`; from E3 on `trait` and
+  names: `cannot find`, `overload`, `covering`, `recursion`, `unknown name`, `unproved theorem`, `unproved law`; from E3 on `trait` and
   `undecidable condition`; from E4 on `conversion`, `condition` and `unproved condition`.
 - Nothing here is trusted and nothing here may weaken a check: a term the kernel refuses is reported as the
   elaborator's bug, with the declaration, never retried another way.
