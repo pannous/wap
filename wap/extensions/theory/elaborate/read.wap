@@ -227,10 +227,9 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 		if declarations_named(x.theory, qualified) is not empty { return name_elaborated(x, qualified, arguments.drop(1), wanted) }
 	}
 	candidates = declarations_named(x.theory, name)
-	operation = trait_operation(x, name, candidates, arguments, wanted)
-	if operation is not ø { return operation! }
-	if #candidates == 1 { return declared_given(x, candidates#1, arguments, wanted) }
-	if #candidates > 1 { return overload_elaborated(x, name, candidates, arguments, wanted) }
+	traits = traits_of(x.theory, name)
+	if #candidates == 1 and traits is empty { return declared_given(x, candidates#1, arguments, wanted) }
+	if candidates is not empty or traits is not empty { return overload_elaborated(x, name, candidates, traits, arguments, wanted) }
 	if x.header and #name == LETTER_LENGTH {
 		letter = scoped(x.el, name, wanted ?? hole_over(x.el, "the type of ${name}", any_sort(x), x.letters))
 		x.letters += [letter]
@@ -242,12 +241,10 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 
 # A declaration at a level hole for each of its level parameters, a hole for each found binder, then its written
 # binders given the arguments
-declared_given(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?): Term := {
-	if wanted is not ø and declaration(x.theory.environment, name)!.kind is Recursor { return recursor_given(x, name, arguments, wanted!) }
-	declared_read(x, name, arguments.map(node => Written(node)), wanted)
-}
-# a declaration given arguments written or read already
+declared_given(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?): Term := declared_read(x, name, unread(arguments), wanted)
+# a declaration given arguments unread or read already
 declared_read(x: Elaborating, name: text, arguments: list<Argument>, wanted: Term?): Term := {
+	if wanted is not ø and declaration(x.theory.environment, name)!.kind is Recursor { return recursor_given(x, name, arguments, wanted!) }
 	# every binder given, the found ones too, as an explicit program calls it: no hole
 	own = x.theory.binders.get(name) ?? binders_counted(declaration(x.theory.environment, name)!.type)
 	found = if #arguments == own then 0 else x.theory.found.get(name) ?? 0
@@ -273,10 +270,11 @@ holes_given(x: Elaborating, name: text, function: Term, type: Term, count: int? 
 
 # A function of a type given its arguments, each read against its domain. When the result does not depend on the
 # arguments it is made the type wanted first
-given_arguments(x: Elaborating, function: Term, type: Term, arguments: list<Node>, wanted: Term?): Term := arguments_given(x, function, type, arguments.map(node => Written(node)), wanted)
+given_arguments(x: Elaborating, function: Term, type: Term, arguments: list<Node>, wanted: Term?): Term := arguments_given(x, function, type, unread(arguments), wanted)
 # an argument of a call: as written, read against its parameter's type, or read already, made of that type, so a call
 # that tries several declarations reads each argument once (overload_elaborated)
-enum Argument { Written(node: Node), Elaborated(term: Term) }
+enum Argument { Unread(node: Node), Elaborated(term: Term) }
+unread(nodes: list<Node>): list<Argument> := nodes.map(node => Unread(node))
 arguments_given(x: Elaborating, function: Term, type: Term, arguments: list<Argument>, wanted: Term?): Term := {
 	if wanted is not ø {
 		result = result_after(filled(x.el, type), #arguments)
@@ -287,7 +285,7 @@ arguments_given(x: Elaborating, function: Term, type: Term, arguments: list<Argu
 	for argument in arguments {
 		parts = pi_parts(x, rest) ?? refused(NOT_A_FUNCTION, "${shown(filled(x.el, given))} is a ${shown(filled(x.el, rest))}, no function, and is given ${argument_shown(x, argument)}")
 		value = match argument {
-			Written(node) => elaborated(x, it_read(x, node, parts.domain), filled(x.el, parts.domain))
+			Unread(node) => elaborated(x, it_read(x, node, parts.domain), filled(x.el, parts.domain))
 			Elaborated(term) => made_of(x, term, filled(x.el, parts.domain))
 		}
 		given = apply(given, value)
@@ -296,19 +294,24 @@ arguments_given(x: Elaborating, function: Term, type: Term, arguments: list<Argu
 	given
 }
 argument_shown(x: Elaborating, argument: Argument): text := match argument {
-	Written(node) => text(node)
+	Unread(node) => text(node)
 	Elaborated(term) => shown(filled(x.el, term))
 }
-# an argument read alone, without a type wanted; written still where it cannot be, its answers taken back, so a
-# lambda without binder types or an overload chosen by its result is read against each parameter's type
+# an argument's term read without a type wanted
+term_alone(x: Elaborating, argument: Argument): Term := match argument {
+	Unread(node) => elaborated(x, node, ø)
+	Elaborated(term) => term
+}
+# an argument read alone, without a type wanted; unread still where it cannot be, all it found put back, so a
+# lambda without binder types, an argument naming `it` or an overload chosen by its result is read against each
+# parameter's type
 read_alone(x: Elaborating, node: Node): Argument := {
-	before = arm_kept(x)
-	kept = found_so_far(x.el)
+	if names_it(node) { return Unread(node) }
+	kept = snapshot(x)
 	try { Elaborated(elaborated(x, node, ø)) } catch e {
 		if not e.message.starts_with(REFUSED) { raise e.message }
-		back_to(x.el, kept)
-		arm_restored(x, before)
-		Written(node)
+		put_back(x, kept)
+		Unread(node)
 	}
 }
 # an argument naming `it` where a function of one value is wanted is that function of it, as lowering reads one where
@@ -336,21 +339,28 @@ declarations_named(p: Theory, name: text): list<text> := {
 	p.overloads.get(kernel) ?? (if declaration(p.environment, kernel) is not ø then [kernel] else [])
 }
 
-# The declarations of an overloaded name tried in turn: exactly one must fit its arguments and the type wanted; none
-# fitting is refused naming why each did not, a refusal met inside an argument included
-overload_elaborated(x: Elaborating, name: text, candidates: list<text>, arguments: list<Node>, wanted: Term?): Term := {
+# The declarations of an overloaded name tried in turn: exactly one must fit its arguments and the type wanted, else
+# it is the operation of a trait it names; none fitting is refused naming why each did not, a refusal met inside an
+# argument included
+overload_elaborated(x: Elaborating, name: text, candidates: list<text>, traits: list<text>, arguments: list<Node>, wanted: Term?): Term := {
 	read = arguments.map(argument => read_alone(x, argument))
 	trials = declarations_tried(x, candidates, read, wanted)
-	fit = the_only(fits(nearest(trials)), OVERLOAD, "${name} here is")
+	fitting = fits(nearest(trials))
+	if fitting is empty and traits is not empty { return trait_operation(x, name, traits, read, wanted) }
+	fit = the_only(fitting, OVERLOAD, "${name} here is")
 	if fit is ø { return distributed(x, name, arguments, wanted) ?? refused(NO_FIT, "${name} is none of ${trials.map(trial => "${trial.candidate} (${trial.refusal!})").join(", ")} here") }
 	declared_read(x, fit!, read, wanted)
 }
 # the declarations that fit the arguments and the type wanted
-fitting_declarations(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<text> := fits(declarations_tried(x, candidates, arguments.map(node => Written(node)), wanted))
+fitting_declarations(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<text> := fits(declarations_tried(x, candidates, unread(arguments), wanted))
 declarations_tried(x: Elaborating, candidates: list<text>, arguments: list<Argument>, wanted: Term?): list<Trial> := trials_of(x, candidates, candidate => {
 	given = declared_read(x, candidate, arguments, wanted)
 	# a result made of the type wanted is the place's step, no step of the fit: only the arguments' count
-	if wanted is ø then given else counted(x, () => made_of(x, given, wanted!), (made, steps) => made)
+	if wanted is ø { return given }
+	steps = x.indirect
+	made = made_of(x, given, wanted!)
+	x.indirect = steps
+	made
 })
 # the candidates an attempt does not refuse as ill-typed
 fitting(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<text> := fits(trials_of(x, candidates, attempt))
@@ -360,18 +370,23 @@ fits(trials: list<Trial>): list<text> := trials.filter(trial => trial.refusal is
 class Trial { candidate: text; refusal: text?; indirect: int }
 # each candidate given to an attempt, the answers it gives taken back
 trials_of(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<Trial> := candidates.map(candidate => {
-	before = arm_kept(x)
-	trial = counted(x, () => taken_back(x.el, () => refusal_of(candidate, attempt)), (refusal, steps) => Trial(candidate, refusal, steps))
-	arm_restored(x, before)
+	kept = snapshot(x)
+	refusal = refusal_of(candidate, attempt)
+	trial = Trial(candidate, refusal, x.indirect - kept.indirect)
+	put_back(x, kept)
 	trial
 })
-# what an action gives, handed on with the indirect steps it took, which the count around it does not get
-counted(x: Elaborating, action: () -> T, given: (T, int) -> R): R := {
-	before = x.indirect
-	result = action()
-	steps = x.indirect - before
-	x.indirect = before
-	given(result, steps)
+# what an attempt may change, kept to be put back: the answers found, the arm being read, the letters, instance holes
+# and effects noted, the indirect steps counted
+class Snapshot { found: Found; arm: Arm; letters: int; instances: int; pending: int; indirect: int }
+snapshot(x: Elaborating): Snapshot := Snapshot(found_so_far(x.el), arm_kept(x), #x.letters, #x.instances, #x.pending, x.indirect)
+put_back(x: Elaborating, kept: Snapshot) := {
+	back_to(x.el, kept.found)
+	arm_restored(x, kept.arm)
+	x.letters = x.letters.take(kept.letters)
+	x.instances = x.instances.take(kept.instances)
+	x.pending = x.pending.take(kept.pending)
+	x.indirect = kept.indirect
 }
 # the trials that fit with the fewest indirect steps, and those that do not fit: a direct fit beats a fit through a
 # conversion, equal fits tie
