@@ -12,7 +12,8 @@ here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 results="$here/../../data/wap-tests"
 SUMMARY="$results/summary.txt"
 FULL_SUMMARY="$results/full-summary.txt"
-cores=$(getconf _NPROCESSORS_ONLN)
+# two cores stay free for the user's apps
+cores=$(( $(getconf _NPROCESSORS_ONLN) - 2 ))
 job_slot="$here/../../scripts/job-slot.sh"
 
 # the outputs of the tests run, each data/wap-tests/<test file>.txt, a script's data/wap-tests/wap/<test file>.txt
