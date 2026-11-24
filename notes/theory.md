@@ -27,6 +27,7 @@ all of them keep. The plan says what the rules are; this note says where they li
 | `prelude/logic.wap` | the logic as an explicit program: False, True, And, Or, Not, Equal, Exists, bool, Decidable | L1 | theory-prelude-logic |
 | `prelude/quotient.wap` | the quotients bound, their axiom, function extensionality proved | K5 | theory-quotients |
 | `prelude/numbers.wap` | nat with its shortcuts and the theorems that license them, the comparisons, int | L2 | theory-prelude-numbers |
+| `prelude/effects.wap` | the effect sets, the one opaque family of computation types `Eff`, `never`, `pure`, `bind`, Error and `Fallible` (`T or Error`) | L4 | theory-prelude-effects |
 | `elaborate/` | the elaborator, which is not trusted: notes/elaborate.md | 8 | theory-arguments-found and after |
 | `export.wap` | what the environment accepted written as an export, one record a line | K7 | theory-second-opinion |
 | `second/` | the second checker: an export checked again by rules of its own | K7 | theory-second-opinion |
