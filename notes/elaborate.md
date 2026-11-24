@@ -9,8 +9,11 @@ obligations).
 
 ## What it reads and writes
 
-- **Reads** the lowered forms of a program (wap/kernel/forms.wap: Call, Fn, Define, Record, Case, Arm, If, Block,
-  literals, Symbol), made by the compiler's own stages up to `lower`. It does not read today's binding or typing
+- **Reads** a program's statements as the reader gives them (`statements_of`, as check.wap does): an enum or a class
+  as written, read by explicit.wap's enum reader, the one the kernel's door uses; any other statement lowered alone
+  first (wap/kernel/forms.wap: Call, Fn, Define, If, Block, literals, Symbol), a `match` as the call of `match` on
+  the subject and a block of arrows. Lowering is the input of today's pipeline, which the elaborator replaces, so it
+  lowers no enum form the kernel needs (parameters, result types). It does not read today's binding or typing
   facts: it resolves names itself. A type is read by the same function as a value: there is one reader of
   expressions. Two forms are the reader's own, since a type is a value now:
   - a type after a colon is not lowered (`Type(1)` is Key(Type, None, (1)) there and a call where a value
@@ -118,7 +121,7 @@ wanted before its later arguments are read, so they are read with more known.
 
 - `Define` with a type and a body: the header is read first (letters, levels), giving the declared type; the body
   is read against it; holes are filled; then `declared`. A `theorem` or a proved `law` is a `Theorem`, `axiom` an `Axiom`.
-- `Record` (an enum or a class): the names after the type's name are its parameters, the result type's binders its
+- An enum or a class: the names after the type's name are its parameters, the result type's binders its
   indices, the cases its cases; a class is a block of one type with one case named as the type. Enums that name
   each other are one block. The block goes to `inductive_declared`, then the recursors are made.
 - A recursive `Define` is made a term over the recursor (below); a function that fails this is refused in E2 with
@@ -126,7 +129,7 @@ wanted before its later arguments are read, so they are read with more known.
 
 ## Match and recursion (E2)
 
-- **Match.** A `Case` whose arms are the cases of one enum, each arm's pattern a case applied to names, is the
+- **Match.** A `match` whose arms are the cases of one enum, each arm's pattern a case applied to names, is the
   enum's recursor applied: the motive is the type wanted with the subject (and its indices) made a binder; each arm
   is the minor premise of its case, its names the fields; an arm the program left out is the refusal `covering`,
   unless an `other` arm fills it. Patterns inside patterns, literals and several subjects are first split into
@@ -200,9 +203,9 @@ adds is how a candidate fits and where its instances come from.
 | `elaborate/read.wap` | `read`: names, calls, functions, types, overloads | E1 |
 | `elaborate/declare.wap` | headers with letters and levels, `Define`, `law`, `axiom` | E1 |
 | `elaborate/door.wap` | the door | E1 |
-| `elaborate/blocks.wap` | `Record` to inductive blocks, the definitions made for each enum | E2 |
-| `elaborate/match.wap` | `Case` to recursors, covering, patterns split | E2 |
-| `elaborate/recursion.wap` | recursion to recursors | E2 |
+| `elaborate/blocks.wap` | enums and classes to inductive blocks, the definitions made for each enum | E2 |
+| `elaborate/match.wap` | `match` to recursors, covering, patterns split | E2 |
+| `elaborate/recursion.wap` | recursion to recursors, the helper of the values below a value | E2 |
 | `elaborate/instances.wap` | the search that fills an instance binder: traits, decisions | E3 |
 | `elaborate/conditions.wap` | conditions, their decisions, the facts a branch knows | E3 |
 | `elaborate/convert.wap` | the conversions, the path between two types, lifting through containers | E4 |
