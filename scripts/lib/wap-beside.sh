@@ -17,7 +17,7 @@ WAP_TOOLS=(verify.wasm:wap/extensions/theory/elaborate/verify.wap)
 wap_tools_built() {
 	local tool
 	for tool in "${WAP_TOOLS[@]}"; do
-		wap "$2" "$1/${tool#*:}" "$(dirname "$2")/${tool%%:*}" || { echo "wap-beside: ${tool#*:} did not compile" >&2; return 1; }
+		wap "$2" "$1/${tool#*:}" "$(dirname "$2")/${tool%%:*}" >&2 || { echo "wap-beside: ${tool#*:} did not compile" >&2; return 1; }
 	done
 }
 # wap_beside_copied <tree> <folder>: all of it copied from the tree into the folder
