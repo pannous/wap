@@ -90,7 +90,10 @@ taken.
 ## Names
 
 - A name is looked up among the binders around it (`named`), then among the program's and the prelude's
-  declarations.
+  declarations. A program's declaration of a name the prelude declares hides the prelude's from there on, as a local
+  name hides an outer one: the kernel holds it under the name marked (`nat'`, a mark no written name holds), the
+  marked name is shown as written, and a dotted name follows its owner (`nat.zero` the program's nat's case). A
+  binding statement's names are read so too.
 - A declaration's binders are of three kinds, kept beside the kernel's declaration (the kernel has no kinds):
   written, found (a letter), instance (a trait's, from E3 on). A call gives a hole for each found binder and reads
   an argument for each written one.
