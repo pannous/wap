@@ -217,6 +217,11 @@ A level name in a declaration that nothing binds is a level parameter of it, in 
 name is looked up among the binders around it, innermost first, then among the declarations; anything else is the
 refusal "unknown name".
 
+Read by the elaborator's door, a prelude file's declaration of a name taken is an overload of it, by the key the
+elaborator gives its own (the name and its binders' types). The binders an elaborated program's call finds of an
+explicit declaration are its leading sorts that a later binder's type names (the letters of an elaborated header);
+a call giving every binder, as an explicit program does, finds none.
+
 ## The declarations that bind names
 
 The kernel names no type of the prelude (plan 5.4). Four statements of the explicit corner bind the ones a
