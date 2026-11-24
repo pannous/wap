@@ -36,12 +36,14 @@ statements_elaborated(x: Elaborating, statements: list<Node>, wanted: Term?): Te
 		Block(inner) => statements_elaborated(x, inner + rest, wanted)
 		Break() => left_elaborated(x, first, EXIT, [], wanted)
 		Continue() => left_elaborated(x, first, NEXT, [symbol(ROUND)], wanted)
-		Set(place, value) => if rest is empty then refused(STATEMENT, "${text(first)} gives no value: write the value after it") else let_elaborated(x, place_binder(place), value, rest, wanted)
+		Set(place, value) => if rest is empty then no_value(first) else let_elaborated(x, place_binder(place), value, rest, wanted)
 		If(condition, then_part, else_part) => if rest is empty then elaborated(x, first, wanted) else joined_elaborated(x, condition, statements_in(then_part), statements_in(else_part), rest, wanted)
-		For(place, count, body) => if rest is empty then refused(STATEMENT, "${text(first)} gives no value: write the value after it") else walked_elaborated(x, place, count, statements_in(body), rest, wanted)
+		For(place, count, body) => if rest is empty then no_value(first) else walked_elaborated(x, place, count, statements_in(body), rest, wanted)
 		_ => if rest is empty then elaborated(x, first, wanted) else refused(STATEMENT, "${text(first)} gives nothing the rest of the block reads: a value before the last is lost")
 	}
 }
+# a statement that ends a block but gives no value
+no_value(statement: Node): Term := refused(STATEMENT, "${text(statement)} gives no value: write the value after it")
 # a part of a choice as statements, an else-part left out none
 statements_in(part: Node): list<Node> := match part {
 	Block(statements) => statements
@@ -94,14 +96,14 @@ rejoined(x: Elaborating, name: text, given: list<text>, rest: list<Node>, wanted
 # round's place is the number after the rounds before it, so it counts 1 … count
 walked_elaborated(x: Elaborating, place: Node, count: Node, body: list<Node>, rest: list<Node>, wanted: Term?): Term := {
 	numbers = x.theory.environment.numbers ?? refused(STATEMENT, "a loop counts its rounds in numbers, and no numbers are declared")
-	number = constant(numbers.number, [])
+	number = number_type(numbers)
 	counted = elaborated(x, count, number)
 	given = unique(names_given(body)).filter(name => named(x.el, name) is not ø)
-	rejoined(x, EXIT, given, rest, wanted, called => walk_elaborated(x, numbers, place, counted, body, given, wanted))
+	rejoined(x, EXIT, given, rest, wanted, _ => walk_elaborated(x, numbers, place, counted, body, given, wanted))
 }
 # the walk of the number type's recursor down the count to the loop's join, from no round before
 walk_elaborated(x: Elaborating, numbers: Numbers, place: Node, counted: Term, body: list<Node>, given: list<text>, wanted: Term?): Term := {
-	number = constant(numbers.number, [])
+	number = number_type(numbers)
 	exit = named(x.el, EXIT)!
 	walk_type = pi(ROUND, number, hypothesis_of(x.el.c, variable_id(exit)).type)
 	e = eliminating(x, counted, walk_type, recursor_name(numbers.number))
@@ -118,7 +120,7 @@ walk_elaborated(x: Elaborating, numbers: Numbers, place: Node, counted: Term, bo
 # The step of a walk: the rounds left, the walk of them, the number of rounds before and the names given, to a round:
 # its place the number after, the body, and the call of the walk of the rounds left
 round_elaborated(x: Elaborating, numbers: Numbers, place: Node, body: list<Node>, given: list<text>, walk_type: Term, wanted: Term?): Term := {
-	number = constant(numbers.number, [])
+	number = number_type(numbers)
 	left = scoped(x.el, LEFT, number)
 	walking = scoped(x.el, NEXT, walk_type)
 	before = scoped(x.el, BEFORE, number)
@@ -152,6 +154,7 @@ names_given(statements: list<Node>): list<text> := {
 			Set(place, value) => [place_binder(place).name]
 			If(condition, then_part, else_part) => names_given(statements_in(then_part)) + names_given(statements_in(else_part))
 			Block(inner) => names_given(inner)
+			For(place, count, body) => names_given(statements_in(body))
 			_ => []
 		}
 	}
