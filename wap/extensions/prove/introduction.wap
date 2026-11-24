@@ -11,6 +11,9 @@ use "../theory/elaborate/unify.wap"
 use "goals.wap"
 use "computing.wap"
 
+# how deep premises are answered, a case's premises asking for cases again, before the search gives up on them:
+# `enum Loop: Prop { make(h: Loop): Loop }` would ask forever
+PREMISE_DEPTH := 8
 # the provers a premise left open is answered by
 PREMISE_PROVERS: list<(Goal) -> Term?> := [by_hypothesis, by_computing, by_introduction]
 
@@ -24,17 +27,23 @@ by_introduction(goal: Goal): Term? := {
 		Inductive(facts) => facts.block
 		_ => return ø
 	}
-	for case in block.types.find(type => type.name == enum)!.cases {
-		proof = applied_law(goal, declaration(el.c.environment, case.name)!, instance => yes, premise => premise_answered(goal, premise))
+	for case in (block.types.find(type => type.name == enum) ?? return ø).cases {
+		proof = applied_law(goal, declaration(el.c.environment, case.name) ?? return ø, instance => yes, premise => premise_answered(goal, premise))
 		if proof is not ø { return proof }
 	}
 	ø
 }
 # a hypothesis whose type is the goal
 by_hypothesis(goal: Goal): Term? := goal.parameters.find(parameter => attempt(goal.el, () => if unified(goal.el, type_of(goal.el.c, parameter), goal.statement) then parameter else ø) is not ø)
-# a premise a law's conclusion left open, given a proof of its type
+# a premise a law's conclusion left open, given a proof of its type, the answers of a failed try taken back; a value
+# premise is never guessed: what the conclusion and the other premises give it is its value, else the law fails open
 premise_answered(goal: Goal, premise: Term): bool := {
 	el = goal.el
-	proof = first_proof(Goal(el, goal.parameters, filled(el, type_of(el.c, premise)), goal.named), PREMISE_PROVERS) ?? return no
-	attempt(el, () => if unified(el, premise, proof) then proof else ø) is not ø
+	wanted = filled(el, type_of(el.c, premise))
+	if not is_proposition(el.c, wanted) { return yes }
+	if goal.depth == PREMISE_DEPTH { return no }
+	attempt(el, () => {
+		proof = first_proof(Goal(el, goal.parameters, wanted, goal.named, goal.depth + 1), PREMISE_PROVERS) ?? return ø
+		if unified(el, premise, proof) then proof else ø
+	}) is not ø
 }
