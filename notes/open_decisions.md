@@ -48,3 +48,6 @@ show the user: the case against and why no library or hook does it (ask the bran
   argument group `f(x + 1)` stays a group. `m() as T := body` now uses the same rule as `m(): T := body`.
 - one-primitive-table (night decision): the emitter keeps its if-chain for primitives; the one-table refactor cost
   +181 nodes, so it was dropped. Undo: land branch one-primitive-table-2 26bf51c7 and raise the ceiling.
+- previous-line (night decision; extension growth, lands after the morning OK): in the console `f(x: int) := 1`
+  then `f(x: int) := 2` makes later lines call the new f (about 5 lines in extensions/native/console.wap); today it
+  is refused with the console's internal file names. Undo: keep the refusal, worded without those names.

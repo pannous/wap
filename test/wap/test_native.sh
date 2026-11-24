@@ -53,6 +53,7 @@ check "a native wap run of a program through a link" "$("$native_wap" "$stage/li
 mkdir -p "$stage/tested/test/wap" && printf '%s\n' 'echo "$@"' 'exit 3' >"$stage/tested/test/wap/run.sh" && chmod +x "$stage/tested/test/wap/run.sh"
 check "wap test runs the areas' tests" "$(cd "$stage/tested" && "$native_wap" test hello raise; echo "exit $?")" "--wait hello raise
 exit 3"
+check "wap build makes a program a native executable named as it" "$(cd "$tree" && "$native_wap" build "$stage/hello.wap" >/dev/null 2>&1 && "$stage/hello" 2>&1)" "Hello"
 # an argument that names no program file is code, run as a program is (core/native/warp.warp is_warp_file)
 check "wap runs code given in place of a file" "$("$native_wap" '1+1' 2>&1)" "2"
 # code given runs without a TMPDIR too, as under cron: its files go to the user's temporary folder
@@ -255,4 +256,6 @@ check "the console names the line of an error" "$(printf '%s\n' 'x = "abc' | "$n
 printf '%s\n' 'twice(x: int) as int := x * 2' >"$stage/helper.wap"
 check "code given uses a file of the current folder" "$(cd "$stage" && "$native_wap" 'use "helper.wap"; twice(21)' 2>&1)" "42"
 check "wap - runs the program standard input gives" "$(printf '%s\n' 'print 1 + 1' | "$native_wap" - 2>&1)" "2"
+# a compiler run from source with no library beside it and no warm state yet, as from wap's own tree, still compiles
+check "a compiler with no library beside it compiles hello" "$(rm -rf "$stage/bare" && mkdir -p "$stage/bare" && cp -R "$tree/wap" "$stage/bare/" && : >"$stage/bare/wap/warm.packed" && : >"$stage/bare/wap/types.wasm" && cd "$stage" && printf '%s\n' 'print "Hello"' >bare_hello.wap && "$native_wap" "$stage/bare/wap/compiler.wap" bare_hello.wap bare_hello.wasm 2>&1 && "$native_wap" bare_hello.wasm 2>&1)" "Hello"
 exit $((failures > 0))

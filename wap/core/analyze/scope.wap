@@ -91,12 +91,14 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 # whether a name in scope names functions and no class, whose constructor is a function too
 names_function_in(name: Node, scope: Scope) as bool := {
 	meant = definitions_meant(text(name), scope)
-	meant is not empty and is_function(meant#1) and not named_in(scope, text(name)).any(definition => definition.kind == DefinitionKind.Record)
+	meant is not empty and is_function(meant#1) and record_meant(scope, text(name)) == ø
 }
+# the class a name means in a scope, ø where it means none
+record_meant(scope: Scope, name: text) as Definition? := named_in(scope, name).find(definition => definition.kind == DefinitionKind.Record)
 type_bound(type: Node, scope: Scope) as Node := match type {
 	Symbol(name) => {
-		for definition in named_in(scope, name) { if definition.kind == DefinitionKind.Record { return with_fact(type, DECLARED_BY, record_declared(definition.definer)) } }
-		type
+		record = record_meant(scope, name) ?? return type
+		with_fact(type, DECLARED_BY, record_declared(record.definer))
 	}
 	List(items, bracket, separator) => refitted(List(items.map(item => type_bound(item, scope)), bracket, separator), type)
 	Call(called, arguments) => refitted(Call(called, arguments.map(argument => type_bound(argument, scope))), type)
@@ -157,7 +159,7 @@ pattern_variables(pattern: Node, scope: Scope, depth: int) as list<Definition> :
 is_type_test(called: Node, scope: Scope) as bool := called is symbol and text(called) == TYPE_TEST_WORD and definitions_meant(TYPE_TEST_WORD, scope) is empty
 type_test_bound(n: Node, called: Node, arguments: list, scope: Scope, depth: int) as Node := {
 	tested = arguments#2
-	if not tested is symbol and type_parts(tested) == ø { return bound(refitted(Call(symbol(EQUALITY_WORD), arguments), n), scope, depth) }
+	if names_value(tested, scope) { return bound(refitted(Call(symbol(EQUALITY_WORD), arguments), n), scope, depth) }
 	type = if tested is symbol and names_case(tested, scope) then resolved(tested, scope, depth) else tested
 	refitted(Call(called, [bound(arguments#1, scope, depth), type]), n)
 }
@@ -203,12 +205,8 @@ receiver_fields(parameters: List, scope: Scope, depth: int) as list<Definition> 
 	type = declared_type(receiver) ?? return []
 	self_name = parameter_name(receiver)
 	if text(self_name) != SELF_WORD { return [] }
-	for definition in named_in(scope, text(type)) {
-		if definition.kind == DefinitionKind.Record {
-			return fields_of(definition.definer).map(field => Definition(text(declared_name(field)), DefinitionKind.Field, self_name, depth))
-		}
-	}
-	[]
+	record = record_meant(scope, text(type)) ?? return []
+	fields_of(record.definer).map(field => Definition(text(declared_name(field)), DefinitionKind.Field, self_name, depth))
 }
 parameter_definitions(parameters: List, depth: int) as list<Definition> := match parameters {
 	List(items, bracket, separator) => items.map(p => Definition(text(parameter_name(p)), DefinitionKind.Parameter, parameter_name(p), depth))

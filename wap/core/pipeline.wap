@@ -49,7 +49,7 @@ notation_of(language: Language, file: text) as Node := {
 	source = source_of(language, file)
 	uses = uses_written(source, file)
 	for used in uses { operated_file(language, used) }
-	language.raw_words[file] = (raw_words_written(source) + uses.flat_map(used => if language.raw_words.has(used) then language.raw_words[used] else [])).unique
+	language.raw_words[file] = (raw_words_written(source) + uses.flat_map(used => language.raw_words.get(used) ?? [])).unique
 	notation(source, file, language.raw_words[file])
 }
 source_of(language: Language, file: text) as text := {
@@ -139,8 +139,10 @@ narrowed(used: Module, words: list<text>) as Module := if words is empty then us
 standard_brought(language: Language, modules: list<Module>, named: list<Node>) as list<Module> := {
 	files = named.map(standard_file).unique
 	for file in files { if ruled(operated_file(language, file)) { refused(named.find(name => standard_file(name) == file)!, "${file_module_name(file)} has rules, which change what code means: write use ${file_module_name(file)}") } }
-	for word in named.map(name => text(name)).unique {
-		name = named.find(first => text(first) == word)!
+	# a word a rule wrote is brought in unsaid: the program never named it
+	written = named.filter(name => not has_fact(name, DERIVED))
+	for word in written.map(name => text(name)).unique {
+		name = written.find(first => text(first) == word)!
 		module = file_module_name(standard_file(name))
 		hint(place_of(name) + "${name} comes from ${module}: write use ${module}")
 	}
@@ -158,27 +160,30 @@ ruled(code: Node) as bool := top_level_statements(code).any(statement => match s
 # the library a module is bound inside: the types module's declarations, except in the types module, which declares them
 # itself
 library_around(module: Module, types: Module) as list<Signature> := if module.file == types.file then [] else types.signatures
-# the modules prepared in order, their statements as one block
-modules_prepared(language: Language, modules: list<Module>, types: Module) as Block := Block(modules.flat_map(module => statements_in(prepared(language, module, modules, types))))
+# the modules prepared in order, each bound among all the modules, their statements as one block
+modules_prepared(language: Language, preparing: list<Module>, modules: list<Module>, types: Module) as Block := Block(preparing.flat_map(module => statements_in(prepared(language, module, modules, types))))
 # the types module's code after the modules it uses, whose words only the types module sees: its functions bound once
 # typing reaches them (core/analyze/scope.wap library_bound)
 library_code_of(language: Language, types: Module) as Library := {
 	uses = used_modules(language, types.code)
 	library = library_bound(lowered_module(language, types, uses, types), modules_of_uses(types, uses))
-	Library(Block(statements_in(modules_prepared(language, uses, types)) + statements_in(library.code)), library.scope, (uses + [types]).flat_map(module => module.signatures))
+	Library(Block(statements_in(modules_prepared(language, uses, uses, types)) + statements_in(library.code)), library.scope, (uses + [types]).flat_map(module => module.signatures))
 }
 # the program with the modules it uses, theirs first: a module's statements run before the code that uses it, its
 # functions are there for any caller; typed, then rewritten by the typed rules. The types module compiled as the program
-# is its own library, with none around it
+# is its own library, with none around it. A module the types module uses is the library's, declared once per compile
+# (core/language.wap): the program binds to it, never prepares it again
 # DEBT: One types file compiled alone as the program (types/floats.wap) still brings its definitions twice, the file
 #   being the program and part of the library around it: calls.wap refuses "two definitions share the key". Off the
 #   census: only the whole types module compiles as a program. Paid off by binding such a file inside the rest of the
 #   types module only.
 typed_modules(language: Language, modules: list<Module>, types: Module) as Block := {
-	whole = with_fact(modules_prepared(language, modules, types), SCRIPT, True)
+	own = module_key(modules.last.file) == module_key(types.file)
+	held = if own then [] else used_modules(language, types.code).map(module => module.file)
+	program_modules = modules.filter(module => not (module.file in held))
+	whole = with_fact(modules_prepared(language, program_modules, modules, types), SCRIPT, True)
 	named = standard_named(whole)
 	if named is not empty { return typed_modules(language, standard_brought(language, modules, named), types) }
-	own = module_key(modules.last.file) == module_key(types.file)
 	library_code = if own then Library(Block([]), scope_around([], [])) else library_code_of(language, types)
-	typed_by_rules(language, whole, if own then [] else types.signatures, library_code, modules.flat_map(module => module.signatures), modules.last.signatures)
+	typed_by_rules(language, whole, if own then [] else types.signatures, library_code, program_modules.flat_map(module => module.signatures), modules.last.signatures)
 }
