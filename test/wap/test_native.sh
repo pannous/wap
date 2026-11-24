@@ -268,4 +268,8 @@ check "a standalone wap runs a program and verifies a file with no seed folder b
 choice: Axiom"
 # and wasmtime's static library beside the shared one (warp's scripts/wasmtime-c-api.sh) is linked into it whole
 check "a standalone wap needs no library but the system's" "$(otool -L "$stage/standalone/wap" | tail -n +2 | grep -vc libSystem)" "0"
+# `wap format <file>` prints the program in canonical spelling, by the compiler beside it
+printf '%s\n' 'x = 1+2' 'f(a)= a*2' >"$stage/unformatted.wap"
+check "wap format prints the program in canonical spelling" "$(cd "$stage" && "$native_wap" format unformatted.wap 2>&1)" "x = 1 + 2
+f(a) = a * 2"
 exit $((failures > 0))

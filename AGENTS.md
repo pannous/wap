@@ -243,7 +243,7 @@ main. The worker does not land it, push it to main, or publish it.
 
 ## Done
 - A major feature ships with its wiki page updated and its test lines in the same task.
-- Landing checks, then the handoff: `wap/compiler.wap format` on the .wap files you wrote; merge origin/main into
+- Landing checks, then the handoff: `wap format <file>` on the .wap files you wrote; merge origin/main into
   the branch (a real merge, its message summing up the change); on that merge the checks of its path (below); hand the
   branch and a patch to warp-integrator, who lands it. Then `todo done <card> <commit>`.
 - Paths, checked on that merge, phase by phase; what later tests find is fixed forward, never by rewriting a landed
