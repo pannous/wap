@@ -293,4 +293,18 @@ b: int? = 4
 c: int? = 4
 d: int? = ø
 print "${half(5.0) ?? 0.0} ${half(-1.0) ?? 9.5} ${paired(3)!.right} ${if paired(0) then "some" else "none"} ${b == c} ${b == d} ${d is ø}"')" "2.5 9.5 6 none yes no yes"
+# an enum's first case is a value, never ø; a record taken after a text reads its float
+check "a native optional holds an enum's first case, a record after a text its float" "$(native_ran present 'enum Color { Red, Green }
+class Wide { x: float }
+seen(c: Color?) := if c == ø then "none" else "some"
+name = "hello"
+w = Wide(2.5)
+print "${seen(Color.Red)} ${seen(ø)} ${name} ${w.x}"')" "some none hello 2.5"
+# C calling back a wap function a natively built program hands it (lib/callbacks.wap c_callback, lib/native/callbacks.h)
+check "a native program's C calls back a function value" "$(native_ran called_back 'use c
+use callbacks
+qsort(base: list<int32>, count: i64, size: i64, compare: handle): void from '"'"'c'"'"'
+xs: list<int32> = [int32(3), int32(1), int32(4), int32(2)]
+qsort(xs, 4, 4, c_callback((a, b) => int(field_i32(a, 0)) - int(field_i32(b, 0)), ["handle", "handle"]))
+print "${xs#1} ${xs#2} ${xs#3} ${xs#4}"')" "1 2 3 4"
 exit $((failures > 0))
