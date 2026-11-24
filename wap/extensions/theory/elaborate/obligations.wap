@@ -20,18 +20,18 @@ DECIDE := "decide"
 SUBSET := "Subset"
 INTRO := "intro"
 PROOF_FIELD := 2
-# the rules an obligation computed to no and one nothing proves are refused by
-CONDITION := "condition"
+# the rules an obligation nothing proves, one two facts prove differently, and an `is` of no subtype are refused by
 UNPROVED_CONDITION := "unproved condition"
+TWO_FACTS := "two facts"
+NOT_A_SUBTYPE := "not a subtype"
 
 # t as a value of the subset wanted, its obligation discharged; ø where the type wanted is no subset of t's type
 gone_down(x: Elaborating, t: Term, given: Term, wanted: Term): Term? := {
-	within = computed(x.el.c, wanted)
-	if result_name(within) != subset(x) or pi_parts(x, within) is not ø { return ø }
+	within = computed_subset(x, wanted) ?? return ø
 	parts = arguments(within)
 	if not unified(x.el, given, parts#1) { return ø }
 	obligation = condition_at(x, parts#2, t)
-	proof = computed_proof(x, obligation) ?? fact_proof(x, obligation) ?? refused(UNPROVED_CONDITION, "nothing proves ${shown(obligation)}: test it with `if` first, or take a value whose type says it")
+	proof = computed_proof(x, obligation) ?? fact_proof(x, obligation) ?? refused(UNPROVED_CONDITION, "nothing proves ${shown_for(x.el.c, obligation)}: test it with `if` first, or take a value whose type says it")
 	levels = match head(within).shape { Constant(name, levels) => levels; _ => [] }
 	apply_all(constant("${subset(x)}${DOT}${INTRO}", levels), [parts#1, parts#2, t, proof!])
 }
@@ -39,29 +39,39 @@ gone_down(x: Elaborating, t: Term, given: Term, wanted: Term): Term? := {
 computed_proof(x: Elaborating, obligation: Term): Term? := {
 	decision = computed(x.el.c, decided(x, obligation, SEARCH_DEPTH) ?? return ø)
 	case = result_name(decision)
-	if case == "${decidable(x)}${DOT}${FAILS}" { refused(CONDITION, "${shown(obligation)} is false") }
+	if case == "${decidable(x)}${DOT}${FAILS}" { refused(CONDITION, "${shown_for(x.el.c, obligation)} is false") }
 	if case == "${decidable(x)}${DOT}${HOLDS}" then arguments(decision).last else ø
 }
-# a fact in scope whose type is the obligation: a binder, or the proof a subset's value carries
+# a fact in scope whose type is the obligation: a binder, or the proof a subset's value carries. Where the obligation
+# still has holes, two facts that fill them differently are refused naming both
 fact_proof(x: Elaborating, obligation: Term): Term? := {
-	carried = x.el.scope.filter(variable => result_name(computed(x.el.c, type_of(x.el.c, variable))) == subset(x))
+	carried = x.el.scope.filter(variable => computed_subset(x, type_of(x.el.c, variable)) is not ø)
 	facts = x.el.scope + carried.map(variable => projection(subset(x), PROOF_FIELD, variable))
-	facts.find(fact => {
-		kept = found_so_far(x.el)
-		fits = unified(x.el, type_of(x.el.c, fact), obligation)
-		if not fits { back_to(x.el, kept) }
-		fits
-	})
+	proving = facts.filter(fact => proves(x, fact, obligation))
+	if proving is empty { return ø }
+	fact = proving#1
+	if holes_in(x.el, filled(x.el, obligation)) is not empty and #proving.map(proved => shown_for(x.el.c, type_of(x.el.c, proved))).unique() > 1 {
+		refused(TWO_FACTS, "${shown_for(x.el.c, obligation)} is proved by ${proving.map(proved => shown_for(x.el.c, proved)).join(" and ")}: give the proof you mean")
+	}
+	unified(x.el, type_of(x.el.c, fact), obligation)
+	fact
 }
+# whether a fact's type unifies with the obligation, the answers it gives taken back
+proves(x: Elaborating, fact: Term, obligation: Term): bool := taken_back(x.el, () => unified(x.el, type_of(x.el.c, fact), obligation))
 # `x is S`: the decision of S's condition at x, a bool
 is_elaborated(x: Elaborating, value: Node, type: Node): Term := {
-	within = computed(x.el.c, filled(x.el, elaborated(x, type, ø)))
-	if result_name(within) != subset(x) or pi_parts(x, within) is not ø { refused(VALUE_TYPE, "${shown(within)} is no type where a condition holds: `is` tests one") }
+	read = elaborated(x, type, ø)
+	within = computed_subset(x, read) ?? refused(NOT_A_SUBTYPE, "${shown(filled(x.el, read))} is no type where a condition holds: `is` tests one")
 	parts = arguments(within)
 	condition = condition_at(x, parts#2, elaborated(x, value, parts#1))
 	apply_all(constant(kernel_name(x.theory, DECIDE), []), [condition, decision_of(x, condition)])
 }
 # a subset's condition at a value, as computed
 condition_at(x: Elaborating, condition: Term, value: Term): Term := computed(x.el.c, filled(x.el, apply(condition, value)))
+# a type computed, where it is a subset (a function giving one is not); ø for any other type
+computed_subset(x: Elaborating, type: Term): Term? := {
+	within = computed(x.el.c, filled(x.el, type))
+	if result_name(within) == subset(x) and pi_parts(x, within) is ø then within else ø
+}
 # the class of subsets where the program reads: its own where it declares one, else the prelude's
 subset(x: Elaborating): text := kernel_name(x.theory, SUBSET)
