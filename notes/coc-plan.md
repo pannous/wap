@@ -193,7 +193,8 @@ the definitional computation rule. At run time a rational is a fraction and `lif
 The library uses it for `rational`, for `set<T>` (lists up to order and repeats) and for `i64` (integers up to
 2^64). Function extensionality is a theorem of the prelude, proved from the quotient (milestone K5). And one rule for
 programs follows: a type that defines its own `equals` is a quotient by it, so `==` always means equal (open
-decision 4).
+decision 4). For `==` to be computed by that `equals`, it must be proved to hold of every value with itself, both
+ways round, and across a chain: an obligation like any other.
 
 ### 3.7 Universes
 
@@ -263,6 +264,9 @@ and the command `wap check`.
 
 ## 4 What changes and what goes
 
+The freedom to overhaul is used on the compiler's middle, not on the surface. No spelling has to go: nothing in the
+theory needs the syntax changed. What goes is looseness in what a type means.
+
 | today | in the target | why |
 |---|---|---|
 | a type is notation, compared as text | a type is a term, compared by computing | dependent types |
@@ -309,6 +313,14 @@ Elaborate replaces today's type, kind rules and elaborate (wap/core/analyze). Th
 a node once its type is known. The stage contract of notes/backbone.md holds as before: each stage reads one
 language and writes one.
 
+Three lines through the stages:
+
+| the program writes | the term the kernel checks | the run term |
+|---|---|---|
+| `shout(c)`, with `c: char` | `shout(c.value)`: the conversion from the subset type is written out | `shout(c)`: a char is stored as its text |
+| `d: char = "a"` | the pair of `"a"` and a proof of `#"a" == 1`, found by computing | `"a"` |
+| `law double(3) == 6` | a theorem: `refl`, of the type `Equal(double(3), 6)` | none: a proof does not run |
+
 ### 5.2 The tree
 
 - `wap/kernel/`: the theory. `forms.wap` holds the ten terms; beside it levels, reduction, equality, typing,
@@ -335,8 +347,8 @@ wap/core and wap/kernel stay as they are and the compiler keeps its size and spe
 | types module | 1,855 | about 4,000 | no |
 | provers | 0 | 4,000 to 6,000 | no |
 
-Core and kernel together go from 9,354 lines to about 18,000. The compiler's size ceiling
-(test/wap/test_guardrails.wap) is measured again at the switch.
+Core and kernel together go from 9,354 lines to about 18,000. The size ceiling of wap's source
+(test/wap/ratchet_census.sh) is raised by hand with each milestone that lands, as its rule asks.
 
 ### 5.4 Core knows no library word
 
@@ -778,10 +790,10 @@ first day.
 | milestone | what works after it | outcome tests |
 |---|---|---|
 | E1 arguments found | letters, level letters, `_`; unification | `identity(3)`, `identity(int)`, `identity(Type)`; `type of identity` shows `(a: T) -> T`; an argument that cannot be found is reported by name |
-| E2 enums, classes, match, recursion | today's spelling makes inductive blocks; `match` to recursors; structural recursion; program bodies | the programs of 3.4 and 3.5 as written; `double(3)` is 8 when run and by `refl`; a `match` that misses a case is refused naming it |
+| E2 enums, classes, match, recursion | today's spelling makes inductive blocks; `match` to recursors; structural recursion; program bodies | the programs of 3.4 and 3.5 as written; `double(3)` is 6 when run and by `refl`; a `match` that misses a case is refused naming it |
 | E3 subtypes | `where`, `type X < T`, conversions, obligations by computing and by facts in scope, else a check | the lines of 3.2 and 3.3, each with the outcome its comment states; `effects of` a function with a check left is Fail |
 | E4 traits and conditions | traits as structures with laws; instances from overloads; operators; decidable conditions; the number tower as conversions | `sort` on a class with `compare`; a class without it refused naming the trait; `3 == 3.0` is yes; `if` on a proposition nothing can decide is refused |
-| E5 statements and effects | blocks, variables, `for`, exits as terms; computation types; `effects of`; `! Pure` | `total` of 3.8 is Pure and a law about it is Proved; the lines of wiki/effects.md; `! Pure` refuses naming the chain |
+| E5 statements and effects | blocks, variables, `for`, exits as terms; computation types; `effects of`; `! Pure` | `total` of 3.8 is Pure, and `total([1, 2, 3]) == 6` holds by `refl`; the lines of wiki/effects.md; `! Pure` refuses naming the chain |
 | E6 measures | recursion by measure, `while` with a measure, Div; the decrease proved for a parameter moved by a literal toward a guarded bound (wiki/Footguns.md), other measures by a written proof until P3 | `fact(4)` is 24 and `fact` is Pure; a `while` without a measure is Div and still runs; `loop` of 3.8 |
 | E7 sums | unions, optional values, `any`, class families; calls distribute | the lines of 3.10; `speak` over a list of an animal and a dog picks each one's method |
 
@@ -798,7 +810,7 @@ first day.
 
 | milestone | what works after it | outcome tests |
 |---|---|---|
-| S1 census | elaborate and check run beside today's typing; a ratchet "accepted n of N" over the compiler's source, lib/ and the test programs | the count, which only grows |
+| S1 census | elaborate and check run beside today's typing; the census (test/wap/ratchet_census.sh) gains a ratchet "accepted n of N" over the compiler's source, lib/ and the test programs | the count, which only grows |
 | S2 running from terms | erase, and emit from run terms, behind an option | every test program prints the same both ways; the benchmarks within their guardrails |
 | S3 the switch | the new stages are the compiler; wap/core/analyze goes; the kernel moves to wap/kernel; the seed is refreshed | test_hello, test_self, the census, `--stage 2`: the compiler built through its own kernel builds itself again |
 | S4 the prelude in the theory | `nat`, `int`, `list`, `text`, `map`, optional values defined as inductive, subset and quotient types, each with the host operations it runs by | the prelude's laws Proved and run on values; `char` is `text where #it == 1` and nothing else |
