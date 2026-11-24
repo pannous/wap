@@ -282,10 +282,9 @@ A kernel addition, a debt or a rise in core lines shows up there the day it happ
 
 ## Open, not built yet
 
-- **Methods, the rest of wiki/class.md:** bare field names inside a method reading and writing the receiver
-  (`inc() := { c = c + 1 }`; scope's, binding a bare name to `self.c`), a getter without parentheses
-  (`double := v * 2`), defaults (`n: int = 1`), `init`, and `extends`. Built: methods written after a class's fields,
-  each a function taking `self` first, so `b.area()` and `b.area` both call it.
+- **Methods, the rest of wiki/class.md:** a getter without parentheses (`double := v * 2`), and a method a class
+  extending another writes again, called on a value typed by the base: the base's runs, the call is not dispatched by
+  the value's class (wiki/function.md, `speak` of a Dog).
 - **Module scoping** (user 2026-11-19): a name is looked up local > parameter > program > used module > types, the
   nearest scope that defines it wins and shadows the rest; two used modules defining the same name are a loud clash
   naming both places, called or not, never overloads of one name; `m.f` picks one module's word explicitly. Not

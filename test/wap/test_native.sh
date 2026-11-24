@@ -309,4 +309,7 @@ qsort(base: list<int32>, count: i64, size: i64, compare: handle): void from '"'"
 xs: list<int32> = [int32(3), int32(1), int32(4), int32(2)]
 qsort(xs, 4, 4, c_callback((a, b) => int(field_i32(a, 0)) - int(field_i32(b, 0)), ["handle", "handle"]))
 print "${xs#1} ${xs#2} ${xs#3} ${xs#4}"')" "1 2 3 4"
+# a class extending another, its instance passed where the class it extends is taken (wiki/class.md), run by the native wap
+printf '%s\n' 'class Shape { x: int; twice() := x * 2 }' 'class Square extends Shape { side: int }' 'shape_x(s: Shape) := s.x' 'print shape_x(Square(3, 4)) + Square(3, 4).twice()' >"$stage/extends.wap"
+check "wap runs a class extending another" "$(cd "$stage" && "$native_wap" extends.wap 2>&1)" "9"
 exit $((failures > 0))
