@@ -53,6 +53,7 @@ check "a native wap run of a program through a link" "$("$native_wap" "$stage/li
 mkdir -p "$stage/tested/test/wap" && printf '%s\n' 'echo "$@"' 'exit 3' >"$stage/tested/test/wap/run.sh" && chmod +x "$stage/tested/test/wap/run.sh"
 check "wap test runs the areas' tests" "$(cd "$stage/tested" && "$native_wap" test hello raise; echo "exit $?")" "--wait hello raise
 exit 3"
+check "wap build makes a program a native executable named as it" "$(cd "$tree" && "$native_wap" build "$stage/hello.wap" >/dev/null 2>&1 && "$stage/hello" 2>&1)" "Hello"
 # an argument that names no program file is code, run as a program is (core/native/warp.warp is_warp_file)
 check "wap runs code given in place of a file" "$("$native_wap" '1+1' 2>&1)" "2"
 # code given runs without a TMPDIR too, as under cron: its files go to the user's temporary folder
