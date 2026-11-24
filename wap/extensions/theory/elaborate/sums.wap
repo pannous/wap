@@ -15,14 +15,18 @@ use "state.wap"
 use "unify.wap"
 use "read.wap"
 use "match.wap"
+use "conditions.wap"
 
 # the prelude's enum of a value of one of two types, and its cases: a value of the first, of the second
 SUM := "Sum"
-LEFT := "left"
-RIGHT := "right"
+LEFT_CASE := "left"
+RIGHT_CASE := "right"
 # the prelude's type of nothing, what ø is where a type is wanted, and its one value, ø where a value is
 NOTHING := "Unit"
 NOTHING_VALUE := "unit"
+# the name a distributed call's arm gives its case's value, a name no program writes
+# the name a case's value is bound to in its arm, after the argument's place, so a second union taken apart keeps the first's
+CASE_VALUE := "the value of the case at"
 
 # `A or B` reaches the elaborator as the spelling of a condition, If(A, yes, B) (sugar/conditions.wap), since `or` is
 # no word of the prelude: where the condition is a type, neither a bool nor a proposition, the union is its one
@@ -96,14 +100,44 @@ injected(x: Elaborating, t: Term, given: Term, wanted: Term): Term? := {
 	union = computed(x.el.c, wanted)
 	if not is_sum(x, union) { return ø }
 	parts = arguments(union)
-	if is_part(x, given, parts#1) { return case_of(x, LEFT, union, t) }
+	if is_part(x, given, parts#1) { return case_of(x, LEFT_CASE, union, t) }
 	inner = (if is_part(x, given, parts#2) then t else injected(x, t, given, parts#2)) ?? return ø
-	case_of(x, RIGHT, union, inner)
+	case_of(x, RIGHT_CASE, union, inner)
 }
 # whether a part of a union is the type given, unified where it is
 is_part(x: Elaborating, given: Term, part: Term): bool := taken_back(x.el, () => unified(x.el, given, part)) and unified(x.el, given, part)
 # a sum's case holding a value, at the sum's levels and parts
 case_of(x: Elaborating, case: text, union: Term, value: Term): Term := apply_all(constant("${sum_name(x)}${DOT}${case}", type_levels(union)), arguments(union) + [value])
+
+# A call no declaration fits, an argument of it a union: the match on the first such argument, each case's arm the
+# call given the case's value in its place. A declaration per part so makes one for the union, and a union of three
+# parts distributes again in the arm of `right`. The match gives the type wanted, else the union of its arms' types;
+# ø where no argument is a union
+distributed(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?): Term? := {
+	for place in 1 to #arguments {
+		if union_typed(x, arguments#place) { return cases_called(x, name, arguments, place, wanted) }
+	}
+	ø
+}
+# whether an argument read alone is of a union, taken back either way
+union_typed(x: Elaborating, argument: Node): bool := taken_back(x.el, () => try { is_sum(x, computed(x.el.c, filled(x.el, type_of(x.el.c, elaborated(x, argument, ø))))) } catch e { mismatch(e) })
+cases_called(x: Elaborating, name: text, written: list<Node>, place: int, wanted: Term?): Term := {
+	subject = elaborated(x, written#place, ø)
+	bound = "${CASE_VALUE} ${place}"
+	call = Call(symbol(name), written.take(place - 1) + [symbol(bound)] + written.drop(place))
+	parts = arguments(computed(x.el.c, filled(x.el, type_of(x.el.c, subject))))
+	arms = [LEFT_CASE, RIGHT_CASE].map(case => ArmWritten(case_written(case, [symbol(bound)]), call))
+	subject_matched(x, subject, arms, wanted ?? union_of(x, parts.map(part => type_given(x, call, bound, part))))
+}
+# the type of a call where the case's value is of a part, taken back
+type_given(x: Elaborating, call: Node, bound: text, part: Term): Term := {
+	kept = found_so_far(x.el)
+	value = scoped(x.el, bound, part)
+	type = filled(x.el, type_of(x.el.c, elaborated(x, call, ø)))
+	unscoped(x.el, [value])
+	back_to(x.el, kept)
+	type
+}
 
 # the enum of sums where the program reads: its own where it declares one, else the prelude's
 sum_name(x: Elaborating): text := kernel_name(x.theory, SUM)

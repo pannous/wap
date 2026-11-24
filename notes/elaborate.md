@@ -254,6 +254,11 @@ adds is how a candidate fits and where its instances come from.
   level of the part before it, so `nat?`, `nat or ø` and the prelude's `optional(nat)` = Sum(nat, Unit) are one type.
   An optional of a union, `(A or B)?`, flattens to Sum(A, Sum(B, Unit)), which is not `optional(A or B)` written
   with the parameter (Sum(Sum(A, B), Unit)): a normal form by sorting does not commute with putting a union in for T.
+- **A call on a union distributes over its cases** (sums.wap `distributed`): only where no declaration fits, the first
+  argument typed a Sum is matched, each arm the same call on the case's value; a union of three parts distributes
+  again inside its `right` arm, and a second union argument in turn. The match's type is the type wanted, else the
+  union of the arms' types (`nat` where every arm gives one). A match on an enum whose type takes universes (the
+  prelude's Sum, list) unifies each parameter with the recursor's domain, so its level holes are found.
 
 ## Files
 
