@@ -10,8 +10,8 @@
 # <executable>.build/
 set -euo pipefail
 C_COMPILER=cc
-# -rdynamic: the executable's own C functions (main.c native_call, wap_host_callback) are found by name as libc's are
-C_FLAGS="-O2 -rdynamic"
+# -std=c23: wasm2c writes C23 (static asserts without a message); -rdynamic: the executable's own C functions (main.c native_call, wap_host_callback) are found by name as libc's are
+C_FLAGS="-O2 -rdynamic -std=c23"
 MODULE_NAME=program
 WASM2C_RUNTIME=share/wabt/wasm2c
 WABT_HEADERS=include
