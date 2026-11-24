@@ -319,4 +319,7 @@ mktime(t)
 print "${t.month} ${t.day} ${t.yearday}"
 PROGRAM
 check "a record crosses to C as its struct and comes back as C wrote it" "$(cd "$stage" && "$native_wap" record_crossed.wap 2>&1)" "2 2 61"
+# a class extending another, its instance passed where the class it extends is taken (wiki/class.md), run by the native wap
+printf '%s\n' 'class Shape { x: int; twice() := x * 2 }' 'class Square extends Shape { side: int }' 'shape_x(s: Shape) := s.x' 'print shape_x(Square(3, 4)) + Square(3, 4).twice()' >"$stage/extends.wap"
+check "wap runs a class extending another" "$(cd "$stage" && "$native_wap" extends.wap 2>&1)" "9"
 exit $((failures > 0))
