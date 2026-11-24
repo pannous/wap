@@ -68,8 +68,8 @@ call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Node?, s
 	result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
 }
 # a list literal given alone where no definition takes one argument, its items the arguments: `no_comma (1, 2)` is
-# no_comma(1, 2) (wiki/function.md); a map `{…}` stays one argument
-spread_alone(arguments: list, candidates: list<Signature>, s: TypingState) as list := if #arguments != 1 or candidates.any(definition => takes_count(definition, 1, s)) then arguments else match arguments#1 { List(items, bracket, separator) => if bracket == Bracket.Curly then arguments else items; _ => arguments }
+# no_comma(1, 2) (wiki/function.md); a map `{…}` stays one argument, as does a form, `(Call f 3)`, which is no list
+spread_alone(arguments: list, candidates: list<Signature>, s: TypingState) as list := if #arguments != 1 or candidates.any(definition => takes_count(definition, 1, s)) then arguments else match arguments#1 { List(items, bracket, separator) => if bracket == Bracket.Square or bracket == Bracket.Round and separator == Separator.Comma then items else arguments; _ => arguments }
 # A word with several results gives the one that is wanted (wiki/conversion.md "declared type via as"): an argument
 # whose definitions differ by their result, `int(hi())` beside hi() as int and hi() as text, is wanted as the parameter
 # type of the outer definition that one of its results is; T(x) of an x that can be a T takes it as a T, int(n: int)
@@ -215,7 +215,7 @@ calling(called: Node, chosen: TypedFunction, s: TypingState) as Node := with_fac
 # field by field (core/analyze/data.wap instance_from_map); ø for any other call
 made_from_map(n: Node, called: Node, candidates: list<Signature>, given: list, s: TypingState) as Node? := {
 	record = record_named(s.records, called)
-	if record == ø or #given != 1 or key_type(value_type(given#1)) == ø or candidates.any(definition => takes_fitting(definition, given, s)) { return ø }
+	if record == ø or #given != 1 or key_type(value_type(given#1)) == ø and value_type(given#1) != ANY_SYMBOL or candidates.any(definition => takes_fitting(definition, given, s)) { return ø }
 	instance_from_map(n, record, given#1, s)
 }
 # A type's own words travel with it: the definitions of a called name that the module of an argument's record declares
@@ -370,7 +370,7 @@ overloads_checked(defined: list<Signature>, declared: list<Signature>, library: 
 	for word in library.filter(word => word.kind == DefinitionKind.Function) { words[word.name] = if words.has(word.name) then words[word.name] + [word] else [word] }
 	own = declared.filter(signature => signature.kind == DefinitionKind.Record).map(signature => signature.name)
 	for signature in defined {
-		if signature.kind == DefinitionKind.Function and words.has(signature.name) and not (own.contains(signature.name) or has_fact(signature.definer, DERIVED) or signature.parameters.any(type => names_type(type, own))) and words[signature.name].any(word => taken_alike(word, signature, s)) { refused(signature.definer, "${signature.name} is a function every program has, which takes these types already: give this one another name, or take a type the program declares, `${signature.name}(s: Ship) := …`") }
+		if signature.kind == DefinitionKind.Function and words.has(signature.name) and not (own.contains(signature.name) or has_fact(signature.definer, DERIVED) or signature.parameters.any(type => mentions_type(type, own))) and words[signature.name].any(word => taken_alike(word, signature, s)) { refused(signature.definer, "${signature.name} is a function every program has, which takes these types already: give this one another name, or take a type the program declares, `${signature.name}(s: Ship) := …`") }
 	}
 }
 # whether two definitions take the same values: as many parameters, a value reaching both of each pair
@@ -379,7 +379,7 @@ taken_alike(word: Signature, signature: Signature, s: TypingState) as bool := #w
 # (as they are, boxed or wrapped, a letter binding it, a protocol it does)
 either_takes(a: Node?, b: Node?, s: TypingState) as bool := a == ø or b == ø or [[a!, b!], [b!, a!]].any(pair => conversion(pair#2, pair#1, s) in STATIC_CONVERSIONS or unified(pair#1, pair#2, [], s) != ø or conforms(pair#2, pair#1, s))
 # whether a written type names one of these types, inside list<…>, an optional or a function type too
-names_type(type: Node?, names: list<text>) as bool := type != ø and (names.contains(text(type!)) or (type_parts(type) ?? []).any(part => names_type(part, names)))
+mentions_type(type: Node?, names: list<text>) as bool := type != ø and (names.contains(text(type!)) or (type_parts(type) ?? []).any(part => mentions_type(part, names)))
 # the protocol words these types lack for these definitions' protocol parameters, as a refusal's fix-it
 words_missing(definitions: list<Signature>, types: list, s: TypingState) as text := {
 	lacking = []
@@ -479,7 +479,7 @@ shaped_typed(definition: Signature, argument_types: list, s: TypingState, at: No
 	typed = TypedFunction(definition, types)
 	written = substituted(declared_type(name), letters)
 	# a bare `list` (or `list?`) written takes the body's own type, as a bare list parameter takes its argument's
-	typed.jumps = written == symbol(NEVER_RESULT)
+	typed.jumps = written == symbol(NEVER_TYPE)
 	typed.result = if names_bare_kind(written) or typed.jumps then ø else written
 	typed.unknown_result = "a function that calls itself and gives a value needs its full result type: write `${declared_name(name)}(…): ${full_type_hint(declared_type(name))} := …`"
 	instance_added(typed, s)
@@ -528,7 +528,7 @@ parameter_typed(parameter: Node, type: Node, frame: TypeFrame) as Node := {
 # a typed function's name with its signature, `(int, text) -> int`: its argument types and its result, `()` for no
 # parameters or no value known, `never` for one that never returns, as a built-in writes it, which the emitter lays out
 signed_name(typed: TypedFunction, s: TypingState) as Node := {
-	result = if typed.jumps then symbol(NEVER_RESULT) else typed.result ?? Empty
+	result = if typed.jumps then symbol(NEVER_TYPE) else typed.result ?? Empty
 	with_name_fact(written_name(define_of(typed.function, s)), SIGNATURE, function_type_of(typed.arguments, result))
 }
 
