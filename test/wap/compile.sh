@@ -21,9 +21,10 @@ seed="$(dirname "$(readlink -f "$wap")")/wap-seed/wap.wasm"
 # build, for a compiler run from the tree's source
 warm_state="$tree/$WAP_WARM"
 library_module="$tree/$WAP_LIBRARY_MODULE"
-# the compiler's own source files, listed from the tree's root, which test_self and the census walk: wap/extensions/theory
-# stays outside the build until the switch (S3); test_theory covers it
-compiler_sources() { git ls-files 'wap/*.wap' ':!wap/extensions/theory'; }
+# the compiler's own source files, listed from the tree's root, which test_self and the census walk: the theory
+# (wap/extensions/theory) and its provers (wap/extensions/prove) stay outside the build until the switch (S3);
+# test_theory and test_theory_verify cover them
+compiler_sources() { git ls-files 'wap/*.wap' ':!wap/extensions/theory' ':!wap/extensions/prove'; }
 compiler_built() {
 	local folder=$1 last=$2 said
 	# (what the build says is printed only when it fails: a notice of a build that went on is no part of the path)
