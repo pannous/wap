@@ -27,6 +27,7 @@ use "state.wap"
 use "read.wap"
 use "unify.wap"
 use "declare.wap"
+use "lifted.wap"
 
 CLASS_WORD := "class"
 TRAIT_WORD := "trait"
@@ -61,8 +62,9 @@ case_written(n: Node): CaseWritten := match n {
 # nodes as written, to compare
 spelled(nodes: list<Node>): list<text> := nodes.map(n => "${n}")
 
-# A case read: its name, its found fields' count, and its type over its fields, the block's parameters still free
-class CaseRead { name: text; found: int; type: Term }
+# A case read: its name, its found fields' count, its type over its fields, the block's parameters still free, and
+# the conditions lifted out of its fields (lifted.wap)
+class CaseRead { name: text; found: int; type: Term; lifted: list<Lifted> }
 
 # The enums or the class of one unit elaborated into one inductive block and declared, with what each of its
 # declarations finds
@@ -79,25 +81,32 @@ block_elaborated(p: Theory, statements: list<Node>) := {
 	found = x.letters
 	parameters = found + written
 	types = (1 to #names).list().map(at => scoped(x.el, names#at, closed_filled(x.el, headers#at, written, no)))
-	cases = (1 to #names).list().map(at => written_blocks#at.cases.map(case => case_elaborated(x, kernel_names#at, types#at, level_reached(x, headers#at), written, case)))
+	cases = (1 to #names).list().map(at => written_blocks#at.cases.map(case => case_elaborated(x, kernel_names#at, types, types#at, level_reached(x, headers#at), written, case)))
 	x.header = no
+	all_cases = cases.flat_map(type_cases => type_cases)
+	lifting = all_cases.any(case => case.lifted is not empty)
+	type_names = if lifting then kernel_names.map(plain_name) else kernel_names
 	header_types = headers.map(header => closed_filled(x.el, header, parameters, no))
 	levels = x.reading.levels.map(name => Parameter(name)) + level_holes_of(header_types).map(name => Parameter(name))
-	standing = (1 to #names).list().map(at => apply_all(constant(kernel_names#at, levels), found))
-	case_types = cases.flat_map(type_cases => type_cases.map(case => closed_filled(x.el, instead_of(filled(x.el, case.type), types, standing), parameters, no)))
-	terms = finished(x, header_types + case_types, #header_types)
+	standing = (1 to #names).list().map(at => apply_all(constant(type_names#at, levels), found))
+	# a case's type and its lifted conditions over the parameters, each type of the block standing for its declaration
+	over_parameters = (t: Term, function: bool) => closed_filled(x.el, instead_of(filled(x.el, t), types, standing), parameters, function)
+	case_types = all_cases.map(case => over_parameters(case.type, no))
+	conditions = all_cases.flat_map(case => case.lifted.map(lifted => over_parameters(lifted.condition, yes)))
+	terms = finished(x, header_types + case_types + conditions, #header_types)
 	case_terms = terms.drop(#names)
 	block_types: list<BlockType> = []
 	before = 0
 	for at in 1 to #names {
-		block_types += [BlockType(kernel_names#at, terms#at, cases_typed(cases#at, case_terms.drop(before)))]
+		block_types += [BlockType(type_names#at, terms#at, cases_typed(cases#at, case_terms.drop(before)))]
 		before += #cases#at
 	}
 	inductive_declared(p.environment, InductiveBlock(x.reading.levels, #parameters, block_types))
+	if lifting { conditions_lifted(x, type_names, kernel_names, lifted_finished(all_cases, terms.drop(#names + #case_types))) }
 	if written_blocks#1.trait { p.traits[names#1] = written_blocks#1.cases#1.fields.map(field => named_binder(field).name) }
 	for at in 1 to #names {
 		p.found[kernel_names#at] = #found
-		p.found[recursor_name(kernel_names#at)] = #parameters + #names
+		p.found[recursor_name(type_names#at)] = #parameters + #names
 		for case in cases#at { p.found[case.name] = #parameters + case.found }
 	}
 }
@@ -116,9 +125,21 @@ header_elaborated(x: Elaborating, head: Node): Term := match head {
 }
 # One case read under the block's parameters: its letters and fields gone into, its result type read or the type
 # at the written parameters
-case_elaborated(x: Elaborating, type_name: text, type: Term, level: Level, written: list<Term>, case: CaseWritten): CaseRead := {
+case_elaborated(x: Elaborating, type_name: text, types: list<Term>, type: Term, level: Level, written: list<Term>, case: CaseWritten): CaseRead := {
 	before = #x.letters
 	fields = case.fields.map(field => gone_into(x, named_binder(field), ø))
+	# a field of a subset that holds the block is of its carrier, its condition lifted out (lifted.wap)
+	carried_fields: list<int> = []
+	carried_conditions: list<Term> = []
+	for at in 1 to #fields {
+		hypothesis = hypothesis_of(x.el.c, variable_id(fields#at))
+		lifting = carried(x, hypothesis.type, types)
+		if lifting is not ø {
+			hypothesis.type = lifting!.carrier
+			carried_fields += [at]
+			carried_conditions += [lifting!.condition]
+		}
+	}
 	# a level of a field's type that nothing fixed is the block's, as the other fields' may be: `item(first: T)` of a
 	# Type takes T: Type, and so does `less: T -> T -> bool`
 	if not is_zero(level) { for field in fields { for name in level_holes_in(field_level(x, field)) { level_answered(x.el, Parameter(name), level) } } }
@@ -126,7 +147,9 @@ case_elaborated(x: Elaborating, type_name: text, type: Term, level: Level, writt
 	letters = x.letters.drop(before)
 	x.letters = x.letters.take(before)
 	unscoped(x.el, letters + fields)
-	CaseRead("${type_name}${DOT}${case.name}", #letters, closed_filled(x.el, result, letters + fields, no))
+	inside = letters + fields
+	lifted = (1 to #carried_fields).list().map(at => Lifted(#letters + carried_fields#at, closed_filled(x.el, carried_conditions#at, inside, yes)))
+	CaseRead("${type_name}${DOT}${case.name}", #letters, closed_filled(x.el, result, inside, no), lifted)
 }
 # the level of the universe a field's type lies in
 field_level(x: Elaborating, field: Term): Level := level_filled(x.el, sort_level(filled(x.el, type_of(x.el.c, filled(x.el, type_of(x.el.c, field))))))
@@ -138,6 +161,20 @@ level_reached(x: Elaborating, type: Term): Level := {
 sort_level(sort: Term): Level := match sort.shape {
 	Sort(level) => level
 	_ => refused(BLOCK, "${shown(sort)} is no sort, so it types no enum")
+}
+# the lifted conditions of each case, each with its finished condition, in the same order
+lifted_finished(cases: list<CaseRead>, conditions: list<Term>): list<list<Lifted>> := {
+	finished_cases: list<list<Lifted>> = []
+	at = 0
+	for case in cases {
+		finished_case: list<Lifted> = []
+		for lifted in case.lifted {
+			at += 1
+			finished_case += [Lifted(lifted.field, conditions#at)]
+		}
+		finished_cases += [finished_case]
+	}
+	finished_cases
 }
 # the cases read with their finished types, in the same order
 cases_typed(cases: list<CaseRead>, types: list<Term>): list<WrittenCase> := (1 to #cases).list().map(place => WrittenCase(cases#place.name, types#place))
