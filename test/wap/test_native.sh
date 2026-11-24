@@ -255,4 +255,7 @@ check "the console sets a value an earlier line gave" "$(printf '%s\n' 's = 1' '
 # a console line defining a word again replaces the earlier line's: the lines after it call the new one
 check "the console replaces a function a later line defines again" "$(printf '%s\n' 'f(x: int) as int := x * 2' 'f(21)' 'f(x: int) as int := x * 3' 'f(14)' | "$native_wap" 2>&1)" "42
 42"
+# a console line defining a word for other parameter types keeps the earlier one: both overloads answer
+check "the console keeps an overload of other parameter types" "$(printf '%s\n' 'f(x: int) as int := x * 2' 'f(x: text) as text := x + x' 'f(21)' 'f("a")' | "$native_wap" 2>&1)" '42
+"aa"'
 exit $((failures > 0))
