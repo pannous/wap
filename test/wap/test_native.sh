@@ -155,6 +155,21 @@ check "a native program's records" "$(native_ran records 'class Point { x: int; 
 p = Point{x: 3, label: "a"}
 p.x = p.x + 4
 print "${p.label} ${p.x}"')" "a 7"
+# maps in a native program, held in its memory (types/memory_lists.wap): a literal, an entry read, changed and added,
+# a count, a walk of its keys and values, and enough keys that it finds them by their hash
+check "a native program's maps" "$(native_ran maps 'ages = {ada: 36, bo: 7}
+ages["bo"] = 8
+ages["cy"] = 1
+for at in 1 to 10 { ages["k${at}"] = at }
+for name, age in ages { if age > 5 { print "${name} ${age}" } }
+print "${#ages} ages, k7 is ${ages["k7"]}, has zed: ${ages.has("zed")}"')" "ada 36
+bo 8
+k6 6
+k7 7
+k8 8
+k9 9
+k10 10
+13 ages, k7 is 7, has zed: no"
 check "a native program's slices" "$(native_ran slices 'xs = ["a", "b", "c"]
 print xs[.. 2].join("+") + " " + xs.drop(1).join("+")')" "a+b b+c"
 # a module's `export` is exported by the program that uses it too, under its plain name: C calls back the module's
