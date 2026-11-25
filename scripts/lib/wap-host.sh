@@ -8,12 +8,17 @@ wap_ran() {
 }
 # the module's file as wasmtime opens it, on the host: on Windows by its drive
 host_path() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else echo "$1"; fi; }
-# the folder the module sees as /, so it reads the paths bash gives as they are: Windows's drive as /<drive>, which Git
-# Bash writes its paths in (and leaves them so, MSYS_NO_PATHCONV, for the module to read); the module's own file
-# wasmtime opens as the host names it (host_path)
+# the folder the module sees as /, so it reads the paths bash gives as they are (wap opens an absolute path below /,
+# types/host.wap ROOT_FOLDER): on Windows, where Git Bash writes a drive as /<drive>, a folder holding the drive by
+# that name (a junction), the paths left so for the module (MSYS_NO_PATHCONV); the module's own file wasmtime opens
+# as the host names it (host_path)
 root_folder() {
 	case $(uname -s) in
-		MINGW* | MSYS*) local drive=$(pwd | cut -d/ -f2); echo "${drive^^}:\\::/$drive" ;;
+		MINGW* | MSYS*)
+			local drive=$(pwd | cut -d/ -f2) drives="$(cygpath -w /tmp)\\wap-drives"
+			mkdir -p "$(cygpath -u "$drives")"
+			[ -e "$(cygpath -u "$drives")/$drive" ] || cmd //c mklink //J "$drives\\$drive" "${drive^^}:\\" >/dev/null
+			echo "$drives::/" ;;
 		*) echo / ;;
 	esac
 }
