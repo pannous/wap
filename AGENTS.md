@@ -8,8 +8,8 @@ reason (to warp-interviewer) instead of quietly obeying or breaking it.
 
 wap: a data format and WebAssembly programming language, warp's successor. Its specification is ./wiki.
 https://github.com/pannous/wap
-- The compiler is written in wap and compiles itself (wap/compiler.wap): The native warp runs the modules (soon wap too)
-- The seed: wap.wasm beside the warp binary, with the types module and kernel it reads beside it (published as
+- The compiler is written in wap and compiles itself (wap/compiler.wap): the native wap runs the modules (wap/extensions/native)
+- The seed: wap.wasm beside the native wap, with the types module and kernel it reads beside it (published as
   pre-releases wap-seed-<date>-<sha8>, named by wap-seed.lock; scripts/refresh-seed.sh refreshes it). The tests'
   compiler is built from it (test/wap/compile.sh): the seed beside its own types module makes wap0, wap0 beside the tree's
   types module makes wap1.
@@ -53,7 +53,7 @@ bash test/wap/run.sh --wait <area>...     # the tests of what a change touches: 
 bash test/wap/run.sh --wait [--stage <n>]   # all scripts (the integrator), --stage: wap built of itself n times
 bash test/wap/ratchet_census.sh             # the census: every function of wap's source typed (the integrator)
 scripts/refresh-seed.sh [--check]           # wap's seed refreshed and published
-warp --no-window <module.wasm> <program.wap> <out.wasm>   # a compiler module run by the host
+wap <module.wasm> <program.wap> <out.wasm>   # a compiler module run by the native wap (wap/extensions/native)
 ```
 <!-- todo (card wap-command-options): wap app with test options as before-->
 
