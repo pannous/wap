@@ -57,8 +57,8 @@ check "wap build makes a program a native executable named as it" "$(cd "$tree" 
 # an argument that names no program file is code, run as a program is (core/native/warp.warp is_warp_file)
 check "wap runs code given in place of a file" "$("$native_wap" '1+1' 2>&1)" "2"
 # code given runs without a TMPDIR too, as under cron: its files go to the user's temporary folder
-# no window under --no-window: a program whose C imports open one is refused before it runs
-check "wap --no-window refuses a program that opens a window" "$(cd "$stage" && printf '%s\n' "InitWindow(width: i64, height: i64, title: text): ø from 'raylib'" 'InitWindow(8, 8, "shown")' >window.wap && "$native_wap" --no-window window.wap 2>&1; echo $?)" "wap: InitWindow from raylib opens a window or a sound device: refused under --no-window
+# no window under --no-window: a program calling a C function marked `! Device` (wiki/effects.md) stops at the call
+check "wap --no-window refuses a program that opens a window" "$(cd "$stage" && printf '%s\n' "InitWindow(width: i64, height: i64, title: text): ø from 'raylib' ! Device" 'InitWindow(8, 8, "shown")' >window.wap && "$native_wap" --no-window window.wap 2>&1; echo $?)" "wap: InitWindow from raylib opens a window or a sound device: refused under --no-window
 1"
 check "wap runs code given in place of a file without a TMPDIR" "$(env -u TMPDIR "$native_wap" '1+1' 2>&1)" "2"
 check "a program file stays after its run" "$(cd "$stage" && "$native_wap" hello.wap >/dev/null && ls hello.wap)" "hello.wap"

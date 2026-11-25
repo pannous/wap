@@ -17,8 +17,8 @@ KIND_F64 := 3
 REGISTERS := 8
 # an import's record, the data wasmtime calls it with: the C function, found at its first call (0 before), its result's
 # kind (NO_RESULT for none), a scratch extern, the REGISTERS integer and REGISTERS float arguments of a call, and the
-# library and name it is found by, and the size of a struct given by value last (0 for none: extensions/c/foreign.wap
-# c_import_name), so a module importing a function no library here has (kernel32's on a Mac) links
+# library and name it is found by, the size of a struct given by value last (0 for none: extensions/c/foreign.wap
+# c_import_name) and whether it opens a window or a sound device (1, its foreign line marked `! Device`), so a module importing a function no library here has (kernel32's on a Mac) links
 # and stops only where it calls it, as warp's driver does
 FUNCTION_SLOT := 0
 RESULT_SLOT := 8
@@ -28,8 +28,11 @@ FLOATS_SLOT := INTEGERS_SLOT + 8 * REGISTERS
 LIBRARY_SLOT := FLOATS_SLOT + 8 * REGISTERS
 NAME_SLOT := LIBRARY_SLOT + 8
 STRUCT_SLOT := NAME_SLOT + 8
-RECORD_BYTES := STRUCT_SLOT + 8
+DEVICE_SLOT := STRUCT_SLOT + 8
+RECORD_BYTES := DEVICE_SLOT + 8
+# an import's name is the C name, then its marks: a struct's size `40*byte`, the effect Device
 STRUCT_MARK := " "
+DEVICE_MARK := "Device"
 STRUCT_TIMES := "*"
 NO_RESULT := -1
 # the C names this file finds, the library of main.c's
@@ -60,14 +63,11 @@ wasmtime_caller_context(caller: i64): i64 from 'c'
 wasmtime_caller_export_get(caller: int, name: int32, size: int, item_at: int): int := prim foreign("c", "wasmtime_caller_export_get", caller, name, size, item_at)
 wasmtime_memory_data(context: i64, memory_at: i64): i64 from 'c'
 
-# the C functions that open a window or a sound device (raylib's, SDL's, GLFW's), each between spaces
-DEVICE_OPENERS := " InitWindow InitAudioDevice SDL_CreateWindow SDL_CreateWindowAndRenderer SDL_OpenAudioDevice SDL_OpenAudioDeviceStream glfwCreateWindow "
-# a call of one stops a run under --no-window, so no test or sample run shows a window; a program that only imports
+# a call of a C function that opens a window or a sound device stops a run under --no-window, so no test or sample run shows a window; a program that only imports
 # one, as window.wap does and skips under windowless(), runs (its record `word`)
 headless_checked(word: int) := {
-	name = slot_text(word, NAME_SLOT)
-	if windowless and DEVICE_OPENERS.contains(" ${name} ") {
-		eprint("wap: ${name} from ${slot_text(word, LIBRARY_SLOT)} opens a window or a sound device: refused under --no-window")
+	if windowless and long_at(word + DEVICE_SLOT) == 1 {
+		eprint("wap: ${slot_text(word, NAME_SLOT)} from ${slot_text(word, LIBRARY_SLOT)} opens a window or a sound device: refused under --no-window")
 		exit(1)
 	}
 }
@@ -83,7 +83,9 @@ c_function_defined(linker: int, imported: int, from: int, name: int): int := {
 	set_long_at(record + LIBRARY_SLOT, strndup(long_at(from + 8), long_at(from)))
 	parts = vector_text(name).split(STRUCT_MARK)
 	set_long_at(record + NAME_SLOT, strndup(long_at(name + 8), byte_count(parts#1)))
-	set_long_at(record + STRUCT_SLOT, if #parts > 1 then int(parts#2.split(STRUCT_TIMES)#1) else 0)
+	sizes = parts.filter(part => part.contains(STRUCT_TIMES))
+	set_long_at(record + STRUCT_SLOT, if sizes is empty then 0 else int(sizes#1.split(STRUCT_TIMES)#1))
+	set_long_at(record + DEVICE_SLOT, if parts.contains(DEVICE_MARK) then 1 else 0)
 	set_long_at(record + RESULT_SLOT, result_kind(type))
 	import_defined(linker, imported, from, name, callback_name(), record)
 }
