@@ -57,24 +57,42 @@ asked_about(words: list<text>, word: text, arguments: list<Node>): Node? := if w
 
 # the word of a line naming a statement's parameter, `for x: T`
 FOR_WORD := "for"
-# the refusals of a body that does not give its untyped parameters a type: two declarations fit, or nothing is found
-UNDETERMINED := [OVERLOAD, CANNOT_FIND]
 
 # A declaration under its word (empty for a plain definition), `axiom name: type` or `theorem name(parameters): type := proof`: the
 # definition the word is called on, or a typed name without a value
 declaration_elaborated(p: Theory, word: text, n: Node) := match n {
 	Define(named, parameters, value) => {
 		written = items_or_one(parameters)
-		# a function with an untyped parameter takes its type from the body, else it is a template, elaborated at each
-		# call by its arguments' types (wiki/function.md: from the body and the calls)
-		open_parameters = word == "" and written.any(parameter => named_binder(parameter).type is ø)
-		refusal = try { definition_elaborated(p, word, named, written, value); ø } catch e { e.message }
-		if refusal is not ø {
-			if not open_parameters or not UNDETERMINED.any(rule => refusal!.starts_with(REFUSED + rule)) { raise refusal! }
-			p.templates[definition_name(named)] = Template(named, written, value)
-		}
+		if word == "" and written.any(parameter => named_binder(parameter).type is ø) { untyped_elaborated(p, named, written, value) } else { definition_elaborated(p, word, named, written, value) }
 	}
 	_ => definition_elaborated(p, word, n, [], ø)
+}
+
+# what a declaration's attempt may write in the theory, kept to be put back where it is refused: the declarations
+# made and what they rest on, the courses, the overloads with their binders, the laws stated, the run bodies
+class TheoryKept { declarations: map<text, Declaration>; places: map<text, int>; axioms: map<text, list<text>>; courses: int; found: map<text, int>; binders: map<text, int>; overloads: map<text, list<text>>; unproved_laws: map<text, Term>; run_bodies: map<text, Node>; stated: int; assumed: int }
+theory_kept(p: Theory): TheoryKept := {
+	e = p.environment
+	TheoryKept(copied(e.declarations), copied(e.places), copied(e.axioms), #e.courses, copied(p.found), copied(p.binders), copied(p.overloads), copied(p.unproved_laws), copied(p.run_bodies), #p.stated, #p.assumed)
+}
+theory_put_back(p: Theory, kept: TheoryKept) := {
+	e = p.environment
+	e.declarations = kept.declarations
+	e.places = kept.places
+	e.axioms = kept.axioms
+	e.courses = e.courses.take(kept.courses)
+	p.found = kept.found
+	p.binders = kept.binders
+	p.overloads = kept.overloads
+	p.unproved_laws = kept.unproved_laws
+	p.run_bodies = kept.run_bodies
+	p.stated = p.stated.take(kept.stated)
+	p.assumed = p.assumed.take(kept.assumed)
+}
+copied(m: map<K, V>): map<K, V> := {
+	copy: map<K, V> = {}
+	copy.update(m)
+	copy
 }
 
 # A declaration `name(parameters): type := value` elaborated and declared. Its header is read first, where a letter
@@ -141,7 +159,8 @@ quantified_head(head: Node): Quantified := {
 	}
 	count = 0
 	while count < #lines and for_binder(lines#(count + 1)) is not ø { count += 1 }
-	if count == 0 or not is_binder(head) { return Quantified(head, []) }
+	# `for` lines alone are no statement: the law reads as written
+	if count == 0 or count == #lines or not is_binder(head) { return Quantified(head, []) }
 	rest = lines.drop(count)
 	Quantified(Key(symbol(binder_name(head)), Op.Colon, if #rest == 1 then rest#1 else List(rest, Bracket.Curly, Separator.Newline)), lines.take(count).map(line => for_binder(line)!))
 }

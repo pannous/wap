@@ -61,9 +61,8 @@ class Theory {
 	binders: map<text, int> = {}
 	overloads: map<text, list<text>> = {}
 	unproved_laws: map<text, Term> = {}
-	# the functions with an untyped parameter, by name, and the versions made of them, by name and argument types
+	# the functions with an untyped parameter, by name, each with the versions made of it
 	templates: map<text, Template> = {}
-	versions: map<text, text> = {}
 	traits: map<text, list<text>> = {}
 	# the language whose rules give the spellings read here no form of their own, `if` among them (sugar/), loaded
 	# from the wap folder
@@ -222,8 +221,6 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 	bound = named(x.el, name)
 	if bound is not ø { return given_arguments(x, bound!, type_of(x.el.c, bound!), arguments, wanted) }
 	if x.recursing is not ø and name == x.recursing!.name { return recursive_call_elaborated(x, arguments, wanted) }
-	template = x.theory.templates.get(name)
-	if template is not ø { return version_called(x, name, template!, arguments, wanted) }
 	if arguments is empty and name == PROP_WORD { return PROP }
 	if arguments is empty and name == TYPE_WORD { return type_at(Zero) }
 	# `list.item(x, rest)`, which the rules write as `item(list, x, rest)`: the declaration under the first argument's
@@ -232,10 +229,13 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 		qualified = "${text(named_form(arguments#1))}${DOT}${name}"
 		if declarations_named(x.theory, qualified) is not empty { return name_elaborated(x, qualified, arguments.drop(1), wanted) }
 	}
-	candidates = declarations_named(x.theory, name)
+	template = x.theory.templates.get(name)
+	# a template's versions are found by their types (templates.wap), never tried as declarations, so which call came
+	# first does not choose
+	candidates = declarations_named(x.theory, name).filter(candidate => template is ø or not template!.versions.any(version => version.name == candidate))
 	traits = traits_of(x.theory, name)
-	if #candidates == 1 and traits is empty { return declared_given(x, candidates#1, arguments, wanted) }
-	if candidates is not empty or traits is not empty { return overload_elaborated(x, name, candidates, traits, arguments, wanted) }
+	if #candidates == 1 and traits is empty and template is ø { return declared_given(x, candidates#1, arguments, wanted) }
+	if candidates is not empty or traits is not empty or template is not ø { return overload_elaborated(x, name, candidates, traits, template, arguments, wanted) }
 	if x.header and #name == LETTER_LENGTH {
 		letter = scoped(x.el, name, wanted ?? hole_over(x.el, "the type of ${name}", any_sort(x), x.letters))
 		x.letters += [letter]
@@ -346,12 +346,13 @@ declarations_named(p: Theory, name: text): list<text> := {
 }
 
 # The declarations of an overloaded name tried in turn: exactly one must fit its arguments and the type wanted, else
-# it is the operation of a trait it names; none fitting is refused naming why each did not, a refusal met inside an
-# argument included
-overload_elaborated(x: Elaborating, name: text, candidates: list<text>, traits: list<text>, arguments: list<Node>, wanted: Term?): Term := {
+# it is the version of the untyped function of that name, else the operation of a trait it names; none fitting is
+# refused naming why each did not, a refusal met inside an argument included
+overload_elaborated(x: Elaborating, name: text, candidates: list<text>, traits: list<text>, template: Template?, arguments: list<Node>, wanted: Term?): Term := {
 	read = arguments.map(argument => read_alone(x, argument))
 	trials = declarations_tried(x, candidates, read, wanted)
 	fitting = fits(nearest(trials))
+	if fitting is empty and template is not ø { return version_called(x, name, template!, read, wanted) }
 	if fitting is empty and traits is not empty { return trait_operation(x, name, traits, read, wanted) }
 	fit = the_only(fitting, OVERLOAD, "${name} here is")
 	if fit is ø { return distributed(x, name, arguments, wanted) ?? refused(NO_FIT, "${name} is none of ${trials.map(trial => "${trial.candidate} (${trial.refusal!})").join(", ")} here") }
