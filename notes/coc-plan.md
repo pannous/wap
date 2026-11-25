@@ -910,20 +910,41 @@ texts.
 |---|---|---|
 | S1 census | elaborate and check run beside today's typing; the census (test/wap/ratchet_census.sh) gains a ratchet "accepted n of N" over the compiler's source, lib/ and the test programs, and a gate on compile time | the count, which only grows; the time, which stays under its gate |
 | S2 running from terms | erase, lower and emit from run terms, behind an option | every test program prints the same both ways; the benchmarks within their guardrails |
-| R1 environments without rollback | checking a declaration returns a new environment or a refusal; nothing is copied per statement or taken back | the census accepts as many statements as before, faster; a refused declaration leaves no trace a later statement can see |
-| R2 numbers stay numbers | every operation the kernel shortcuts (6.7) on literals stays a literal, for `int` as for `nat`; no recursion depth grows with a number's size | `h - 700000000` checks in the time of `h - 7`; the depth budget is gone |
-| R3 one library | the prelude and wap/types are one library, each word declared once; a declaration carries its host operation or layout (9.7), so the trust base is the list of those declarations, derived | no word declared twice; `axioms of` and the trust base listing come from the declarations; the prelude's laws Proved and run on values |
-| R4 elaboration before the kernel | literals read at the type their place wants; overloads and conversions chosen once (8), so the kernel sees unique names | `abs(0 - 3)` prints 3 compiled and checked; no overload ranking inside the theory |
-| R5 effects in the kernel | `! IO` is a computation type of the kernel (9.2): a computation where a value is wanted is a type error, not an unfit candidate | `print` checks; a proposition with an effect refused |
-| R6 one pipeline | read, elaborate, check, erase, emit; check, run and verify are modes of one run, not doors | one refusal of a program's host layout, at one place |
-| R7 the switch | the new stages are the compiler; wap/core/analyze goes; the kernel moves to wap/kernel; the seed is refreshed | test_hello, test_self, the census, `--stage 2`: the compiler built through its own kernel builds itself again; the benchmarks unchanged; `char` is `text where #it == 1` and nothing else |
+| R0 agreement | the census also counts the test programs that print the same both ways (`both_ways` of test/wap/scripted.wap over every test program), a ratchet beside the accepted count; a theory feature lands only when it lowers neither | `x := 0 - 3; x` prints -3 both ways; the agreement count, which only grows |
+| R1 one meaning per word | the words both typers read mean one thing (13): a numeral has the type its place wants, else the default; `int`, a count and a bool mean what number.md and bool.md say, in the prelude and in wap/types alike | `0 - 3` is -3 compiled, checked and run from terms; `#xs - 1` the same three ways |
+| R2 one table of primitives | wap/kernel/primitives.wap holds one row per host operation: its name, the wasm types it takes and gives, its builder; the emitter finds an operation by one lookup; a `runs(…)` body is a `prim` of that table, checked against its row (9.7), and no wap spelling of a host operation is typed or checked | `runs(add, prim i64.add(m, n))` accepted, a body of the wrong width refused naming the row; the trust base listed by a command from the `runs(…)` declarations |
+| R3 layouts | every prelude type has its row (9.7): numbers, lists, texts, optional values, records | a program over texts and records runs from its terms; `axioms of` shows no layout outside the prelude |
+| R4 running from terms | erase lowers a run term into the forms today's emitter reads, each node carrying the layout erase takes from its kernel type; lowering never infers a layout | the agreement count reaches every test program the census accepts; the benchmarks within their guardrails |
+| R5 one choice | where the gate shows the two typers apart (a literal's type, an overload, a conversion), the elaborator's choice is made the language's and the old typer follows it until R7 | every test program prints the same both ways; the census accepts every statement of the compiler, lib/ and the tests |
+| R6 one door | check, verify, run and census are modes of one door after one reading of the prelude; a statement's writes are kept apart and joined to the environment when it is accepted, so nothing is copied per statement or taken back | a program's `runs(…)` refused at one place; a refused statement leaves no trace a later one sees; the census within its time gate |
+| R7 the switch | the prelude and wap/types are one library, each word declared once with its `prim` body; the new stages are the compiler; wap/core/analyze goes; the kernel moves to wap/kernel; the seed is refreshed | test_hello, test_self, the census, `--stage 2`: the compiler built through its own kernel builds itself again; the benchmarks unchanged; `char` is `text where #it == 1` and nothing else |
 
 Order: K1, then K2 to K6 in a row, with K3 right after K2 since every program is full of numbers. L follows K as
 its table says. E1 follows K1; E2 follows K2 and L1; E3 follows L2; E4 follows E3 and L3; E5 follows E4 and L4; E6
 and E7 follow E5, E7 needing K6; E8 follows E4. P1 follows E2 and K4; P2 to P4 follow it. S1 starts with E2; the
-stage `lower` is built and measured as soon as E2 gives run terms; S2 follows E5. R1 and R2 touch only the theory and
-start at once; R3 follows R1; R4 and R5 follow R3; R6 follows R4 and R5; R7 follows all of them. Each R lands alone
-with the compiler building itself. K7 any time after K2.
+stage `lower` is built and measured as soon as E2 gives run terms; S2 follows E5. R0 comes first, before any further theory feature; R1 runs beside it, its
+questions answered by the user; R2 starts at once; R3 follows R2; R4 follows R0 and R3, its size measured first by a
+spike of three programs (a closure, a loop, a `try`); R5 follows R1 and R4; R6 follows R3; R7 follows all of them.
+Each R lands alone with the compiler building itself.
+
+What R0 to R7 cost, roughly (lines added / deleted; core and kernel lines need the user's OK):
+
+| step | added | deleted | core and kernel |
+|---|---|---|---|
+| R0 | 40 (test script) | 0 | 0 |
+| R1 | 10 in the elaborator, the rest by the answers of 13 | 2 (prelude overloads) | 1 to 5 (the numeral's default) |
+| R2 | 60 (the table) | 120 (the emitter's seven tables, the spelling check) | +60 kernel, -20 emit |
+| R3 | 60 | 0 | 0 |
+| R4 | about 150, the spike says | 34 (lower writing wap text) | 0 |
+| R5 | by the gate's list | by the gate's list | 0 |
+| R6 | 30 | 80 (four doors, whole-theory copies) | 0 |
+| R7 | the emitter of erased terms, the kernel's move | 3,491 (core/analyze) and the prelude's twins | the user's OK at that step |
+
+The numerals keep their scheme (6.7): unbounded host numbers with the seven shortcuts, opened one successor at a time
+only where a recursor meets a literal, guarded by the step and depth budgets, as Lean's kernel does. None of R0 to R7
+changes that.
+
+K7 any time after K2.
 
 Feature by feature:
 
@@ -992,6 +1013,13 @@ Open, with the recommendation first and its cost in core; with the user through 
 
 1. **W0 and `wap verify`.** Recommended: the Lean model and the Lean prover retire at milestones R7 and P3; until
    then they stay beside the new ones. 0 core lines.
+3. **A numeral's default** (R1). Recommended: a whole numeral where no type is wanted is an `int`, the whole numbers;
+   `nat` only where a `nat` is wanted. `0 - 3` is -3 everywhere. 1 to 5 core lines (core/analyze reads it as today).
+4. **`int` as decided** (R1). Recommended: keep the decision; the overflow test on the fast path takes big numbers
+   (lib/magnitude.wap) into every build, the compiler's included, which costs its size and a seed refresh. The other
+   reading keeps `int` the wrapping i64 for now and moves the decision to R7.
+5. **A count minus a count** (R1). Recommended: `#xs` is an `int` in the language and a `nat` only inside proofs, so
+   `#xs - 1` is -1 on an empty list, never 0. 0 core lines.
 2. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
    `refl`; `axiom`, `assume`; `by`, `chain`; `decreasing`; the axioms' names. Settled on the wiki pages.
 
