@@ -16,6 +16,8 @@ use "state.wap"
 use "read.wap"
 use "effects.wap"
 use "match.wap"
+use "../compute.wap"
+use "../inductive.wap"
 
 # the elaborator's own rule a refusal names
 STATEMENT := "statement"
@@ -26,6 +28,16 @@ ROUND := "the round"
 NEXT := "the next round"
 LEFT := "the rounds left"
 BEFORE := "the rounds before"
+TOTAL := "the rounds in all"
+# the number a round's range and the rounds before are conditions on
+NUMBER := "the number"
+# the fact a let's name is given, one no program writes
+DEFINITION := "the definition of "
+# the words a round's range and the walk's count are written in
+WHERE_FUNCTION := "filter"
+AT_MOST := "<="
+PLUS := "+"
+EQUALS := "=="
 
 # A block of the type wanted: its first statement, the rest of the block after it
 statements_elaborated(x: Elaborating, statements: list<Node>, wanted: Term?): Term := {
@@ -36,7 +48,7 @@ statements_elaborated(x: Elaborating, statements: list<Node>, wanted: Term?): Te
 		Return(value) => elaborated(x, value, wanted)
 		Block(inner) => statements_elaborated(x, inner + rest, wanted)
 		Break() => left_elaborated(x, first, EXIT, [], wanted)
-		Continue() => left_elaborated(x, first, NEXT, [symbol(ROUND)], wanted)
+		Continue() => left_elaborated(x, first, NEXT, [next_round(x)], wanted)
 		Set(place, value) => if rest is empty then no_value(first) else let_elaborated(x, place_binder(place), value, rest, wanted)
 		If(condition, then_part, else_part) => if rest is empty then elaborated(x, first, wanted) else joined_elaborated(x, condition, statements_in(then_part), statements_in(else_part), rest, wanted)
 		For(place, count, body) => if rest is empty then no_value(first) else walked_elaborated(x, place, count, statements_in(body), rest, wanted)
@@ -56,14 +68,33 @@ statements_in(part: Node): list<Node> := match part {
 # (the computation the value is runs around the let; the rest closes inside it, where its name is bound)
 let_elaborated(x: Elaborating, binder: WrittenBinder, value_written: Node, rest: list<Node>, wanted: Term?): Term := closed_over(x, wanted, () => {
 	type = if binder.type is not ø then elaborated(x, binder.type!, any_sort(x)) else ø
+	pending = #x.pending
 	read = elaborated(x, value_written, type)
 	value = filled(x.el, ran(x, read, type_of(x.el.c, filled(x.el, read)), ø) ?? read)
 	held = filled(x.el, type ?? type_of(x.el.c, value))
 	variable = scoped(x.el, binder.name, held)
-	body = rest_read(x, rest, wanted)
-	unscoped(x.el, [variable])
-	let_in(binder.name, held, value, abstracted(filled(x.el, body), variable_id(variable)))
+	# a value that opened runs stands for their results, bound around the let: it is no fact about the name, and the
+	# runs are taken back only where they were bound, so a count that did not grow means the value runs nothing
+	definition = if #x.pending == pending then defined(x, variable, held, value) else []
+	body = filled(x.el, rest_read(x, rest, wanted))
+	unscoped(x.el, [variable] + definition.map(fact => fact.variable))
+	defining = definition.fold(body, (inner, fact) => instantiated(abstracted(inner, variable_id(fact.variable)), fact.proof))
+	let_in(binder.name, held, value, abstracted(defining, variable_id(variable)))
 })
+# A let's name equals its value: a fact in scope while the rest is read, and the name's refl once the let closes,
+# where the kernel reads the rest with the value put in. None without an equality, for a value of no known sort, or
+# for a value a computation gives part of: that is known only by running it
+class Definition { variable: Term; proof: Term }
+defined(x: Elaborating, variable: Term, held: Term, value: Term): list<Definition> := {
+	numbers = x.theory.environment.numbers ?? return []
+	level = match computed(x.el.c, filled(x.el, type_of(x.el.c, held))).shape {
+		Sort(level) => level
+		_ => return []
+	}
+	fact = apply_all(constant(numbers.equality, [level]), [held, variable, value])
+	name = hypothesis_of(x.el.c, variable_id(variable)).binder
+	[Definition(scoped(x.el, DEFINITION + name, fact), apply_all(constant(reflexive_case(x.theory.environment, numbers.equality), [level]), [held, variable]))]
+}
 
 # the rest of a block after what binds names in it: a binder that closes, around which the computations run in it bind
 rest_read(x: Elaborating, rest: list<Node>, wanted: Term?): Term := closed_over(x, wanted, () => statements_elaborated(x, rest, wanted))
@@ -101,46 +132,56 @@ rejoined(x: Elaborating, name: text, given: list<text>, rest: list<Node>, wanted
 # the rest can see, and the loop the walk of the number type's recursor down the count, from no round before; a
 # round's place is the number after the rounds before it, so it counts 1 … count
 walked_elaborated(x: Elaborating, place: Node, count: Node, body: list<Node>, rest: list<Node>, wanted: Term?): Term := {
-	numbers = x.theory.environment.numbers ?? refused(STATEMENT, "a loop counts its rounds in numbers, and no numbers are declared")
-	number = number_type(numbers)
-	counted = elaborated(x, count, number)
+	numbers = loop_numbers(x)
+	counted = elaborated(x, count, number_type(numbers))
 	given = unique(names_given(body)).filter(name => named(x.el, name) is not ø)
-	rejoined(x, EXIT, given, rest, wanted, _ => walk_elaborated(x, numbers, place, counted, body, given, wanted))
+	rejoined(x, EXIT, given, rest, wanted, _ => walk_elaborated(x, numbers, place, count, counted, body, given, wanted))
 }
-# the walk of the number type's recursor down the count to the loop's join, from no round before
-walk_elaborated(x: Elaborating, numbers: Numbers, place: Node, counted: Term, body: list<Node>, given: list<text>, wanted: Term?): Term := {
-	number = number_type(numbers)
+# The walk of the number type's recursor down the count to the loop's join, from no round before. Its motive holds of
+# the rounds left: the rounds before are those that add up to the count with them, so each round is proved to lie
+# between 1 and the count
+walk_elaborated(x: Elaborating, numbers: Numbers, place: Node, count: Node, counted: Term, body: list<Node>, given: list<text>, wanted: Term?): Term := {
 	exit = named(x.el, EXIT)!
-	walk_type = pi(ROUND, number, hypothesis_of(x.el.c, variable_id(exit)).type)
-	e = eliminating(x, counted, walk_type, recursor_name(numbers.number))
-	walk = e.function
-	takes = e.rest
-	for minor in [lambda(ROUND, number, exit), round_elaborated(x, numbers, place, body, given, walk_type, wanted)] {
-		parts = pi_parts(x, takes)!
-		made_of(x, minor, parts.domain)
-		walk = apply(walk, minor)
-		takes = instantiated(parts.body, minor)
-	}
-	apply_all(walk, [counted, numeral(0)] + given.map(given_name => named(x.el, given_name)!))
+	total = scoped(x.el, TOTAL, number_type(numbers))
+	e = eliminating(x, total, pi(BEFORE, before_type(x, numbers, TOTAL, count), hypothesis_of(x.el.c, variable_id(exit)).type), recursor_name(numbers.number))
+	unscoped(x.el, [total])
+	walk = Applied(e.function, e.rest)
+	walk = given_one(x, walk, motive => made_of(x, lambda(BEFORE, pi_parts(x, motive)!.domain, exit), motive))!
+	walk = given_one(x, walk, step => made_of(x, round_elaborated(x, numbers, place, count, body, given, step, wanted), step))!
+	for value in [counted, numeral(0)] + given.map(given_name => named(x.el, given_name)!) { walk = given_one(x, walk, taken => made_of(x, value, taken))! }
+	walk.function
 }
-# The step of a walk: the rounds left, the walk of them, the number of rounds before and the names given, to a round:
-# its place the number after, the body, and the call of the walk of the rounds left
-round_elaborated(x: Elaborating, numbers: Numbers, place: Node, body: list<Node>, given: list<text>, walk_type: Term, wanted: Term?): Term := {
-	number = number_type(numbers)
-	left = scoped(x.el, LEFT, number)
-	walking = scoped(x.el, NEXT, walk_type)
-	before = scoped(x.el, BEFORE, number)
+# The step of a walk: the rounds left, the walk of them, the rounds before and the names given, to a round: its place
+# the number after the rounds before, between 1 and the count, the body, and the call of the walk of the rounds left
+round_elaborated(x: Elaborating, numbers: Numbers, place: Node, count: Node, body: list<Node>, given: list<text>, step: Term, wanted: Term?): Term := {
+	stepping = pi_parts(x, step)!
+	left = scoped(x.el, LEFT, stepping.domain)
+	walked = pi_parts(x, instantiated(stepping.body, left))!
+	walking = scoped(x.el, NEXT, walked.domain)
+	before = scoped(x.el, BEFORE, pi_parts(x, instantiated(walked.body, walking))!.domain)
 	variables = given.map(given_name => scoped(x.el, given_name, type_before(x, given_name)))
-	round = scoped(x.el, ROUND, number)
+	range = round_type(x, numbers, count)
+	this_round = elaborated(x, next_round(x), range)
+	round = scoped(x.el, ROUND, range)
 	around = x.round_given
 	x.round_given = given
 	run = rest_read(x, [Set(place, symbol(ROUND))] + body + [Continue()], wanted)
 	x.round_given = around
 	unscoped(x.el, [round])
-	rounds = let_in(ROUND, number, next(numbers, before), abstracted(filled(x.el, run), variable_id(round)))
+	rounds = let_in(ROUND, range, this_round, abstracted(filled(x.el, run), variable_id(round)))
 	unscoped(x.el, [left, walking, before] + variables)
 	closed_filled(x.el, rounds, [left, walking, before] + variables, yes)
 }
+# the number after the rounds before: the round's place, and the rounds before the next round
+next_round(x: Elaborating): Node := Call(symbol(loop_numbers(x).successor), [symbol(BEFORE)])
+# the numbers a loop counts its rounds in
+loop_numbers(x: Elaborating): Numbers := x.theory.environment.numbers ?? refused(STATEMENT, "a loop counts its rounds in numbers, and no numbers are declared")
+# a round's type: the numbers from 1 to the count
+round_type(x: Elaborating, numbers: Numbers, count: Node): Term := numbers_where(x, numbers, If(operation(AT_MOST, Number(1), symbol(NUMBER)), operation(AT_MOST, symbol(NUMBER), count), False()))
+# the type of the rounds before, of the rounds left: the numbers adding up to the count with them
+before_type(x: Elaborating, numbers: Numbers, left: text, count: Node): Term := numbers_where(x, numbers, operation(EQUALS, operation(PLUS, symbol(NUMBER), symbol(left)), count))
+numbers_where(x: Elaborating, numbers: Numbers, condition: Node): Term := elaborated(x, Call(symbol(WHERE_FUNCTION), [symbol(numbers.number), function_of(x, NUMBER, condition)]), any_sort(x))
+operation(name: text, a: Node, b: Node): Node := Call(symbol(name), [a, b])
 # a break or a continue: the round left by calling the rest after the loop, or the walk of the rounds after it, with
 # the names the round passes on; the statements after it are never read
 left_elaborated(x: Elaborating, word: Node, name: text, leading: list<Node>, wanted: Term?): Term := {
