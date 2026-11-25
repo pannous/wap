@@ -18,7 +18,7 @@ SIZE_NODES=142815
 # test programs: the statements it accepts may not drop below the floor, and its wall time stays under the ratio times
 # the typing census's, measured in the same run. It runs only with --theory (the landings touching wap/extensions/theory
 # or wap/extensions/prove, and the hourly full run): about 4 min more
-THEORY_ACCEPTED=1331
+THEORY_ACCEPTED=1424
 THEORY_TIME_RATIO=3
 
 source "$(dirname "$0")/compile.sh"
