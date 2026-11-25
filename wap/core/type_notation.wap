@@ -73,21 +73,37 @@ ATOM_TYPES = [CHAR_TYPE, INT_TYPE, FLOAT_TYPE, NUMBER_TYPE, TEXT_TYPE]
 # the type words a type test may name besides records and letters
 TYPE_WORDS = ATOM_TYPES + [BOOL_TYPE, ANY_TYPE, LIST_TYPE, MAP_TYPE, ENUM_TYPE]
 
-# The table of the types a compile met: the terms by place, the places by hash, the ids of the words core does not
-# build. It is the compile's own, as a symbol table is: every stage reads a type fact through it, so it is one value
-# for the whole run, not handed down every call
-class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; words: map<text, int> = {} }
+# The table of the types a compile met: the terms by place, the places by hash, and of the words core does not build
+# their ids by name, the declaration a record's word names (two records of one name are two words) and the type a
+# shape's word narrows (core/analyze/shapes.wap). It is the compile's own, as a symbol table is: every stage reads a
+# type fact through it, so it is one value for the whole run, not handed down every call
+class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; words: map<text, int> = {}; declared: map<int, Node> = {}; narrows: map<int, Term> = {} }
 TYPES: TypeTerms = TypeTerms()
 # a type word's term: core's own by its fixed id, any other by the id the table gives it the first time
-word_term(word: text) as Term := {
-	if CORE_WORDS.contains(word) { return core_word(word) }
-	id = TYPES.words.get(word)
+word_term(word: text) as Term := word_keyed(word, word)
+word_keyed(word: text, key: text) as Term := {
+	if CORE_WORDS.contains(key) { return core_word(key) }
+	id = TYPES.words.get(key)
 	if id == ø {
 		id = #TYPES.words + 1
-		TYPES.words[word] = id!
+		TYPES.words[key] = id!
 	}
 	constant(id!, word, [])
 }
+# a written word's term: a record's own by its declaration, a shape's with the type it narrows known
+word_named(n: Node) as Term := {
+	declared = fact_of(n, DECLARED_BY)
+	word = if declared == ø then word_term(text(n)) else word_keyed(text(n), "${text(n)} ${place_key(declared!)}")
+	if declared != ø { TYPES.declared[word_id(word)] = declared! }
+	narrows = fact_of(n, NARROWS)
+	if narrows != ø { TYPES.narrows[word_id(word)] = type_term(narrows!) }
+	word
+}
+word_id(word: Term) as int := match word.shape { Constant(name, levels, id) => id; _ => 0 }
+# the declaration of the record a type names, ø for a type no declaration bound
+declared_by(type: Term?) as Node? := if is_word(type) then TYPES.declared.get(word_id(type!)) else ø
+# the type a shape's word narrows, `Node` of Define, ø for any other type
+narrowed_type(type: Term?) as Term? := if is_word(type) then TYPES.narrows.get(word_id(type!)) else ø
 # the place of a type in the table, entered the first time it is met
 place_of(type: Term) as int := {
 	places = TYPES.places.get(type.hash) ?? []
@@ -154,7 +170,7 @@ type_text(type: Term?) as text := {
 		_ => if is_word(type) then word_of(type)! else "${word_of(type) ?? "?"}<${types_text(parts_of(type!))}>"
 	}
 }
-types_text(types: list<Term?>) as text := types.map(type_text).join(", ")
+types_text(types: list<Term>) as text := types.map(type_text).join(", ")
 # a value of a type read as another where that one is wanted: a char as its text, a range as its list
 READS = [[CHAR_SYMBOL, TEXT_SYMBOL], [RANGE_SYMBOL, list_type(INT_SYMBOL)]]
 read_of(given: Term?) as Term? := if given == ø then ø else (READS.find(pair => same(pair#1, given!)) ?? return ø)#2
@@ -178,9 +194,13 @@ function_value_parts(type: Term?) as list<Term>? := parts_of_type(FUNCTION_VALUE
 # the key of the function a function value calls, the first of its parts
 function_value_key(parts: list<Term>) as text := match (parts#1).shape { Quoted(value) => value; _ => raise("a function value's type begins with its key") }
 
+# a type the compiler writes into code it makes, as its notation carrying its term
+written_of(type: Term) as Node := with_fact(symbol(type_text(type)), TYPE, type_fact(type))
 # The door: a type as a program writes it read into its term. `list<int>`, `int?`, `(int) -> text`, `40⋅byte` (a
 # list of bytes), a function value's `fn<"key", int>`; a name alone is its word
 type_term(n: Node) as Term := {
+	known = fact_type(fact_of(n, TYPE))
+	if known != ø { return known! }
 	base = written_optional(n)
 	if base != ø { return optional_type(type_term(base!)) }
 	function = written_function(n)
@@ -189,7 +209,8 @@ type_term(n: Node) as Term := {
 		Key(name, Op.None, List(items, Bracket.Less, separator)) => type_built(word_term(text(name)), items.map(item => type_term(item)))
 		Call(times, items) => if text(times) == ARRAY_TIMES and #items == 2 and items#1 is number then list_type(type_term(items#2)) else raise("${n} is no type")
 		Text(value) => quoted(value)
-		_ => word_term(text(n))
+		Empty => EMPTY_SYMBOL
+		_ => word_named(n)
 	}
 }
 # a written optional's base, `int` of `int?`
@@ -205,3 +226,24 @@ written_function(n: Node) as list<Node>? := match n {
 }
 # two types are one where their terms are the same
 ==(a: Term, b: Term) as bool := same(a, b)
+# whether written code is a type with parts, `list<int>`, `int?`, `(int) -> text`, not a word alone
+writes_compound_type(n: Node) as bool := written_optional(n) != ø or written_function(n) != ø or (match n { Key(name, Op.None, List(items, Bracket.Less, separator)) => yes; _ => no })
+# a written type's word and parts, `list` and `int` of `list<int>`, `?` and `int` of `int?`; ø for a word alone
+written_parts(n: Node) as list<Node>? := {
+	base = written_optional(n)
+	if base != ø { return [symbol(OPTIONAL_MARK), base!] }
+	function = written_function(n)
+	if function != ø { return [symbol(FUNCTION_ARROW)] + function! }
+	match n { Key(name, Op.None, List(items, Bracket.Less, separator)) => [name] + items; _ => ø }
+}
+# a written type built back from its word and parts, as written_parts gives them
+written_built(word: text, parts: list<Node>) as Node := {
+	if word == OPTIONAL_MARK { return List([parts#1, symbol(OPTIONAL_MARK)], Bracket.None, Separator.None) }
+	separator = if #parts > 1 then Separator.Comma else Separator.None
+	if word == FUNCTION_ARROW { return Call(symbol(FUNCTION_ARROW), [List(parts.take(#parts - 1), Bracket.Round, if #parts > 2 then Separator.Comma else Separator.None), parts.last]) }
+	Key(symbol(word), Op.None, List(parts, Bracket.Less, separator))
+}
+# the item a written array holds, `byte` of `40⋅byte`; ø for any other written type
+written_array_item(n: Node) as Node? := match n { Call(times, items) => if text(times) == ARRAY_TIMES and #items == 2 and items#1 is number then items#2 else ø; _ => ø }
+# a type's text is its notation: `int`, `list<int>`, as a program writes it
+text(type: Term) as text := type_text(type)

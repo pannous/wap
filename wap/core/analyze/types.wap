@@ -95,11 +95,11 @@ class TypingState {
 	retyped: list<Binding> = []
 	# the list and map types values were boxed into an any as, and the dispatches that choose among generic definitions
 	# by them (core/analyze/dispatch.wap)
-	boxed: list<Node> = []
+	boxed: list<Term> = []
 	dispatches: list<Dispatch> = []
 	# the own types of the function values that meet where one type holds them, by the unknown holding them until a
 	# call or a written type settles it to a signature (core/analyze/function_values.wap functions_joined)
-	members: map<text, list<Node>> = {}
+	members: map<text, list<Term>> = {}
 	retypings: list<text> = []
 	fixed: list<text> = []
 }
@@ -124,8 +124,8 @@ class Refusal {
 # body gives it) and the Define it became
 class TypedFunction {
 	function: Signature
-	arguments: list<Node>
-	result: Node? = ø
+	arguments: list<Term>
+	result: Term? = ø
 	define: Node = ø
 	done: bool = no
 	# the globals it reads, itself or through the functions it calls, before the statements that give them their values
@@ -139,15 +139,15 @@ class TypedFunction {
 }
 # the type a typed function gives: ø's own when it gives nothing, `T` of `-> T` bound to ø; none while its result is not
 # known yet
-result_given(typed: TypedFunction) as Node? := typed.result ?? (if typed.done then EMPTY_SYMBOL else ø)
+result_given(typed: TypedFunction) as Term? := typed.result ?? (if typed.done then EMPTY_SYMBOL else ø)
 # What a condition finds of a variable: its key, the arm it holds in (1 then, 2 else), the type it reads as there
 class Finding { key: text; arm: int; type: Term }
 # The function whose body is being typed: its variables' types and its written result type
 class TypeFrame {
 	variables: list<Binding> = []
-	result: Node? = ø
+	result: Term? = ø
 	# the types its returns give, ø for a bare return
-	returns: list<Node?> = []
+	returns: list<Term?> = []
 	# the generic letters its parameters bound (core/analyze/calls.wap)
 	letters: list<Binding> = []
 	# what the conditions around find of their variables: an optional one present, read as its value; one any or a
@@ -215,12 +215,12 @@ gives_value(n: Node) as bool := fact_of(n, TYPE) != ø and not jumps(n) and valu
 # whether a type is one of a value: not none, not ø alone
 # a typed form's value type, refused where it gives none, saying where the value is wanted: "to pass", "to test" …; a
 # call of a function whose result is not known yet says what to write
-value_of(n: Node, wanted: text) as Node := value_type(n) ?? refused(n, text_of(fact_of(n, RESULT_UNKNOWN)) ?? "this gives no value ${wanted}")
+value_of(n: Node, wanted: text) as Term := value_type(n) ?? refused(n, text_of(fact_of(n, RESULT_UNKNOWN)) ?? "this gives no value ${wanted}")
 # a fact's text, ø for none
 text_of(fact: Node?) as text? := match fact { Text(value) => value; _ => ø }
 valued(type: Term?) as bool := value_bearing(type) != ø
 # a type that holds a value, ø for none or ø's own
-value_bearing(type: Term?) as Node? := if type == EMPTY_SYMBOL then ø else type
+value_bearing(type: Term?) as Term? := if type == EMPTY_SYMBOL then ø else type
 jumps(n: Node) as bool := has_fact(n, JUMPS)
 jumping(n: Node) as Node := with_fact(n, JUMPS, True)
 # n typed as the code it gives the value of: of its type, or jumping with it, `{ x = 1; return x }`, or a call of a
@@ -300,7 +300,7 @@ held_function(definition: Node, s: TypingState) as Signature := definition_keyed
 # pipeline's bug, never skipped
 define_of(definition: Signature, s: TypingState) as Define := s.defines.get(definition.key) ?? refused(Text(definition.key), "typing holds no definition for this record: the pipeline lost it")
 # the library globals' written types, shaped, which its functions read before the statements that give the values
-globals_declared(statements: list, s: TypingState) := { s.declared += statements.filter(statement => statement is Set and declared_type(statement) != ø).map(statement => Binding(place_key(declared_name(statement)), shaped(declared_type(statement)!, s))) }
+globals_declared(statements: list, s: TypingState) := { s.declared += statements.filter(statement => statement is Set and declared_type(statement) != ø).map(statement => Binding(place_key(declared_name(statement)), type_term(shaped(declared_type(statement)!, s)))) }
 # the records among statements added to those typing knows, their fields' written types shaped once all are known, as
 # a definition's are: a field of a pattern's type holds a Node
 records_added(statements: list, s: TypingState) := {
@@ -308,11 +308,11 @@ records_added(statements: list, s: TypingState) := {
 	if statements.any(statement => statement is Record) { s.records = Records(s.records.items.map(record => record_shaped(record, s)), s.records.names) }
 }
 record_shaped(record: Node, s: TypingState) as Node := match record {
-	Record(name, fields, variants) => refitted(Record(name, with_items(fields, items_of(fields).map(callable_held).map(field => if names_bare_kind(declared_type(field)) then refused(field, "a field writes its full type, list<int> rather than list: a bare kind takes the type of the value given, which a field has none of") else shaped_key(field, s))), variants), record)
+	Record(name, fields, variants) => refitted(Record(name, with_items(fields, items_of(fields).map(callable_held).map(field => if names_bare_kind(written_type(declared_type(field))) then refused(field, "a field writes its full type, list<int> rather than list: a bare kind takes the type of the value given, which a field has none of") else shaped_key(field, s))), variants), record)
 	_ => record
 }
 # a field written `block` or a bare `function` holds one function value of one layout: one called as () -> any
-callable_held(field: Node) as Node := match field { Set(place, value) => refitted(Set(callable_held(place), value), field); _ => if text(declared_type(field) ?? Empty) in [BLOCK_WORD, FUNCTION_WORD] then refitted(Key(declared_name(field), Op.Colon, function_type_of([], ANY_SYMBOL)), field) else field }
+callable_held(field: Node) as Node := match field { Set(place, value) => refitted(Set(callable_held(place), value), field); _ => if text(declared_type(field) ?? Empty) in [BLOCK_WORD, FUNCTION_WORD] then refitted(Key(declared_name(field), Op.Colon, written_built(FUNCTION_ARROW, [symbol(ANY_TYPE)])), field) else field }
 # the definitions among statements
 defines_in(statements: list) as list<Define> := statements.flat_map(statement => if statement is Define then [statement] else [])
 # Defines typing now holds, each by its record's key unless it holds one already: the record declare wrote, else one
@@ -359,10 +359,10 @@ return_typed(n: Node, value: Node, s: TypingState, f: TypeFrame) as Node := {
 }
 
 # a typed subject's part, `x.f` by a text key, `xs#i` by an int place
-part_got(n: Node, held: Term, key: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := if key is text then part_typed(n, held, key, s, f, expected) else get_typed(n, held, key, s, f)
+part_got(n: Node, held: Node, key: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := if key is text then part_typed(n, held, key, s, f, expected) else get_typed(n, held, key, s, f)
 # a property given a value, `canvas.width = 12`, where the subject's record has no field of that name: its setter
 # width(canvas, 12) (decision setter-calls); ø for a field or anything else
-setter_called(n: Node, held: Term, key: Node, value: Node, s: TypingState, f: TypeFrame) as Node? := {
+setter_called(n: Node, held: Node, key: Node, value: Node, s: TypingState, f: TypeFrame) as Node? := {
 	record = record_named(s.records, value_type(held)) ?? return ø
 	if not key is text or field_named(record, key) != ø { return ø }
 	word_called(n, text(key), [held, typed_form(value, s, f, ø)], ø, s)
@@ -385,7 +385,7 @@ receiver_field(name: Node) as Node := {
 name_set_typed(n: Node, place: Node, value: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
 	name = declared_name(place)
 	# a name written `any` holds the type of what it is given (a later other type retypes it)
-	written = opened(substituted(declared_type(place), f.letters), s)
+	written = opened(substituted(written_type(declared_type(place)), f.letters), s)
 	declared = if written != ø and shaped(written, s) == ANY_SYMBOL then ø else written
 	key = place_key(defined_at(name))
 	if declared != ø or is_kind_word(fact_of(n, ASSIGNS), DefinitionKind.Local) { s.fixed.add(key) }
@@ -401,7 +401,7 @@ name_set_typed(n: Node, place: Node, value: Node, s: TypingState, f: TypeFrame, 
 	# the name keeps the type it holds, `found: Node? = ø` a Node? whatever it is given
 	held = type_keyed(key, s.retyped) ?? wanted ?? type
 	remembered(name, held, s, f)
-	with_fact(refitted(Set(with_name_fact(place, TYPE, held), given), n), TYPE, held)
+	with_type_of(refitted(Set(with_name_fact(place, TYPE, type_fact(held)), given), n), held)
 }
 
 # a counted loop, its place an int in the body
@@ -412,7 +412,7 @@ for_typed(n: Node, place: Node, count: Node, body: Node, s: TypingState, f: Type
 
 # a variable's bare container kind as its open type, `a: map` a map<α1, α2> and `a: list` a list<α1>, as `{}` and `[]`
 # are: their uses settle the unknowns (wiki/map.md)
-opened(type: Term?, s: TypingState) as Node? := if type == core_word(LIST_TYPE) then list_type(unknown_type(s)) else if type == core_word(MAP_TYPE) then map_type(unknown_type(s), unknown_type(s)) else type
+opened(type: Term?, s: TypingState) as Term? := if type == core_word(LIST_TYPE) then list_type(unknown_type(s)) else if type == core_word(MAP_TYPE) then map_type(unknown_type(s), unknown_type(s)) else type
 # a variable given a value of another type than it holds: from its first value on it holds the type both meet in, any
 # said with a warning, an int that becomes a float said nothing; a let, a written type or a name made so already keeps
 # its type, refused as conversion refuses it
@@ -482,13 +482,13 @@ read_before_given(n: Node, s: TypingState, f: TypeFrame) as Node? := {
 # A path's read as a condition around finds it: an optional's value where it is known present, `x!`, a boxed value of
 # the type it is known to hold, a value of a type read as that one read so, `text(c)` of a char found a text; as it is
 # where nothing finds it
-as_found(n: Node, read: Term, s: TypingState, f: TypeFrame) as Node := {
+as_found(n: Node, read: Node, s: TypingState, f: TypeFrame) as Node := {
 	known = found_type(path_key(n) ?? return read, f.present) ?? return read
 	if base_of_optional(value_type(read)) != ø { return with_type_of(word_called(n, REQUIRED_WORD, [read], ø, s), known) }
 	readers = passing_types(known).filter(given => given != known and read_of(given) != ø)
 	readers.fold(unboxed(read, known, n), (otherwise, given) => with_type_of(placed_like(If(boxed_tested(read, given, n), as_read(unboxed(read, given, n), known, s), otherwise), n), known))
 }
-unboxed(read: Term, type: Term, at: Node) as Node := with_type_of(placed_like(Prim(symbol(OPTIONAL_VALUE), [read]), at), type)
+unboxed(read: Node, type: Term, at: Node) as Node := with_type_of(placed_like(Prim(symbol(OPTIONAL_VALUE), [read]), at), type)
 # A path a condition may find, its key: a variable's own, `x`, a field of a path, `m.pattern`, and an item of a path at
 # a written place, `types#1`, and the place a condition gives its value, `(x = v) is int`; ø for any other form. A path
 # is found until something gives it, or a path it is part of, a new value.
@@ -518,14 +518,14 @@ remembered(name: Node, type: Term, s: TypingState, f: TypeFrame) := {
 	forgotten(variable.key, f)
 	if is_bound(name, DefinitionKind.Global) { s.globals += [variable] } else { f.variables += [variable] }
 }
-variable_type(name: Node, s: TypingState, f: TypeFrame) as Node? := settled_optional(type_keyed(place_key(defined_at(name)), variables_of(name, s, f)), s)
+variable_type(name: Node, s: TypingState, f: TypeFrame) as Term? := settled_optional(type_keyed(place_key(defined_at(name)), variables_of(name, s, f)), s)
 # the type of this key among these bindings
-type_keyed(key: text, bindings: list<Binding>) as Node? := {
+type_keyed(key: text, bindings: list<Binding>) as Term? := {
 	for binding in bindings { if binding.key == key { return binding.type } }
 	ø
 }
 # the type a condition around finds a variable of, ø where none finds it
-found_type(key: text, present: list<Finding>) as Node? := type_keyed(key, present.map(finding => Binding(finding.key, finding.type)))
+found_type(key: text, present: list<Finding>) as Term? := type_keyed(key, present.map(finding => Binding(finding.key, finding.type)))
 defined_at(name: Node) as Node := fact_of(name, DEFINED_AT) ?? refused(name, "this name reached the typing stage unbound")
 # whether a name is the one that defines its variable, its first value rather than a change
 is_definer(name: Node) as bool := place_key(name) == place_key(defined_at(name))
@@ -534,12 +534,12 @@ is_definer(name: Node) as bool := place_key(name) == place_key(defined_at(name))
 case_call_typed(n: Node, called: Node, arguments: list<Node>, s: TypingState, f: TypeFrame) as Node := {
 	fields = case_fields(case_declaring(s.records, called))
 	if #arguments != #fields { refused(n, "${called} takes a value for each of its fields: ${field_names(fields)}") }
-	given = (1 to #arguments).map(at => field_checked(typed_form(arguments#at, s, f, declared_type(fields#at)), fields#at, arguments#at, s))
+	given = (1 to #arguments).map(at => field_checked(typed_form(arguments#at, s, f, written_type(declared_type(fields#at))), fields#at, arguments#at, s))
 	case_typed_as(n, called, given, s)
 }
 case_typed_as(n: Node, called: Node, given: list, s: TypingState) as Node := {
 	typed = if given is empty and n === called then n else refitted(Call(called, given), n)
-	with_type_of(typed, record_type(enum_declaring(s.records, called)))
+	with_type_of(typed, record_term(enum_declaring(s.records, called)))
 }
 # a primitive's value is of the type its built-in's definition writes, or its place expects (`x: int = prim …`, a
 # value of another module), none when neither says one

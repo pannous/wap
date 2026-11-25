@@ -97,7 +97,7 @@ generic_choices(definition: Signature, dispatch: Dispatch, s: TypingState) as li
 	taking.map(type => Choice(places.map(place => test_of(dispatch.reads#place, type, dispatch.name, s)), named_call(definition.name, [definition], read_as(type), dispatch.name, s)))
 }
 # the boxed types a definition's generic parameter takes
-taken(definition: Signature, at: int, boxed: list<Node>, s: TypingState) as list<Node> := {
+taken(definition: Signature, at: int, boxed: list<Term>, s: TypingState) as list<Term> := {
 	wanted = definition.parameters#at ?? ANY_SYMBOL
 	boxed.filter(type => bare_fit(type, wanted, s.records) or unified(wanted, type, [], s) != ø)
 }
@@ -125,15 +125,15 @@ dispatches_completed(s: TypingState) as bool := {
 	grown
 }
 # a type of these that holds one of those, ø for none
-deeper_type(fresh: list<Node>, before: list<Node>) as Node? := fresh.find(type => before.any(old => holds_type(type, old)))
+deeper_type(fresh: list<Term>, before: list<Term>) as Term? := fresh.find(type => before.any(old => holds_type(type, old)))
 # whether a boxed type fits a generic definition of a dispatch's word
 fits_generic(dispatch: Dispatch, type: Term, s: TypingState) as bool := dispatch.order.any(definition => {
 	at = generic_place(definition, dispatch.types, s)
 	at != ø and taken(definition, at!, [type], s) is not empty
 })
 # the boxed types as far as their unknowns have settled, each once; one an unknown still holds waits
-boxed_known(s: TypingState) as list<Node> := {
-	known: list<Node> = []
+boxed_known(s: TypingState) as list<Term> := {
+	known: list<Term> = []
 	for type in s.boxed.map(each => settled_type(each, s)) { if not has_unknowns(type) and not known.any(other => same_type(other, type)) { known.add(type) } }
 	known
 }
@@ -159,8 +159,8 @@ field_dispatching(key: Node, s: TypingState) as Signature? := {
 	known = definition_keyed(place_key(name), s)
 	if known != ø { return known }
 	read = parameters_of(name, [ANY_SYMBOL])#1
-	tried = holders.map(record => Choice([test_of(read, record_type(record), name, s)], placed_like(Get(read, key), name)))
-	dispatcher_made(name, [read], chained(tried, raised("${key}: no record of this value's type has this field", name, s), name), holders.map(record => declared_type(held_field(record, key))), s)
+	tried = holders.map(record => Choice([test_of(read, record_term(record), name, s)], placed_like(Get(read, key), name)))
+	dispatcher_made(name, [read], chained(tried, raised("${key}: no record of this value's type has this field", name, s), name), holders.map(record => written_type(declared_type(held_field(record, key)))), s)
 }
 held_field(record: Node, key: Node) as Node := field_named(record, key) ?? refused(key, "the record holding this field has none")
 
@@ -171,16 +171,16 @@ parameters_of(name: Node, types: list) as list := (1 to #types).map(at => {
 })
 # The dispatching function, kept with the typing stage's definitions and placed with the program's functions; its
 # result written when every choice writes its own, so a choice calling back through the dispatch finds it
-dispatcher_made(name: Node, reads: list, body: Node, results: list<Node?>, s: TypingState) as Signature := {
+dispatcher_made(name: Node, reads: list, body: Node, results: list<Term?>, s: TypingState) as Signature := {
 	# joined_type is ø where either is: a choice without a written result writes none
 	result = if results is empty then ø else results.drop(1).fold(results#1, (a, b) => held_joined(a, b, s))
-	written = if result == ø then name else Key(name, Op.Colon, result)
-	dispatcher = placed_like(Define(written, List(reads.map(read => Key(read, Op.Colon, value_of(read, "for a dispatcher's parameter"))), Bracket.Round, Separator.Comma), body), name)
+	written = if result == ø then name else Key(name, Op.Colon, written_of(result!))
+	dispatcher = placed_like(Define(written, List(reads.map(read => Key(read, Op.Colon, written_of(value_of(read, "for a dispatcher's parameter")))), Bracket.Round, Separator.Comma), body), name)
 	s.dispatchers += [dispatcher]
 	function_added(dispatcher, s)
 }
 # the results of choices made when the program runs, each kept as it is: an int's and a float's a number, not a float
-held_joined(a: Node?, b: Node?, s: TypingState) as Node? := if a != ø and b != ø and a != b and boxed_fit(a!, core_word(NUMBER_TYPE)) and boxed_fit(b!, core_word(NUMBER_TYPE)) then core_word(NUMBER_TYPE) else joined_type(a, b, s)
+held_joined(a: Term?, b: Term?, s: TypingState) as Term? := if a != ø and b != ø and a != b and boxed_fit(a!, core_word(NUMBER_TYPE)) and boxed_fit(b!, core_word(NUMBER_TYPE)) then core_word(NUMBER_TYPE) else joined_type(a, b, s)
 # a dispatch's choice: its tests, and the code that runs once they all pass
 class Choice { tests: list<Node>; code: Node }
 # the choices tried in order: the first whose tests all pass runs, else the last
@@ -203,7 +203,7 @@ tested_reads(definition: Signature, reads: list, types: list, s: TypingState) as
 }
 tests_of(definition: Signature, reads: list, types: list, s: TypingState, at: Node) as list<Node> := tested_places(definition, types, s).map(place => test_of(reads#place, definition.parameters#place ?? refused(at, "a tested parameter has its type"), at, s))
 # whether an any's value is of the type, `x is int`, or a value of a shape (core/analyze/shapes.wap)
-test_of(read: Term, type: Term, at: Node, s: TypingState) as Node := if narrowed_type(type) != ø then shape_test(read, type, at, s) else with_fact(with_type_of(placed_like(Prim(symbol(BOXED_TEST), [read]), at), BOOL_SYMBOL), TESTED, type)
+test_of(read: Node, type: Term, at: Node, s: TypingState) as Node := if narrowed_type(type) != ø then shape_test(read, type, at, s) else with_fact(with_type_of(placed_like(Prim(symbol(BOXED_TEST), [read]), at), BOOL_SYMBOL), TESTED, type_fact(type))
 # a call of one of these definitions, chosen among them as any call is
 named_call(word: text, definitions: list<Signature>, arguments: list, at: Node, s: TypingState) as Node := {
 	called = with_fact(with_binding(placed_like(symbol(word), at), DefinitionKind.Function), CANDIDATES, data_list([data_list(definitions.map(definition => defined_name(define_of(definition, s))))]))
@@ -216,7 +216,7 @@ raising(message: Node, at: Node, s: TypingState) as Node := named_call(RAISE_WOR
 # the function the typing stage writes once for the shape: the value when it is of the shape, else a raise naming the
 # place that wanted it
 narrowed_call(n: Node, wanted: Term, at: Node, s: TypingState) as Node := {
-	name = name_once("${NARROWING_WORD}(${wanted})", wanted, s)
+	name = name_once("${NARROWING_WORD}(${wanted})", n, s)
 	# one for each shape, wherever it is wanted
 	if definitions_named(text(name), s) is empty {
 		reads = parameters_of(name, [narrowed_type(wanted) ?? NODE_SYMBOL, TEXT_SYMBOL])
