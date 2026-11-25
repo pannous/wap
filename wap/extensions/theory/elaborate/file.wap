@@ -85,10 +85,24 @@ door_run(p: Theory, given: list<text>, work: (DoorArguments) -> ø) := {
 door_elaborated(p: Theory, given: list<text>) := door_run(p, given, arguments => {
 	language = base_language()
 	prelude_checked(p, language)
-	for module in program_modules(language, door_program(arguments)) {
-		for unit in module_units(module) { unit_elaborated(p, unit) }
+	preload = preload_read(language, p.wap_folder)
+	for module in program_modules(language, door_program(arguments), preload) {
+		preloaded = source_key(module) in preload.files
+		for unit in module_units(module) { if preloaded { unit_taken(p, unit) } else { unit_elaborated(p, unit) } }
 	}
 })
+# a statement elaborated, or refused: then what it wrote is taken back and the names it declares keep the refusal, so
+# a later use of one says why it is missing (read.wap name_elaborated): the refusal's message, ø when accepted
+unit_taken(p: Theory, unit: list<Node>): text? := {
+	before = copied(p)
+	try { unit_elaborated(p, unit) } catch e {
+		held(p, before)
+		file = (file_of(unit#1) ?? "").split(p.wap_folder + "/").last
+		for name in declared_words(unit#1) { p.refused_names[name] = "${name} is declared in ${file}, which the theory refused: ${e.message}" }
+		return e.message
+	}
+	ø
+}
 # the language as a program is lowered in, loaded from a wap folder: a parameter the types module declares a function,
 # `filter`'s condition, takes its argument naming it as that function
 spellings_loaded(p: Theory, wap_folder: text) := {
@@ -98,24 +112,34 @@ spellings_loaded(p: Theory, wap_folder: text) := {
 }
 # a program file's code after the modules it uses, theirs first, each read once (wiki/use.md): the modules to
 # elaborate in order
-program_modules(language: Language, program: text): list<Node> := {
+program_modules(language: Language, program: text, preload: Preload? = ø): list<Node> := {
 	code = operated_file(language, program)
-	modules_of(language, code) + [code]
+	modules_of(language, code, preload) + [code]
 }
-# the modules code uses, theirs first, each file read and operated once; with a preload, its modules first, unless the
-# code is one of the files it is written in, a module it holds already left out
+# the modules code uses, theirs first, each file read and operated once; with a preload, its modules first when the
+# code or a module it uses names a word the preload declares, the way `use` brings in a module (wiki/use.md), unless
+# the code is one of the files the preload is written in, a module it holds already left out
 modules_of(language: Language, code: Node, preload: Preload? = ø): list<Node> := {
 	used = modules_used(code, file => operated_file(language, file))
-	if preload is ø or source_key(code) in preload!.files { return used }
+	if preload is ø or source_key(code) in preload!.files or not ([code] + used).any(module => names_any(module, preload!.words)) { return used }
 	preload!.modules + used.filter(module => not (source_key(module) in preload!.files))
 }
+# the name an operated statement declares, none of a statement that declares nothing
+declared_words(statement: Node): list<text> := {
+	declaration = declaration_of(statement) ?? return []
+	[text(declaration_name(declaration))]
+}
+# whether code names any of the words
+names_any(code: Node, words: map<text, bool>): bool := if code is symbol then words.has(text(code)) else direct_parts(code).any(part => names_any(part, words))
 # the types module, the language every program gets (core/pipeline.wap TYPES_FILE) read from the wap folder: its
-# modules, itself last, and the files it is written in, its includes'
-class Preload { modules: list<Node>; files: list<text> }
+# modules, itself last, the files it is written in, its includes', and the words they declare
+class Preload { modules: list<Node>; files: list<text>; words: map<text, bool> }
 preload_read(language: Language, wap_folder: text): Preload := {
 	code = operated_file(language, in_folder(wap_folder, TYPES_FILE))
-	used = modules_used(code, file => operated_file(language, file))
-	Preload(used + [code], (used + [code]).flat_map(module => statements_of(module).map(statement => module_key(file_of(statement) ?? file_of(module) ?? ""))).unique())
+	modules = modules_used(code, file => operated_file(language, file)) + [code]
+	words: map<text, bool> = {}
+	for name in modules.flat_map(statements_of).flat_map(declared_words) { words[name] = yes }
+	Preload(modules, (modules.map(source_key) + modules.flat_map(module => statements_of(module).map(statement => module_key(file_of(statement) ?? file_of(module) ?? "")))).unique(), words)
 }
 # a module's statements, each with the lines that belong to it; a `use` line is read as its module, no statement
 module_units(code: Node): list<list<Node>> := units_of(statements_of(code).filter(statement => phrase_part(statement, USE_WORD) is ø))
