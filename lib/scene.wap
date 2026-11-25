@@ -1,0 +1,107 @@
+# The standard module scene (wiki/3d.md): `use scene`, a 3d scene declared as the things in it,
+# `scene("{car, tree, tree, house}")`, every other choice assumed: each thing's natural size in meters, its upright
+# orientation, where it stands, which member of a family it is, the camera that sees them all.
+# - coordinates are wgpu's (wiki/3d.md): x right, y up, z toward the viewer; meters; the ground is y = 0
+# - a thing is a kind of KINDS (its size [width, height, depth] in meters, its color [r, g, b] in 0…1) or a family
+#   of FAMILIES: `tree` is a palm, an apple or a pine tree, picked at random (`use random`; seed(n) repeats it)
+# - things stand side by side along x, SCENE_GAP meters apart, the row centred on x = 0, each facing +z; a thing's
+#   position is the centre of its footprint on the ground
+# - a kind's shape is a few boxes, each given in fractions of its size; what a renderer draws is a triangle list,
+#   scene_triangles, three corners [x, y, z] a triangle
+# - an unknown thing is refused, never guessed
+use random
+
+SCENE_GAP := 2.0
+# a box in fractions of a thing's size, [x0, y0, z0, x1, y1, z1]: x and z from -0.5 to 0.5 about its centre, y from 0
+# (the ground) to 1 (its top)
+WHOLE := [-0.5, 0.0, -0.5, 0.5, 1.0, 0.5]
+
+class Kind { size: list<float>, color: list<float>, boxes: list<list<float>> }
+KINDS: map<text, Kind> = {
+	car: Kind([4.5, 1.5, 1.8], [0.80, 0.15, 0.12], [[-0.5, 0.15, -0.5, 0.5, 0.55, 0.5], [-0.25, 0.55, -0.45, 0.25, 1.0, 0.45], [-0.4, 0.0, -0.5, -0.2, 0.15, 0.5], [0.2, 0.0, -0.5, 0.4, 0.15, 0.5]]),
+	truck: Kind([8.0, 3.5, 2.5], [0.20, 0.35, 0.70], [[-0.5, 0.2, -0.5, 0.2, 1.0, 0.5], [0.22, 0.2, -0.5, 0.5, 0.7, 0.5], [-0.4, 0.0, -0.5, -0.25, 0.2, 0.5], [0.3, 0.0, -0.5, 0.45, 0.2, 0.5]]),
+	bike: Kind([1.8, 1.1, 0.6], [0.15, 0.15, 0.15], [WHOLE]),
+	person: Kind([0.5, 1.75, 0.3], [0.90, 0.70, 0.55], [[-0.5, 0.0, -0.5, 0.5, 0.85, 0.5], [-0.3, 0.85, -0.4, 0.3, 1.0, 0.4]]),
+	dog: Kind([0.9, 0.6, 0.3], [0.55, 0.40, 0.25], [[-0.5, 0.45, -0.5, 0.3, 0.85, 0.5], [0.3, 0.6, -0.4, 0.5, 1.0, 0.4], [-0.45, 0.0, -0.4, -0.3, 0.45, 0.4], [0.1, 0.0, -0.4, 0.25, 0.45, 0.4]]),
+	house: Kind([10.0, 7.0, 8.0], [0.95, 0.85, 0.70], [[-0.5, 0.0, -0.5, 0.5, 0.6, 0.5], [-0.4, 0.6, -0.4, 0.4, 0.8, 0.4], [-0.25, 0.8, -0.25, 0.25, 1.0, 0.25]]),
+	tower: Kind([6.0, 30.0, 6.0], [0.60, 0.60, 0.65], [WHOLE]),
+	palm: Kind([4.0, 12.0, 4.0], [0.30, 0.65, 0.25], [[-0.04, 0.0, -0.04, 0.04, 0.85, 0.04], [-0.5, 0.85, -0.5, 0.5, 1.0, 0.5]]),
+	apple: Kind([5.0, 6.0, 5.0], [0.25, 0.55, 0.20], [[-0.06, 0.0, -0.06, 0.06, 0.4, 0.06], [-0.5, 0.4, -0.5, 0.5, 1.0, 0.5]]),
+	pine: Kind([4.0, 15.0, 4.0], [0.10, 0.40, 0.20], [[-0.05, 0.0, -0.05, 0.05, 0.2, 0.05], [-0.5, 0.2, -0.5, 0.5, 0.5, 0.5], [-0.35, 0.5, -0.35, 0.35, 0.8, 0.35], [-0.15, 0.8, -0.15, 0.15, 1.0, 0.15]]),
+	bush: Kind([1.5, 1.2, 1.5], [0.20, 0.50, 0.15], [WHOLE]),
+	rock: Kind([1.2, 0.8, 1.0], [0.50, 0.50, 0.50], [WHOLE])
+}
+# a family's members, one picked at random for each mention
+FAMILIES: map<text, list<text>> = {
+	tree: ["palm", "apple", "pine"],
+	vehicle: ["car", "truck", "bike"],
+	animal: ["dog"],
+	building: ["house", "tower"],
+	plant: ["bush", "palm", "apple", "pine"]
+}
+
+# a thing of a scene: the name it was mentioned by, its kind, and where its footprint's centre stands
+class Placed { name: text, kind: text, position: list<float> }
+size_of(thing: Placed): list<float> := KINDS[thing.kind].size
+color_of(thing: Placed): list<float> := KINDS[thing.kind].color
+# a box by its low and its high corner, in meters
+class Box { low: list<float>, high: list<float> }
+
+# the names a scene mentions: `{car, tree, tree}` or `car tree tree`
+scene_names(things: text): list<text> := words(things.replace("{", " ").replace("}", " ").replace(",", " "))
+# the kind a name stands for: itself, or a family's member picked at random
+scene_kind(name: text): text := {
+	if KINDS.has(name) { return name }
+	if FAMILIES.has(name) { return choice(FAMILIES[name]) }
+	raise "scene: no thing named ${name} (things: ${keys(KINDS)}, families: ${keys(FAMILIES)})"
+}
+
+# every thing of a scene placed, side by side along x on the ground
+scene(things: text): list<Placed> := scene(scene_names(things))
+scene(names: list<text>): list<Placed> := {
+	kinds = names.map(scene_kind)
+	widths = kinds.map(kind => KINDS[kind].size[0])
+	x = -(widths.sum + SCENE_GAP * (#kinds - 1)) / 2
+	placed: list<Placed> = []
+	for i in 0 upto #kinds {
+		placed.add(Placed(names[i], kinds[i], [x + widths[i] / 2, 0.0, 0.0]))
+		x += widths[i] + SCENE_GAP
+	}
+	placed
+}
+
+# the boxes a placed thing is made of, in meters
+scene_boxes(thing: Placed): list<Box> := {
+	size = size_of(thing)
+	at = thing.position
+	corner = (b: list<float>, from: int) => (0 upto 3).map(axis => at[axis] + b[from + axis] * size[axis])
+	KINDS[thing.kind].boxes.map(b => Box(corner(b, 0), corner(b, 3)))
+}
+
+# a box's corners, the low one first, and its six faces by their corners, counter-clockwise seen from outside
+FACES := [[0, 3, 2, 1], [4, 5, 6, 7], [0, 4, 7, 3], [1, 2, 6, 5], [0, 1, 5, 4], [3, 7, 6, 2]]
+corners(b: Box): list<list<float>> := {
+	l = b.low
+	h = b.high
+	[l, [h[0], l[1], l[2]], [h[0], h[1], l[2]], [l[0], h[1], l[2]], [l[0], l[1], h[2]], [h[0], l[1], h[2]], h, [l[0], h[1], h[2]]]
+}
+# a box's twelve triangles, three corners each
+box_triangles(b: Box): list<list<float>> := {
+	c = corners(b)
+	FACES.flat_map(f => [c[f[0]], c[f[1]], c[f[2]], c[f[0]], c[f[2]], c[f[3]]])
+}
+# the triangles of a whole scene, three corners [x, y, z] a triangle
+scene_triangles(placed: list<Placed>): list<list<float>> := placed.flat_map(scene_boxes).flat_map(box_triangles)
+
+# the box around every thing of a scene, the origin inside it
+scene_bounds(placed: list<Placed>): Box := {
+	boxes = placed.flat_map(scene_boxes)
+	Box((0 upto 3).map(axis => min([0.0] + boxes.map(b => b.low[axis]))), (0 upto 3).map(axis => max([0.0] + boxes.map(b => b.high[axis]))))
+}
+# where a camera stands to see the whole scene through a 90° view: in front of it (+z), a little above, looking at its
+# centre
+scene_camera(placed: list<Placed>): list<float> := {
+	b = scene_bounds(placed)
+	span = max(b.high[0] - b.low[0], b.high[1] - b.low[1])
+	[(b.low[0] + b.high[0]) / 2, (b.high[1] - b.low[1]) / 2 + span * 0.25, b.high[2] + span * 0.75 + 2]
+}
