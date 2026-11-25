@@ -940,7 +940,7 @@ step, measured against the step before; more goes to the user.
 | T5 definitions, statements and inductive types | enums, classes, functions, `match`, blocks, variables, loops and exits become kernel declarations and terms as analyze types them: inductive blocks, recursors, structural recursion, a measure, else Div; unions, optional values and `any`; the emitter erases types, levels and proofs from the checked terms (E2, E5's statements, E6, E7) | a `match` that misses a case is refused by `covering`; `effects of fact` is Pure; `effects of` a `while` without a measure is Div and it still runs; `speak` over a list of an animal and a dog picks each one's method |
 | T6 laws, effects and instances | a law is a theorem; a plain compile proves by computing, else the law is Tested; effects are computation types and a proof refuses an impure function; traits are structures and instances come from overloads (E3, E5's effects, P1, P2); conditions lifted out of recursive types (E8); `wap check` loads the proof extension | `law double(3) == 6` Proved; `wap check` proves a law from two earlier laws; a proof using an impure function refused naming the chain; `sort` on a class without `compare` refused naming the trait; `class Quad { parts: vector(Quad, 4) }` accepted |
 | T7 the theory extension retires | what is left of wap/extensions/theory goes: its run door and its prelude, whose words now live once in wap/types; the provers (P3, P4), the second opinion (K7), the export, the arithmetic proofs and the door `wap check` live in wap/extensions/proof, which only `wap check` and proofs load | every test as before; `wap check` and the second opinion from wap/extensions/proof; the trust base listed by a command |
-| T8 storage by context (cuttable) | an `int` is stored as i32 or i64 where computing or a fact in scope shows it fits (the plain compile loads no provers), else as a big number; the big numbers come from a library only the programs that need them load; `int` no longer wraps | `2 ^ 62 * 4` prints 18446744073709551616; a loop counter stays an i64 and the benchmarks keep their guardrails; the compiler's build holds no big numbers (13, open 3) |
+| T8 storage by context (cuttable) | an `int` is stored as i32 or i64 where computing or a fact in scope shows it fits (the plain compile loads no provers), else as a big number; the big numbers come from a library only the programs that need them load; `int` no longer wraps | `2 ^ 62 * 4` prints 18446744073709551616; a loop counter stays an i64 and the benchmarks keep their guardrails; the compiler's build holds no big numbers (13) |
 
 Order: K1, then K2 to K6 in a row, with K3 right after K2 since every program is full of numbers. L follows K as
 its table says. P1 and P2 follow K4; P3 and P4 follow P2, in the proof extension. T1 to T8 follow one another, each
@@ -1055,6 +1055,11 @@ Decided by the user (2026-11-25), the basis of track T:
   lines; a clear jump over its estimate or over the ceiling goes back to the user.
 - The audit's Prim(shown) mark goes with the table of primitives (T1), the typed_readings global with the numbers
   step, where typing's readings become facts on the nodes (T3).
+- **`i64` is the integers modulo 2^64** (prelude/checked.wap: `quotient(int, wrapped_alike)`), as Lean's `Int64`.
+  Laws that hold modulo 2^64 (commutativity, associativity) prove on `i64`; laws that assume no overflow
+  (`a + 1 > a`) are refused there. The compiler's own source writes `i64` where it means a machine word, so its
+  build holds no big numbers; 0 core lines, a source edit after a seed refresh.
+- **T8** stays in the plan and is decided at its turn, once the sizes of T1 to T7 are measured.
 
 Open, with the recommendation first and its cost in core; with the user through the interviewer:
 
@@ -1062,11 +1067,6 @@ Open, with the recommendation first and its cost in core; with the user through 
    then they stay beside the new ones. 0 core lines.
 2. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
    `refl`; `axiom`, `assume`; `by`, `chain`; `decreasing`; the axioms' names. Settled on the wiki pages.
-3. **`i64` in the compiler's own source** (T8). Storage by context proves a fit only by computing and by facts in
-   scope, so most of the compiler's counters, sizes and offsets could not be shown to fit and would become big
-   numbers. Recommended: the compiler's source writes `i64` where it means a machine word, a source edit of a few
-   hundred lines after a seed refresh, so its build holds no big numbers; 0 core lines. The other option: the
-   compiler's build loads the big numbers, its size and speed paying for it; or cut T8 (12).
 
 Decided by the plan, for the user to overrule: the rules are those of Lean 4's kernel with the four departures of
 section 6, known flaws included (10.3), because that is the rule set with a model and with independent checkers to
