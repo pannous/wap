@@ -1,0 +1,73 @@
+# wap on Windows (card native-other-platforms): the native wap built there from the seed, as scripts/refresh-seed.sh
+# builds it on macOS and Linux, then test/wap/test_native.sh. By hand, or on a push to main.
+name: windows
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, native-windows]
+
+env:
+  # wasm2c from wabt's source at the commit the Mac uses: 1.0.42's writes `u32 u32 var_i0`
+  WABT_COMMIT: ce4ebe80
+  LLVM_MINGW: 20261104 # clang for Windows (warp's release.yml takes the same)
+  WASMTIME: v49.0.2    # the wasmtime command, which runs the seed before a native wap is there (scripts/lib/wap-host.sh)
+  # warp's release carries the wasmtime library the native wap links, built for Windows (no Rust here)
+  WARP_RELEASE: v1.15.0
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+    # the sources as written, LF: Git for Windows checks text out with CRLF, which bash refuses in the scripts
+    - run: git config --global core.autocrlf false
+    - uses: actions/checkout@v4
+    - name: llvm-mingw, wasmtime and warp's wasmtime library
+      run: |
+        mkdir -p "$RUNNER_TEMP/tools" && cd "$RUNNER_TEMP/tools"
+        gh release download "$LLVM_MINGW" --repo mstorsjo/llvm-mingw --pattern "llvm-mingw-$LLVM_MINGW-ucrt-x86_64.zip"
+        unzip -q "llvm-mingw-$LLVM_MINGW-ucrt-x86_64.zip"
+        echo "$PWD/llvm-mingw-$LLVM_MINGW-ucrt-x86_64/bin" >>"$GITHUB_PATH"
+        gh release download "$WASMTIME" --repo bytecodealliance/wasmtime --pattern "wasmtime-$WASMTIME-x86_64-windows.zip"
+        unzip -q "wasmtime-$WASMTIME-x86_64-windows.zip"
+        echo "$PWD/wasmtime-$WASMTIME-x86_64-windows" >>"$GITHUB_PATH"
+        gh release download "$WARP_RELEASE" --repo pannous/warp --pattern "warp-$WARP_RELEASE-x86_64-pc-windows-gnu.zip"
+        mkdir -p "$RUNNER_TEMP/native/lib"
+        unzip -q -j "warp-$WARP_RELEASE-x86_64-pc-windows-gnu.zip" warp_wasmtime.dll libwarp_wasmtime.dll.a -d "$RUNNER_TEMP/native/lib"
+    - uses: actions/cache@v4
+      id: wabt
+      with:
+        path: ${{ runner.temp }}/wabt
+        key: wabt-${{ env.WABT_COMMIT }}-windows
+    - name: wabt
+      if: steps.wabt.outputs.cache-hit != 'true'
+      run: |
+        git clone -q https://github.com/WebAssembly/wabt "$RUNNER_TEMP/wabt-source" && cd "$RUNNER_TEMP/wabt-source"
+        git checkout -q "$WABT_COMMIT" && git submodule update -q --init third_party/picosha2
+        cmake -S . -B build -DBUILD_TESTS=OFF -DBUILD_LIBWASM=OFF -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/wabt"
+        cmake --build build --config Release --parallel
+        cmake --install build --config Release
+    - run: echo "$RUNNER_TEMP/wabt/bin" >>"$GITHUB_PATH"
+    - name: the seed
+      # the compiler wap-seed.lock names, with what it reads beside it, where the native wap finds it: wap-seed/
+      run: |
+        seed="$RUNNER_TEMP/native/wap-seed" && mkdir -p "$seed"
+        gh release download "$(cut -d' ' -f1 wap-seed.lock)" --repo pannous/wap --pattern wap.wasm --pattern wap-seed-beside.tar.gz --dir "$seed"
+        tar -xzf "$seed/wap-seed-beside.tar.gz" -C "$seed" && rm "$seed/wap-seed-beside.tar.gz"
+    - name: the native wap
+      run: |
+        native="$RUNNER_TEMP/native"
+        source scripts/lib/wap-beside.sh && wap_linked "$native"
+        wap/extensions/native/build.sh "$native/wap-seed/wap.wasm" wap/extensions/native/driver.wap "$native/wap" "${WAP_LINKED[@]}"
+        # Windows finds warp_wasmtime.dll on the PATH (scripts/lib/wap-beside.sh wap_linked)
+        echo "$native" >>"$GITHUB_PATH" && echo "$native/lib" >>"$GITHUB_PATH"
+    - name: hello
+      run: |
+        wap '1+1'
+        echo 'print "Hello"' >hello.wap && [ "$(wap hello.wap)" = Hello ]
+    - name: test_native
+      run: bash test/wap/test_native.sh
