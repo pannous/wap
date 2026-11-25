@@ -915,17 +915,23 @@ texts.
 | R2 one table of primitives | wap/kernel/primitives.wap holds one row per host operation: its name, the wasm types it takes and gives, its builder; the emitter finds an operation by one lookup; a `runs(…)` body is a `prim` of that table, checked against its row (9.7), and no wap spelling of a host operation is typed or checked | `runs(add, prim i64.add(m, n))` accepted, a body of the wrong width refused naming the row; the trust base listed by a command from the `runs(…)` declarations |
 | R3 layouts | every prelude type has its row (9.7): numbers, lists, texts, optional values, records | a program over texts and records runs from its terms; `axioms of` shows no layout outside the prelude |
 | R4 running from terms | erase lowers a run term into the forms today's emitter reads, each node carrying the layout erase takes from its kernel type; lowering never infers a layout | the agreement count reaches every test program the census accepts; the benchmarks within their guardrails |
-| R5 one choice | where the gate shows the two typers apart (a literal's type, an overload, a conversion), the elaborator's choice is made the language's and the old typer follows it until R7 | every test program prints the same both ways; the census accepts every statement of the compiler, lib/ and the tests |
+| R5 one choice | where the gate shows the two typers apart (a literal's type, an overload, a conversion), the elaborator's choice is made the language's; the old typer follows it only for a literal's type, every other difference is exempted in the gate by name until R7a | every test program prints the same both ways; the census accepts every statement of the compiler, lib/ and the tests |
 | R6 one door | check, verify, run and census are modes of one door after one reading of the prelude; a statement's writes are kept apart and joined to the environment when it is accepted, so nothing is copied per statement or taken back | a program's `runs(…)` refused at one place; a refused statement leaves no trace a later one sees; the census within its time gate |
-| R7 the switch | the prelude and wap/types are one library, each word declared once with its `prim` body; the new stages are the compiler; wap/core/analyze goes; the kernel moves to wap/kernel; the seed is refreshed | test_hello, test_self, the census, `--stage 2`: the compiler built through its own kernel builds itself again; the benchmarks unchanged; `char` is `text where #it == 1` and nothing else |
+| R7a new stages behind an option | the compiler built through elaborate, check, erase and emit behind an option; a plain compile elaborates and checks every statement | `--stage 2` through the new stages is a fixed point; the benchmarks unchanged |
+| R7b seed | the seed refreshed from R7a's compiler | test_hello and test_self from the new seed |
+| R7c typer gone | wap/core/analyze goes | every test as before R7b |
+| R7d one library | the prelude and wap/types are one library, each word declared once with its `prim` body; the seed rule binds here | `char` is `text where #it == 1` and nothing else; the trust base listed by a command |
+| R7e kernel moved | the kernel moves to wap/kernel | `--stage 2` again |
 
 Order: K1, then K2 to K6 in a row, with K3 right after K2 since every program is full of numbers. L follows K as
 its table says. E1 follows K1; E2 follows K2 and L1; E3 follows L2; E4 follows E3 and L3; E5 follows E4 and L4; E6
 and E7 follow E5, E7 needing K6; E8 follows E4. P1 follows E2 and K4; P2 to P4 follow it. S1 starts with E2; the
 stage `lower` is built and measured as soon as E2 gives run terms; S2 follows E5. R0 comes first, before any further theory feature; R1 runs beside it, its
 questions answered by the user; R2 starts at once; R3 follows R2; R4 follows R0 and R3, its size measured first by a
-spike of three programs (a closure, a loop, a `try`); R5 follows R1 and R4; R6 follows R3; R7 follows all of them.
-Each R lands alone with the compiler building itself.
+spike of three programs (a closure, a loop, a `try`); R5 follows R1 and R4; R6 follows R3; R7a to R7e follow all of them, one after another.
+Each R lands alone with the compiler building itself. R2 changes the kernel the seed reads beside it, so it takes the
+careful path: the table added, the seed refreshed, then the seven tables deleted. R0 doubles the census time: it runs
+under a time gate of its own.
 
 What R0 to R7 cost, roughly (lines added / deleted; core and kernel lines need the user's OK):
 
@@ -933,12 +939,19 @@ What R0 to R7 cost, roughly (lines added / deleted; core and kernel lines need t
 |---|---|---|---|
 | R0 | 40 (test script) | 0 | 0 |
 | R1 | 10 in the elaborator, the rest by the answers of 13 | 2 (prelude overloads) | 1 to 5 (the numeral's default) |
-| R2 | 60 (the table) | 120 (the emitter's seven tables, the spelling check) | +60 kernel, -20 emit |
+| R2 | 60 (the table) | 80 (the emitter's seven tables, net about -20, and the spelling check) | +60 kernel, -80 emit |
 | R3 | 60 | 0 | 0 |
-| R4 | about 150, the spike says | 34 (lower writing wap text) | 0 |
+| R4 | 300 to 500, the spike says | 34 (lower writing wap text) | 0 |
 | R5 | by the gate's list | by the gate's list | 0 |
-| R6 | 30 | 80 (four doors, whole-theory copies) | 0 |
-| R7 | the emitter of erased terms, the kernel's move | 3,491 (core/analyze) and the prelude's twins | the user's OK at that step |
+| R6 | about 120 (joined writes) | 80 (four doors, whole-theory copies) | 0 |
+| R7a | the emitter of erased terms, about 300 | 0 | the user's OK |
+| R7b | 0 | 0 | 0 |
+| R7c | 0 | 3,491 (core/analyze) | the user's OK |
+| R7d | 0 | the prelude's twins, about 200 | 0 |
+| R7e | 0 (a move) | 0 | the user's OK |
+
+The compiler grows: the theory is about 8,400 lines against the 3,491 of core/analyze it replaces, so the compiler
+ends some 5,000 lines larger, the price of checking every statement.
 
 The numerals keep their scheme (6.7): unbounded host numbers with the seven shortcuts, opened one successor at a time
 only where a recursor meets a literal, guarded by the step and depth budgets, as Lean's kernel does. None of R0 to R7
