@@ -138,8 +138,9 @@ Checker.judgements: list<Checked>
 | `type_found` Pi | `pi_rule(c, x, A: Checked, B: Checked)` | `A: Sort u`, `B: Sort v` → `Sort(imax(u, v))` |
 | `type_found` LetIn | `let_rule(c, x, A, v: Checked, body: Checked)` | `v: A'`, `A ≡ A'` → `body[v]` |
 | `type_found` Numeral | `numeral_rule(c, n)` | numbers bound → `n: nat` |
+| `type_found` Quoted | `quoted_rule(c, t)` | texts bound → `"…": text` |
 | `projection_type` | `projection_rule(c, structure, field, of: Checked)` | `of: S(params)` → the field's type |
-| `declared` / `value_checked` | `declaration_rule(e, d, type: Checked, value: Checked?)` | → a new Environment |
+| `declared` / `value_checked` | `declaration_rule(c, d, type: Checked, value: Checked?)` | `type: Sort u`, `value: A'`, `A ≡ A'` → the declaration added |
 
 - `type_of(c, t)` stays the interface for the door and the elaborator. It becomes the walk that calls these rules
   bottom-up and returns the conclusion's type. Its memory (`c.types`) keeps the judgement number instead of the
