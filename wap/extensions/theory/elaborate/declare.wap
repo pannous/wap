@@ -13,6 +13,9 @@ use "../explicit.wap"
 use "../export.wap"
 use "../../../kernel/forms.wap"
 use "../../../core/type_notation.wap"
+use "../../../core/stage.wap"
+use "../../../core/parse/operator_table.wap"
+use "../../../core/rules/termination.wap"
 use "state.wap"
 use "read.wap"
 use "recursion.wap"
@@ -38,9 +41,11 @@ REPORTED_WORDS := [AXIOM_WORD, LAW_WORD, THEOREM_WORD]
 # the law that a function calling itself equals its body as written: `<function>.unfolds`
 UNFOLDS := ".unfolds"
 
-# A statement of a program in the lowered forms: a definition, an axiom, `type of e`, `export("file")` or a value
+# A statement of a program in the lowered forms: a definition, a constant, an axiom, `type of e`, `export("file")` or a
+# value
 statement_elaborated(p: Theory, statement: Node) := match statement {
 	Define(named, parameters, value) => declaration_elaborated(p, "", statement)
+	Set(target, value) => if target is symbol or target is Key then constant_elaborated(p, target, value) else computed(p, statement)
 	Call(called, arguments) => {
 		word = text(called)
 		typed = asked_about(QUESTION_WORDS, word, arguments)
@@ -54,6 +59,30 @@ statement_elaborated(p: Theory, statement: Node) := match statement {
 		computed(p, statement)
 	}
 	_ => computed(p, statement)
+}
+
+# A name given a value at the top of a program, `c: char = "a"`, is a constant, defined as that value, when nothing else
+# ever sets it: no other line, no function's body, no module the program uses (wiki/subtype.md)
+constant_elaborated(p: Theory, target: Node, value: Node) := {
+	name = declared_name(target)
+	again = (p.sets.get(text(name)) ?? []).find(place => line_of(place) != line_of(name))
+	if again is not ø { refused(SET_AGAIN, "${name} is set again on line ${line_of(again!) ?? 0}: a name set once is a constant, one set again a variable the theory does not follow") }
+	definition_elaborated(p, "", target, [], value)
+}
+SET_AGAIN := "set again"
+# the places each name is given a value in a module's code, function bodies included
+places_set(code: Node): map<text, list<Node>> := {
+	places: map<text, list<Node>> = {}
+	for n in nodes_in(code) {
+		match n {
+			Call(called, arguments) => if text(called) == ASSIGNMENT and #arguments == 2 {
+				name = declared_name(arguments#1)
+				places[text(name)] = (places.get(text(name)) ?? []) + [name]
+			}
+			_ => ø
+		}
+	}
+	places
 }
 
 # a question's answer printed, where the door says them (the run door's output is the program alone)
