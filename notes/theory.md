@@ -287,6 +287,25 @@ when it is accepted. `type of e` prints the type. The first refusal is printed a
 <what was found>`, and ends the run with a failing exit code. The output is the test: test/wap/test_theory.wap gives
 a program and compares what the door says. A line for a refusal compares the part before the colon only.
 
+## The run trust base
+
+What runs is believed where the kernel cannot see it (notes/coc-plan.md 9.7, 10.2): the kernel's own computation, and
+the layouts of the prelude, each a `runs(…)` statement after the declaration it is about, which erase reads in place
+of the declaration's value (`elaborate/file.wap` layout_noted). Each is elaborated over the host's types when the
+prelude is read, so a spelling of the wrong type is refused; that it means what the declaration says is tested by the
+laws run on values. The set is kept small:
+
+| what | runs as |
+|---|---|
+| `nat`, `int` | a machine int: `nat.zero`, `nat.successor`, `int.of_nat`, `int.negative_successor` by their tests and fields |
+| `bool` | wap's bool: `bool.no`, `bool.yes` |
+| `add`, `multiply`, `equals` | the machine's `+`, `*`, `==` on two nats |
+| `minus`, `sum`, `times`, `negative`, `equal_integers` | the machine's `-`, `+`, `*`, `< 0`, `==` on ints |
+| `negated` | `not` |
+| `Eff`, `pure`, `bind` | a computation as its value, `pure(x)` as x, `bind(c, next)` as `next(c)` |
+
+A number runs as a machine int, so one past 2^63 wraps where the theory's does not.
+
 ## A second opinion
 
 A program either door accepts can be written out: `export("file")` writes what the environment accepted, in order

@@ -13,6 +13,7 @@ use "../compute.wap"
 use "../typing.wap"
 use "../show.wap"
 use "../explicit.wap"
+use "../run/terms.wap"
 use "../../../kernel/forms.wap"
 use "../../../core/type_notation.wap"
 use "state.wap"
@@ -87,6 +88,8 @@ class Theory {
 	hidden: map<text, text> = {}
 	# the bodies as written of the functions that may not end, which run by them and are declared opaque
 	run_bodies: map<text, Node> = {}
+	# how the host runs what the prelude lays out, by name (file.wap layout_noted)
+	layouts: map<text, Layout> = {}
 	# the bodies the functions that call themselves run by, their calls of themselves calls of the constant
 	# (declare.wap run_body_kept), and why one could not be kept
 	run_terms: map<text, Term> = {}
@@ -122,6 +125,7 @@ held(p: Theory, from: Theory) := {
 	p.prelude_size = from.prelude_size
 	p.hidden = copy(from.hidden)
 	p.run_bodies = copy(from.run_bodies)
+	p.layouts = copy(from.layouts)
 	p.run_terms = copy(from.run_terms)
 	p.run_refusals = copy(from.run_refusals)
 	p.values = copy(from.values)
@@ -177,7 +181,33 @@ class Elaborating {
 	# how many terms were made of a type wanted other than their own, so a fit with fewer such steps wins an overload
 	indirect: int = 0
 }
+# How the host runs a declaration of the prelude (file.wap layout_noted), plain wap with each argument at its place,
+# `$1` for the first: a function's or a case's value, a type's wap type; a case's test that a value at `$1` is of it
+# and its fields taken out of that value, by name
+# the refusal of a layout the host cannot run, or of one a program writes: only the prelude says how the host runs
+LAYOUT := "layout"
+class Layout { value: text; test: text? = ø; fields: map<text, text> = {} }
 # a function as its body calls it, by its written name, and the declaration such a call is of
+# the wap type a type's values run as: its layout's, the host types of the arguments it names put in; a type of types
+# `Type`, a function type of host types one; a type the prelude lays out no way to run is the unlaid's
+host_type(p: Theory, c: Checker, type: Term, unlaid: (Term) -> text): text := {
+	folded = computed_folded(c, type)
+	match folded.shape {
+		Sort(level) => TYPE_WORD
+		Pi(binder, domain, body) => "(${host_type(p, c, domain, unlaid)}) -> ${host_type(p, c, instantiated(body, hypothesis(c, binder, domain)), unlaid)}"
+		_ => {
+			whole = [folded, computed(c, type)].find(t => layout_of(p, t) is not ø) ?? return unlaid(type)
+			layout = layout_of(p, whole)!
+			given = arguments(whole)
+			filled(layout.value, (1 to #given).map(at => if layout.value.contains("\$${at}") then host_type(p, c, given#at, unlaid) else ""))
+		}
+	}
+}
+# the layout of the declaration a type applies
+layout_of(p: Theory, type: Term): Layout? := match head(type).shape {
+	Constant(name, levels) => p.layouts.get(name)
+	_ => ø
+}
 class Itself { written: text; name: text }
 elaborating(p: Theory): Elaborating := Elaborating(p, elaboration(p.environment, []), Reading(p.environment))
 
