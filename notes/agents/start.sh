@@ -4,6 +4,7 @@
 #   notes/agents/start.sh <role>                  one of the SERVICES
 #   notes/agents/start.sh owner <stage>           the owner of one stage of OWNERS (wap-owner.md "Owners")
 #   notes/agents/start.sh worker <branch> "<task>"   a feature worker on that branch
+#   notes/agents/start.sh auditor                 the daily architecture audit, at max effort
 # The prompt of a role is notes/agents/<role>.md, read from origin/main by the session itself.
 REPO=/Users/me/dev/angles/wap
 SPAWN="$HOME/dev/bin/claude-remote.sh"
@@ -30,6 +31,8 @@ case "$1" in
 	owner)
 		[ -n "$2" ] || { echo "usage: $0 owner <stage>" >&2; exit 1; }
 		spawn "$2" "$(prompt_for wap-owner) YOU ARE wap-$2, the owner named so in the Owners table." ;;
+	auditor)  # once a day, closed when its report is handed off (notes/agents/auditor.md)
+		CLAUDE_EFFORT=max spawn auditor "$(prompt_for auditor)" ;;
 	worker)
 		[ -n "$2" ] && [ -n "$3" ] || { echo "usage: $0 worker <branch> \"<task>\"" >&2; exit 1; }
 		spawn "$2" "$(prompt_for worker) YOUR BRANCH: $2. YOUR TASK: $3" ;;
