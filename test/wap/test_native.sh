@@ -345,4 +345,8 @@ check "wap runs a class extending another" "$(cd "$stage" && "$native_wap" exten
 printf '%s\n' 'long doubled(long x) { return 2 * x; }' >"$stage/doubled.c" && cc -shared -o "$stage/libdoubled.dylib" "$stage/doubled.c"
 check "a native program calls C from a library named by its path" "$(native_ran doubled_by_path "doubled(x: i64): i64 from '$stage/libdoubled.dylib'
 exit(doubled(21))" >/dev/null; echo $?)" "42"
+# wap format writes a function's result type after a colon, the canonical spelling; `as` is its alias (card format-colon-result)
+printf '%s\n' 'f(x: int) as int := x + 1' 'g(x: int): int := x * 2' >"$stage/result_type.wap"
+check "wap format writes a result type after a colon" "$(cd "$stage" && "$native_wap" format result_type.wap 2>&1)" "f(x: int): int := x + 1
+g(x: int): int := x * 2"
 exit $((failures > 0))
