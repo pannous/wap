@@ -7,19 +7,25 @@ use "../../../core/analyze/declarations.wap"
 use "../../../core/analyze/modules.wap"
 use "../../../core/stage.wap"
 use "../../../core/parse/reader.wap"
+use "../../../core/parse/operators.wap"
 use "../../../core/language.wap"
 use "../../../core/rules/lowering.wap"
 use "../../../core/rules/declared.wap"
 use "../../../core/rules/patterns.wap"
+use "../terms.wap"
 use "../environment.wap"
+use "../compute.wap"
+use "../show.wap"
 use "../explicit.wap"
 use "../bindings.wap"
 use "../options.wap"
 use "../../../kernel/forms.wap"
 use "../../../core/type_notation.wap"
+use "../../../core/format.wap"
 use "read.wap"
 use "declare.wap"
 use "blocks.wap"
+use "lifted.wap"
 
 # a declaration word's declaration is lowered without its word, which lowering does not know
 unit_elaborated(p: Theory, unit: list<Node>) := {
@@ -71,10 +77,50 @@ PRELUDE_FILES := ["logic", "numbers", "quotient", "data", "effects", "operators"
 # the prelude checked into the theory's environment, its declarations counted
 prelude_checked(p: Theory, language: Language) := {
 	for file in PRELUDE_FILES {
-		for unit in file_units(language, prelude_file(p, file)) { statement_checked(p.environment, explicit_overloaded(p, unit)) }
+		for unit in file_units(language, prelude_file(p, file)) {
+			statement = explicit_overloaded(p, unit)
+			match statement {
+				LaysOut(name, parts) => layout_noted(p, language, name, parts)
+				_ => statement_checked(p.environment, statement)
+			}
+		}
 	}
 	p.prelude_size = #p.environment.places
 }
+# How the host runs a declaration of the prelude, the statement after it: `runs(add, m + n)`, plain wap naming the
+# declaration's parameters; a case's also its test and how each field is taken out of a value, naming it `it`,
+# `runs(nat.successor, n + 1, when: it > 0, n: it - 1)`; a type's the wap type, or the argument whose type it runs
+# as, `runs(Eff, T)`. What the host runs is believed, never proved: notes/theory.md "The run trust base"
+TEST_NAME := "when"
+VALUE_NAME := "it"
+# a layout noted: its value with the declaration's parameters at their places, a case's test and fields with the value
+layout_noted(p: Theory, language: Language, name: text, parts: list<Node>) := {
+	parameters = binder_names(declared_named(p.environment, name).type)
+	at_value = (n: Node) => formatted(language, placed(n, [VALUE_NAME]))
+	test = named_part(parts, TEST_NAME)
+	fields: map<text, text> = {}
+	for field in parameters { if named_part(parts, field) is not ø { fields[field] = at_value(named_part(parts, field)!) } }
+	p.layouts[name] = Layout(formatted(language, placed(parts#2, parameters)), if test is ø then ø else at_value(test!), fields, parts)
+}
+# the part named so, `when: it > 0`, of a layout's; ø where none is
+named_part(parts: list<Node>, name: text): Node? := {
+	for part in parts {
+		match part {
+			Key(key, Op.Colon, value) => if text(key) == name { return value }
+			_ => ø
+		}
+	}
+	ø
+}
+# code with each of these names at its place, `$1` for the first
+placed(n: Node, names: list<text>): Node := renamed(n, names.map(name => [name, "\$${names.index_of(name)}"]))
+# code with each name of a pair written as its second
+renamed(n: Node, pairs: list<list<text>>): Node := match n {
+	Symbol(name) => symbol((pairs.find(pair => pair#1 == name) ?? [name, name])#2)
+	Call(called, arguments) => Call(renamed(called, pairs), arguments.map(argument => renamed(argument, pairs)))
+	_ => with_parts(n, part => renamed(part, pairs))
+}
+
 # an explicit statement whose declaration takes a name declared before: an overload of it, by the elaborator's key
 explicit_overloaded(p: Theory, unit: list<Node>): Statement := {
 	statement = unit_read(p.environment, unit)
@@ -100,9 +146,10 @@ door_run(p: Theory, given: list<text>, work: (DoorArguments) -> ø) := {
 }
 # the elaborator's door: the prelude checked, then the modules the program uses and its own statements elaborated in
 # order into the theory
-door_elaborated(p: Theory, given: list<text>) := door_run(p, given, arguments => {
+door_elaborated(p: Theory, given: list<text>, prelude_read: (Theory, Language) -> ø = (p, language) => ø) := door_run(p, given, arguments => {
 	language = base_language()
 	prelude_checked(p, language)
+	prelude_read(p, language)
 	preload = preload_read(language, p.wap_folder)
 	p.language_files = preload.files
 	modules = program_modules(language, door_program(arguments), preload)

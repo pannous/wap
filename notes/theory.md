@@ -287,6 +287,34 @@ when it is accepted. `type of e` prints the type. The first refusal is printed a
 <what was found>`, and ends the run with a failing exit code. The output is the test: test/wap/test_theory.wap gives
 a program and compares what the door says. A line for a refusal compares the part before the colon only.
 
+## The run trust base
+
+What runs is believed where the kernel cannot see it (notes/coc-plan.md 9.7, 10.2): the kernel's own computation, and
+the layouts of the prelude, each a `runs(…)` statement after the declaration it is about, which erase reads in place
+of the declaration's value (`elaborate/file.wap` layout_noted). Each is elaborated over the host's types when the
+prelude is read, so a spelling of the wrong type is refused; that it means what the declaration says is tested by the
+laws run on values. The set is kept small:
+
+| what | runs as |
+|---|---|
+| `nat`, `int` | a machine int: `nat.zero`, `nat.successor`, `int.of_nat`, `int.negative_successor` by their tests and fields |
+| `bool` | wap's bool: `bool.no`, `bool.yes` |
+| `add`, `multiply`, `equals` | the machine's `+`, `*`, `==` on two nats |
+| `minus`, `sum`, `times`, `negative`, `equal_integers` | the machine's `-`, `+`, `*`, `< 0`, `==` on ints |
+| `negated` | `not` |
+| `Eff`, `pure`, `bind` | a computation as its value, `pure(x)` as x, `bind(c, next)` as `next(c)` |
+
+A number runs as a machine int, so one past 2^63 wraps where the theory's does not.
+
+The types module adds two more, made by the declarations themselves (elaborate/declare.wap), never by a `runs(…)`:
+- **Its words the prelude has too.** A declaration with the signature of a prelude declaration is that declaration:
+  proofs read the prelude's definition, and the program runs the types module's function for it, by its name, where
+  the prelude lays out none. The pairs the tests rely on are int's `+`, `-` (both arities), `*`, `==`, `<`, `<=`,
+  `>`, `>=`. Every other function of the types module runs its own body, as the theory read it.
+- **The host's operations.** A function whose body is `prim …` is a constant of its written type, never unfolded; it
+  runs as the host's operation. One giving a proposition, or a type that may be one (a letter's), is refused, and one
+  with neither a written type nor a limit after its body (`! IO`) too, since nothing says what it does.
+
 ## A second opinion
 
 A program either door accepts can be written out: `export("file")` writes what the environment accepted, in order
@@ -324,16 +352,3 @@ Three limits follow, and the kernel is written around them:
 - **A map keyed by an enum value** hashes the case name only, so terms that share a head share a slot: caches are
   keyed by a term's int `hash`.
 No two terms are made one (interning) yet: `same` stays the one place that would change when shared terms cost too much.
-
-## The run trust base
-
-What a program runs is not always what the theory proves of it. Each such pair is a claim nobody checks:
-- **The language's words the prelude has too.** A types-module declaration with the signature of a prelude
-  declaration is that declaration (elaborate/declare.wap overloaded): proofs read the prelude's definition, and the
-  program runs the types module's function for it, by its name. The pairs the tests rely on are int's `+`, `-` (both
-  arities), `*`, `==`, `<`, `<=`, `>`, `>=`. Every other function of the types module runs its own body, as the
-  theory read it.
-- **The host's operations.** A function whose body is `prim …` is a constant of its written type, never unfolded; it
-  runs as the host's operation. One giving a proposition, or a type that may be one (a letter's), is refused, and one
-  with neither a written type nor a limit after its body (`! IO`) too, since nothing says what it does.
-- **The prelude's own host spellings** (run/hosts.wap HOST_FUNCTIONS): a number runs as a machine int.

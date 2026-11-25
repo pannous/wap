@@ -1,6 +1,6 @@
 # Erase (notes/coc-plan.md 5.1, 9.7): what a program the theory accepted runs, as run terms (terms.wap). Its types,
 # proofs and levels go: a binder or an argument that is a type, a type family or a proof runs as nothing. A function
-# of the prelude runs by the host where hosts.wap says how, else by its value, unfolded where it is used: the prelude
+# of the prelude runs by the host where its layout says how (`runs(…)`, elaborate/file.wap), else by its value, unfolded where it is used: the prelude
 # has no recursion, so unfolding ends. A function of the program runs as a Routine of its own, erased the first
 # time a value reaches it. A term no run term stands for yet is refused by the rule `running`.
 use "../terms.wap"
@@ -10,9 +10,14 @@ use "../compute.wap"
 use "../below.wap"
 use "../show.wap"
 use "../elaborate/read.wap"
+use "../elaborate/file.wap"
+use "../explicit.wap"
+use "../elaborate/lifted.wap"
+use "../../../core/format.wap"
+use "../../../core/parse/reader.wap"
+use "../../../core/parse/operators.wap"
 use "../../../core/parse/atoms.wap"
 use "terms.wap"
-use "hosts.wap"
 
 # a binder named by words runs under them joined by this; one named nothing a program can write as show.wap's
 # UNNAMED; the value a choice is made on under CHOSEN
@@ -48,7 +53,11 @@ run_of(e: Erasing, t: Term): Run := match t.shape {
 		variable = named_variable(e, binder, type)
 		Named(e.names[variable_id(variable)], held, run_of(e, instantiated(body, variable)))
 	}
-	Lambda(binder, domain, body) => refused(RUNNING, "${shown_for(e.c, t)} is a function value, which no program runs from its terms yet")
+	Lambda(binder, domain, body) => {
+		if not runs_on(e, domain) { refused(RUNNING, "${shown_for(e.c, t)} is a function of a type or a proof, which runs as nothing") }
+		variable = named_variable(e, binder, domain)
+		Function(Typed(e.names[variable_id(variable)], run_type(e, domain)), run_of(e, instantiated(body, variable)))
+	}
 	_ => applied(e, head(t), arguments(t))
 }
 
@@ -56,9 +65,8 @@ run_of(e: Erasing, t: Term): Run := match t.shape {
 # program's function, a prelude function unfolded
 applied(e: Erasing, function: Term, given: list<Term>): Run := match function.shape {
 	Constant(name, levels) => {
-		spelling = host_spelling(name) ?? e.p.hosted.get(name)
-		if spelling is not ø { return host_run(e, name, spelling!, given) }
-		if name == HOST_SEQUENCE { return sequenced(e, given) }
+		layout = e.p.layouts.get(name)
+		if layout is not ø { return host_run(e, name, layout!.value, given) }
 		match declared_named(e.p.environment, name).kind {
 			Recursor(facts) => return chosen(e, name, facts, given)
 			_ => ø
@@ -81,23 +89,9 @@ data_runs(e: Erasing, given: list<Term>): list<Run> := given.filter(argument => 
 # The host's spelling of a prelude function given all the arguments it takes: those it spells, numbered again in
 # their order
 host_run(e: Erasing, name: text, spelling: text, given: list<Term>): Run := {
-	taking(name, given, #binders_of(declared_named(e.p.environment, name).type))
+	taking(name, given, #binder_names(declared_named(e.p.environment, name).type))
 	used = (1 to #given).filter(at => spelling.contains("\$${at}"))
 	Host(used.fold(spelling, (spelled, at) => spelled.replace("\$${at}", "\$${used.index_of(at)}")), used.map(at => run_of(e, given#at)))
-}
-# the binders of a function type, as written
-binders_of(type: Term): list<Term> := match type.shape {
-	Pi(binder, domain, body) => [domain] + binders_of(body)
-	_ => []
-}
-# a computation handing its value to the next: the value held under the next one's binder for its body
-sequenced(e: Erasing, given: list<Term>): Run := {
-	taking(HOST_SEQUENCE, given, HOST_SEQUENCE_ARGUMENTS)
-	next = given#HOST_SEQUENCE_NEXT
-	match next.shape {
-		Lambda(binder, domain, body) => run_of(e, let_in(binder, domain, given#HOST_SEQUENCE_FIRST, body))
-		_ => refused(RUNNING, "what ${HOST_SEQUENCE} hands its value to is no function written in place")
-	}
 }
 
 # A recursor given all its arguments, its major premise last, as a choice between its minor premises, one per case,
@@ -110,7 +104,7 @@ chosen(e: Erasing, name: text, facts: RecursorFacts, given: list<Term>): Run := 
 	subject = run_of(e, given#major)
 	held = named_variable(e, CHOSEN, type_of(e.c, given#major))
 	below = recursive_fields(e, facts.of)
-	alternatives = (1 to #facts.cases).map(at => alternative(e, facts.cases#at, facts.fields#at + below#at, given#(first_minor + at), given.drop(major)))
+	alternatives = (1 to #facts.cases).map(at => alternative(e, facts.cases#at, facts.fields#at, below#at, given#(first_minor + at), given.drop(major)))
 	Choose(subject, e.names[variable_id(held)], alternatives)
 }
 # how many fields of each case of a type hold a value of its block, an induction hypothesis each
@@ -143,16 +137,20 @@ coursed(e: Erasing, name: text, given: list<Term>): Run := {
 # A minor premise taken as the alternative of its case: the case's host test, its fields named and spelled as the
 # host takes them out of the value, then its value given the arguments after the major premise. The induction
 # hypotheses after the fields get no run name, so a use is refused as recursion.
-# DEBT: only the cases of a type the host lays out (hosts.wap); an enum of the program needs its layout first
-alternative(e: Erasing, case: text, binders: int, minor: Term, after: list<Term>): Alternative := {
-	spellings = HOST_CASES.get(case) ?? refused(RUNNING, "${case} is matched, and the host has no layout for its type yet")
+# DEBT: only the cases of a type the prelude lays out; an enum of the program needs its layout first
+alternative(e: Erasing, case: text, fields: int, below: int, minor: Term, after: list<Term>): Alternative := {
+	layout = e.p.layouts.get(case) ?? refused(RUNNING, "${case} is matched, and the host has no layout for its type yet")
+	test = layout.test ?? refused(RUNNING, "${case} is matched, and its layout has no test")
+	# (a case's fields are its last binders, after its type's parameters)
+	field_names = binder_names(declared_named(e.p.environment, case).type)
+	field_names = field_names.drop(#field_names - fields)
 	variables: list<Term> = []
 	inner = minor
-	for at in 1 to binders {
+	for at in 1 to fields + below {
 		match inner.shape {
 			Lambda(binder, domain, body) => {
-				variable = if at < #spellings then named_variable(e, binder, domain) else hypothesis(e.c, binder, domain)
-				if at < #spellings { variables += [variable] }
+				variable = if at <= fields then named_variable(e, binder, domain) else hypothesis(e.c, binder, domain)
+				if at <= fields { variables += [variable] }
 				inner = instantiated(body, variable)
 			}
 			_ => refused(RUNNING, "the alternative of ${case} is no function of its fields")
@@ -161,7 +159,8 @@ alternative(e: Erasing, case: text, binders: int, minor: Term, after: list<Term>
 	value = beta(inner, after)
 	# (only the fields its value uses are taken out)
 	used = (1 to #variables).filter(at => variable_id(variables#at) in free_variables(value))
-	Alternative(spellings#1, used.map(at => e.names[variable_id(variables#at)]), used.map(at => spellings#(at + 1)), run_of(e, value))
+	spellings = used.map(at => layout.fields.get(field_names#at) ?? refused(RUNNING, "${field_names#at} of ${case} is used, and its layout does not take it out"))
+	Alternative(test, used.map(at => e.names[variable_id(variables#at)]), spellings, run_of(e, value))
 }
 
 # whether a term is data a program runs on, not a type, a type family or a proof
@@ -218,15 +217,78 @@ run_name(e: Erasing, name: text): text := {
 	written_name(if shared is empty then name else shared#1)
 }
 
-# the wap type that holds a type's values as they run; a computation's, its value's
-run_type(e: Erasing, type: Term): text := {
-	folded = computed_folded(e.c, type)
-	match head(folded).shape {
-		Constant(name, levels) => if name == HOST_COMPUTATION then run_type(e, arguments(folded)#HOST_COMPUTATION_VALUE) else held_type(e, folded)
-		_ => held_type(e, folded)
+# the wap type that holds a type's values as they run: its layout's, as written or computed
+run_type(e: Erasing, type: Term): text := host_type(e.p, e.c, type, unlaid => unlaid_refused(e, unlaid))
+unlaid_refused(e: Erasing, type: Term): text := refused(RUNNING, "a value of ${shown_for(e.c, type)} has no layout the host runs it in yet")
+
+# the wap type a type's values run as: its layout's, the host types of the arguments it names put in; a type of types
+# `Type`, a function type of host types one; a type the prelude lays out no way to run is the unlaid's
+host_type(p: Theory, c: Checker, type: Term, unlaid: (Term) -> text): text := {
+	folded = computed_folded(c, type)
+	match folded.shape {
+		Sort(level) => TYPE_WORD
+		Pi(binder, domain, body) => "(${host_type(p, c, domain, unlaid)}) -> ${host_type(p, c, instantiated(body, hypothesis(c, binder, domain)), unlaid)}"
+		_ => {
+			whole = [folded, computed(c, type)].find(t => layout_of(p, t) is not ø) ?? return unlaid(type)
+			layout = layout_of(p, whole)!
+			given = arguments(whole)
+			# (a type given fewer arguments than it takes has no host type: its layout names a place none fills)
+			if #given < #binder_names(type_of(c, head(whole))) { return unlaid(type) }
+			# (an argument the layout leaves out is never written)
+			filled(layout.value, (1 to #given).map(at => if layout.value.contains("\$${at}") then host_type(p, c, given#at, unlaid) else ""))
+		}
 	}
 }
-held_type(e: Erasing, type: Term): text := match computed(e.c, type).shape {
-	Constant(name, levels) => HOST_TYPES.get(name) ?? refused(RUNNING, "a value of ${name} has no layout the host runs it in yet")
-	_ => refused(RUNNING, "a value of ${shown_for(e.c, type)} has no layout the host runs it in yet")
+# the layout of the declaration a type applies
+layout_of(p: Theory, type: Term): Layout? := match head(type).shape {
+	Constant(name, levels) => p.layouts.get(name)
+	_ => ø
 }
+
+# A layout checked, since erase believes it: each spelling is elaborated as a definition over the host's types, the
+# declaration's parameters at the types their values run as (`nat`'s as an int), so `it - 1` is an int; one of no
+# value of its layout type is refused
+LAYOUT_CHECKED := "laid_out"
+# the name a case's value is checked under, `it` being no name a definition's parameter can take
+VALUE_CHECKED := "value"
+# every layout of the prelude checked, before a program's declarations can hide the names its spellings use
+layouts_checked(p: Theory, language: Language) := {
+	for name in p.layouts.keys() { layout_checked(p, language, name, p.layouts[name].written) }
+}
+layout_checked(p: Theory, language: Language, name: text, parts: list<Node>) := {
+	d = declared_named(p.environment, name)
+	c = checker(p.environment, d.levels)
+	binders: list<list<text>> = []
+	type = d.type
+	while yes {
+		match type.shape {
+			Pi(binder, domain, body) => {
+				binders += [[binder, host_type(p, c, domain)]]
+				type = instantiated(body, hypothesis(c, binder, domain))
+			}
+			_ => break
+		}
+	}
+	result = host_type(p, c, type)
+	spelled_as(p, language, name, binders, result, parts#2)
+	value = [[VALUE_CHECKED, result]]
+	at_value = [[VALUE_NAME, VALUE_CHECKED]]
+	test = named_part(parts, TEST_NAME)
+	if test is not ø { spelled_as(p, language, name, value, BOOL, renamed(test!, at_value)) }
+	for binder in binders {
+		field = named_part(parts, binder#1)
+		if field is not ø { spelled_as(p, language, name, value, binder#2, renamed(field!, at_value)) }
+	}
+}
+# a spelling of a layout elaborated as the value of a definition of these parameters, each a name and its host type
+spelled_as(p: Theory, language: Language, name: text, binders: list<list<text>>, result: text, spelling: Node) := {
+	written = formatted(language, spelling)
+	head = if binders is empty then LAYOUT_CHECKED else "${LAYOUT_CHECKED}(${binders.map(binder => "${binder#1}: ${binder#2}").join(", ")})"
+	try {
+		checking = copied(p)
+		for unit in module_units(operated_program(language, notation("${head}: ${result} := ${written}", LAYOUT_CHECKED))) { unit_elaborated(checking, unit) }
+	} catch refusal { refused(LAYOUT, "${name} runs as ${written}, which is no ${result} there: ${refusal.message}") }
+}
+# the wap type a type's values run as, where a layout is checked: one the prelude lays out no way to run, a type
+# variable `T` or `Effects`, whose values a layout only passes on, as the theory names it
+host_type(p: Theory, c: Checker, type: Term): text := host_type(p, c, type, unlaid => shown_for(c, unlaid))
