@@ -18,8 +18,6 @@ static uint32_t module_address(struct w2c_wasi__snapshot__preview1* wasi, void* 
 // pointer): handle from "c"`): the glue made it the pointer already
 void* native_pointer(void* address) { return address; }
 #include "callbacks.h"
-// the process's environment, for the children it starts (core/native/driver.warp words_run)
-char** process_environment(void) { return environ; }
 // the error number of the C call that failed last (core/native/driver.warp os_failure)
 int32_t last_error(void) { return errno; }
 // the terminal's rows, else its columns, on standard output; 0 outside a terminal (ioctl is variadic: called here, not
