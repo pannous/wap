@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# all of wap's tests, test/wap/run.sh [--wait] [--stage <n>] [<tests>] (default every test program test/test_*.wap and
+# all of wap's tests, test/wap/run.sh [--wait] [--stage <n>] [--known] [<tests>] (default every test program test/test_*.wap and
 # script test/wap/test_*.wap and test_*.sh; a test is a path or an area, `run.sh nodes`): first wap's compiler compiled and run once,
 # or its error, the first signal a worker waits for; then the tests run detached, niced, as many at once as the
 # machine's job slots allow (scripts/job-slot.sh, shared by every worktree), each one's output in
@@ -7,11 +7,17 @@
 # writes its line to data/wap-tests/full-summary.txt too, which a run of some leaves alone (vitals reads it). --wait
 # runs them in the foreground and prints the summary. Its modules run on the native wap on PATH. The self-build ratchet,
 # ratchet_census.sh (about 4 min), is no default script: run it by name, test/wap/run.sh --wait
-# test/wap/ratchet_census.sh, after each wap landing
+# test/wap/ratchet_census.sh, after each wap landing.
+# The reds are compared with the baseline test/reds.txt, every check expected red as `<test file>: <check name>`: the
+# summary names only the regressions, red checks the baseline lacks, and the fixed ones, the baseline's checks of the
+# tests run that went green; a run is green when it has no regression. --known writes the reds of the tests run into
+# the baseline instead, after a fix (the fixed lines leave it) or a new _wanted program
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 results="$here/../../data/wap-tests"
 SUMMARY="$results/summary.txt"
 FULL_SUMMARY="$results/full-summary.txt"
+KNOWN_REDS="$(cd -P "$here/.." && pwd -P)/reds.txt"
+REDS="$results/reds.txt"
 # two cores stay free for the user's apps
 cores=$(( $(getconf _NPROCESSORS_ONLN) - 2 ))
 job_slot="$here/../../scripts/job-slot.sh"
@@ -31,6 +37,36 @@ summed() {
 	failed=$(outputs "$@" | xargs cat | grep -c '^✗')
 	echo "wap tests: $passed ✓, $failed ✗ in $# tests, $(($(date +%s) - started)) s$( [ "$failed" = 0 ] || printf '; failed: %s' "$(outputs "$@" | xargs grep -l '^✗' | xargs -n1 basename | sed 's/\.txt$//' | tr '\n' ' ')")"
 }
+# the red checks of the tests run, `<test file>: <check name>` each, without the values got and expected
+reds() {
+	for test in "$@"; do grep '^✗' "$(outputs "$test")" | sed -e 's/^✗ //' -e 's/: got .*//' -e "s|^|$(basename "$test"): |"; done | LC_ALL=C sort -u
+}
+# the baseline's lines of the tests run (known_reds in <tests>), or of every other test (known_reds out <tests>)
+known_reds() {
+	local side=$1
+	shift
+	[ -f "$KNOWN_REDS" ] || return 0
+	# the names of the tests run come first, as a file of their own
+	awk -v side="$side" '
+		NR == FNR { run[$0]; next }
+		{ file = $0; sub(/: .*/, "", file) }
+		(file in run) == (side == "in")' <(for test in "$@"; do basename "$test"; done) "$KNOWN_REDS" | LC_ALL=C sort -u
+}
+# the reds of the tests run against the baseline: the fixed checks and the regressions named, green without a regression
+compared() {
+	local fixed regressions
+	reds "$@" >"$REDS"
+	fixed=$(known_reds in "$@" | LC_ALL=C comm -13 "$REDS" -)
+	regressions=$(known_reds in "$@" | LC_ALL=C comm -23 "$REDS" -)
+	[ -z "$fixed" ] || printf 'fixed, green now (test/wap/run.sh --known takes them out of test/reds.txt):\n%s\n' "$fixed"
+	[ -z "$regressions" ] || printf 'regressions, red and not in test/reds.txt:\n%s\n' "$regressions"
+	[ -z "$regressions" ]
+}
+# the baseline with the reds of the tests run in place of its lines of them
+known() {
+	{ known_reds out "$@"; cat "$REDS"; } | LC_ALL=C sort -u >"$KNOWN_REDS.$$" && mv "$KNOWN_REDS.$$" "$KNOWN_REDS"
+	echo "test/reds.txt now holds the $(wc -l <"$REDS" | tr -d ' ') reds of these tests"
+}
 # one test given the compiler under test (one_run <test> <module or "">): a test program, test/test_<area>.wap,
 # compiled by it and run; a test script run with it, a wap one, test/wap/test_<area>.wap, compiled by it and given the
 # wap binary, it, the script's folder in the tree's data/ and the tree as arguments
@@ -42,17 +78,20 @@ one_run() {
 		*) bash "$1" ${2:+--compiler "$2"} ;;
 	esac
 }
-# every test run in a job slot, niced (all_run <module or ""> <all: yes or no> <tests>), then the summary written; a
-# test waiting for its slot says so in its output
+# every test run in a job slot, niced (all_run <module or ""> <all: yes or no> <known: yes or no> <tests>), then the
+# summary written, compared with the baseline; a test waiting for its slot says so in its output
 all_run() {
-	local module=$1 all=$2
-	shift 2
+	local module=$1 all=$2 record=$3 status
+	shift 3
 	started=$(date +%s)
 	printf '%s\n' "$@" | xargs -P "$cores" -I{} "$job_slot" bash "${BASH_SOURCE[0]}" one_run {} "$module"
-	summed "$@" | tee "$SUMMARY"
+	summed "$@" >"$SUMMARY"
+	compared "$@" >>"$SUMMARY"; status=$?
+	cat "$SUMMARY"
 	[ "$all" = no ] || cp "$SUMMARY" "$FULL_SUMMARY"
-	# the run's exit status: 0 only when no check failed
-	grep -q ' 0 ✗' "$SUMMARY"
+	[ "$record" = no ] || { known "$@"; return; }
+	# the run's exit status: 0 only when no check outside the baseline failed
+	return $status
 }
 
 # a test that fails without a ✗ of its own, by its exit status or by printing no check at all, fails as one ✗ (a script
@@ -69,10 +108,12 @@ all_run() {
 [ "$1" = all_run ] && { shift; all_run "$@"; exit; }
 wait=no
 built=
+record=no
 while [ $# -gt 0 ]; do
 	case $1 in
 		--wait) wait=yes; shift ;;
 		--stage) built=$2; shift 2 ;;
+		--known) record=yes; shift ;;
 		*) break ;;
 	esac
 done
@@ -103,4 +144,4 @@ fi
 # the first signal: wap's compiler compiles and runs, reading an empty program
 said=$(ran empty '') || { echo "wap compiler: $said"; exit 1; }
 echo "wap compiler OK; the checks of $# tests run$( [ $wait = yes ] || echo " in the background: summary in $SUMMARY")"
-if [ $wait = yes ]; then all_run "$module" "$all" "$@"; else nohup bash "${BASH_SOURCE[0]}" all_run "$module" "$all" "$@" >/dev/null 2>&1 & fi
+if [ $wait = yes ]; then all_run "$module" "$all" "$record" "$@"; else nohup bash "${BASH_SOURCE[0]}" all_run "$module" "$all" "$record" "$@" >/dev/null 2>&1 & fi
