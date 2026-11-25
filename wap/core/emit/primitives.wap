@@ -6,7 +6,9 @@
 # function of the module, emitted once.
 
 use folder
+use "../../kernel/opcodes.wap"
 use "../../kernel/forms.wap"
+use "../../kernel/primitives.wap"
 use "../errors.wap"
 use "../stage.wap"
 use "../type_notation.wap"
@@ -19,15 +21,9 @@ HELPERS = {"text_written": writing_function, "text_placed": placing_function, "m
 # the lists a map holds, not copied: its keys and its values, an entry the same place in both, and its slots
 MAP_FIELDS = {"map_keys_held": MAP_KEYS, "map_values_held": MAP_VALUES, "map_slots_held": MAP_SLOTS}
 
-# The operations on the module's memory and on a text's bytes, each by the wasm types it takes and gives and its
-# instructions, as a host function's call by HOST_FUNCTIONS: an int given where it takes an i32 is wrapped to one, an
-# i32 it gives extended to an int; an operand of another type than it takes is refused
-class WasmOperation { takes: list<list<int>>; gives: list<list<int>>; code: list<int> }
-# (the ones on the memory alone first: a module of no text has no text type, as a native build's wasm2c takes none)
-MEMORY_OPERATIONS = {
-	"i32.load8_u": WasmOperation([I32], [I32], instruction(I32_LOAD8_U, [0, 0])), "memory.size": WasmOperation([], [I32], instruction(MEMORY_SIZE, [0])),
-	"i32.load": WasmOperation([I32], [I32], instruction(I32_LOAD, [2, 0])), "i32.store": WasmOperation([I32, I32], [], instruction(I32_STORE, [2, 0])), "i32.store8": WasmOperation([I32, I32], [], instruction(I32_STORE8, [0, 0]))
-}
+# The operations on a text's bytes, each by the wasm types it takes and gives and its instructions, as a host
+# operation's row (kernel/primitives.wap): an int given where it takes an i32 is wrapped to one, an i32 it gives extended
+# to an int; an operand of another type than it takes is refused
 # an item of a list in the memory (wap/types/memory_lists.wap): 8 bytes at an address, read or written as
 # the item's type is laid out, an int or a float as it is, an address (a text, a list) in the low 4 bytes
 ITEM_LOAD = "item.load"
@@ -47,11 +43,15 @@ text_operations(p: Program) as map<text, WasmOperation> := {
 		"array.new_default": WasmOperation([I32], [text], instruction(ARRAY_NEW_DEFAULT, [bytes])), "array.set": WasmOperation([text, I32, I32], [], instruction(ARRAY_SET, [bytes]))
 	}
 }
-# the code of an operation of wasm types: its operands, each int it takes as an i32 wrapped, its instructions, then an
-# i32 it gives extended to the int its definition writes
+# the code of an operation of wasm types: as many operands as it takes, each int it takes as an i32 wrapped, its
+# instructions, then the value it gives as its definition writes it: an i32 as an int extended, another of its own type
+# (the extension is the declared mirror of the operand's wrap: wap's host words read every i32 as an int)
 wasm_called(form: Node, arguments: list<Code>, operation: WasmOperation, p: Program) as Code := {
+	if #arguments != #operation.takes { refused(form, "this primitive takes ${#operation.takes} operands, not ${#arguments}") }
 	narrowed = (1 to #arguments).flat_map(at => arguments#at.instructions + (if arguments#at.type == operation.takes#at or arguments#at.type == NEVER then [] else if arguments#at.type == I64 and operation.takes#at == I32 then I32_WRAP_I64 else refused(form, "operand ${at} of this primitive is not of the wasm type it takes")))
-	Code(typed_layout(form, p), narrowed + operation.code + (if operation.gives == [I32] and typed_layout(form, p) == I64 then I64_EXTEND_I32_U else []))
+	type = typed_layout(form, p)
+	given = if operation.gives == [type] or (operation.gives is empty and type is empty) then [] else if operation.gives == [I32] and type == I64 then I64_EXTEND_I32_U else refused(form, "this primitive gives a value of another wasm type than its definition writes")
+	Code(type, narrowed + operation.code + given)
 }
 
 # two cases compared, by the type of the first: its tag and its fields, each by its own type's equality
@@ -63,7 +63,7 @@ primitive_code(form: Node, operation: Node, arguments: list<Code>, p: Program) a
 	operands = arguments.flat_map(argument => argument.instructions)
 	# the value the operands and these instructions after them give
 	ending = instructions => Code(typed_layout(form, p), operands + instructions)
-	if MNEMONICS.has(name) { return ending(if name == MISSING_TEST then missing_tested(p.m) else MNEMONICS[name]) }
+	if name == MISSING_TEST { return ending(missing_tested(p.m)) }
 	if HELPERS.has(name) { return helper_called(form, operands, name, HELPERS[name], p) }
 	if name == BOXED_TEST { return boxed_test(form, operands, fact_of(form, TESTED) ?? refused(form, "this test reached the emitter without the type it tests"), p) }
 	if name == BOXED_VALUE { return ending(box_made(plain_word(boxed_operand(form)), p)) }
@@ -74,8 +74,7 @@ primitive_code(form: Node, operation: Node, arguments: list<Code>, p: Program) a
 	if name == LIST_COUNT { return ending(counted_items(p)) }
 	if MAP_FIELDS.has(name) { return ending(instruction(STRUCT_GET, [map_struct(first_operand_type(form), p), MAP_FIELDS[name]])) }
 	if TYPED_HELPERS.has(name) { return finished(ending(typed_helper_called(name, first_operand_type(form), p))) }
-	if HOST_FUNCTIONS.has(name) { return wasm_called(form, arguments, WasmOperation(HOST_FUNCTIONS[name]#1, HOST_FUNCTIONS[name]#2, instruction(CALL, [host(p, name)])), p) }
-	if MEMORY_OPERATIONS.has(name) { return wasm_called(form, arguments, MEMORY_OPERATIONS[name], p) }
+	if PRIMITIVES.has(name) { return wasm_called(form, arguments, host_performed(name, p), p) }
 	if name == ITEM_LOAD { return wasm_called(form, arguments, item_loaded(typed_layout(form, p)), p) }
 	if name == ITEM_STORE { return wasm_called(form, arguments, item_stored(arguments#2.type), p) }
 	if name == MEMORY_TAKEN { return wasm_called(form, arguments, WasmOperation([I32], [I32], helper_call(p, MEMORY_TAKEN, memory_taking_function)), p) }
@@ -83,6 +82,11 @@ primitive_code(form: Node, operation: Node, arguments: list<Code>, p: Program) a
 	operations = text_operations(p)
 	if operations.has(name) { return wasm_called(form, arguments, operations[name], p) }
 	refused(form, "no primitive of this name")
+}
+# a host operation's row, an imported function's with the call of its import
+host_performed(name: text, p: Program) as WasmOperation := {
+	row = PRIMITIVES[name]
+	if is_imported(row) then WasmOperation(row.takes, row.gives, instruction(CALL, [host(p, name)])) else row
 }
 # the plain value a box holds
 boxed_operand(form: Prim) as Node := match form { Prim(operation, given) => given#1 }

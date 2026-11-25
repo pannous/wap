@@ -63,6 +63,8 @@ wap/
   kernel/                     the kernel layer: the emitter's whole input language
     forms.wap                 the kernel forms, each a named pattern of Node
     surface.wap               the forms rules write and typing turns into kernel forms (Item, Variable)
+    primitives.wap            the host's operations a Prim names, each a row of the wasm types it takes and gives
+    opcodes.wap               the wasm format's codes: section ids, value and heap types, opcodes
 
   core/                       the machinery: mechanisms only, no names of a domain
     pipeline.wap              one function per step from source to typed program, shared by compiler and census
@@ -131,7 +133,6 @@ wap/
       values.wap              the value layout (notes/self_hosting.md "Value layout"), reused as it is
       memory.wap              how a build keeping values in the memory lays them out: the record its extension fills
       wasm.wap                the wasm binary format: modules, sections, instructions; knows no warp form
-      opcodes.wap             the format's codes: section ids, value and heap types, opcodes
 
   types/                    the standard language every program gets: whole definitions, data and rules
     types.wap               the word files below, included in place: the one library every program is bound in
