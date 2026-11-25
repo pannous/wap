@@ -252,7 +252,10 @@ form_elaborated(x: Elaborating, n: Node, wanted: Term?): Term := match n {
 	Char(value) => text_literal(x.theory.environment, text(value))
 	If(condition, then_part, else_part) => if_elaborated(x, condition, then_part, else_part, wanted)
 	Case(subject, arms) => match_elaborated(x, subject, arms.map(arm_written), wanted)
-	Get(subject, key) => form_elaborated(x, named_form(n), wanted)
+	Get(subject, key) => match key {
+		Text(value) => form_elaborated(x, named_form(n), wanted)
+		_ => call_elaborated(x, symbol(ITEM_WORD), [subject, key], wanted)
+	}
 	Call(called, arguments) => call_elaborated(x, named_form(called), arguments, wanted)
 	Key(called, Op.None, List(arguments, bracket, separator)) => if bracket in PARAMETER_BRACKETS then call_elaborated(x, called, arguments, wanted) else if bracket == Bracket.Square then levelled(x, called, arguments, wanted) else respelled(x, n, wanted, UNKNOWN_FORM, no_expression(n))
 	Item(subject, key) => levelled(x, subject, items_or_one(key), wanted)
@@ -283,6 +286,8 @@ levelled(x: Elaborating, written: Node, levels: list<Node>, wanted: Term?): Term
 	if not unified(x.el, head(t), constant(name, levels.map(level => level_written(x, level)))) { refused(VALUE_TYPE, "${text(written)} takes ${#declaration(x.theory.environment, name)!.levels} levels, not ${#levels}") }
 	t
 }
+# the function an item read by its place calls, `xs#i` being Get(xs, i), a field read by its name, `p.x`, Get(p, "x")
+ITEM_WORD := "#"
 # a dotted name, which the rules write as a field read, `bool.yes` as Get(bool, "yes"); any other node as it is
 named_form(n: Node): Node := match n {
 	Get(subject, key) => dotted(named_form(subject), Symbol(field_named(key)))
@@ -398,20 +403,24 @@ holes_given(x: Elaborating, name: text, function: Term, type: Term, count: int? 
 	holes_given(x, name, apply(function, found), instantiated(parts.body, found), if count is ø then ø else count! - 1)
 }
 
-# A function of a type given its arguments, each read against its domain. When the result does not depend on the
-# arguments it is made the type wanted first
+# A function of a type given its arguments, each read against its domain. Once the result no longer depends on the
+# arguments still to read, it is made the type wanted: before the first, or after a type's hole, `list.item(_, 1, …)`
+# wanting a list of ints reads 1 as an int
 given_arguments(x: Elaborating, function: Term, type: Term, arguments: list<Node>, wanted: Term?): Term := arguments_given(x, function, type, unread(arguments), wanted)
 # an argument of a call: as written, read against its parameter's type, or read already, made of that type, so a call
 # that tries several declarations reads each argument once (overload_elaborated)
 enum Argument { Unread(node: Node), Elaborated(term: Term) }
 unread(nodes: list<Node>): list<Argument> := nodes.map(node => Unread(node))
 arguments_given(x: Elaborating, function: Term, type: Term, arguments: list<Argument>, wanted: Term?): Term := {
-	if wanted is not ø {
-		result = result_after(filled(x.el, type), #arguments)
-		if result is not ø and result!.loose == 0 { unified(x.el, result!, wanted!) }
-	}
 	given = Applied(function, type)
-	for argument in arguments {
+	aimed = wanted is ø
+	for at in 1 to #arguments {
+		if not aimed {
+			result = result_after(filled(x.el, given.rest), #arguments - at + 1)
+			aimed = result is not ø and result!.loose == 0
+			if aimed { unified(x.el, result!, wanted!) }
+		}
+		argument = arguments#at
 		given = given_one(x, given, domain => match argument {
 			# an argument refused alone is read again for each candidate, and distributed reads them again: the trial
 			# limit refuses a program where that grows past it, as gave up
@@ -520,7 +529,7 @@ trial_counted(p: Theory) := {
 }
 # what a read may change, kept to be put back: the answers found, the arm being read, the letters, instance holes,
 # effects and lifts noted, the indirect steps counted, the course and the round read, the levels made
-class Snapshot { found: Found; arm: Arm; letters: int; instances: int; pending: int; lifts: int; indirect: int; result_steps: int; literal_steps: int; without_course: text?; round_given: list<text>?; levels: int }
+class Snapshot { found: Found; arm: ArmState; letters: int; instances: int; pending: int; lifts: int; indirect: int; result_steps: int; literal_steps: int; without_course: text?; round_given: list<text>?; levels: int }
 snapshot(x: Elaborating): Snapshot := Snapshot(found_so_far(x.el), arm_kept(x), #x.letters, #x.instances, #x.pending, #x.lifts, x.indirect, x.result_steps, x.literal_steps, x.without_course, x.round_given, #x.el.c.levels)
 put_back(x: Elaborating, kept: Snapshot) := {
 	back_to(x.el, kept.found)

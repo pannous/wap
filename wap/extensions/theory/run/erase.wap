@@ -14,6 +14,8 @@ use "../elaborate/file.wap"
 use "../explicit.wap"
 use "../elaborate/lifted.wap"
 use "../../../core/format.wap"
+use "../../../core/pipeline.wap"
+use "../../../core/language.wap"
 use "../../../core/parse/reader.wap"
 use "../../../core/parse/operators.wap"
 use "../../../core/parse/atoms.wap"
@@ -58,7 +60,17 @@ run_of(e: Erasing, t: Term): Run := match t.shape {
 		variable = named_variable(e, binder, domain)
 		Function(Typed(e.names[variable_id(variable)], run_type(e, domain)), run_of(e, instantiated(body, variable)))
 	}
+	Projection(structure, field, of) => projected(e, structure, field, of)
 	_ => applied(e, head(t), arguments(t))
+}
+# a field of a structure's value as it runs: the layout of the structure's one case takes it out of the value
+projected(e: Erasing, structure: text, field: int, of: Term): Run := {
+	facts = structure_facts(e.p.environment, structure) ?? refused(RUNNING, "${structure} is no structure whose field a projection takes")
+	case = facts.block.types#1.cases#1.name
+	layout = e.p.layouts.get(case) ?? refused(RUNNING, "a field of ${case} is taken, and the host has no layout for its type yet")
+	names = binder_names(declared_named(e.p.environment, case).type)
+	name = names#(#names - facts.fields#1#1 + field)
+	Host(layout.fields.get(name) ?? refused(RUNNING, "${name} of ${case} is taken, and its layout does not take it out"), [run_of(e, of)])
 }
 
 # a head applied to its arguments as it runs: a host's spelling, a choice of a recursor or a course, a call of a
@@ -234,8 +246,8 @@ host_type(p: Theory, c: Checker, type: Term, unlaid: (Term) -> text): text := {
 			given = arguments(whole)
 			# (a type given fewer arguments than it takes has no host type: its layout names a place none fills)
 			if #given < #binder_names(type_of(c, head(whole))) { return unlaid(type) }
-			# (an argument the layout leaves out is never written)
-			filled(layout.value, (1 to #given).map(at => if layout.value.contains("\$${at}") then host_type(p, c, given#at, unlaid) else ""))
+			# (`Eff`'s effects, which its layout names no place of, are asked no host type)
+			filled(layout.value, #given, at => host_type(p, c, given#at, unlaid))
 		}
 	}
 }
@@ -245,17 +257,22 @@ layout_of(p: Theory, type: Term): Layout? := match head(type).shape {
 	_ => ø
 }
 
-# A layout checked, since erase believes it: each spelling is elaborated as a definition over the host's types, the
-# declaration's parameters at the types their values run as (`nat`'s as an int), so `it - 1` is an int; one of no
-# value of its layout type is refused
+# A layout checked, since erase believes it: each spelling is host code, typed by wap's own typer as the value of a
+# definition of the parameters it names, each at the wap type its values run as (`nat`'s as an int, so `it - 1` is an
+# int); a type's spelling as the type of a value. One the typer refuses is refused. What the typer checks is that the
+# spelling is well typed; that it means what the theory's word does is believed (notes/theory.md "The run trust base")
 LAYOUT_CHECKED := "laid_out"
 # the name a case's value is checked under, `it` being no name a definition's parameter can take
 VALUE_CHECKED := "value"
-# every layout of the prelude checked, before a program's declarations can hide the names its spellings use
+# wap's own language and types module, which type the host's code
+class HostTyping { language: Language; types: Module }
+# every layout of the prelude checked
 layouts_checked(p: Theory, language: Language) := {
-	for name in p.layouts.keys() { layout_checked(p, language, name, p.layouts[name].written) }
+	wap = base_language()
+	host = HostTyping(wap, language_loaded(wap, p.wap_folder))
+	for name in p.layouts.keys() { layout_checked(p, host, name, p.layouts[name].written) }
 }
-layout_checked(p: Theory, language: Language, name: text, parts: list<Node>) := {
+layout_checked(p: Theory, host: HostTyping, name: text, parts: list<Node>) := {
 	d = declared_named(p.environment, name)
 	c = checker(p.environment, d.levels)
 	binders: list<list<text>> = []
@@ -270,24 +287,32 @@ layout_checked(p: Theory, language: Language, name: text, parts: list<Node>) := 
 		}
 	}
 	result = host_type(p, c, type)
-	spelled_as(p, language, name, binders, result, parts#2)
+	# (a type's spelling is a wap type: that of a value)
+	if result == TYPE_WORD {
+		type_written = formatted(host.language, parts#2)
+		spelled_as(host, name, [[VALUE_CHECKED, type_written]], type_written, symbol(VALUE_CHECKED))
+		return
+	}
+	spelled_as(host, name, binders, result, parts#2)
 	value = [[VALUE_CHECKED, result]]
 	at_value = [[VALUE_NAME, VALUE_CHECKED]]
 	test = named_part(parts, TEST_NAME)
-	if test is not ø { spelled_as(p, language, name, value, BOOL, renamed(test!, at_value)) }
+	if test is not ø { spelled_as(host, name, value, BOOL, renamed(test!, at_value)) }
 	for binder in binders {
 		field = named_part(parts, binder#1)
-		if field is not ø { spelled_as(p, language, name, value, binder#2, renamed(field!, at_value)) }
+		if field is not ø { spelled_as(host, name, value, binder#2, renamed(field!, at_value)) }
 	}
 }
-# a spelling of a layout elaborated as the value of a definition of these parameters, each a name and its host type
-spelled_as(p: Theory, language: Language, name: text, binders: list<list<text>>, result: text, spelling: Node) := {
-	written = formatted(language, spelling)
-	head = if binders is empty then LAYOUT_CHECKED else "${LAYOUT_CHECKED}(${binders.map(binder => "${binder#1}: ${binder#2}").join(", ")})"
+# a spelling typed by the host as the value of a definition of the parameters it names, each a name and its wap type
+spelled_as(host: HostTyping, name: text, binders: list<list<text>>, result: text, spelling: Node) := {
+	written = formatted(host.language, spelling)
+	named = words_in(spelling)
+	parameters = binders.filter(binder => binder#1 in named and binder#2 != TYPE_WORD).map(binder => "${binder#1}: ${binder#2}").join(", ")
+	source = "${LAYOUT_CHECKED}(${parameters}): ${result} := ${written}"
 	try {
-		checking = copied(p)
-		for unit in module_units(operated_program(language, notation("${head}: ${result} := ${written}", LAYOUT_CHECKED))) { unit_elaborated(checking, unit) }
-	} catch refusal { refused(LAYOUT, "${name} runs as ${written}, which is no ${result} there: ${refusal.message}") }
+		code = operated_program(host.language, notation(source, LAYOUT_CHECKED))
+		typed_modules(host.language, [declared_module(host.language, code)], host.types, LAYOUT_CHECKED)
+	} catch refusal { refused(LAYOUT, "${name} runs as ${written}, which wap types as no ${result}: ${refusal.message}") }
 }
 # the wap type a type's values run as, where a layout is checked: one the prelude lays out no way to run, a type
 # variable `T` or `Effects`, whose values a layout only passes on, as the theory names it

@@ -291,18 +291,23 @@ a program and compares what the door says. A line for a refusal compares the par
 
 What runs is believed where the kernel cannot see it (notes/coc-plan.md 9.7, 10.2): the kernel's own computation, and
 the layouts of the prelude, each a `runs(…)` statement after the declaration it is about, which erase reads in place
-of the declaration's value (`elaborate/file.wap` layout_noted). Each is elaborated over the host's types when the
-prelude is read, so a spelling of the wrong type is refused; that it means what the declaration says is tested by the
-laws run on values. The set is kept small:
+of the declaration's value (`elaborate/file.wap` layout_noted). Only the prelude writes them: every door refuses a
+program's own. The run door checks each before it runs anything (`run/erase.wap` layouts_checked): a spelling is
+host code, so wap's own typer types it as the value of a definition of the parameters it names, each at the wap type
+its values run as (`nat`'s as an int), a case's test as a bool and its fields as their wap types, a type's spelling as
+a wap type. What the typer checks is only that a spelling is well typed; that it means what the theory's word means
+is believed, and tested by the laws run on values. The set is kept small:
 
-| what | runs as |
-|---|---|
-| `nat`, `int` | a machine int: `nat.zero`, `nat.successor`, `int.of_nat`, `int.negative_successor` by their tests and fields |
-| `bool` | wap's bool: `bool.no`, `bool.yes` |
-| `add`, `multiply`, `equals` | the machine's `+`, `*`, `==` on two nats |
-| `minus`, `sum`, `times`, `negative`, `equal_integers` | the machine's `-`, `+`, `*`, `< 0`, `==` on ints |
-| `negated` | `not` |
-| `Eff`, `pure`, `bind` | a computation as its value, `pure(x)` as x, `bind(c, next)` as `next(c)` |
+| what | runs as | believed |
+|---|---|---|
+| `nat`, `int` | a machine int: `nat.zero`, `nat.successor`, `int.of_nat`, `int.negative_successor` by their tests and fields | the tests split the ints as the cases split the numbers, and `it - 1`, `-it - 1` undo the cases |
+| `bool` | wap's bool: `bool.no`, `bool.yes` | |
+| `add`, `multiply`, `equals` | the machine's `+`, `*`, `==` on two nats | they compute what the recursions do, below the wrap |
+| `minus`, `sum`, `times`, `negative`, `equal_integers` | the machine's `-`, `+`, `*`, `< 0`, `==` on ints | as above |
+| `negated` | `not` | |
+| `list`, `count`, `item_at`, `drop`, `joined`, `mapped` | wap's list: `list.empty`, `list.item` by `#it == 0`, `#it > 0`, `it#1`, `drop(it, 1)`; `#xs`, `xs#i`, `drop(xs, n)`, `xs + ys`, `xs.map(f)` | wap's list functions count, index, drop, join and map as the recursions do |
+| `Subset` | its value: `Subset.intro` as the value, its proof gone | |
+| `Eff`, `pure`, `bind` | a computation as its value, `pure(x)` as x, `bind(c, next)` as `next(c)` | a computation's effects happen as it runs |
 
 A number runs as a machine int, so one past 2^63 wraps where the theory's does not.
 
