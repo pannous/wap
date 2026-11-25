@@ -43,6 +43,8 @@ PLACE := "z"
 # the names of the unknowns and of the hypotheses a proof is generalized over
 ATOM := "a"
 FACT := "h"
+# the name of the laws the linear prover declares, numbered
+LEMMA := "linear"
 NO_TERMS: list<Term> := []
 
 # the numbers and the checker the sums are read and proved with, and the functions they are written by
@@ -161,7 +163,25 @@ equal_bounds(s: Sums, a: Term, b: Term, proof: Term): list<Bound> := {
 # --- the elimination
 
 # `t + gap == u` from the hypotheses and the differences they bound, ø where no sum of rows refutes `t > u`
-gap_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := generalized(s, with_differences(s, bounds, [t, u]), t, u)
+gap_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := generalized(s, with_differences(s, relevant(s, bounds, [t, u]), [t, u]), t, u)
+# The bounds linked to the terms: those sharing an unknown with them or with a bound linked already, and those of no
+# unknown, which can refute alone; the others cannot help, and every bound more multiplies the rows eliminated
+relevant(s: Sums, bounds: list<Bound>, terms: list<Term>): list<Bound> := {
+	linking = bounds.map(bound => Linking(bound, [bound.left, bound.difference, bound.right].flat_map(side => linked(s, side)).fold(NO_TERMS, with_new)))
+	reached = terms.flat_map(term => linked(s, term)).fold(NO_TERMS, with_new)
+	linked_to(linking, reached).map(found => found.bound)
+}
+class Linking { bound: Bound; unknowns: list<Term> }
+linked_to(linking: list<Linking>, reached: list<Term>): list<Linking> := {
+	near = linking.filter(found => found.unknowns is empty or found.unknowns.any(atom => reached.any(known => same(known, atom))))
+	grown = near.flat_map(found => found.unknowns).fold(reached, with_new)
+	if #grown == #reached then near else linked_to(linking, grown)
+}
+# the unknowns of a term and of the differences among them, the inner ones first
+linked(s: Sums, t: Term): list<Term> := normal(s, t).unknowns.flat_map(atom => {
+	sides = called(s, atom, s.subtract) ?? return [atom]
+	linked(s, sides#1) + linked(s, sides#2) + [atom]
+})
 # The bounds and, for each difference `a - b` in their sides or in the terms (the inner ones first) whose `b <= a`
 # they prove, `b + (a - b) == a`: subtraction stops at 0, so a difference is a sum only where it does not reach it
 with_differences(s: Sums, bounds: list<Bound>, terms: list<Term>): list<Bound> := {
@@ -169,14 +189,10 @@ with_differences(s: Sums, bounds: list<Bound>, terms: list<Term>): list<Bound> :
 	differences = sides.flat_map(side => differences_in(s, side)).fold(NO_TERMS, with_new)
 	differences.fold(bounds, (so_far, difference) => so_far + difference_bounds(s, so_far, difference))
 }
-differences_in(s: Sums, t: Term): list<Term> := normal(s, t).unknowns.flat_map(atom => differences_of(s, atom))
-differences_of(s: Sums, atom: Term): list<Term> := {
-	sides = called(s, atom, s.subtract) ?? return []
-	differences_in(s, sides#1) + differences_in(s, sides#2) + [atom]
-}
+differences_in(s: Sums, t: Term): list<Term> := linked(s, t).filter(atom => called(s, atom, s.subtract) is not ø)
 difference_bounds(s: Sums, bounds: list<Bound>, difference: Term): list<Bound> := {
 	sides = called(s, difference, s.subtract)!
-	gap = generalized(s, bounds, sides#2, sides#1) ?? return []
+	gap = generalized(s, relevant(s, bounds, sides), sides#2, sides#1) ?? return []
 	reached = law(AT_MOST_DIFFERENCE, [], [sides#2, sides#1, at_most_from(s, sides#2, sides#1, gap)])
 	equal_bounds(s, added(s, sides#2, difference), sides#1, reached)
 }
@@ -188,9 +204,21 @@ generalized(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := {
 	standing = (side: Term) => skeleton(s, side, atom => unknowns#(atoms.index_where(found => same(found, atom))))
 	facts = bounds.map(bound => standing_bound(s, standing(bound.left), standing(bound.difference), standing(bound.right)))
 	gap = eliminated(s, facts, standing(t), standing(u)) ?? return ø
-	proof = apply_all(closed_over(s.c, gap.equated.proof, unknowns + facts.map(fact => fact.proof), yes), atoms + bounds.map(bound => bound.proof))
+	given = unknowns + facts.map(fact => fact.proof)
+	proved_type = stated(equation(s, s.nat, gap.equated.left, gap.equated.right), gap.equated.left, gap.equated.right)
+	lemma = lemma_declared(s, closed_over(s.c, proved_type, given, no), closed_over(s.c, gap.equated.proof, given, yes))
+	proof = apply_all(lemma, atoms + bounds.map(bound => bound.proof))
 	gap_given = (0 upto #atoms).fold(gap.gap, (inner, at) => replaced_by(inner, variable_id(unknowns[at]), atoms[at]))
 	Gap(gap_given, Equated(added(s, t, gap_given), u, proof))
+}
+# A law of the environment proving a type by a proof, both closed, checked once: the provers' proofs are given as calls
+# of it, so a big proof is not copied wherever the term proved goes
+lemma_declared(s: Sums, type: Term, proof: Term): Term := {
+	e = s.c.environment
+	name = "${LEMMA}·${#e.places + 1}"
+	levels = [type, proof].flat_map(term_levels).unique()
+	declared(e, Declaration(name, levels, type, Theorem(proof)))
+	constant(name, levels.map(level => Parameter(level)))
 }
 standing_bound(s: Sums, left: Term, difference: Term, right: Term): Bound := Bound(left, difference, right, hypothesis(s.c, FACT, stated(equation(s, s.nat, added(s, left, difference), right), added(s, left, difference), right)))
 # `t + gap == u` from the hypotheses alone, ø where no sum of rows refutes `t > u`
