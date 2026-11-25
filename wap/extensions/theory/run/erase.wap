@@ -20,12 +20,17 @@ use "../../../core/language.wap"
 use "../../../core/parse/reader.wap"
 use "../../../core/parse/operators.wap"
 use "../../../core/parse/atoms.wap"
+use "../../../core/emit/values.wap"
+use "../../../core/type_notation.wap"
+use "../../../kernel/forms.wap"
+use "../../../kernel/primitives.wap"
 use "terms.wap"
 
 # a binder named by words runs under them joined by this; one named nothing a program can write as show.wap's
-# UNNAMED; the value a choice is made on under CHOSEN
+# UNNAMED; the value a choice is made on under CHOSEN, the value of a host's operation under HELD
 NAME_JOINER := "_"
 CHOSEN := "chosen"
+HELD := "held"
 
 # An erase under way: the checker its terms are typed by, the run name of each free variable it went into, and what
 # runs so far, the functions erased by name
@@ -80,7 +85,7 @@ projected(e: Erasing, structure: text, field: int, of: Term): Run := {
 applied(e: Erasing, function: Term, given: list<Term>): Run := match function.shape {
 	Constant(name, levels) => {
 		layout = e.p.layouts.get(name)
-		if layout is not ø { return host_run(e, name, layout!.value, given) }
+		if layout is not ø { return host_run(e, function, name, layout!, given) }
 		match declared_named(e.p.environment, name).kind {
 			Recursor(facts) => return chosen(e, name, facts, given)
 			_ => ø
@@ -101,11 +106,13 @@ applied(e: Erasing, function: Term, given: list<Term>): Run := match function.sh
 data_runs(e: Erasing, given: list<Term>): list<Run> := given.filter(argument => is_data(e, argument)).map(argument => run_of(e, argument))
 
 # The host's spelling of a prelude function given all the arguments it takes: those it spells, numbered again in
-# their order
-host_run(e: Erasing, name: text, spelling: text, given: list<Term>): Run := {
+# their order; a host operation's value held at the wap type the function's value runs as, which types it (a word
+# of the types module the host runs as written has no written layout)
+host_run(e: Erasing, function: Term, name: text, layout: Layout, given: list<Term>): Run := {
 	taking(name, given, #binder_names(declared_named(e.p.environment, name).type))
-	used = (1 to #given).filter(at => spelling.contains("\$${at}"))
-	Host(used.fold(spelling, (spelled, at) => spelled.replace("\$${at}", "\$${used.index_of(at)}")), used.map(at => run_of(e, given#at)))
+	used = (1 to #given).filter(at => layout.value.contains("\$${at}"))
+	run = Host(used.fold(layout.value, (spelled, at) => spelled.replace("\$${at}", "\$${used.index_of(at)}")), used.map(at => run_of(e, given#at)))
+	if layout.written is not empty and formed(e.p, layout.written#2) is Prim then Held(fresh_name(e, HELD), run_type(e, type_of(e.c, apply_all(function, given))), run) else run
 }
 
 # A recursor given all its arguments, its major premise last, as a choice between its minor premises, one per case,
@@ -159,12 +166,16 @@ alternative(e: Erasing, case: text, fields: int, below: int, minor: Term, after:
 	field_names = binder_names(declared_named(e.p.environment, case).type)
 	field_names = field_names.drop(#field_names - fields)
 	variables: list<Term> = []
+	types: list<text> = []
 	inner = minor
 	for at in 1 to fields + below {
 		match inner.shape {
 			Lambda(binder, domain, body) => {
 				variable = if at <= fields then named_variable(e, binder, domain) else hypothesis(e.c, binder, domain)
-				if at <= fields { variables += [variable] }
+				if at <= fields {
+					variables += [variable]
+					types += [run_type(e, domain)]
+				}
 				inner = instantiated(body, variable)
 			}
 			_ => refused(RUNNING, "the alternative of ${case} is no function of its fields")
@@ -174,7 +185,7 @@ alternative(e: Erasing, case: text, fields: int, below: int, minor: Term, after:
 	# (only the fields its value uses are taken out)
 	used = (1 to #variables).filter(at => variable_id(variables#at) in free_variables(value))
 	spellings = used.map(at => layout.fields.get(field_names#at) ?? refused(RUNNING, "${field_names#at} of ${case} is used, and its layout does not take it out"))
-	Alternative(test, used.map(at => e.names[variable_id(variables#at)]), spellings, run_of(e, value))
+	Alternative(test, used.map(at => e.names[variable_id(variables#at)]), spellings, used.map(at => types#at), run_of(e, value))
 }
 
 # whether a term is data a program runs on, not a type, a type family or a proof
@@ -187,13 +198,16 @@ runs_on(e: Erasing, type: Term): bool := not (result_of(computed(e.c, type)).sha
 named_variable(e: Erasing, binder: text, type: Term): Term := {
 	variable = hypothesis(e.c, binder, type)
 	spelled = binder.codepoints.map(c => if is_name_char(text(c)) then text(c) else NAME_JOINER).join("")
-	written = if spelled == "" or spelled == NAME_JOINER then UNNAMED else spelled
+	e.names[variable_id(variable)] = fresh_name(e, if spelled == "" or spelled == NAME_JOINER then UNNAMED else spelled)
+	variable
+}
+# a name no other variable of the function has: the written one, with a count where another has it
+fresh_name(e: Erasing, written: text): text := {
 	name = written
 	count = 1
 	while name in e.scope { count += 1; name = "${written}${count}" }
 	e.scope += [name]
-	e.names[variable_id(variable)] = name
-	variable
+	name
 }
 
 # a function of the program erased once: its parameters that are data, its result's run type, its body
@@ -267,11 +281,11 @@ LAYOUT_CHECKED := "laid_out"
 # the name a case's value is checked under, `it` being no name a definition's parameter can take
 VALUE_CHECKED := "value"
 # wap's own language and types module, which type the host's code
-class HostTyping { language: Language; types: Module }
+class HostTyping { language: Language; types: Module; theory: Theory }
 # every layout of the prelude checked
 layouts_checked(p: Theory, language: Language) := {
 	wap = base_language()
-	host = HostTyping(wap, language_loaded(wap, p.wap_folder))
+	host = HostTyping(wap, language_loaded(wap, p.wap_folder), p)
 	for name in p.layouts.keys() { layout_checked(p, host, name, p.layouts[name].written) }
 }
 layout_checked(p: Theory, host: HostTyping, name: text, parts: list<Node>) := {
@@ -305,8 +319,14 @@ layout_checked(p: Theory, host: HostTyping, name: text, parts: list<Node>) := {
 		if field is not ø { spelled_as(host, name, value, binder#2, renamed(field!, at_value)) }
 	}
 }
-# a spelling typed by the host as the value of a definition of the parameters it names, each a name and its wap type
+# a spelling typed by the host as the value of a definition of the parameters it names, each a name and its wap type;
+# one that is a host operation, `prim i64.add(m, n)`, is checked against its row instead
 spelled_as(host: HostTyping, name: text, binders: list<list<text>>, result: text, spelling: Node) := {
+	operation = formed(host.theory, spelling)
+	if operation is Prim {
+		if wasm_types(name, binders, operation) != [wasm_type(name, result)] { refused(LAYOUT, "${name} runs as ${formatted(host.language, spelling)}, whose value is no ${result}") }
+		return
+	}
 	written = formatted(host.language, spelling)
 	named = words_in(spelling)
 	parameters = binders.filter(binder => binder#1 in named and binder#2 != TYPE_WORD).map(binder => "${binder#1}: ${binder#2}").join(", ")
@@ -316,6 +336,18 @@ spelled_as(host: HostTyping, name: text, binders: list<list<text>>, result: text
 		typed_modules(host.language, [declared_module(host.language, code)], host.types, LAYOUT_CHECKED)
 	} catch refusal { refused(LAYOUT, "${name} runs as ${written}, which wap types as no ${result}: ${refusal.message}") }
 }
+# A host operation checked against its row (kernel/primitives.wap): its operands, the parameters it names, numbers and
+# operations inside it, of exactly the wasm types the row takes; the wasm types it gives
+wasm_types(name: text, binders: list<list<text>>, spelling: Node): list<list<int>> := match spelling {
+	Prim(operation, given) => {
+		row = PRIMITIVES.get(text(operation)) ?? refused(LAYOUT, "${name} runs as ${operation}, which is no operation of the host")
+		if given.flat_map(operand => wasm_types(name, binders, operand)) != row.takes { refused(LAYOUT, "${name} runs as the host's ${operation}, which takes operands of other wasm types") }
+		row.gives
+	}
+	Number(value) => [wasm_type(name, if value is int then INT_TYPE else FLOAT_TYPE)]
+	_ => [wasm_type(name, (binders.find(binder => binder#1 == text(spelling)) ?? refused(LAYOUT, "${name} runs as an operation on ${spelling}, which is no parameter"))#2)]
+}
+wasm_type(name: text, type: text): list<int> := WORD_LAYOUTS.get(type) ?? refused(LAYOUT, "${name} runs as a host operation on a ${type}, which has no wasm type")
 # the wap type a type's values run as, where a layout is checked: one the prelude lays out no way to run, a type
 # variable `T` or `Effects`, whose values a layout only passes on, as the theory names it
 host_type(p: Theory, c: Checker, type: Term): text := host_type(p, c, type, unlaid => shown_for(c, unlaid))

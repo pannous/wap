@@ -258,6 +258,10 @@ check "code given uses a file of the current folder" "$(cd "$stage" && "$native_
 check "wap - runs the program standard input gives" "$(printf '%s\n' 'print 1 + 1' | "$native_wap" - 2>&1)" "2"
 # a compiler run from source with no library beside it and no warm state yet, as from wap's own tree, still compiles
 check "a compiler with no library beside it compiles hello" "$(rm -rf "$stage/bare" && mkdir -p "$stage/bare" && cp -R "$tree/wap" "$stage/bare/" && : >"$stage/bare/wap/warm.packed" && : >"$stage/bare/wap/types.wasm" && cd "$stage" && printf '%s\n' 'print "Hello"' >bare_hello.wap && "$native_wap" "$stage/bare/wap/compiler.wap" bare_hello.wap bare_hello.wasm 2>&1 && "$native_wap" bare_hello.wasm 2>&1)" "Hello"
+# an option before the program is told to it (the user: every run of a painting program headless, --no-window): `--no-window` makes it windowless, a program without it is not
+printf '%s\n' 'use os' 'print windowless()' >"$stage/windowless.wap"
+check "wap --no-window runs the program windowless" "$(cd "$stage" && "$native_wap" --no-window windowless.wap 2>&1; "$native_wap" windowless.wap 2>&1)" "yes
+no"
 # `wap verify <file>` runs the verify program beside its compiler on the file, from any folder
 printf '%s\n' 'axiom choice: Prop' >"$stage/axiom_only.wap"
 check "wap verify gives each axiom and law its verdict, from any folder" "$(cd "$stage" && "$native_wap" verify axiom_only.wap 2>&1)" "choice: Axiom"

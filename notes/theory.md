@@ -302,19 +302,22 @@ What runs is believed where the kernel cannot see it (notes/coc-plan.md 9.7, 10.
 (from T2b its shortcuts on i64 with the overflow check, and a text literal opened into its code points), and
 the layouts of the prelude, each a `runs(…)` statement after the declaration it is about, which erase reads in place
 of the declaration's value (`elaborate/file.wap` layout_noted). Only the prelude writes them: every door refuses a
-program's own. The run door checks each before it runs anything (`run/erase.wap` layouts_checked): a spelling is
-host code, so wap's own typer types it as the value of a definition of the parameters it names, each at the wap type
-its values run as (`nat`'s as an int), a case's test as a bool and its fields as their wap types, a type's spelling as
-a wap type. What the typer checks is only that a spelling is well typed; that it means what the theory's word means
-is believed, and tested by the laws run on values. The set is kept small:
+program's own. The run door checks each before it runs anything (`run/erase.wap` layouts_checked). A spelling that
+is a host operation, `prim i64.add(m, n)`, is checked against its row in the table of the host's operations
+(wap/kernel/primitives.wap): its operands, the parameters it names at the wasm types their values run as (`nat`'s as an
+int, an i64), numbers and the operations inside it, are exactly the wasm types the row takes, and the row gives the
+wasm type of the declaration's value. Any other spelling (a list's, until lists have their rows) is host code, which
+wap's own typer types as the value of a definition of the parameters it names, a case's test as a bool and its fields
+as their wap types, a type's spelling as a wap type. What is checked is only that a spelling fits; that it means what
+the theory's word means is believed, and tested by the laws run on values. The set is kept small:
 
 | what | runs as | believed |
 |---|---|---|
-| `nat`, `int` | a machine int: `nat.zero`, `nat.successor`, `int.of_nat`, `int.negative_successor` by their tests and fields | the tests split the ints as the cases split the numbers, and `it - 1`, `-it - 1` undo the cases |
+| `nat`, `int` | a machine int: `nat.zero`, `nat.successor`, `int.of_nat`, `int.negative_successor` by their tests and fields | the tests split the ints as the cases split the numbers, and `i64.sub(it, 1)`, `i64.sub(-1, it)` undo the cases |
 | `bool` | wap's bool: `bool.no`, `bool.yes` | |
-| `add`, `multiply`, `equals` | the machine's `+`, `*`, `==` on two nats | they compute what the recursions do, below the wrap |
-| `minus`, `sum`, `times`, `negative`, `equal_integers` | the machine's `-`, `+`, `*`, `< 0`, `==` on ints | as above |
-| `negated` | `not` | |
+| `add`, `multiply`, `equals` | the machine's `i64.add`, `i64.mul`, `i64.eq` on two nats | they compute what the recursions do, below the wrap |
+| `minus`, `sum`, `times`, `negative`, `equal_integers` | the machine's `i64.sub` from 0, `i64.add`, `i64.mul`, `i64.lt_s` with 0, `i64.eq` on ints | as above |
+| `negated` | `i32.eqz` | |
 | `list`, `count`, `item_at`, `drop`, `joined`, `mapped` | wap's list: `list.empty`, `list.item` by `#it == 0`, `#it > 0`, `it#1`, `drop(it, 1)`; `#xs`, `xs#i`, `drop(xs, n)`, `xs + ys`, `xs.map(f)` | wap's list functions count, index, drop, join and map as the recursions do |
 | `Subset` | its value: `Subset.intro` as the value, its proof gone | |
 | `Eff`, `pure`, `bind` | a computation as its value, `pure(x)` as x, `bind(c, next)` as `next(c)` | a computation's effects happen as it runs |
