@@ -10,11 +10,14 @@ use "../compute.wap"
 use "../below.wap"
 use "../show.wap"
 use "../elaborate/read.wap"
+use "../../../core/parse/atoms.wap"
 use "terms.wap"
 use "hosts.wap"
 
-# a binder named nothing a program can write runs under this name; the value a choice is made on, under that one
+# a binder named nothing a program can write runs under this name, one named by words under them joined by this;
+# the value a choice is made on, under that one
 UNNAMED := "x"
+NAME_JOINER := "_"
 CHOSEN := "chosen"
 
 # An erase under way: the checker its terms are typed by, the run name of each free variable it went into, and what
@@ -53,7 +56,8 @@ run_of(e: Erasing, t: Term): Run := match t.shape {
 applied(e: Erasing, function: Term, given: list<Term>): Run := match function.shape {
 	Constant(name, levels) => {
 		spelling = HOST_FUNCTIONS.get(name)
-		if spelling is not ø { return host_run(e, name, spelling!, data_runs(e, given)) }
+		if spelling is not ø { return host_run(e, name, spelling!, given) }
+		if name == HOST_SEQUENCE { return sequenced(e, given) }
 		match declared_named(e.p.environment, name).kind {
 			Recursor(facts) => return chosen(e, name, facts, given)
 			_ => ø
@@ -62,7 +66,7 @@ applied(e: Erasing, function: Term, given: list<Term>): Run := match function.sh
 		if place(e.p.environment, name) > e.p.prelude_size {
 			definition_erased(e, name)
 			kept = data_runs(e, given)
-			return if kept is empty then Global(name) else Called(Global(name), kept)
+			return if kept is empty then Global(written_name(e, name)) else Called(Global(written_name(e, name)), kept)
 		}
 		value = unfolded(e.c, apply_all(function, given)) ?? refused(RUNNING, "${name} runs by nothing: it has no value and the host does not run it")
 		run_of(e, beta(head(value), arguments(value)))
@@ -73,11 +77,27 @@ applied(e: Erasing, function: Term, given: list<Term>): Run := match function.sh
 # the arguments that are data, as they run
 data_runs(e: Erasing, given: list<Term>): list<Run> := given.filter(argument => is_data(e, argument)).map(argument => run_of(e, argument))
 
-# the host's spelling of a prelude function given all the arguments it takes
-host_run(e: Erasing, name: text, spelling: text, arguments: list<Run>): Run := {
-	takes = #spelling.split("\$") - 1
-	if takes != #arguments { refused(RUNNING, "${name} is given ${#arguments} of its ${takes} arguments: the host runs it called whole") }
-	Host(spelling, arguments)
+# The host's spelling of a prelude function given all the arguments it takes: those it spells, numbered again in
+# their order
+host_run(e: Erasing, name: text, spelling: text, given: list<Term>): Run := {
+	takes = #binders_of(declared_named(e.p.environment, name).type)
+	if takes != #given { refused(RUNNING, "${name} is given ${#given} of its ${takes} arguments: the host runs it called whole") }
+	used = (1 to #given).filter(at => spelling.contains("\$${at}"))
+	Host(used.fold(spelling, (spelled, at) => spelled.replace("\$${at}", "\$${used.index_of(at)}")), used.map(at => run_of(e, given#at)))
+}
+# the binders of a function type, as written
+binders_of(type: Term): list<Term> := match type.shape {
+	Pi(binder, domain, body) => [domain] + binders_of(body)
+	_ => []
+}
+# a computation handing its value to the next: the value held under the next one's binder for its body
+sequenced(e: Erasing, given: list<Term>): Run := {
+	if #given != HOST_SEQUENCE_ARGUMENTS { refused(RUNNING, "${HOST_SEQUENCE} is given ${#given} arguments: it runs given all it takes") }
+	next = given#HOST_SEQUENCE_NEXT
+	match next.shape {
+		Lambda(binder, domain, body) => run_of(e, let_in(binder, domain, given#HOST_SEQUENCE_FIRST, body))
+		_ => refused(RUNNING, "what ${HOST_SEQUENCE} hands its value to is no function written in place")
+	}
 }
 
 # A recursor given all its arguments, its major premise last, as a choice between its minor premises, one per case,
@@ -147,7 +167,8 @@ runs_on(e: Erasing, type: Term): bool := not (result_of(computed(e.c, type)).sha
 # the function has it
 named_variable(e: Erasing, binder: text, type: Term): Term := {
 	variable = hypothesis(e.c, binder, type)
-	written = if binder == "" or binder == "_" then UNNAMED else binder
+	spelled = binder.codepoints.map(c => if is_name_char(text(c)) then text(c) else NAME_JOINER).join("")
+	written = if spelled == "" or spelled == NAME_JOINER then UNNAMED else spelled
 	name = written
 	count = 1
 	while name in e.scope { count += 1; name = "${written}${count}" }
@@ -162,8 +183,9 @@ definition_erased(e: Erasing, name: text) := {
 	e.erased += [name]
 	outer = e.scope
 	e.scope = []
-	declaration = declared_named(e.p.environment, name)
-	body = unfolding(declaration) ?? refused(RUNNING, "${name} runs by nothing: it has no value")
+	refusal = e.p.run_refusals.get(name)
+	if refusal is not ø { refused(RUNNING, "${name} calls itself, and runs by its body as written, which is kept by no proof: ${refusal!}") }
+	body = e.p.run_terms.get(name) ?? unfolding(declared_named(e.p.environment, name)) ?? refused(RUNNING, "${name} runs by nothing: it has no value")
 	parameters: list<Typed> = []
 	while yes {
 		match body.shape {
@@ -178,12 +200,28 @@ definition_erased(e: Erasing, name: text) := {
 	result = run_type(e, type_of(e.c, body))
 	# (the body erased first: the functions it reaches are added meanwhile)
 	run_body = run_of(e, body)
-	e.running.routines += [Routine(name, parameters, result, run_body)]
+	e.running.routines += [Routine(written_name(e, name), parameters, result, run_body)]
 	e.scope = outer
 }
 
-# the wap type that holds a type's values as they run
-run_type(e: Erasing, type: Term): text := match computed(e.c, type).shape {
+# the name a function of the program is written by, which wap reads: of an overload, the name the overloads share;
+# of a declaration hiding the prelude's, the program's name
+written_name(e: Erasing, name: text): text := {
+	shared = e.p.overloads.keys().filter(kernel => name in e.p.overloads[kernel])
+	kernel = if shared is empty then name else shared#1
+	hiding = e.p.hidden.keys().filter(written => e.p.hidden[written] == kernel)
+	if hiding is empty then kernel else hiding#1
+}
+
+# the wap type that holds a type's values as they run; a computation's, its value's
+run_type(e: Erasing, type: Term): text := {
+	folded = computed_folded(e.c, type)
+	match head(folded).shape {
+		Constant(name, levels) => if name == HOST_COMPUTATION then run_type(e, arguments(folded)#HOST_COMPUTATION_VALUE) else held_type(e, folded)
+		_ => held_type(e, folded)
+	}
+}
+held_type(e: Erasing, type: Term): text := match computed(e.c, type).shape {
 	Constant(name, levels) => HOST_TYPES.get(name) ?? refused(RUNNING, "a value of ${name} has no layout the host runs it in yet")
 	_ => refused(RUNNING, "a value of ${shown_for(e.c, type)} has no layout the host runs it in yet")
 }
