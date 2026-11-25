@@ -6,6 +6,7 @@ use "../types/operators.wap"
 use "rules/patterns.wap"
 use "parse/operator_table.wap"
 use "stage.wap"
+use "errors.wap"
 use "emit/memory.wap"
 use "analyze/declarations.wap"
 
@@ -28,8 +29,8 @@ class Rules { by_head: map<text, list<Rule>>, checked: bool = no }
 # looser_than: group name → every group it binds tighter than, the order of the groups' relations, derived from
 # `groups` whenever they change (core/parse/operator_table.wap related_groups); reading: the alias rows the file being
 # read names its words by, its own alias lines' and its used files'; words: the names a program's file defines at its
-# top
-class Grammar { groups: list<Group>, operators: list<Operator>, phrase_words: PhraseWords = PhraseWords({}, {}), shape_rules: Rules = Rules({}), typed_rules: Rules = Rules({}), patterns: map<text, Declared> = {}, declared_rules: Rules = Rules({}), looser_than: map<text, list<text>> = {}, group_names: NameIndex = NameIndex(), operator_names: NameIndex = NameIndex(), circumfix: map<text, text> = {}, reading: list<Alias> = [], words: map<text, bool> = {} }
+# top; declares: whether the file or a file it uses declares anything beyond the base, which a grammar joins
+class Grammar { groups: list<Group>, operators: list<Operator>, phrase_words: PhraseWords = PhraseWords({}, {}), shape_rules: Rules = Rules({}), typed_rules: Rules = Rules({}), patterns: map<text, Declared> = {}, declared_rules: Rules = Rules({}), looser_than: map<text, list<text>> = {}, group_names: NameIndex = NameIndex(), operator_names: NameIndex = NameIndex(), circumfix: map<text, text> = {}, reading: list<Alias> = [], words: map<text, bool> = {}, declares: bool = no }
 # What the build hands the compile: readers, by file ending, for files that are no wap source (a compiled module's);
 # memory: how a build keeping values in the memory lays them out (core/emit/memory.wap MemoryLayout); standard: the
 # words of the standard library's modules, each with the modules defining it (extensions/warm.wap); use_free_modules:
@@ -63,10 +64,10 @@ copy(row: Operator) as Operator := Operator(row.spelling, row.name, row.infix, r
 
 # A file's own grammar is the base's joined, then each used file's, in the order written, so what it declares joins
 # its own tables alone (wiki/use.md: a module's operators, rules and aliases reach the files that use it, and theirs).
-# A used grammar's entry of a name is taken as that grammar has it, as it holds whatever the base's held
+# Rows of one name join: a group's relations, an operator's fixities
 joined(into: Grammar, from: Grammar) := {
-	rows_joined(into.groups, from.groups.map(row => copy(row)), group => group.name)
-	rows_joined(into.operators, from.operators.map(row => copy(row)), operator => operator.spelling)
+	rows_joined(into.groups, from.groups.map(row => copy(row)), group => group.name, (a, b) => Group(a.name, (a.tighter_than + b.tighter_than).unique, a.grouping))
+	rows_joined(into.operators, from.operators.map(row => copy(row)), operator => operator.spelling, (a, b) => Operator(a.spelling, a.name, fixity_joined(a, a.infix, b.infix), fixity_joined(a, a.prefix, b.prefix), fixity_joined(a, a.postfix, b.postfix)))
 	into.phrase_words.leading.update(from.phrase_words.leading)
 	into.phrase_words.inner.update(from.phrase_words.inner)
 	for stage in RULE_STAGES { joined(rules_of(into, stage), rules_of(from, stage)) }
@@ -75,7 +76,9 @@ joined(into: Grammar, from: Grammar) := {
 	into.reading = (into.reading + from.reading).unique
 	into.words.update(from.words)
 }
-rows_joined(into: list<T>, from: list<T>, name_of: (T) -> text) := { for row in from { at = into.index_where(other => name_of(other) == name_of(row)); if at == 0 { into.add(row) } else { into[at - 1] = row } } }
+rows_joined(into: list<T>, from: list<T>, name_of: (T) -> text, both: (T, T) -> T) := { for row in from { at = into.index_where(other => name_of(other) == name_of(row)); if at == 0 { into.add(row) } else { into[at - 1] = both(into[at - 1], row) } } }
+# an operator's group in one fixity as two used grammars have it: one of them, or both the same; two groups refused
+fixity_joined(row: Operator, group: text, other: text) as text := if group == "" or group == other then other else if other == "" then group else refused(symbol(row.spelling), "${row.spelling} is placed in ${group} by one used module and in ${other} by another: declare it in one module, used by both")
 # the rules a grammar lacks joined, its termination to be checked again once one came
 joined(into: Rules, from: Rules) := {
 	for head in from.by_head.keys {
