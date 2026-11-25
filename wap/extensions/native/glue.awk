@@ -36,7 +36,9 @@ function struct_type(size) {
 	listed = $0; sub(/^[^,)]*/, "", listed); sub(/\);.*$/, "", listed)
 	count = split(listed, types, /, */)
 	name = unescaped(name); size = 0
-	if (match(name, / [0-9]+\*byte$/)) { size = substr(name, RSTART + 1) + 0; name = substr(name, 1, RSTART - 1) }
+	# the C name, then its marks (extensions/c/foreign.wap c_import_name): a struct's size, the effect Device
+	if (match(name, / [0-9]+\*byte/)) size = substr(name, RSTART + 1) + 0
+	sub(/ .*$/, "", name)
 	parameters = "struct " module "* library"; c_parameters = ""; arguments = ""
 	for (i = 2; i <= count; i++) {
 		parameters = parameters ", " types[i] " value" i
