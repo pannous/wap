@@ -19,7 +19,7 @@ function unescaped(name,    decoded, code) {
 # the C type an argument of this wasm2c type is given to the C function as
 function c_type(wasm_type) { return wasm_type == "u32" ? "void*" : wasm_type }
 function c_value(wasm_type, name) { return wasm_type == "u32" ? "wasi_memory(library) + " name : name }
-# a struct given by value last, its size after the C name (`wgpuInstanceRequestAdapter bytes<40>`,
+# a struct given by value last, its size after the C name (`wgpuInstanceRequestAdapter 40*byte`,
 # extensions/c/foreign.wap c_import_name): the u64 that points to its bytes, given as the struct of that size C takes
 function struct_type(size) {
 	if (!(size in structs)) { structs[size] = 1; glue = glue sprintf("typedef struct { uint64_t words[%d]; } bytes%d;\n", (size + 7) / 8, size) }
@@ -36,7 +36,7 @@ function struct_type(size) {
 	listed = $0; sub(/^[^,)]*/, "", listed); sub(/\);.*$/, "", listed)
 	count = split(listed, types, /, */)
 	name = unescaped(name); size = 0
-	if (match(name, / bytes<[0-9]+>$/)) { size = substr(name, RSTART + 7, RLENGTH - 8) + 0; name = substr(name, 1, RSTART - 1) }
+	if (match(name, / [0-9]+\*byte$/)) { size = substr(name, RSTART + 1) + 0; name = substr(name, 1, RSTART - 1) }
 	parameters = "struct " module "* library"; c_parameters = ""; arguments = ""
 	for (i = 2; i <= count; i++) {
 		parameters = parameters ", " types[i] " value" i
