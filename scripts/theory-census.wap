@@ -9,41 +9,62 @@ use "../wap/extensions/theory/elaborate/read.wap"
 use "../wap/extensions/theory/options.wap"
 use "../wap/extensions/theory/environment.wap"
 use "../wap/core/language.wap"
+use "../wap/core/pipeline.wap"
+use "../wap/core/analyze/declarations.wap"
 
 REFUSED_LINE := "refused "
 TOTAL_LINE := "accepted "
 
 refusal_printed(program: text, refusal: Error) := print "${REFUSED_LINE}${program}: ${refusal.message}"
-# the census's one language, its files read once, and the theories made, by the modules elaborated into them in
-# order: the prelude's alone under no module
-class Census { language: Language; theories: map<text, Theory> = {} }
-# a program's own statements elaborated on its modules, each refusal printed: how many the kernel accepted, of how
+# the census's one language, its files read once; the prelude's theory; each module's theory, of the prelude, the
+# modules it uses and its own statements, made once, with how many of its statements the kernel accepted, of how many;
+# the modules whose theory is being made, which a module using one back cannot start from
+class Census { language: Language; prelude: Theory? = ø; theories: map<text, Theory> = {}; counts: map<text, list<int>> = {}; making: list<text> = [] }
+# a program's statements elaborated on the modules it uses, each refusal printed: how many the kernel accepted, of how
 # many; a program the elaborator cannot read has all its statements refused
 program_counted(census: Census, spellings: Theory, program: text): list<int> := {
 	try {
-		modules = program_modules(census.language, program)
-		p = theory_after(census, spellings, modules.take(#modules - 1))
-		taken = module_units(modules.last).map(unit => statement_accepted(p, program, unit))
-		return [#taken.filter(accepted => accepted), #taken]
+		code = operated_file(census.language, program)
+		theory_of(census, spellings, code)
+		return census.counts#source_key(code)
 	} catch refusal { refusal_printed(program, refusal) }
 	[0, #written_units(program)]
 }
-# a copy of the theory of the prelude and these modules, elaborated in order, each made once a census
-theory_after(census: Census, spellings: Theory, modules: list<Node>): Theory := {
-	key = modules.map(module_named).join("\n")
-	if not census.theories.has(key) { census.theories[key] = theory_made(census, spellings, modules) }
-	copied(census.theories#key)
+# a module's theory, made once a census: on the theory of the modules it uses, its statements, each counted
+theory_of(census: Census, spellings: Theory, code: Node): Theory := {
+	key = source_key(code)
+	if census.theories.has(key) { return census.theories#key }
+	census.making += [key]
+	p = theory_using(census, spellings, modules_used(code, file => operated_file(census.language, file)))
+	taken = module_units(code).map(unit => statement_accepted(p, key, unit))
+	census.counts[key] = [#taken.filter(accepted => accepted), #taken]
+	census.theories[key] = p
+	census.making = census.making.filter(making => making != key)
+	p
 }
-theory_made(census: Census, spellings: Theory, modules: list<Node>): Theory := {
-	if modules is empty {
+# a theory of the prelude and these modules, in order: a copy of the theory of the one using the most of them, the
+# others elaborated on it
+theory_using(census: Census, spellings: Theory, modules: list<Node>): Theory := {
+	widest: Node? = ø
+	for module in modules {
+		if not (source_key(module) in census.making) and (widest is ø or #used_of(census, module) > #used_of(census, widest!)) { widest = module }
+	}
+	if widest is ø { return copied(prelude_theory(census, spellings)) }
+	p = copied(theory_of(census, spellings, widest!))
+	covered = used_of(census, widest!).map(source_key) + [source_key(widest!)]
+	for module in modules.filter(module => not (source_key(module) in covered)) {
+		for unit in module_units(module) { statement_accepted(p, source_key(module), unit) }
+	}
+	p
+}
+used_of(census: Census, code: Node): list<Node> := modules_used(code, file => operated_file(census.language, file))
+prelude_theory(census: Census, spellings: Theory): Theory := {
+	if census.prelude is ø {
 		p = copied(spellings)
 		prelude_checked(p, census.language)
-		return p
+		census.prelude = p
 	}
-	p = theory_after(census, spellings, modules.take(#modules - 1))
-	module = modules.last
-	for unit in module_units(module) { statement_accepted(p, module_named(module), unit) }
-	p
+	census.prelude!
 }
 # whether the kernel accepted a statement, its refusal printed and what it wrote into the theory taken back
 statement_accepted(p: Theory, program: text, unit: list<Node>): bool := {
