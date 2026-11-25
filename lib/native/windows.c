@@ -130,6 +130,8 @@ static ssize_t posix_readlink(const char* path, char* buffer, size_t size) {
 	}
 	return (ssize_t)strlen(buffer);
 }
+// the native wap's own readlink (main.c wap_path_readlink)
+#define readlink posix_readlink
 // a path made absolute, NULL for one that names nothing; resolved NULL: a copy the caller frees
 static char* posix_realpath(const char* path, char* resolved) {
 	char buffer[MAX_PATH];
