@@ -859,7 +859,8 @@ by the second opinion, not by a test.
   two readings fit, refuse and name both.
 - **Compile time.** Every fact is now built through the kernel. Each T step measures the wall time of the
   self-build (`--stage 2`) before it lands: at most a fifth more than the step before, else it goes to the user.
-  The baseline before T3, a warm compile of `print "Hello"` on the Mac at 07e358d8, 350 ms in all:
+  The baseline before T3, a warm compile of `print "Hello"` on the Mac at 07e358d8, 350 ms in all
+  (scripts/compile-steps.wap measures it again):
   | step | ms |
   |---|---|
   | the warm state brought in | 12 |
