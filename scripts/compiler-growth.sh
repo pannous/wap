@@ -46,6 +46,10 @@ fresh_in_new=$(git diff --unified=0 "$range" -- "${GUARDED_FILES[@]}" | awk -v n
 		print fresh + 0
 	}')
 [ "$fresh_in_new" -eq 0 ] && new_files=""
+# only the kernel's rule functions make a judgement (notes/coc-t2.md "Checked(term, type)"), so a Checked found is one
+# the rules concluded
+judgements_made=$(git grep -n -E '(^|[^A-Za-z_])Checked\(' "$tip" -- 'wap/*.wap' ':!wap/kernel/typing.wap' | grep -v -E '^[^:]+:[^:]+:[0-9]+:[[:space:]]*#')
+[ -n "$judgements_made" ] && { echo "FAIL only wap/kernel/typing.wap's rule functions make a judgement:"; echo "$judgements_made"; exit 1; }
 [ -z "$new_rules$new_files" ] && exit 0
 
 messages=$(git log --format=%B "$base..$tip")
