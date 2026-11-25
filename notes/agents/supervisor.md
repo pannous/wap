@@ -72,6 +72,9 @@ the team, crash resume), notes/roles.md (what the other roles do).
 - Quick capability checks: `/Users/me/dev/bin/warp --no-window 'use math; dir(math)'`; never rebuild for it.
 - Any extensive investigation (more than a few lookups: reading sources, profiles, crates, history) goes to an
   agent, a background subagent or a worker session; I keep only the quick answer from what is known and its verdict.
+- Daily audit (user 2026-11-25): once a day `notes/agents/start.sh auditor` (notes/agents/auditor.md) starts a max-effort
+  session that writes notes/audit/<date>.md and stops; it counts against no worker limit. When it reports, kill its
+  tmux by exact name, turn the accepted items into cards (core and kernel rewrites go to wap-interviewer).
 - Never assign @copilot. Releases (version bump, tag, tap formula) need no approval; nothing waits for brew.
 
 - Focus (user 2026-11-22): only wap. Warp Vitals is off: nobody runs scripts/vitals.py or republishes its page.
