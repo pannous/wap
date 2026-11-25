@@ -388,8 +388,10 @@ The kernel and the elaborator name no library word. Where a mechanism needs one,
 declaration:
 - **numbers**: which type number literals belong to, and which functions the arithmetic shortcuts stand for (6.7);
 - **quotient**: which type is the equality (6.6);
-- **texts**: a text literal is the library's function from the number that spells its code points, applied to that
-  number: a 1 and then the code points, base 0x110000, so every text has its own number (`texts(text_of)`). The kernel has one literal, the natural number;
+- **texts**: a text literal is the kernel's second literal, typed by the library's function from a list of code
+  points; where a rule asks for a constructor it opens into that function applied to the list of its code points,
+  each a number, as Lean's string literal does (`texts(text_of, list.empty, list.item)`, notes/coc-t2.md). The
+  kernel has two literals, the natural number and the text;
 - **conversions, instances, the computation type, decidable conditions**: declarations of the types module that the
   elaborator's general mechanisms read (section 8); spellings such as `T where c`, `T?` and `if` reach library
   functions through rules in sugar/.
@@ -408,7 +410,7 @@ short of a compiler that builds the kernel itself wrongly (10.2).
 ## 6 The kernel
 
 The rules are Lean 4's kernel's, stated here as wap builds them, with four departures. Three only narrow what is
-accepted: the natural number is the one literal (a text literal is a library function of a number); no library name
+accepted: the natural number and the text are the literals (a text opens into a library function of its code points); no library name
 is written in the kernel, each is bound by a declaration (5.4); a projection is allowed only out of a structure that
 does not hold itself. One adds equalities, and has its own argument: arithmetic on literals is switched on by
 theorems instead of being built in (6.7). Every rule has a test on both sides: something it accepts and something
@@ -426,7 +428,8 @@ it refuses (section 11).
 | function | binder name, domain, body | `x => b` |
 | function type | binder name, domain, body | `(x: A) -> B`; `A -> B` when the body ignores the binder |
 | let | name, type, value, body | |
-| number | a natural number below 2^63, an i64 | the one literal |
+| number | a natural number below 2^63, an i64 | a literal |
+| text | its code points | a literal, opened into the bound function of the list of its code points |
 | projection | structure name, field index, term | a field of a structure value |
 
 A level is zero, a successor, `max`, `imax` or a parameter name. Terms are complete: no hole, no overload, no
@@ -959,8 +962,10 @@ carried once, as the kernel accepted them when it was built (13); the emitter er
 
 Order: K1, then K2 to K6 in a row, with K3 right after K2 since every program is full of numbers. L follows K as
 its table says. P1 and P2 follow K4; P3 and P4 follow P2, in the proof extension. T1 to T8 follow one another, T1b right after T1, each
-landing before the next begins. T1 and T2 change the kernel the seed reads beside it, so each takes the careful
-path: the new kernel added, the seed refreshed, then the old code deleted. Each of T3 to T6 deletes the files of
+landing before the next begins. T1 changes the kernel the seed reads beside it, so it takes the careful
+path: the new kernel added, the seed refreshed, then the old code deleted. T2 changes nothing the seed reads (the
+compiler reads only kernel/forms.wap and links no moved file until T3), so its sub-steps land on the normal path
+plus the census (notes/coc-t2.md); T3, the first step whose core uses wap/kernel's typing, takes the careful path. Each of T3 to T6 deletes the files of
 wap/extensions/theory/elaborate whose job analyze took over, so the two typers never both do one job. The E
 milestones are reached in the T steps that name them.
 

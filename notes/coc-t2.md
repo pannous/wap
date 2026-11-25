@@ -54,24 +54,27 @@ provers' goal search).
 The new shape:
 
 ```
-# one statement the kernel accepted, by its id: the place in the log, from 1
-class Entry { statement: Accepted; declarations: list<Declaration>; axioms: list<list<int>> }
-# every statement accepted on the way to the newest environment; ids index it; names find ids
-class Log { entries: list<Entry> = []; named: map<text, list<int>> = {} }
-# an environment: the log as far as it reaches, and what the binding statements bound by then
-class Environment { log: Log; reach: int = 0; numbers: Numbers? = ø; texts: int? = ø }
+# a declaration the kernel accepted, by its id; a dropped one is a tombstone, its id never given again
+enum Entry { Live(declaration: Declaration, axioms: list<int>); Dropped }
+# every declaration accepted so far, by id; ids come from the counter and are never reused
+class Log { entries: list<Entry> = []; next: int = 1 }
+# an environment: the ids it holds reach up to `reach`, and what the binding statements bound by then
+class Environment { log: Log; reach: int = 0; numbers: Numbers? = ø; texts: Texts? = ø }
 ```
 
 - **Checking returns a new environment or refuses.** `declared(e, d): Environment`, `block_declared`,
-  `numbers_declared` and the rest return `Environment(e.log, e.reach + 1, …)`. A refused statement returns
-  nothing, so the caller still holds `e`, and nothing needs to be rolled back.
-- **The log is shared and append-only.** An environment sees only the ids up to its own `reach`. Appending to an
-  environment whose log has grown past its reach first drops the entries after that reach. Those entries came from
-  an attempt that was given up (a refused statement, a template's try, a failed proof search), and that attempt's
-  environment is never used again. The persistence is therefore linear: an old environment can be returned to, but
-  two newer ones cannot live side by side. Every current use is linear in this way (elaborate, prove, the door).
-  Making it loud instead: stamp the log with a generation that dropping entries increments, so that using a dropped
-  environment refuses instead of reading stale data (a decision for review).
+  `numbers_declared` and the rest return an Environment that reaches the ids they appended. A refused statement
+  returns nothing, so the caller still holds `e`, and nothing needs to be rolled back. `declared(e, d)` hides the
+  representation: a persistent map can replace the log later without any caller changing.
+- **The log is shared, ids are monotonic.** Ids come from `Log.next` and are never reused. Appending to an
+  environment whose reach is behind the newest id first marks every live entry after that reach `Dropped`: those
+  came from an attempt that was given up (a refused statement, a template's try, a failed proof search). Since the
+  ids stay taken, anything still pointing into the dropped attempt (a term naming one of its constants, a stale
+  `c.types` cache entry, a stale environment) finds a tombstone and is refused ("unknown name"), never read as
+  some later declaration. The persistence is linear: an old environment can be returned to, but two newer ones
+  cannot both be extended; every current use is linear (elaborate, prove, the door), and a violation is loud.
+- **No name index in the kernel.** Which id a written name means belongs to the door's and the elaborator's scope
+  (`Log.named` is not kept): the door keeps its own `map<text, int>`, the elaborator one per module.
 - **Ids, not names.** `Constant(id: int, levels)` replaces `Constant(name: text, levels)`. Hashing and comparing
   a constant becomes one integer operation. `show` prints `log.entries[id]`'s name, so a name's text is used only
   for showing. `Numbers`, `RecursorFacts`, `InductiveFacts` and `QuotientPart` hold ids. The kernel no longer has a
@@ -79,8 +82,21 @@ class Environment { log: Log; reach: int = 0; numbers: Numbers? = ø; texts: int
   id a written name means is the elaborator's question (a module's scope, then the ones it uses), never the
   kernel's.
 - **`place`** (which of two definitions unfolds first, 6.5) is the id: the later declaration has the higher id.
-- **`accepted`** is the log itself: an export walks `entries` up to the reach. An exported name that the log holds
-  twice gets its id appended (`Side.17`), because lean4export's format needs unique names.
+- **`accepted`** is the log itself: an export walks the live entries up to the reach. An exported name that the
+  log holds twice gets its id appended (`Side.17`), because lean4export's format needs unique names. The
+  statements an export writes as blocks and bindings are marked on their first entry.
+- **A block names itself through free variables.** Today a block's cases name its types as constants before they
+  are declared: elaborate/blocks.wap:93 builds `constant(type_names#at, levels)`, and inductive.wap `holding`
+  adds the types as axioms to a copied environment so the checks can type them. With ids, those axioms would take
+  ids that the block's real declarations then need. Instead the block arrives with its types as free variables
+  (hypotheses of the checker, `(T: Type) -> …` as `free(k)`), checks 1 to 5 type them as hypotheses, and on
+  acceptance the kernel takes the fresh ids and substitutes each type's constant for its variable in every case
+  and recursor. `holding` goes, and the elaborator (blocks.wap) and explicit.wap write free variables instead of
+  constants. This lands with T2d, planned here before it.
+- **below.wap's side state is keyed by id.** `products` and the courses below.wap made are kept by the id of
+  their statement and of each course's declaration, and count only while that id is live in the environment at
+  hand. A refused statement's course becomes a tombstone with its declaration, so it is never taken for a course
+  of a later environment (today a refused statement leaves it behind in `courses`).
 
 **Deleted by this:**
 - in the kernel: `copied` (13 lines), `Reach`, `reach_of` and `withdrawn` (14), the `places` and `accepted` maps,
@@ -143,17 +159,27 @@ The kernel stops using lib/magnitude (`use magnitude` in terms, typing, show and
   two comparisons. A shortcut that would overflow returns ø, so the term is left to the definitions and the step
   budget (6.7). About 10 lines. `MAX` is i64's largest value (2^63 − 1), a constant at the top of numbers.wap.
 - `opened` (a number as a case) and `number_computed` (a case as a number, `sum(…, ONE)`) work on int.
-- **Text literals do not fit.** `text_number` spells a text as a 1 followed by its code points in base 0x110000
-  (5.4, notes/theory.md). That is a number of about 21 bits per code point, so i64 holds only three code points,
-  and every longer text literal would fail. Options for review:
-  1. **Recommended:** a text literal term of its own, `Text(value: text)`, typed by the texts statement's function,
-     which opens (as `opened` does for numerals) into that function applied to the list of the text's code-point
-     numerals. The texts statement then binds the list's two cases as well: `texts(text_of, list.add, list.empty)`.
-     This is Lean's kernel's string literal. It costs about 30 kernel lines; 5.4's text paragraph and
-     prelude/data.wap's `text_of` are rewritten.
-  2. Keep the unbounded numbers for text literals only. This contradicts 6.7 ("the kernel has no unbounded
-     arithmetic"), and lib/magnitude would stay in the compiler.
-  3. Split long texts into three-code-point chunks joined by a bound `join`. This is ad hoc and shows badly.
+- **Text literals get a term of their own.** Today `text_number` spells a text as a 1 followed by its code points
+  in base 0x110000, about 21 bits a code point, so an i64 would hold three. The kernel gets a second literal,
+  `Text(value: text)`, as Lean's kernel has its string literal:
+  - its type is the texts statement's function's result; where a rule asks for a constructor, it opens (as
+    `opened` does for a numeral) into that function applied to the list of its code points, each a numeral:
+    `text_of(list.item[1](nat, 104, list.item[1](nat, 105, list.empty[1](nat))))` for `"hi"`;
+  - the statement becomes `texts(text_of, list.empty, list.item)` and is shape-checked as numbers is: the list a
+    block of one type with one level parameter `u` and one parameter `T: Sort(u)`, in `Sort(max(1, u))`, a case
+    without fields and a case of a `T` and a list of `T`, in that order (prelude/data.wap's `list`); `text_of`
+    exactly `list[1](nat) -> X` without level parameters;
+  - about 30 kernel lines (the term, its typing, its opening, the statement's checks, show); prelude/data.wap's
+    `text_of` takes the list instead of the number, and `spelled` goes;
+  - outside the kernel: export.wap writes it as lean4export's `"strVal"` (+2 lines), and second/ reads, types and
+    opens it (+20 lines in read.wap, judge.wap and expressions.wap).
+  - **Not chosen: the elaborator expanding the literal itself** (0 kernel lines). The compiler's source alone holds
+    2,204 text literals of 32,745 code points (14.9 on average, the longest 189; counted over `compiler_sources`).
+    Expanded, a code point is 6 term nodes (three applications, `list.item`, `nat`, the numeral) and a literal 4 more:
+    about 205,000 term nodes and three judgements a code point (about 98,000), against 2,204 nodes and judgements
+    as literals: ninety times the terms, for every text in every program.
+  - Also not chosen: unbounded numbers for texts only (lib/magnitude would stay in the compiler, against 6.7), or
+    three-code-point chunks joined by a bound function (ad hoc, and shows badly).
 - show.wap prints int digits directly (its `use magnitude` goes).
 
 ## The seed rule
@@ -166,7 +192,8 @@ The kernel stops using lib/magnitude (`use magnitude` in terms, typing, show and
 - The moved files enter the census's and the size ratchet's scope automatically, because test/wap/compile.sh's
   `compiler_sources` excludes only extensions/theory and extensions/prove. This is theory-switch's census note:
   the size ceiling (SIZE_NODES, 143,077 today) rises by the kernel's measured nodes (21,312 as moved) in the same
-  commit as the move, and the typing census covers the kernel from then on.
+  commit as the move, and the typing census covers the kernel from then on. Every later sub-step measures again
+  (scripts/wap-size.warp over `compiler_sources`) and sets SIZE_NODES to what it measured, in its own commit.
 - The first seed refresh that matters is T3's, when core `use`s wap/kernel/typing.wap. By then T2b has removed
   `use magnitude`, so the compiler links no library module. Until then, the kernel's source may use only types
   words the seed's types module holds; it does so today, since the seed's compilers build the theory extension.
@@ -179,14 +206,14 @@ theory test areas (`bash test/wap/run.sh --wait theory`) and the census green.
 | step | what | lines (kernel) | checks |
 |---|---|---|---|
 | T2a move | `git mv` the 12 files into wap/kernel, then a pure path edit of every `use` (elaborate 19 files, run 3, second 1, prove, door, scripts/theory-census.wap); SIZE_NODES += 21,312 | +2,241 moved, 0 new | census (418/418 typed), theory areas, test_hello |
-| T2b i64 | `Numeral(int)`, the overflow checks, magnitude out of the kernel, text literals as decided | −15, +10, +30 for option 1 | theory areas, the new line: a shortcut past 2^63 does not fire |
-| T2c persistent | `Log`, `Environment(log, reach, …)`, every `declared…` returns an environment; the deletions above; callers assign instead of mutating | −50, +35 | theory areas, prove's tests |
-| T2d ids | `Constant(id, levels)`, `show` by id, `names_new` goes, the facts hold ids; the elaborator resolves a written name to an id through its module's scope (the extension's lines, not the kernel's) | −8, +20 (elaborate +40) | theory areas, the new line: two modules with the same name |
+| T2b i64 | `Numeral(int)`, the overflow checks, magnitude out of the kernel, the `Text` literal and the new texts statement; export and second/ read it | −15, +10, +30 (outside: +22) | theory areas, test_theory_second, the new lines: a shortcut past 2^63 does not fire; a long text literal checks |
+| T2c persistent | `Log` with its counter and tombstones, `Environment(log, reach, …)`, every `declared…` returns an environment; the deletions above; callers assign instead of mutating; below.wap's state keyed by id | −50, +35 | theory areas, prove's tests |
+| T2d ids | `Constant(id, levels)`, `show` by id, `names_new` goes, the facts hold ids; a block's types as free variables, given their ids on acceptance, `holding` goes; the door and the elaborator resolve a written name to an id through their own scope (the extension's lines, not the kernel's) | −8 − 6, +20 + 15 (elaborate +40) | theory areas, the new line: two modules with the same name |
 | T2e rules | the rule functions and the judgement table; `type_of` as their walk | +60 | theory areas; the theory census time ratio stays under 3 (checked once, then the census retires) |
 | T2f census | the theory census retires: `--theory`, THEORY_ACCEPTED and THEORY_TIME_RATIO leave ratchet_census.sh; scripts/theory-census.wap stays for whoever wants its numbers | 0 | the typing census |
 
-T2a goes first so that every later diff is read in its final place. T2b comes before T2c and T2d because it is the
-only step with a spec decision (texts), so its answer can be waited for while T2c is built. T2e comes last among the
+T2a goes first so that every later diff is read in its final place. T2b's text literal is decided (no form a
+program writes changes). T2e comes last among the
 kernel steps because its rules read ids and return environments.
 
 ## The estimate
@@ -195,12 +222,12 @@ kernel steps because its rules read ids and return environments.
 |---|---|---|
 | moved | 2,300 | 2,241 |
 | judgements | 60 | 60 |
-| environment by id, persistent | 40 | 35 − 50 + 20 − 8 = −3 |
+| environment by id, persistent | 40 | 35 − 50 + 20 − 8 + 15 − 6 = +6 |
 | numbers | (in moved) | −15 + 10 + 30 = +25 |
-| **kernel** | **+2,400** | **about +2,323** |
+| **kernel** | **+2,400** | **about +2,332** |
 
-The elaborator's side (outside the compiler, deleted from T3 on): about +40 for resolving names per module, and a
-few lines fewer where `held` and templates copied the environment.
+Outside the compiler: the elaborator about +40 for resolving names per module (deleted from T3 on), a few lines
+fewer where `held` and templates copied the environment; export and second/ +22 for the text literal.
 
 ## Acceptance (the T2 row, with this page's additions)
 
