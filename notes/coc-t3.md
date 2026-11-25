@@ -12,13 +12,18 @@ The elaborator's unifier is analyze's job from T3 on: letters, `_`, holes and an
 of the unifier. It is untrusted (the kernel checks what it fills in), so it lives in core, beside the typer, not in
 wap/kernel.
 
-| file today | lines | goes to |
-|---|---|---|
-| theory/elaborate/unify.wap | 152 | wap/core/analyze/unify.wap, as it is |
-| theory/elaborate/state.wap: `Elaboration` (the checker, the binders in scope, the holes and their answers), Hole, Problem, Found, `filled`, `holes_in`, `back_to`, `taken_back`, the level holes | 156 | wap/core/analyze/holes.wap, as it is |
+What moves is what the provers call and what that calls in turn, measured over the two files' code lines (no
+comments, no blank lines; data/t3-plan/closure.py): 268 of their 275. analyze calls the same functions, since its holes
+are the provers' holes.
 
-The provers read the elaboration only through `el.c` (39 places) and the moved functions, so the whole record moves
-and no part of it is split off.
+| file today | code lines | moves to wap/core/analyze | stays in the extension |
+|---|---|---|---|
+| theory/elaborate/unify.wap | 133 | all 133, as unify.wap | none |
+| theory/elaborate/state.wap | 142 | 135, as holes.wap: `Elaboration` (the checker, the binders in scope, the holes and their answers), Hole, Problem, Found, `filled`, `holes_in`, `back_to`, `taken_back`, the level holes | 7: `holes_left`, `level_problems_hold`, `unscoped` and CANNOT_FIND, which only the elaborator calls; they go when T5 deletes it |
+
+The provers read the elaboration through `el.c` (39 places) and the moved functions, so the record moves whole.
+The plan's 180 for unification was an estimate of a unifier written fresh. The one the provers already run is 268
+lines, and moving it saves writing a second one.
 
 This settles the audit's finding 6 for two of the three files the provers import (data/extensions-audit/report.md):
 goals, linear, induction, apart, computing, introduction and rewriting import core/analyze/unify.wap and holes.wap
@@ -51,8 +56,8 @@ in analyze, 26 in emit) become the kernel constants of the type words.
   body reads the written or found result type. The body is typed once.
 - **An assignment of another type is a new binding:** `x = 1; x = "a"`, and from there on x holds a text. The
   retyping round goes: typed_among's restart, TypingState `retyped`, `retypings` and `fixed`, and `retyped(…)` in
-  types.wap. A `let`, a `const` or a written type still fixes the type. wiki/type.md "Representation" is checked
-  for the old wording before this lands; a changed sentence goes to the user first.
+  types.wap. A `let`, a `const` or a written type still fixes the type
+  (coc-plan 4).
 - **A kind rule's output is typed in place,** at the node's position and as that node, and never fires on its own
   output. ROUNDS_LIMIT, `refirings` and the refusal "still fire after 100 rewrites" go. A rule's error names the line
   of the phrase it rewrote, because the output keeps that position.
@@ -94,7 +99,7 @@ The whole suite runs at T3b, T3d and T3e, compared line by line with main's last
 
 | step | what | core lines (estimate) | checks |
 |---|---|---|---|
-| T3a unifier | unify.wap and state.wap `git mv` into wap/core/analyze (unify.wap, holes.wap); the elaborator and the provers import them from there; nothing else changes | +308 moved, extension −308 | normal path: theory areas, prove's tests, test_hello |
+| T3a unifier | unify.wap and state.wap `git mv` into wap/core/analyze (unify.wap, holes.wap); the elaborator and the provers import them from there; nothing else changes | +268 moved, extension −268 | normal path: theory areas, prove's tests, test_hello |
 | T3b terms | TYPE facts hold terms; type_notation.wap's readers read terms; the type words declared in wap/types; one notation door; show for messages and format; emit through the readers | +100 (type_notation rewritten in place, the door +40, the declarations in wap/types +40) | careful; the whole suite as before; `--stage 2` time and warm hello measured against the baseline |
 | T3c holes | letters.wap goes: letters, `_` and α are holes of the unifier, `settles`/`deferred` are answers; fits.wap's comparisons go to kernel equality (`same_type`, `same_types`, `bare_fit`, `joined_settling`'s settling) | −169 letters, −45 fits, +60 | careful; `identity(3)` and `identity(int)`; the census |
 | T3d one pass | headers first, assignment as a new binding, the retyping round goes; kind rules typed in place, the refiring goes | −40 analyze, −20 rules, +40 | careful; a recursive function's result found from its body; a kind rule's error names the line of its phrase |
@@ -109,7 +114,7 @@ type_notation.wap.
 
 | | plan (coc-plan 11) | this page |
 |---|---|---|
-| unification | +180 | +308 moved from the extension, then letters.wap −169 |
+| unification | +180 | +268 moved from the extension (measured), then letters.wap −169 |
 | numerals at the expected type | +170 | +170 |
 | types as terms, the notation's readers | +100 | +100 |
 | one pass | +40, −40 | +40, −40 |
@@ -118,7 +123,7 @@ type_notation.wap.
 | functions as opaque constants | | +20 |
 | the holes wired into analyze | | +60 |
 | deleted | letters 235, fits 189, typed_readings and numerals 40 | letters 169, fits 45, ranking and typed_readings 40 |
-| **net** | **+186** | **about +624 in the compiler, −588 in the extension** |
+| **net** | **+186** | **about +584 in the compiler, −548 in the extension** |
 
 Two budget differences:
 - **The unifier moves in, it is not written again:** the extension shrinks by what core gains, and with the prelude moved too the tree as a whole
@@ -136,15 +141,29 @@ T3 is done when all of these hold:
 - the whole suite has no new red;
 - the census types every function, with 0 places typed any beyond today's 4;
 - `--stage 2` is a fixed point;
-- typing stays fast: `--stage 2` takes at most 1.25 times its time before T3a (84 s on the integrator's last run),
-  and a warm `print "Hello"` at most 1.25 times its time before T3a, measured on the same machine;
+- typing stays fast: T3 as a whole adds at most 25% to `--stage 2` (84 s on the integrator's last run) and to a
+  warm `print "Hello"`, each measured against its time before T3a on the same machine. That is a ceiling for the
+  whole step, shared out below, not slack for the first sub-step;
 - letters.wap, typed_readings, ROUNDS_LIMIT and the retyping round are gone, and so are the five ranking words in
   calls.wap and `nearest`'s weights in read.wap.
 
+## The speed budget
+
+Each sub-step measures `--stage 2` and a warm hello, three runs each, the median, against the baseline taken before
+T3a. It lands only if the total so far stays within the sum of the shares so far. A share a sub-step does not use
+carries over to the next one, and one that needs more goes to the supervisor before it lands.
+
+| step | share of the 25% | why |
+|---|---|---|
+| T3a | 0 | moved code only, the elaborator's own |
+| T3b | 10 | each type comparison becomes kernel equality on terms |
+| T3c | 5 | holes and answers in place of letter bindings |
+| T3d | 0 | one pass in place of the retyping rounds and the refiring: expected to be faster, and a gain is credited |
+| T3e | 7 | numerals typed through the kernel, the prelude's declarations read |
+| T3f | 3 | one opaque constant per typed function |
+| T3g | 0 | extension only |
+
 ## Open for the user (through the supervisor)
 
-- **The speed limit:** 1.25 times is the recommendation. A kernel check per type comparison could cost more; if T3b
+- **The speed ceiling:** 25% over T3 as a whole, shared by sub-step as above, is the recommendation. A kernel check per type comparison could cost more; if T3b
   measures above it, the next step is caching the opaque type terms, not a second representation.
-- **`x = 1; x = "a"` as a new binding** changes what such a script says today: an any with a warning becomes a text
-  from the second line on. coc-plan 4 decides it; the wiki sentence, if one says otherwise, goes to the user with
-  T3d.
