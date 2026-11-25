@@ -1,0 +1,228 @@
+# Erase (notes/coc-plan.md 5.1, 9.7): what a program the theory accepted runs, as run terms (terms.wap). Its types,
+# proofs and levels go: a binder or an argument that is a type, a type family or a proof runs as nothing. A function
+# of the prelude runs by the host where hosts.wap says how, else by its value, unfolded where it is used: the prelude
+# has no recursion, so unfolding ends. A function of the program runs as a Routine of its own, erased the first
+# time a value reaches it. A term no run term stands for yet is refused by the rule `running`.
+use "../terms.wap"
+use "../environment.wap"
+use "../typing.wap"
+use "../compute.wap"
+use "../below.wap"
+use "../show.wap"
+use "../elaborate/read.wap"
+use "../../../core/parse/atoms.wap"
+use "terms.wap"
+use "hosts.wap"
+
+# a binder named by words runs under them joined by this; one named nothing a program can write as show.wap's
+# UNNAMED; the value a choice is made on under CHOSEN
+NAME_JOINER := "_"
+CHOSEN := "chosen"
+
+# An erase under way: the checker its terms are typed by, the run name of each free variable it went into, and what
+# runs so far, the functions erased by name
+class Erasing {
+	p: Theory
+	c: Checker
+	names: map<int, text> = {}
+	running: Running = Running()
+	erased: list<text> = []
+	# the run names given in the function being erased, which its variables' names keep apart
+	scope: list<text> = []
+}
+
+# what a program the theory accepted runs: the functions its values reach, and the values
+running(p: Theory): Running := {
+	e = Erasing(p, checker(p.environment, []))
+	e.running.values = p.values.map(value => run_of(e, value))
+	e.running
+}
+
+run_of(e: Erasing, t: Term): Run := match t.shape {
+	Free(id) => Local(e.names.get(id) ?? refused(RUNNING, "this uses the values below a case, which runs by recursion"))
+	Numeral(value) => Natural(value)
+	LetIn(binder, type, value, body) => {
+		held = run_of(e, value)
+		variable = named_variable(e, binder, type)
+		Named(e.names[variable_id(variable)], held, run_of(e, instantiated(body, variable)))
+	}
+	Lambda(binder, domain, body) => refused(RUNNING, "${shown_for(e.c, t)} is a function value, which no program runs from its terms yet")
+	_ => applied(e, head(t), arguments(t))
+}
+
+# a head applied to its arguments as it runs: a host's spelling, a choice of a recursor or a course, a call of a
+# program's function, a prelude function unfolded
+applied(e: Erasing, function: Term, given: list<Term>): Run := match function.shape {
+	Constant(name, levels) => {
+		spelling = host_spelling(name)
+		if spelling is not ø { return host_run(e, name, spelling!, given) }
+		if name == HOST_SEQUENCE { return sequenced(e, given) }
+		match declared_named(e.p.environment, name).kind {
+			Recursor(facts) => return chosen(e, name, facts, given)
+			_ => ø
+		}
+		if name in e.p.environment.courses { return coursed(e, name, given) }
+		if place(e.p.environment, name) > e.p.prelude_size {
+			definition_erased(e, name)
+			kept = data_runs(e, given)
+			return if kept is empty then Global(run_name(e, name)) else Called(Global(run_name(e, name)), kept)
+		}
+		value = unfolded(e.c, apply_all(function, given)) ?? refused(RUNNING, "${name} runs by nothing: it has no value and the host does not run it")
+		run_of(e, beta(head(value), arguments(value)))
+	}
+	Lambda(binder, domain, body) => run_of(e, beta(function, given))
+	_ => if given is empty then refused(RUNNING, "${shown_for(e.c, function)} is no value a program runs") else Called(run_of(e, function), data_runs(e, given))
+}
+# the arguments that are data, as they run
+data_runs(e: Erasing, given: list<Term>): list<Run> := given.filter(argument => is_data(e, argument)).map(argument => run_of(e, argument))
+
+# The host's spelling of a prelude function given all the arguments it takes: those it spells, numbered again in
+# their order
+host_run(e: Erasing, name: text, spelling: text, given: list<Term>): Run := {
+	taking(name, given, #binders_of(declared_named(e.p.environment, name).type))
+	used = (1 to #given).filter(at => spelling.contains("\$${at}"))
+	Host(used.fold(spelling, (spelled, at) => spelled.replace("\$${at}", "\$${used.index_of(at)}")), used.map(at => run_of(e, given#at)))
+}
+# the binders of a function type, as written
+binders_of(type: Term): list<Term> := match type.shape {
+	Pi(binder, domain, body) => [domain] + binders_of(body)
+	_ => []
+}
+# a computation handing its value to the next: the value held under the next one's binder for its body
+sequenced(e: Erasing, given: list<Term>): Run := {
+	taking(HOST_SEQUENCE, given, HOST_SEQUENCE_ARGUMENTS)
+	next = given#HOST_SEQUENCE_NEXT
+	match next.shape {
+		Lambda(binder, domain, body) => run_of(e, let_in(binder, domain, given#HOST_SEQUENCE_FIRST, body))
+		_ => refused(RUNNING, "what ${HOST_SEQUENCE} hands its value to is no function written in place")
+	}
+}
+
+# A recursor given all its arguments, its major premise last, as a choice between its minor premises, one per case,
+# each given the arguments after the major premise (a motive of functions)
+chosen(e: Erasing, name: text, facts: RecursorFacts, given: list<Term>): Run := {
+	first_minor = facts.parameters + facts.motives
+	major = first_minor + facts.minors + facts.indices + 1
+	taking(name, given, major)
+	if facts.cases is empty { refused(RUNNING, "${name} chooses among no cases: no value of ${facts.of} runs") }
+	subject = run_of(e, given#major)
+	held = named_variable(e, CHOSEN, type_of(e.c, given#major))
+	below = recursive_fields(e, facts.of)
+	alternatives = (1 to #facts.cases).map(at => alternative(e, facts.cases#at, facts.fields#at + below#at, given#(first_minor + at), given.drop(major)))
+	Choose(subject, e.names[variable_id(held)], alternatives)
+}
+# how many fields of each case of a type hold a value of its block, an induction hypothesis each
+recursive_fields(e: Erasing, type: text): list<int> := {
+	facts = type_facts(e, type)
+	facts.recursive#place_in_block(facts, type).map(places => #places)
+}
+# what checks 1 to 5 found of the block a type is of, and the type's place in it
+type_facts(e: Erasing, type: text): InductiveFacts := match declared_named(e.p.environment, type).kind {
+	Inductive(facts) => facts
+	_ => refused(RUNNING, "${type} is no enum")
+}
+place_in_block(facts: InductiveFacts, type: text): int := type_names(facts.block).index_of(type)
+# a function given fewer arguments than it takes, refused: it runs given all of them
+taking(name: text, given: list<Term>, count: int) := if #given < count { refused(RUNNING, "${name} is given ${#given} of its ${count} arguments: it runs given all it takes") }
+# A course given all its arguments (../below.wap): its step at the indices, the value and the values below it, those
+# given no run name, so a step that uses them is refused as recursion; the arguments after the value given to it
+coursed(e: Erasing, name: text, given: list<Term>): Run := {
+	type = name[.. #name - #COURSE]
+	facts = type_facts(e, type)
+	step_at = facts.block.parameters + 2
+	value_at = step_at + facts.indices#place_in_block(facts, type) + 1
+	taking(name, given, value_at)
+	at_value = beta(given#step_at, given[step_at .. value_at])
+	match at_value.shape {
+		Lambda(binder, domain, body) => run_of(e, beta(instantiated(body, hypothesis(e.c, binder, domain)), given.drop(value_at)))
+		_ => refused(RUNNING, "the step of ${name} is no function of the values below")
+	}
+}
+# A minor premise taken as the alternative of its case: the case's host test, its fields named and spelled as the
+# host takes them out of the value, then its value given the arguments after the major premise. The induction
+# hypotheses after the fields get no run name, so a use is refused as recursion.
+# DEBT: only the cases of a type the host lays out (hosts.wap); an enum of the program needs its layout first
+alternative(e: Erasing, case: text, binders: int, minor: Term, after: list<Term>): Alternative := {
+	spellings = HOST_CASES.get(case) ?? refused(RUNNING, "${case} is matched, and the host has no layout for its type yet")
+	variables: list<Term> = []
+	inner = minor
+	for at in 1 to binders {
+		match inner.shape {
+			Lambda(binder, domain, body) => {
+				variable = if at < #spellings then named_variable(e, binder, domain) else hypothesis(e.c, binder, domain)
+				if at < #spellings { variables += [variable] }
+				inner = instantiated(body, variable)
+			}
+			_ => refused(RUNNING, "the alternative of ${case} is no function of its fields")
+		}
+	}
+	value = beta(inner, after)
+	# (only the fields its value uses are taken out)
+	used = (1 to #variables).filter(at => variable_id(variables#at) in free_variables(value))
+	Alternative(spellings#1, used.map(at => e.names[variable_id(variables#at)]), used.map(at => spellings#(at + 1)), run_of(e, value))
+}
+
+# whether a term is data a program runs on, not a type, a type family or a proof
+is_data(e: Erasing, t: Term): bool := runs_on(e, type_of(e.c, t))
+# whether values of a type are data: it is no sort, no function into one and no proposition
+runs_on(e: Erasing, type: Term): bool := not (result_of(computed(e.c, type)).shape is Sort) and not is_proposition(e.c, type)
+
+# a binder gone into, its variable named for the run: the binder's name, with a count where another variable of
+# the function has it
+named_variable(e: Erasing, binder: text, type: Term): Term := {
+	variable = hypothesis(e.c, binder, type)
+	spelled = binder.codepoints.map(c => if is_name_char(text(c)) then text(c) else NAME_JOINER).join("")
+	written = if spelled == "" or spelled == NAME_JOINER then UNNAMED else spelled
+	name = written
+	count = 1
+	while name in e.scope { count += 1; name = "${written}${count}" }
+	e.scope += [name]
+	e.names[variable_id(variable)] = name
+	variable
+}
+
+# a function of the program erased once: its parameters that are data, its result's run type, its body
+definition_erased(e: Erasing, name: text) := {
+	if name in e.erased { return }
+	e.erased += [name]
+	outer = e.scope
+	e.scope = []
+	refusal = e.p.run_refusals.get(name)
+	if refusal is not ø { refused(RUNNING, "${name} calls itself, and runs by its body as written, which is kept by no proof: ${refusal!}") }
+	body = e.p.run_terms.get(name) ?? unfolding(declared_named(e.p.environment, name)) ?? refused(RUNNING, "${name} runs by nothing: it has no value")
+	parameters: list<Typed> = []
+	while yes {
+		match body.shape {
+			Lambda(binder, domain, inner) => {
+				variable = named_variable(e, binder, domain)
+				if runs_on(e, domain) { parameters += [Typed(e.names[variable_id(variable)], run_type(e, domain))] }
+				body = instantiated(inner, variable)
+			}
+			_ => break
+		}
+	}
+	result = run_type(e, type_of(e.c, body))
+	# (the body erased first: the functions it reaches are added meanwhile)
+	run_body = run_of(e, body)
+	e.running.routines += [Routine(run_name(e, name), parameters, result, run_body)]
+	e.scope = outer
+}
+
+# the name a function of the program runs by, as the program wrote it: of an overload, the name the overloads share
+run_name(e: Erasing, name: text): text := {
+	shared = e.p.overloads.keys().filter(kernel => name in e.p.overloads[kernel])
+	written_name(if shared is empty then name else shared#1)
+}
+
+# the wap type that holds a type's values as they run; a computation's, its value's
+run_type(e: Erasing, type: Term): text := {
+	folded = computed_folded(e.c, type)
+	match head(folded).shape {
+		Constant(name, levels) => if name == HOST_COMPUTATION then run_type(e, arguments(folded)#HOST_COMPUTATION_VALUE) else held_type(e, folded)
+		_ => held_type(e, folded)
+	}
+}
+held_type(e: Erasing, type: Term): text := match computed(e.c, type).shape {
+	Constant(name, levels) => HOST_TYPES.get(name) ?? refused(RUNNING, "a value of ${name} has no layout the host runs it in yet")
+	_ => refused(RUNNING, "a value of ${shown_for(e.c, type)} has no layout the host runs it in yet")
+}
