@@ -44,13 +44,14 @@ folder_built() {
 }
 # the compilers of folder_built, in the folder: wap0 holds no library and no warm state, reading the sources; the
 # library is compiled once by it, from the sources, and each next compiler holds it and the warm state the one before
-# wrote beside it
+# wrote beside it, run by its full path so the state's paths are marked as the wap folder's (extensions/warm.wap marked)
+# and a compile from any other folder finds them
 steps_built() {
 	local n source=compiler.wap library=${WAP_LIBRARY_MODULE##*/} warm=${WAP_WARM##*/}
 	: >"$library" && : >"$warm" && $wap "$seed" "$source" wap0.wasm 2>&1 || return 1
 	$wap wap0.wasm --sources types/types.wap "$library" 2>&1 || return 1
 	for ((n = 1; n <= $1; n++)); do
-		$wap "wap$((n - 1)).wasm" --sources warm "$warm" 2>&1 && $wap "wap$((n - 1)).wasm" --sources "$source" "wap$n.wasm" 2>&1 || return 1
+		$wap "$PWD/wap$((n - 1)).wasm" --sources warm "$warm" 2>&1 && $wap "wap$((n - 1)).wasm" --sources "$source" "wap$n.wasm" 2>&1 || return 1
 	done
 }
 # a built file put in the tree whole, so a reader never sees half of it
