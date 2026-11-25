@@ -67,7 +67,7 @@ compared() {
 	reds "$@" >"$REDS"
 	fixed=$(expected_reds "$@" | LC_ALL=C comm -13 "$REDS" -)
 	regressions=$(expected_reds "$@" | LC_ALL=C comm -23 "$REDS" -)
-	[ -z "$fixed" ] || printf 'fixed, green now (test/wap/run.sh --known takes them out of test/reds.txt):\n%s\n' "$fixed"
+	[ -z "$fixed" ] || printf 'fixed, green now (test/wap/run.sh --known records them in test/reds.txt):\n%s\n' "$fixed"
 	[ -z "$regressions" ] || printf 'regressions, red and not in test/reds.txt:\n%s\n' "$regressions"
 	[ -z "$regressions" ]
 }
