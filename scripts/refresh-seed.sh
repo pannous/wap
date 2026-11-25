@@ -120,8 +120,8 @@ cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored 
 rm -f "$(dirname "$seed")"/*.cwasm
 # the native wap, the command that runs the seed (wap/extensions/native/driver.wap), built by it
 native=$(dirname "$(dirname "$seed")")
-"$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" \
-	-L"$native/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib && echo "refresh-seed: installed $native/wap" ||
+wap_linked "$native"
+"$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" "${WAP_LINKED[@]}" && echo "refresh-seed: installed $native/wap" ||
 	echo "refresh-seed: the native wap was not built; $native/wap stays" >&2
 # its first run, so the first one anyone makes finds the compiler's machine code written
 "$native/wap" '1+1' >/dev/null || echo "refresh-seed: the installed $native/wap fails to run 1+1" >&2

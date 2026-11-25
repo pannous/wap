@@ -11,13 +11,14 @@
 # a wap-seed/ folder beside it; and each library -l<name> whose static library lib<name>.a is in a -L folder linked
 # whole into it (its functions are found by name, so no reference pulls them in): one file, needing only the system's
 # the arguments after the executable are the C compiler's, the libraries the program's C functions are in:
-# `-Llib -lwarp_wasmtime -Wl,-rpath,@executable_path/lib` for the native wap (driver.wap)
+# scripts/lib/wap-beside.sh wap_linked's for the native wap (driver.wap)
 # The compiler runs on the native wap on PATH, else on wasmtime (scripts/lib/wap-host.sh). The build's files go in
 # <executable>.build/
 set -euo pipefail
 C_COMPILER=cc
-# -std=c23: wasm2c writes C23 (static asserts without a message); -rdynamic: the executable's own C functions (main.c native_call, wap_host_callback) are found by name as libc's are
-C_FLAGS="-O2 -rdynamic -std=c23"
+# -std=gnu23: wasm2c writes C23 (static asserts without a message), and glibc shows POSIX (sigaction, sigaltstack) only
+# to a GNU dialect; -rdynamic: the executable's own C functions (main.c native_call, wap_host_callback) are found by name as libc's are
+C_FLAGS="-O2 -rdynamic -std=gnu23"
 MODULE_NAME=program
 WASM2C_RUNTIME=share/wabt/wasm2c
 WABT_HEADERS=include

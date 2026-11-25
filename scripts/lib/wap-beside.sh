@@ -19,6 +19,13 @@ WAP_TOOLS=(verify.wasm:wap/extensions/theory/elaborate/verify.wap)
 WAP_LIBRARY_LINKED='types-*.wasm'
 # a seed folder's parts, by name: the compiler, what it reads beside itself, the tools (its machine code *.cwasm is none)
 WAP_PARTS=(wap.wasm "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "${WAP_TOOLS[@]%%:*}")
+# wap_linked <folder>: the C compiler's arguments that link the native wap with wasmtime's library in <folder>/lib, which
+# it finds beside itself wherever it moves (macOS names the executable's folder @executable_path, Linux $ORIGIN)
+wap_linked() {
+	local executable_folder='$ORIGIN'
+	[ "$(uname -s)" = Darwin ] && executable_folder=@executable_path
+	WAP_LINKED=(-L"$1/lib" -lwarp_wasmtime -Wl,-rpath,"$executable_folder/lib")
+}
 # wap_tools_built <tree> <compiler>: each tool compiled by that compiler, by the native wap on PATH, in its folder, so
 # the tool links the library module by its name beside it and the folder can move
 wap_tools_built() {

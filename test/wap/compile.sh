@@ -67,9 +67,10 @@ fi
 # folder, bin/wap with the compiler under test beside it as its seed and wasmtime's library, the seed built into it too
 # with --standalone (build.sh); prints its path or the build's error
 native_wap_built() {
+	wap_linked "$1"
 	mkdir -p "$1/wap-seed" "$1/lib" && (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$1/wap-seed/") && cp "$compiler" "$1/wap-seed/wap.wasm" && wap_tools_built "$tree" "$1/wap-seed/wap.wasm" \
 		&& cp "$(cd -P "$(dirname "$wap")/lib" && pwd -P)"/libwarp_wasmtime.* "$1/lib/" \
-		&& "$tree/wap/extensions/native/build.sh" ${2-} "$1/wap-seed/wap.wasm" "$tree/wap/extensions/native/driver.wap" "$1/wap" -L"$1/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib >"$1/build.log" 2>&1 \
+		&& "$tree/wap/extensions/native/build.sh" ${2-} "$1/wap-seed/wap.wasm" "$tree/wap/extensions/native/driver.wap" "$1/wap" "${WAP_LINKED[@]}" >"$1/build.log" 2>&1 \
 		|| { echo "the tree's native wap did not build: $(tail -3 "$1/build.log")" >&2; return 1; }
 	echo "$1/wap"
 }
