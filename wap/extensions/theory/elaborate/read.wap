@@ -185,8 +185,12 @@ class Elaborating {
 	lifting: bool = no
 	pending: list<Pending> = []
 	lifts: list<text> = []
-	# how many terms were made of a type wanted other than their own, so a fit with fewer such steps wins an overload
+	# how many terms were made of a type wanted other than their own, so a fit with fewer such steps wins an overload;
+	# of a call's result, of a numeral, which is read at the type its place wants (a nat made an int is no step of the
+	# argument's), counted apart
 	indirect: int = 0
+	result_steps: int = 0
+	literal_steps: int = 0
 }
 # a function as its body calls it, by its written name, and the declaration such a call is of
 class Itself { written: text; name: text }
@@ -204,7 +208,10 @@ made_of(x: Elaborating, t: Term, wanted: Term): Term := {
 	if unified(x.el, given, wanted) { return t }
 	have = filled(x.el, given)
 	want = filled(x.el, wanted)
-	x.indirect += 1
+	match t.shape {
+		Numeral(value) => x.literal_steps += 1
+		_ => x.indirect += 1
+	}
 	converted(x, t, have, want) ?? gone_down(x, t, have, want) ?? injected(x, t, have, want) ?? lifted_into(x, t, have, want) ?? ran(x, t, have, want) ?? {
 		computation_refused(x, t, have)
 		refused(VALUE_TYPE, "${shown(filled(x.el, t))} is a ${shown(have)}, where a ${shown(want)} is wanted")
@@ -466,10 +473,11 @@ overload_elaborated(x: Elaborating, name: text, candidates: list<text>, traits: 
 fitting_declarations(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<text> := fits(declarations_tried(x, candidates, unread(arguments), wanted))
 declarations_tried(x: Elaborating, candidates: list<text>, arguments: list<Argument>, wanted: Term?): list<Trial> := trials_of(x, candidates, candidate => {
 	given = declared_read(x, candidate, arguments, wanted)
-	# a result made of the type wanted is the place's step, no step of the fit: only the arguments' count
+	# a result made of the type wanted is the place's step, counted after the arguments'
 	if wanted is ø { return given }
 	steps = x.indirect
 	made = made_of(x, given, wanted!)
+	x.result_steps += x.indirect - steps
 	x.indirect = steps
 	made
 })
@@ -478,13 +486,13 @@ fitting(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<tex
 fits(trials: list<Trial>): list<text> := trials.filter(trial => trial.refusal is ø).map(trial => trial.candidate)
 # a candidate an attempt was given: the refusal it met, ø where it fits, and how many terms it made of a type other
 # than their own
-class Trial { candidate: text; refusal: text?; indirect: int }
+class Trial { candidate: text; refusal: text?; indirect: int; result: int; literals: int }
 # each candidate given to an attempt, the answers it gives taken back
 trials_of(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<Trial> := candidates.map(candidate => undone(x, () => {
 	trial_counted(x.theory)
-	before = x.indirect
+	before = snapshot(x)
 	refusal = refusal_of(candidate, attempt)
-	Trial(candidate, refusal, x.indirect - before)
+	Trial(candidate, refusal, x.indirect - before.indirect, x.result_steps - before.result_steps, x.literal_steps - before.literal_steps)
 }))
 # one more candidate tried in this statement: past the limit the statement is given up
 trial_counted(p: Theory) := {
@@ -493,8 +501,8 @@ trial_counted(p: Theory) := {
 }
 # what a read may change, kept to be put back: the answers found, the arm being read, the letters, instance holes,
 # effects and lifts noted, the indirect steps counted, the course and the round read, the levels made
-class Snapshot { found: Found; arm: Arm; letters: int; instances: int; pending: int; lifts: int; indirect: int; without_course: text?; round_given: list<text>?; levels: int }
-snapshot(x: Elaborating): Snapshot := Snapshot(found_so_far(x.el), arm_kept(x), #x.letters, #x.instances, #x.pending, #x.lifts, x.indirect, x.without_course, x.round_given, #x.el.c.levels)
+class Snapshot { found: Found; arm: Arm; letters: int; instances: int; pending: int; lifts: int; indirect: int; result_steps: int; literal_steps: int; without_course: text?; round_given: list<text>?; levels: int }
+snapshot(x: Elaborating): Snapshot := Snapshot(found_so_far(x.el), arm_kept(x), #x.letters, #x.instances, #x.pending, #x.lifts, x.indirect, x.result_steps, x.literal_steps, x.without_course, x.round_given, #x.el.c.levels)
 put_back(x: Elaborating, kept: Snapshot) := {
 	back_to(x.el, kept.found)
 	arm_restored(x, kept.arm)
@@ -503,6 +511,8 @@ put_back(x: Elaborating, kept: Snapshot) := {
 	x.pending = x.pending.take(kept.pending)
 	x.lifts = x.lifts.take(kept.lifts)
 	x.indirect = kept.indirect
+	x.result_steps = kept.result_steps
+	x.literal_steps = kept.literal_steps
 	x.without_course = kept.without_course
 	x.round_given = kept.round_given
 	x.el.c.levels = x.el.c.levels.take(kept.levels)
@@ -516,17 +526,21 @@ undone(x: Elaborating, attempt: () -> T): T := {
 	put_back(x, kept)
 	given
 }
-# the trials that do not fit, and those that fit best: a direct fit beats a fit through a conversion, a whole call
-# a part of one, `turned(x)` of `turned(x, when)`, one for the types given one for any type, `==(a: T, b: T)`; equal
-# fits tie
+# the trials that do not fit, and those that fit best: a direct fit beats a fit through a conversion, of its arguments
+# first, then of its result, so a numeral is read at the type its place wants, `abs(0 - 3)` subtracts ints; a whole
+# call a part of one, `turned(x)` of `turned(x, when)`, one for the types given one for any type, `==(a: T, b: T)`;
+# equal fits tie
 nearest(p: Theory, trials: list<Trial>, given: int, type_wanted: bool): list<Trial> := {
 	fitting = trials.filter(trial => trial.refusal is ø)
 	if fitting is empty { return trials }
 	# in a type's place, one giving a type before one giving data: `a implies b` the proposition, `bool` the type
 	types = if type_wanted then fitting.filter(trial => gives_type(p, trial.candidate)) else []
 	best = fewest_by(if types is empty then fitting else types, trial => trial.indirect)
+	best = fewest_by(best, trial => trial.result)
 	best = fewest_by(best, trial => left_open(p, trial.candidate, given))
 	best = fewest_by(best, trial => letters_found(p, trial.candidate))
+	# and, where nothing else tells them apart, a numeral at its own type: `1 + 2` adds nats
+	best = fewest_by(best, trial => trial.literals)
 	trials.filter(trial => trial.refusal is not ø) + best
 }
 # the trials a measure gives the least
