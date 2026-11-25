@@ -347,7 +347,8 @@ check "a native program calls C from a library named by its path" "$(native_ran 
 exit(doubled(21))" >/dev/null; echo $?)" "42"
 # wap format keeps an else-if chain written over lines as it reads, and the formatted program runs (card format-else-if)
 printf '%s\n' 'x = 2' 'if x == 1 { print 1 }' 'else if x == 2 { print 2 }' 'else { print 3 }' >"$stage/else_if.wap"
-check "wap format keeps an else-if chain over lines" "$(cd "$stage" && "$native_wap" format else_if.wap >else_if_formatted.wap && cat else_if_formatted.wap && "$native_wap" else_if_formatted.wap 2>&1)" "x = 2
+check "wap format keeps an else-if chain over lines" "$(cd "$stage" && "$native_wap" format else_if.wap >else_if_formatted.wap && cat else_if_formatted.wap)
+$(cd "$stage" && "$native_wap" else_if_formatted.wap 2>&1)" "x = 2
 if x == 1 {print 1}
 else if x == 2 {print 2}
 else {print 3}
