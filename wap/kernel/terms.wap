@@ -81,8 +81,9 @@ enum Shape {
 	Free(id: int)
 	# Prop is Sort(Zero), Type(u) is Sort(Successor(u))
 	Sort(level: Level)
-	# a declared name at its level arguments
-	Constant(name: text, levels: list<Level>)
+	# a declaration at its level arguments: the declaration is its id, the place in the environment's log; the name
+	# is a hint for showing, as a binder's is, never read by a rule
+	Constant(name: text, levels: list<Level>, id: int)
 	Apply(function: Term, argument: Term)
 	# `(x: domain) => body`
 	Lambda(binder: text, domain: Term, body: Term)
@@ -105,7 +106,8 @@ outside(body: Term): int := max(body.loose - 1, 0)
 bound(index: int): Term := Term(Bound(index), mixed(BOUND_HASH, index), index + 1, no, no)
 free(id: int): Term := Term(Free(id), mixed(FREE_HASH, id), 0, yes, no)
 universe(level: Level): Term := Term(Sort(level), mixed(SORT_HASH, level_hash(level)), 0, no, level_open(level))
-constant(name: text, levels: list<Level>): Term := Term(Constant(name, levels), levels.fold(mixed(CONSTANT_HASH, hashed(name, HASH_MODULUS)), (hash, level) => mixed(hash, level_hash(level))), 0, no, levels.any(level => level_open(level)))
+# hashed by its name, which one id always has: orders by hash (a union's parts) stay those of the names
+constant(id: int, name: text, levels: list<Level>): Term := Term(Constant(name, levels, id), levels.fold(mixed(CONSTANT_HASH, hashed(name, HASH_MODULUS)), (hash, level) => mixed(hash, level_hash(level))), 0, no, levels.any(level => level_open(level)))
 apply(function: Term, argument: Term): Term := Term(Apply(function, argument), mixed(mixed(APPLY_HASH, function.hash), argument.hash), max(function.loose, argument.loose), function.holds_free or argument.holds_free, function.holds_parameter or argument.holds_parameter)
 lambda(binder: text, domain: Term, body: Term): Term := Term(Lambda(binder, domain, body), mixed(mixed(LAMBDA_HASH, domain.hash), body.hash), max(domain.loose, outside(body)), domain.holds_free or body.holds_free, domain.holds_parameter or body.holds_parameter)
 pi(binder: text, domain: Term, body: Term): Term := Term(Pi(binder, domain, body), mixed(mixed(PI_HASH, domain.hash), body.hash), max(domain.loose, outside(body)), domain.holds_free or body.holds_free, domain.holds_parameter or body.holds_parameter)
@@ -120,6 +122,23 @@ type_at(level: Level): Term := universe(Successor(level))
 
 # a function applied to its arguments, the first one first
 apply_all(function: Term, arguments: list<Term>): Term := arguments.fold(function, (applied, argument) => apply(applied, argument))
+# a constant's name, levels and id; of any other term none, and the id 0, which no declaration has
+constant_name(t: Term): text := match t.shape {
+	Constant(name, levels, id) => name
+	_ => ""
+}
+constant_levels(t: Term): list<Level> := match t.shape {
+	Constant(name, levels, id) => levels
+	_ => []
+}
+constant_id(t: Term): int := match t.shape {
+	Constant(name, levels, id) => id
+	_ => 0
+}
+# a constant at other levels
+at_levels(t: Term, levels: list<Level>): Term := constant(constant_id(t), constant_name(t), levels)
+# whether a term is this constant, at whatever levels
+is_constant(t: Term, other: Term): bool := constant_id(t) != 0 and constant_id(t) == constant_id(other)
 # the binders' names of a function type, in order
 binder_names(type: Term): list<text> := match type.shape {
 	Pi(binder, domain, body) => [binder] + binder_names(body)
@@ -241,7 +260,7 @@ with_levels(t: Term, names: list<text>, levels: list<Level>): Term := {
 	if names is empty or not t.holds_parameter { return t }
 	match t.shape {
 		Sort(level) => universe(level_with(level, names, levels))
-		Constant(name, held) => constant(name, held.map(level => level_with(level, names, levels)))
+		Constant(name, held, id) => constant(id, name, held.map(level => level_with(level, names, levels)))
 		Apply(function, argument) => apply(with_levels(function, names, levels), with_levels(argument, names, levels))
 		Lambda(binder, domain, body) => lambda(binder, with_levels(domain, names, levels), with_levels(body, names, levels))
 		Pi(binder, domain, body) => pi(binder, with_levels(domain, names, levels), with_levels(body, names, levels))
@@ -269,7 +288,7 @@ same_shape(a: Shape, b: Shape): bool := match a {
 	Bound(index) => match b { Bound(other) => index == other; _ => no }
 	Free(id) => match b { Free(other) => id == other; _ => no }
 	Sort(level) => match b { Sort(other) => level_same(level, other); _ => no }
-	Constant(name, levels) => match b { Constant(other, other_levels) => name == other and levels_same(levels, other_levels); _ => no }
+	Constant(name, levels, id) => match b { Constant(other, other_levels, other_id) => id == other_id and levels_same(levels, other_levels); _ => no }
 	Apply(function, argument) => match b { Apply(other_function, other_argument) => same(function, other_function) and same(argument, other_argument); _ => no }
 	Lambda(binder, domain, body) => match b { Lambda(other_binder, other_domain, other_body) => same(domain, other_domain) and same(body, other_body); _ => no }
 	Pi(binder, domain, body) => match b { Pi(other_binder, other_domain, other_body) => same(domain, other_domain) and same(body, other_body); _ => no }

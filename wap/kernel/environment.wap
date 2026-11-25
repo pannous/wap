@@ -171,10 +171,35 @@ enum Accepted {
 	AcceptedBlock(block: InductiveBlock)
 	AcceptedBinding(word: text, names: list<text>)
 }
-# the pair type and its one case, the unit type and its one case
-class Products { pair: text; intro: text; unit: text; one: text }
+# the pair type and its one case, the unit type and its one case, each a constant
+class Products { pair: Term; intro: Term; unit: Term; one: Term }
 declaration(e: Environment, name: text): Declaration? := e.log#(e.ids.get(name) ?? return ø)
 # the declaration of a name that must be declared, else refused
+# the declaration of an id while it is live; ø for an id taken back or never given
+declared_at(e: Environment, id: int): Declaration? := {
+	d = if id >= 1 and id <= #e.log then e.log#id else return ø
+	if e.ids.get(d.name) == id then d else ø
+}
+# a constant's declaration, refused where it is taken back
+declaration_of(e: Environment, constant: Term): Declaration := match constant.shape {
+	Constant(name, levels, id) => declared_at(e, id) ?? refused(UNKNOWN_NAME, "nothing is named ${name} here")
+	_ => raise "only a constant names a declaration"
+}
+# Declarations added together, made given the ids they take, so one may name another before it is added (a block's
+# types in its cases, a recursor in its rules, a quotient's former in its other parts); each checked once the ones
+# before it are added. Where making or a check refuses, none is added
+declared_together(e: Environment, names: list<text>, made: (list<int>) -> list<Declaration>, checked: (Declaration) -> T): list<Declaration> := kept_if_given(e, () => {
+	size = #e.log
+	declarations = made((1 to #names).list().map(at => size + at))
+	if #e.log != size or declarations.map(d => d.name) != names { raise "declarations made together are added by declared_together alone, in the order of their names" }
+	for d in declarations {
+		added(e, d)
+		checked(d)
+	}
+	declarations
+})!
+# a declaration by its name as a constant at these levels
+constant_of(e: Environment, name: text, levels: list<Level>): Term := constant(place(e, name), name, levels)
 declared_named(e: Environment, name: text): Declaration := {
 	d = declaration(e, name)
 	if d is ø { refused(UNKNOWN_NAME, "nothing is named ${name}") }
@@ -203,7 +228,7 @@ rests_on(e: Environment, name: text, terms: list<Term>, own: bool) := {
 # the constants a term names, each once, gathered into a map whose keys they are
 constants_named(t: Term, named: map<text, bool>) := {
 	match t.shape {
-		Constant(name, levels) => { named[name] = yes }
+		Constant(name, levels, _) => { named[name] = yes }
 		Apply(function, argument) => { constants_named(function, named); constants_named(argument, named) }
 		Lambda(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
 		Pi(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
