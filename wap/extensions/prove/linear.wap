@@ -40,6 +40,9 @@ ONE_LEVEL := Successor(Zero)
 ROW_LIMIT := 400
 # the binder of the place in a sum a congruence rewrites
 PLACE := "z"
+# the names of the unknowns and of the hypotheses a proof is generalized over
+ATOM := "a"
+FACT := "h"
 NO_TERMS: list<Term> := []
 
 # the numbers and the checker the sums are read and proved with, and the functions they are written by
@@ -158,7 +161,7 @@ equal_bounds(s: Sums, a: Term, b: Term, proof: Term): list<Bound> := {
 # --- the elimination
 
 # `t + gap == u` from the hypotheses and the differences they bound, ø where no sum of rows refutes `t > u`
-gap_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := eliminated(s, with_differences(s, bounds, [t, u]), t, u)
+gap_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := generalized(s, with_differences(s, bounds, [t, u]), t, u)
 # The bounds and, for each difference `a - b` in their sides or in the terms (the inner ones first) whose `b <= a`
 # they prove, `b + (a - b) == a`: subtraction stops at 0, so a difference is a sum only where it does not reach it
 with_differences(s: Sums, bounds: list<Bound>, terms: list<Term>): list<Bound> := {
@@ -173,10 +176,23 @@ differences_of(s: Sums, atom: Term): list<Term> := {
 }
 difference_bounds(s: Sums, bounds: list<Bound>, difference: Term): list<Bound> := {
 	sides = called(s, difference, s.subtract)!
-	gap = eliminated(s, bounds, sides#2, sides#1) ?? return []
+	gap = generalized(s, bounds, sides#2, sides#1) ?? return []
 	reached = law(AT_MOST_DIFFERENCE, [], [sides#2, sides#1, at_most_from(s, sides#2, sides#1, gap)])
 	equal_bounds(s, added(s, sides#2, difference), sides#1, reached)
 }
+# `t + gap == u` from the hypotheses alone, eliminated over variables standing for the unknowns and the hypotheses:
+# the proof, closed over them, is given each unknown and each hypothesis's proof once, however often it uses them
+generalized(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := {
+	atoms = ([t, u] + bounds.flat_map(bound => [bound.left, bound.difference, bound.right])).flat_map(side => normal(s, side).unknowns).fold(NO_TERMS, with_new)
+	unknowns = atoms.map(atom => hypothesis(s.c, ATOM, s.nat))
+	standing = (side: Term) => skeleton(s, side, atom => unknowns#(atoms.index_where(found => same(found, atom))))
+	facts = bounds.map(bound => standing_bound(s, standing(bound.left), standing(bound.difference), standing(bound.right)))
+	gap = eliminated(s, facts, standing(t), standing(u)) ?? return ø
+	proof = apply_all(closed_over(s.c, gap.equated.proof, unknowns + facts.map(fact => fact.proof), yes), atoms + bounds.map(bound => bound.proof))
+	gap_given = (0 upto #atoms).fold(gap.gap, (inner, at) => replaced_by(inner, variable_id(unknowns[at]), atoms[at]))
+	Gap(gap_given, Equated(added(s, t, gap_given), u, proof))
+}
+standing_bound(s: Sums, left: Term, difference: Term, right: Term): Bound := Bound(left, difference, right, hypothesis(s.c, FACT, stated(equation(s, s.nat, added(s, left, difference), right), added(s, left, difference), right)))
 # `t + gap == u` from the hypotheses alone, ø where no sum of rows refutes `t > u`
 eliminated(s: Sums, bounds: list<Bound>, t: Term, u: Term): Gap? := {
 	lefts = bounds.map(bound => normal(s, bound.left))
@@ -250,6 +266,11 @@ normal(s: Sums, t: Term): Normal := {
 		}
 		_ => raise "${t} is read as no sum"
 	}
+}
+# t with each unknown in its sums replaced, the same sum by computing
+skeleton(s: Sums, t: Term, replaced: (Term) -> Term): Term := {
+	found = unfolded_until(s, t, part => is_sum_part(s, part)) ?? return replaced(atom_of(s, t))
+	apply_all(head(found), arguments(found).map(part => skeleton(s, part, replaced)))
 }
 # t as one unknown: a difference kept as one, so the bounds of differences name it, anything else computed
 atom_of(s: Sums, t: Term): Term := unfolded_until(s, t, part => calls(part, s.subtract)) ?? computed(s.c, t)
