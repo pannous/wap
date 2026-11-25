@@ -53,7 +53,7 @@ known_reds() {
 	[ -f "$KNOWN_REDS" ] || return 0
 	# the names of the tests run come first, as a file of their own
 	awk -v side="$side" '
-		NR == FNR { run[$0]; next }
+		FILENAME == ARGV[1] { run[$0]; next }
 		{ file = $0; sub(/^\[[^]]*\] /, "", file); sub(/: .*/, "", file) }
 		(file in run) == (side == "in")' <(for test in "$@"; do basename "$test"; done) "$KNOWN_REDS" | LC_ALL=C sort -u
 }
@@ -76,7 +76,7 @@ compared() {
 # a red only here is this system's; the other system's own lines stay
 known() {
 	{ known_reds out "$@"; awk -v here="$SYSTEM" -v other="$OTHER_SYSTEM" '
-		NR == FNR { red[$0]; next }
+		FILENAME == ARGV[1] { red[$0]; next }
 		{ tag = ""; check = $0; if (match(check, /^\[[^]]*\] /)) { tag = substr(check, 2, RLENGTH - 3); check = substr(check, RLENGTH + 1) } }
 		tag == here { next }
 		check in red { print check; seen[check]; next }
