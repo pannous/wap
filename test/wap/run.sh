@@ -8,16 +8,21 @@
 # runs them in the foreground and prints the summary. Its modules run on the native wap on PATH. The self-build ratchet,
 # ratchet_census.sh (about 4 min), is no default script: run it by name, test/wap/run.sh --wait
 # test/wap/ratchet_census.sh, after each wap landing.
-# The reds are compared with the baseline test/reds.txt, every check expected red as `<test file>: <check name>`: the
-# summary names only the regressions, red checks the baseline lacks, and the fixed ones, the baseline's checks of the
-# tests run that went green; a run is green when it has no regression. --known writes the reds of the tests run into
-# the baseline instead, after a fix (the fixed lines leave it) or a new _wanted program
+# The reds are compared with the baseline test/reds.txt, every check expected red as `<test file>: <check name>`, one
+# red on one system only led by its name, `[Linux] test_png.wap: …`: the summary names only the regressions, red checks
+# the baseline lacks here, and the fixed ones, the baseline's checks of the tests run that went green here; a run is
+# green when it has no regression. --known writes this system's reds of the tests run into the baseline instead, after
+# a fix (the fixed lines leave it) or a new _wanted program, leaving what it knows of the other system as it is
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 results="$here/../../data/wap-tests"
 SUMMARY="$results/summary.txt"
 FULL_SUMMARY="$results/full-summary.txt"
 KNOWN_REDS="$(cd -P "$here/.." && pwd -P)/reds.txt"
 REDS="$results/reds.txt"
+# the systems a baseline line may be red on alone, by uname's name: this one and the other
+SYSTEMS=(Darwin Linux)
+SYSTEM=$(uname -s)
+OTHER_SYSTEM=$(printf '%s\n' "${SYSTEMS[@]}" | grep -vx "$SYSTEM")
 # two cores stay free for the user's apps
 cores=$(( $(getconf _NPROCESSORS_ONLN) - 2 ))
 job_slot="$here/../../scripts/job-slot.sh"
@@ -48,24 +53,36 @@ known_reds() {
 	[ -f "$KNOWN_REDS" ] || return 0
 	# the names of the tests run come first, as a file of their own
 	awk -v side="$side" '
-		NR == FNR { run[$0]; next }
-		{ file = $0; sub(/: .*/, "", file) }
+		FILENAME == ARGV[1] { run[$0]; next }
+		{ file = $0; sub(/^\[[^]]*\] /, "", file); sub(/: .*/, "", file) }
 		(file in run) == (side == "in")' <(for test in "$@"; do basename "$test"; done) "$KNOWN_REDS" | LC_ALL=C sort -u
+}
+# the checks of the tests run expected red here: those red everywhere and this system's own, without its name
+expected_reds() {
+	known_reds in "$@" | awk -v here="[$SYSTEM] " '/^\[/ { if (index($0, here) == 1) print substr($0, length(here) + 1); next } { print }' | LC_ALL=C sort -u
 }
 # the reds of the tests run against the baseline: the fixed checks and the regressions named, green without a regression
 compared() {
 	local fixed regressions
 	reds "$@" >"$REDS"
-	fixed=$(known_reds in "$@" | LC_ALL=C comm -13 "$REDS" -)
-	regressions=$(known_reds in "$@" | LC_ALL=C comm -23 "$REDS" -)
-	[ -z "$fixed" ] || printf 'fixed, green now (test/wap/run.sh --known takes them out of test/reds.txt):\n%s\n' "$fixed"
+	fixed=$(expected_reds "$@" | LC_ALL=C comm -13 "$REDS" -)
+	regressions=$(expected_reds "$@" | LC_ALL=C comm -23 "$REDS" -)
+	[ -z "$fixed" ] || printf 'fixed, green now (test/wap/run.sh --known records them in test/reds.txt):\n%s\n' "$fixed"
 	[ -z "$regressions" ] || printf 'regressions, red and not in test/reds.txt:\n%s\n' "$regressions"
 	[ -z "$regressions" ]
 }
-# the baseline with the reds of the tests run in place of its lines of them
+# the baseline with this system's reds of the tests run in place of what it knew of them here: a check red here and
+# known red on the other system is red everywhere; one red everywhere before and green here now is the other system's;
+# a red only here is this system's; the other system's own lines stay
 known() {
-	{ known_reds out "$@"; cat "$REDS"; } | LC_ALL=C sort -u >"$KNOWN_REDS.$$" && mv "$KNOWN_REDS.$$" "$KNOWN_REDS"
-	echo "test/reds.txt now holds the $(wc -l <"$REDS" | tr -d ' ') reds of these tests"
+	{ known_reds out "$@"; awk -v here="$SYSTEM" -v other="$OTHER_SYSTEM" '
+		FILENAME == ARGV[1] { red[$0]; next }
+		{ tag = ""; check = $0; if (match(check, /^\[[^]]*\] /)) { tag = substr(check, 2, RLENGTH - 3); check = substr(check, RLENGTH + 1) } }
+		tag == here { next }
+		check in red { print check; seen[check]; next }
+		{ print (tag == "" ? "[" other "] " check : $0) }
+		END { for (check in red) if (!(check in seen)) print "[" here "] " check }' "$REDS" <(known_reds in "$@"); } | LC_ALL=C sort -u >"$KNOWN_REDS.$$" && mv "$KNOWN_REDS.$$" "$KNOWN_REDS"
+	echo "test/reds.txt now holds the $(wc -l <"$REDS" | tr -d ' ') reds of these tests here"
 }
 # one test given the compiler under test (one_run <test> <module or "">): a test program, test/test_<area>.wap,
 # compiled by it and run; a test script run with it, a wap one, test/wap/test_<area>.wap, compiled by it and given the
