@@ -55,28 +55,29 @@ constant(n: Node, m: WasmModule) as Code? := match n {
 # records (core/stage.wap record_named)
 # a shape, `Record`, laid out as the type it narrows (core/analyze/shapes.wap); a list or a class's instance in the
 # memory its address
-layout_of(type_name: Node, m: WasmModule, records: Records, at: Node? = ø) as list<int>? := memory_layout(m, type_word(type_name)) ?? memory_kept(type_name, at ?? type_name, m, match type_name {
-	Symbol(written) => {
-		type = fact_of(type_name, NARROWS) ?? type_name
-		name = text(type)
-		record = record_named(records, type)
-		if WORD_LAYOUTS.has(name) then WORD_LAYOUTS[name] else if name == TEXT_TYPE then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == MAP_TYPE then nullable(map_base(m)) else if name == ENUM_TYPE then enum_layout(m) else if record == ø then ø else if plain_enums(m) and cases_of(record!).all(case => case_fields(case) is empty) then I32 else nullable(struct_of(record, m, records))
-	}
-	# a compound type the memory lays out none of is refused whole, before its parts, which have no place of their own;
-	# a function value in the memory is the address of what it captures, or of its function's table slot beside them;
-	# an optional the address of its value or of the box holding it, 0 its ø
-	_ => if m.memory != ø then (if function_value_parts(type_name) != ø or function_parts(type_name) != ø or base_of_optional(type_name) != ø then I32 else memory_refused(type_name, at ?? type_name)) else {
-		index = list_index(type_name, m, records) ?? function_value_index(type_name, m, records) ?? signature_value_index(type_name, m, records) ?? map_index(type_name, m, records)
-		if index == ø then optional_layout(type_name, m, records) else nullable(index)
-	}
-})
+layout_of(type_name: Term, m: WasmModule, records: Records, at: Node? = ø) as list<int>? := memory_layout(m, type_word(type_name)) ?? memory_kept(type_name, at, m, if is_word(type_name) then word_layout(narrowed_type(type_name) ?? type_name, m, records) else compound_layout(type_name, at, m, records))
+word_layout(type: Term, m: WasmModule, records: Records) as list<int>? := {
+	name = text(type)
+	record = record_named(records, type)
+	if WORD_LAYOUTS.has(name) then WORD_LAYOUTS[name] else if name == TEXT_TYPE then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == MAP_TYPE then nullable(map_base(m)) else if name == ENUM_TYPE then enum_layout(m) else if record == ø then ø else if plain_enums(m) and cases_of(record!).all(case => case_fields(case) is empty) then I32 else nullable(struct_of(record, m, records))
+}
+# a compound type the memory lays out none of is refused whole, before its parts, which have no place of their own;
+# a function value in the memory is the address of what it captures, or of its function's table slot beside them;
+# an optional the address of its value or of the box holding it, 0 its ø
+compound_layout(type: Term, at: Node?, m: WasmModule, records: Records) as list<int>? := if m.memory != ø then (if function_value_parts(type) != ø or function_parts(type) != ø or base_of_optional(type) != ø then I32 else memory_refused(type, at)) else {
+	index = list_index(type, m, records) ?? function_value_index(type, m, records) ?? signature_value_index(type, m, records) ?? map_index(type, m, records)
+	if index == ø then optional_layout(type, m, records) else nullable(index)
+}
 # a layout as a build keeping its values in the memory takes it: a number's; any other is refused, as its wasm2c takes no GC type
-memory_kept(type: Term, at: Node, m: WasmModule, layout: list<int>?) as list<int>? := if m.memory == ø or layout == ø or layout in PLAIN_VALUES then layout else memory_refused(type, at)
-memory_refused(type: Term, at: Node) as list<int> := refused(at, "a build keeping values in the memory has no layout for ${type_text(type)}")
+memory_kept(type: Term, at: Node?, m: WasmModule, layout: list<int>?) as list<int>? := if m.memory == ø or layout == ø or layout in PLAIN_VALUES then layout else memory_refused(type, at)
+memory_refused(type: Term, at: Node?) as list<int> := {
+	why = "a build keeping values in the memory has no layout for ${type_text(type)}"
+	if at == ø then raise why else refused(at!, why)
+}
 
 # The GC type of a map, `map<text, int>`: a struct of three lists, its keys and its values of one count and its slots (lists.wap); ø
 # for a type that is no map. Every map's type extends the map base, so `x is map` tests any map at once
-map_index(type: Term, m: WasmModule, records: Records) as int? := if key_type(type) == ø then ø else added_type(m, open_type([map_base(m)], struct_type(map_parts(type).map(part => field_type(nullable(items_list(part, m, records) ?? refused(part, "the emitter has no value layout for this type yet")), MUTABLE)))))
+map_index(type: Term, m: WasmModule, records: Records) as int? := if key_type(type) == ø then ø else added_type(m, open_type([map_base(m)], struct_type(map_parts(type).map(part => field_type(nullable(items_list(part, m, records) ?? refused_type(part, "the emitter has no value layout for this type yet")), MUTABLE)))))
 map_base(m: WasmModule) as int := added_type(m, open_type([], struct_type([])))
 # a map type's parts, each held as a list: its keys (field 0), its values (field 1) and its slots (field 2), the places
 # of its keys by their hash (types/maps.wap key_place)
@@ -148,7 +149,7 @@ no_layout(type: Term?, at: Node) as list<int> := refused(at, "the emitter has no
 list_index(type: Term, m: WasmModule, records: Records) as int? := items_list(item_type(type) ?? return ø, m, records)
 # the list of items of a type, its base built before its items: items of a record being built open a recursion group,
 # and a type that refers to none of its records stays out of it
-items_list(item: Node, m: WasmModule, records: Records) as int? := {
+items_list(item: Term, m: WasmModule, records: Records) as int? := {
 	base = list_base(m)
 	added_type(m, open_type([base], struct_type([LIST_COUNT_FIELD, field_type(nullable(item_array(item, m, records) ?? return ø), MUTABLE)])))
 }
@@ -159,7 +160,7 @@ LIST_ITEMS_AT = 1
 # the GC array of a list's items, ø for a type that is no list
 items_index(type: Term, m: WasmModule, records: Records) as int? := item_array(item_type(type) ?? return ø, m, records)
 # a plain value's array is its type word's own (plain_typed), so a list<bool> held as an any is told from a list<char>
-item_array(item: Node, m: WasmModule, records: Records) as int? := {
+item_array(item: Term, m: WasmModule, records: Records) as int? := {
 	array = layout => array_type(field_type(layout, MUTABLE))
 	if text(item) in BOXED_WORDS then plain_typed(m, text(item), array) else added_type(m, array(layout_of(item, m, records) ?? return ø))
 }
