@@ -430,7 +430,7 @@ declarations_named(p: Theory, name: text): list<text> := {
 overload_elaborated(x: Elaborating, name: text, candidates: list<text>, traits: list<text>, template: Template?, arguments: list<Node>, wanted: Term?): Term := {
 	read = arguments.map(argument => read_alone(x, argument))
 	trials = declarations_tried(x, candidates, read, wanted)
-	fitting = fits(nearest(x.theory, trials, #arguments))
+	fitting = fits(nearest(x.theory, trials, #arguments, wanted is not ø and is_sort(computed(x.el.c, filled(x.el, wanted!)))))
 	if fitting is empty and template is not ø { return version_called(x, name, template!, read, wanted) }
 	if fitting is empty and traits is not empty { return trait_operation(x, name, traits, read, wanted) }
 	fit = the_only(fitting, OVERLOAD, "${name} here is")
@@ -491,21 +491,26 @@ undone(x: Elaborating, attempt: () -> T): T := {
 	put_back(x, kept)
 	given
 }
-# the trials that fit with the fewest indirect steps, and those that do not fit: a direct fit beats a fit through a
-# conversion, a whole call a part of one, a specific one a general one, equal fits tie
-nearest(p: Theory, trials: list<Trial>, given: int): list<Trial> := {
+# the trials that do not fit, and those that fit best: a direct fit beats a fit through a conversion, a whole call
+# a part of one, `turned(x)` of `turned(x, when)`, one for the types given one for any type, `==(a: T, b: T)`; equal
+# fits tie
+nearest(p: Theory, trials: list<Trial>, given: int, type_wanted: bool): list<Trial> := {
 	fitting = trials.filter(trial => trial.refusal is ø)
 	if fitting is empty { return trials }
-	fewest = fitting.map(trial => trial.indirect).min()
-	# of those, a declaration for the types given before one for any type, `==(a: T, b: T)`: the fewest letters found
-	closest = fitting.filter(trial => trial.indirect == fewest)
-	# of those, one taking just the arguments given before one given only some, `turned(x)` of `turned(x, when)`
-	least = closest.map(trial => left_open(p, trial.candidate, given)).min()
-	whole = closest.filter(trial => left_open(p, trial.candidate, given) == least)
-	# and one for the types given before one for any type, `==(a: T, b: T)`: the fewest letters found
-	general = whole.map(trial => letters_found(p, trial.candidate)).min()
-	trials.filter(trial => trial.refusal is not ø or (whole.any(fit => fit.candidate == trial.candidate) and letters_found(p, trial.candidate) == general))
+	# in a type's place, one giving a type before one giving data: `a implies b` the proposition, `bool` the type
+	types = if type_wanted then fitting.filter(trial => gives_type(p, trial.candidate)) else []
+	best = fewest_by(if types is empty then fitting else types, trial => trial.indirect)
+	best = fewest_by(best, trial => left_open(p, trial.candidate, given))
+	best = fewest_by(best, trial => letters_found(p, trial.candidate))
+	trials.filter(trial => trial.refusal is not ø) + best
 }
+# the trials a measure gives the least
+fewest_by(trials: list<Trial>, measure: (Trial) -> int): list<Trial> := {
+	least = trials.map(measure).min()
+	trials.filter(trial => measure(trial) == least)
+}
+# whether a declaration gives a type, a proposition among them
+gives_type(p: Theory, key: text): bool := is_sort(result_of(declaration(p.environment, key)!.type))
 # how many of its written parameters a declaration leaves open given so many arguments
 left_open(p: Theory, key: text, given: int): int := (p.binders.get(key) ?? 0) - letters_found(p, key) - given
 # whether the prelude declares this key
