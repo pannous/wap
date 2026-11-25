@@ -17,7 +17,8 @@ KIND_F64 := 3
 REGISTERS := 8
 # an import's record, the data wasmtime calls it with: the C function, found at its first call (0 before), its result's
 # kind (NO_RESULT for none), a scratch extern, the REGISTERS integer and REGISTERS float arguments of a call, and the
-# library and name it is found by, so a module importing a function no library here has (kernel32's on a Mac) links
+# library and name it is found by, and the size of a struct given by value last (0 for none: extensions/c/foreign.wap
+# c_import_name), so a module importing a function no library here has (kernel32's on a Mac) links
 # and stops only where it calls it, as warp's driver does
 FUNCTION_SLOT := 0
 RESULT_SLOT := 8
@@ -26,7 +27,10 @@ INTEGERS_SLOT := 40
 FLOATS_SLOT := INTEGERS_SLOT + 8 * REGISTERS
 LIBRARY_SLOT := FLOATS_SLOT + 8 * REGISTERS
 NAME_SLOT := LIBRARY_SLOT + 8
-RECORD_BYTES := NAME_SLOT + 8
+STRUCT_SLOT := NAME_SLOT + 8
+RECORD_BYTES := STRUCT_SLOT + 8
+STRUCT_MARK := " "
+STRUCT_TIMES := "*"
 NO_RESULT := -1
 # the C names this file finds, the library of main.c's
 callback_name(): int32 := prim data_address("wap_host_callback")
@@ -46,6 +50,7 @@ calling: int = 0
 # stops the run naming it
 native_function(library: i64, name: i64): i64 from 'c'
 native_call(function: i64, integers: i64, floats: i64, float_result: i64): i64 from 'c'
+native_call_struct(function: i64, integers: i64, count: i64, bytes: i64, size: i64): i64 from 'c'
 wasm_importtype_type(imported: i64): i64 from 'c'
 wasm_externtype_as_functype_const(type: i64): i64 from 'c'
 wasm_functype_results(type: i64): i64 from 'c'
@@ -63,7 +68,9 @@ c_function_defined(linker: int, imported: int, from: int, name: int): int := {
 	record = host_block(RECORD_BYTES)
 	set_long_at(record + FUNCTION_SLOT, 0)
 	set_long_at(record + LIBRARY_SLOT, strndup(long_at(from + 8), long_at(from)))
-	set_long_at(record + NAME_SLOT, strndup(long_at(name + 8), long_at(name)))
+	parts = vector_text(name).split(STRUCT_MARK)
+	set_long_at(record + NAME_SLOT, strndup(long_at(name + 8), byte_count(parts#1)))
+	set_long_at(record + STRUCT_SLOT, if #parts > 1 then int(parts#2.split(STRUCT_TIMES)#1) else 0)
 	set_long_at(record + RESULT_SLOT, result_kind(type))
 	import_defined(linker, imported, from, name, callback_name(), record)
 }
@@ -101,7 +108,10 @@ host_word_answered(word: int, caller: int, given: int, count: int, results: int,
 	outer: int = calling
 	global calling = caller
 	if long_at(word + FUNCTION_SLOT) == 0 { set_long_at(word + FUNCTION_SLOT, native_function(long_at(word + LIBRARY_SLOT), long_at(word + NAME_SLOT))) }
-	returned = native_call(long_at(word + FUNCTION_SLOT), word + INTEGERS_SLOT, word + FLOATS_SLOT, if kind == KIND_F64 or kind == KIND_F32 then 1 else 0)
+	function = long_at(word + FUNCTION_SLOT)
+	size = long_at(word + STRUCT_SLOT)
+	# (a struct given by value is the last integer, a pointer to its bytes)
+	returned = if size > 0 then native_call_struct(function, word + INTEGERS_SLOT, integer_count - 1, long_at(word + INTEGERS_SLOT + 8 * (integer_count - 1)), size) else native_call(function, word + INTEGERS_SLOT, word + FLOATS_SLOT, if kind == KIND_F64 or kind == KIND_F32 then 1 else 0)
 	global calling = outer
 	if results_count > 0 {
 		set_long_at(results, kind)
