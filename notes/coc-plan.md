@@ -344,7 +344,7 @@ Three lines through the stages:
   `Decidable`), numbers, lists, texts, maps, optional values, the effects and the computation type, the conversions.
 - `wap/extensions/prove/`: the provers.
 
-Until the switch (milestone S3) the kernel is built in `wap/extensions/theory/`, as a module of its own, so
+Until the switch (milestone R7) the kernel is built in `wap/extensions/theory/`, as a module of its own, so
 wap/core and wap/kernel stay as they are and the compiler keeps its size and speed while it grows.
 
 ### 5.3 Size
@@ -910,14 +910,20 @@ texts.
 |---|---|---|
 | S1 census | elaborate and check run beside today's typing; the census (test/wap/ratchet_census.sh) gains a ratchet "accepted n of N" over the compiler's source, lib/ and the test programs, and a gate on compile time | the count, which only grows; the time, which stays under its gate |
 | S2 running from terms | erase, lower and emit from run terms, behind an option | every test program prints the same both ways; the benchmarks within their guardrails |
-| S3 the switch | the new stages are the compiler; wap/core/analyze goes; the kernel moves to wap/kernel; the seed is refreshed | test_hello, test_self, the census, `--stage 2`: the compiler built through its own kernel builds itself again |
-| S4 host layouts | every type and function of the prelude runs by its host layout or operation (9.7) | the prelude's laws Proved and run on values; the benchmarks unchanged; `char` is `text where #it == 1` and nothing else |
+| R1 environments without rollback | checking a declaration returns a new environment or a refusal; nothing is copied per statement or taken back | the census accepts as many statements as before, faster; a refused declaration leaves no trace a later statement can see |
+| R2 numbers stay numbers | every operation the kernel shortcuts (6.7) on literals stays a literal, for `int` as for `nat`; no recursion depth grows with a number's size | `h - 700000000` checks in the time of `h - 7`; the depth budget is gone |
+| R3 one library | the prelude and wap/types are one library, each word declared once; a declaration carries its host operation or layout (9.7), so the trust base is the list of those declarations, derived | no word declared twice; `axioms of` and the trust base listing come from the declarations; the prelude's laws Proved and run on values |
+| R4 elaboration before the kernel | literals read at the type their place wants; overloads and conversions chosen once (8), so the kernel sees unique names | `abs(0 - 3)` prints 3 compiled and checked; no overload ranking inside the theory |
+| R5 effects in the kernel | `! IO` is a computation type of the kernel (9.2): a computation where a value is wanted is a type error, not an unfit candidate | `print` checks; a proposition with an effect refused |
+| R6 one pipeline | read, elaborate, check, erase, emit; check, run and verify are modes of one run, not doors | one refusal of a program's host layout, at one place |
+| R7 the switch | the new stages are the compiler; wap/core/analyze goes; the kernel moves to wap/kernel; the seed is refreshed | test_hello, test_self, the census, `--stage 2`: the compiler built through its own kernel builds itself again; the benchmarks unchanged; `char` is `text where #it == 1` and nothing else |
 
 Order: K1, then K2 to K6 in a row, with K3 right after K2 since every program is full of numbers. L follows K as
 its table says. E1 follows K1; E2 follows K2 and L1; E3 follows L2; E4 follows E3 and L3; E5 follows E4 and L4; E6
 and E7 follow E5, E7 needing K6; E8 follows E4. P1 follows E2 and K4; P2 to P4 follow it. S1 starts with E2; the
-stage `lower` is built and measured as soon as E2 gives run terms; S2 follows E5, S3 follows all of E, S4 follows
-S3. K7 any time after K2.
+stage `lower` is built and measured as soon as E2 gives run terms; S2 follows E5. R1 and R2 touch only the theory and
+start at once; R3 follows R1; R4 and R5 follow R3; R6 follows R4 and R5; R7 follows all of them. Each R lands alone
+with the compiler building itself. K7 any time after K2.
 
 Feature by feature:
 
@@ -948,7 +954,7 @@ In the order to cut, first what costs most for least:
    Tested;
 9. the second opinion (K7): it is the only check wap does not build itself, so it is cut last of these.
 
-Not to cut: K1 to K6, L1 to L4, E1 to E6, optional values and `any` of E7, P1, S1 to S3 and the refusal tests of
+Not to cut: K1 to K6, L1 to L4, E1 to E6, optional values and `any` of E7, P1, S1, S2, R1 to R7 and the refusal tests of
 10.4. Together they are the nine features in wap's own types, with `char` a subtype of `text`.
 
 ## 13 Decisions
@@ -984,7 +990,7 @@ Decided by the user (2026-11-24):
 
 Open, with the recommendation first and its cost in core; with the user through the interviewer:
 
-1. **W0 and `wap verify`.** Recommended: the Lean model and the Lean prover retire at milestones S3 and P3; until
+1. **W0 and `wap verify`.** Recommended: the Lean model and the Lean prover retire at milestones R7 and P3; until
    then they stay beside the new ones. 0 core lines.
 2. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
    `refl`; `axiom`, `assume`; `by`, `chain`; `decreasing`; the axioms' names. Settled on the wiki pages.
