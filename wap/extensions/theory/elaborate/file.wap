@@ -76,27 +76,16 @@ PRELUDE_FILES := ["logic", "numbers", "quotient", "data", "effects", "operators"
 
 # the prelude checked into the theory's environment, its declarations counted
 prelude_checked(p: Theory, language: Language) := {
-	laid: list<Statement> = []
 	for file in PRELUDE_FILES {
 		for unit in file_units(language, prelude_file(p, file)) {
 			statement = explicit_overloaded(p, unit)
-			statement_checked(p.environment, statement)
 			match statement {
-				LaysOut(name, parts) => {
-					layout_noted(p, language, name, parts)
-					laid += [statement]
-				}
-				_ => ø
+				LaysOut(name, parts) => layout_noted(p, language, name, parts)
+				_ => statement_checked(p.environment, statement)
 			}
 		}
 	}
 	p.prelude_size = #p.environment.places
-	for statement in laid {
-		match statement {
-			LaysOut(name, parts) => layout_checked(p, language, name, parts)
-			_ => ø
-		}
-	}
 }
 # How the host runs a declaration of the prelude, the statement after it: `runs(add, m + n)`, plain wap naming the
 # declaration's parameters; a case's also its test and how each field is taken out of a value, naming it `it`,
@@ -111,7 +100,7 @@ layout_noted(p: Theory, language: Language, name: text, parts: list<Node>) := {
 	test = named_part(parts, TEST_NAME)
 	fields: map<text, text> = {}
 	for field in parameters { if named_part(parts, field) is not ø { fields[field] = at_value(named_part(parts, field)!) } }
-	p.layouts[name] = Layout(formatted(language, placed(parts#2, parameters)), if test is ø then ø else at_value(test!), fields)
+	p.layouts[name] = Layout(formatted(language, placed(parts#2, parameters)), if test is ø then ø else at_value(test!), fields, parts)
 }
 # the part named so, `when: it > 0`, of a layout's; ø where none is
 named_part(parts: list<Node>, name: text): Node? := {
@@ -132,50 +121,6 @@ renamed(n: Node, pairs: list<list<text>>): Node := match n {
 	_ => with_parts(n, part => renamed(part, pairs))
 }
 
-# A layout checked, since erase believes it: each spelling is elaborated as a definition over the host's types, the
-# declaration's parameters at the types their values run as (`nat`'s as an int), so `it - 1` is an int; one of no
-# value of its layout type is refused
-LAYOUT_CHECKED := "laid_out"
-# the name a case's value is checked under, `it` being no name a definition's parameter can take
-VALUE_CHECKED := "value"
-layout_checked(p: Theory, language: Language, name: text, parts: list<Node>) := {
-	d = declared_named(p.environment, name)
-	c = checker(p.environment, d.levels)
-	binders: list<list<text>> = []
-	type = d.type
-	while yes {
-		match type.shape {
-			Pi(binder, domain, body) => {
-				binders += [[binder, host_type(p, c, domain)]]
-				type = instantiated(body, hypothesis(c, binder, domain))
-			}
-			_ => break
-		}
-	}
-	result = host_type(p, c, type)
-	# (a type's layout names a wap type: nothing to elaborate)
-	if result == TYPE_WORD { return }
-	spelled_as(p, language, name, binders, result, parts#2)
-	value = [[VALUE_CHECKED, result]]
-	at_value = [[VALUE_NAME, VALUE_CHECKED]]
-	test = named_part(parts, TEST_NAME)
-	if test is not ø { spelled_as(p, language, name, value, BOOL, renamed(test!, at_value)) }
-	for binder in binders {
-		field = named_part(parts, binder#1)
-		if field is not ø { spelled_as(p, language, name, value, binder#2, renamed(field!, at_value)) }
-	}
-}
-# a spelling of a layout elaborated as the value of a definition of these parameters, each a name and its host type
-spelled_as(p: Theory, language: Language, name: text, binders: list<list<text>>, result: text, spelling: Node) := {
-	written = formatted(language, spelling)
-	head = if binders is empty then LAYOUT_CHECKED else "${LAYOUT_CHECKED}(${binders.map(binder => "${binder#1}: ${binder#2}").join(", ")})"
-	try {
-		checking = copied(p)
-		for unit in module_units(operated_program(language, notation("${head}: ${result} := ${written}", LAYOUT_CHECKED))) { unit_elaborated(checking, unit) }
-	} catch refusal { refused(LAYOUT, "${name} runs as ${written}, which is no ${result} there: ${refusal.message}") }
-}
-# the wap type a type's values run as, one the prelude lays out no way to run as the theory shows it
-host_type(p: Theory, c: Checker, type: Term): text := host_type(p, c, type, unlaid => shown_for(c, unlaid))
 # an explicit statement whose declaration takes a name declared before: an overload of it, by the elaborator's key
 explicit_overloaded(p: Theory, unit: list<Node>): Statement := {
 	statement = unit_read(p.environment, unit)
@@ -201,9 +146,10 @@ door_run(p: Theory, given: list<text>, work: (DoorArguments) -> ø) := {
 }
 # the elaborator's door: the prelude checked, then the modules the program uses and its own statements elaborated in
 # order into the theory
-door_elaborated(p: Theory, given: list<text>) := door_run(p, given, arguments => {
+door_elaborated(p: Theory, given: list<text>, prelude_read: (Theory, Language) -> ø = (p, language) => ø) := door_run(p, given, arguments => {
 	language = base_language()
 	prelude_checked(p, language)
+	prelude_read(p, language)
 	modules = program_modules(language, door_program(arguments))
 	p.sets = places_set(modules)
 	for module in modules {
