@@ -44,7 +44,7 @@ theory_report="$stage/theory-census.out"
 theory_census="$stage/theory-census.wasm"
 if [ -n "$theory" ]; then
 	(cd "$root" && $wap "$compiler" scripts/theory-census.wap "$theory_census" >"$theory_report" 2>&1 &&
-		timed $wap "$theory_census" --tree . $(compiler_sources) $(git ls-files 'lib/*.wap') test/test_*.wap >"$theory_report" 2>&1)
+		timed $wap "$theory_census" --tree . $(compiler_sources) $(git ls-files 'lib/*.wap') test/check.wap test/test_*.wap >"$theory_report" 2>&1)
 	theory_status=$?
 	accepted=$(sed -n 's/^accepted \([0-9]*\) of [0-9]* statements$/\1/p' "$theory_report")
 	# a census that failed has no time to compare: a quick crash is no fast census
