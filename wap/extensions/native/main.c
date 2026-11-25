@@ -1,7 +1,8 @@
 // The C entry of a native wap program (wap/extensions/native/build.sh): wasm2c's module of the program, named program,
 // run by lib/native/wasi.c, which answers its WASI calls over libc and holds main(); the glue build.sh writes with
-// glue.awk calls the C functions the program imports. A program of no GC value (no text, list or raise), as wasm2c
-// takes no GC type
+// glue.awk calls the C functions the program imports. wasm2c takes no GC type, so the program keeps its texts, lists,
+// enums and class instances in the memory (wap/extensions/native/memory.wap); maps, `any`, enums whose cases have
+// fields and try/catch stay GC values a native program cannot use
 #include <limits.h>
 #include <string.h>
 #include "program.h"
