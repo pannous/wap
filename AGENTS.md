@@ -66,7 +66,7 @@ removed by whoever meets it.
 ## Folders
 - `test/` = every kept test: test programs test/test_<area>.wap (check.wap), test/wap/ the scripts for what a program cannot check; `data/` = kept but ignored: logs, builds, dumps (`data/<topic>/`).
 <!-- DONE (card shell-test-scripts) turn test/wap/*.sh into pure test/*.wap -->
-- `notes/` = the design: backbone.md (stages, milestones, Debts), wap.md (owners, layout), kernel.md, rules.md.
+- `notes/` = the design: backbone.md (stages, milestones), debts.md, theory.md, coc-plan.md; owners and layout in notes/agents/wap-owner.md.
   Notes say how things are, never how they came to be: no history, no "learned on <date>" stories; history is in git (user).
 <!-- todo (card wap-notes-cleanup): cleanup notes: Everything should already be in the specification, agents.md or roles !  -->
 
