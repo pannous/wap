@@ -7,7 +7,6 @@
 # A term given to `type_of` holds no loose variable: under a binder the body is typed with the binder's variable
 # replaced by a free one (environment.wap `hypothesis`), and the type found is made the binder's body again.
 
-use magnitude
 use "terms.wap"
 use "levels.wap"
 use "environment.wap"
@@ -33,7 +32,7 @@ type_found(c: Checker, t: Term): Term := match t.shape {
 		levels_declared(c, level)
 		universe(Successor(level))
 	}
-	Constant(name, levels) => constant_type(c, name, levels)
+	Constant(name, levels, _) => constant_type(c, t)
 	Apply(function, argument) => application_type(c, t)
 	# `(x: A) => b` is a `(x: A) -> B`, where B is the type of b
 	Lambda(binder, domain, body) => {
@@ -56,7 +55,9 @@ type_found(c: Checker, t: Term): Term := match t.shape {
 		type_of(c, instantiated(body, value))
 	}
 	# a number has the number type the numbers statement bound
-	Numeral(value) => constant((c.environment.numbers ?? refused(NO_NUMBERS, "the number ${digits(value)} belongs to no type: no numbers are declared")).number, [])
+	Numeral(value) => (c.environment.numbers ?? refused(NO_NUMBERS, "the number ${value} belongs to no type: no numbers are declared")).number
+	# a text has the type the texts statement's function gives
+	Quoted(value) => (c.environment.texts ?? refused(TEXTS, "the text ${shown(t)} belongs to no type: no texts are declared")).type
 	Projection(structure, field, of) => projection_type(c, structure, field, of)
 }
 
@@ -64,15 +65,14 @@ type_found(c: Checker, t: Term): Term := match t.shape {
 # has the type the structure's case gives it, with those parameters and the fields before it put in, each as the
 # projection of the same value. Out of a proof only a proof is taken, and no field passes that a later one's type
 # names unless it is a proof itself: the witness of an `exists` stays inside
-projection_type(c: Checker, structure: text, field: int, of: Term): Term := {
+projection_type(c: Checker, structure: Term, field: int, of: Term): Term := {
 	type = computed(c, type_of(c, of))
-	levels = match head(type).shape {
-		Constant(name, levels) => if name == structure then levels else refused(NOT_A_STRUCTURE, "${shown(of)} is a ${shown(type)}, no ${structure}")
-		_ => refused(NOT_A_STRUCTURE, "${shown(of)} is a ${shown(type)}, no ${structure}")
-	}
-	facts = structure_facts(c.environment, structure) ?? refused(NOT_A_STRUCTURE, "${structure} is no structure: a structure has one case, no index and does not hold itself")
+	name = constant_name(structure)
+	if not is_constant(head(type), structure) { refused(NOT_A_STRUCTURE, "${shown(of)} is a ${shown(type)}, no ${name}") }
+	levels = constant_levels(head(type))
+	facts = structure_facts(c.environment, structure) ?? refused(NOT_A_STRUCTURE, "${name} is no structure: a structure has one case, no index and does not hold itself")
 	fields = facts.fields#1#1
-	if field < 1 or field > fields { refused(NOT_A_STRUCTURE, "${structure} has ${fields} fields, so no field ${field}") }
+	if field < 1 or field > fields { refused(NOT_A_STRUCTURE, "${name} has ${fields} fields, so no field ${field}") }
 	proof = is_zero(simplified(level_of(c, type)))
 	case = facts.block.types#1.cases#1
 	rest = instantiated_all(body_under(with_levels(case.type, facts.block.levels, levels), facts.block.parameters), arguments(type))
@@ -83,7 +83,7 @@ projection_type(c: Checker, structure: text, field: int, of: Term): Term := {
 				if proof and body.loose > 0 and not is_proposition(c, domain) { refused(DATA_FROM_PROOF, "field ${field} of ${shown(of)} names field ${at}, which is data inside a proof") }
 				instantiated(body, projection(structure, at, of))
 			}
-			_ => refused(NOT_A_STRUCTURE, "${structure}'s case has no field ${at}")
+			_ => refused(NOT_A_STRUCTURE, "${name}'s case has no field ${at}")
 		}
 		at += 1
 	}
@@ -92,7 +92,7 @@ projection_type(c: Checker, structure: text, field: int, of: Term): Term := {
 			if proof and not is_proposition(c, domain) { refused(DATA_FROM_PROOF, "field ${field} of ${shown(of)} is data, and ${shown(of)} is a proof") }
 			domain
 		}
-		_ => refused(NOT_A_STRUCTURE, "${structure}'s case has no field ${field}")
+		_ => refused(NOT_A_STRUCTURE, "${name}'s case has no field ${field}")
 	}
 }
 # whether a type is a proposition: it lies in Prop
@@ -114,9 +114,10 @@ levels_declared(c: Checker, level: Level) := {
 }
 
 # a constant has its declared type at the levels it is given, which are exactly as many as it has parameters
-constant_type(c: Checker, name: text, levels: list<Level>): Term := {
-	d = declared_named(c.environment, name)
-	if #levels != #d.levels { refused(LEVEL_COUNT, "${name} takes ${counted(#d.levels, "level")} and is given ${#levels}") }
+constant_type(c: Checker, t: Term): Term := {
+	d = declaration_of(c.environment, t)
+	levels = constant_levels(t)
+	if #levels != #d.levels { refused(LEVEL_COUNT, "${d.name} takes ${counted(#d.levels, "level")} and is given ${#levels}") }
 	for level in levels { levels_declared(c, level) }
 	with_levels(d.type, d.levels, levels)
 }
@@ -148,13 +149,12 @@ application_type(c: Checker, t: Term): Term := {
 # its terms are closed, its type is a type, and its value's type equals its type; a theorem's type is a proposition.
 # An inductive block comes in through inductive.wap, which makes its declarations itself
 declared(e: Environment, d: Declaration) := {
-	names_new(e, [d.name])
 	levels_distinct(d.levels)
 	closed(d.type, d.name)
 	c = checker(e, d.levels)
 	level = level_of(c, d.type)
-	match d.kind {
-		Axiom => rests_on(e, d.name, [d.type], yes)
+	checked: Term? = match d.kind {
+		Axiom => ø
 		Defined(value) => value_checked(c, d, value)
 		Theorem(value) => {
 			if not is_zero(simplified(level)) { refused(NOT_A_PROPOSITION, "${d.name} is a law of ${shown(d.type)}, which is a ${shown(universe(level))}, no proposition") }
@@ -164,11 +164,12 @@ declared(e: Environment, d: Declaration) := {
 		_ => refused(UNKNOWN_NAME, "${d.name} is of a block, which inductive.wap declares")
 	}
 	added(e, d)
+	rests_on(e, size(e), [d.type] + (if checked is ø then [] else [checked!]), checked is ø)
 }
-# a value has its declaration's type
-value_checked(c: Checker, d: Declaration, value: Term) := {
+# a value that has its declaration's type
+value_checked(c: Checker, d: Declaration, value: Term): Term := {
 	closed(value, d.name)
 	given = type_of(c, value)
 	if not equal(c, given, d.type) { refused(VALUE_TYPE, "${d.name} is declared a ${shown(d.type)}, its value ${shown(value)} is a ${shown(given)}") }
-	rests_on(c.environment, d.name, [d.type, value], no)
+	value
 }

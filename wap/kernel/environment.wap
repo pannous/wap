@@ -74,10 +74,10 @@ enum DeclarationKind {
 	Defined(value: Term)
 	Theorem(value: Term)
 	Opaque(value: Term)
-	# a type of an inductive block, and one of its cases: the name of its type, its place among the type's cases, and
+	# a type of an inductive block, and one of its cases: its type's constant, its place among the type's cases, and
 	# how many fields it takes after the block's parameters
 	Inductive(facts: InductiveFacts)
-	Constructor(of: text, place: int, fields: int)
+	Constructor(of: Term, place: int, fields: int)
 	# the recursor of a type of a block (recursors.wap)
 	Recursor(facts: RecursorFacts)
 	# one of the quotient's four constants (quotients.wap)
@@ -93,14 +93,17 @@ class WrittenCase { name: text; type: Term }
 class BlockType { name: text; type: Term; cases: list<WrittenCase> }
 class InductiveBlock { levels: list<text>; parameters: int; types: list<BlockType> }
 type_names(block: InductiveBlock): list<text> := block.types.map(type => type.name)
-# What checks 1 to 5 found of a block, so the recursors are made without finding it again: the block made plain,
-# its types first and then one for each container a type of it is nested in, and that container as a function of
-# the block's parameters (nested.wap); the universe its types lie in; each type's count of indices; each case's count
+# What checks 1 to 5 found of a block, so the recursors are made without finding it again: the block as declared and
+# its types' constants at its level parameters; the block made plain, its types first and then one for each container a type of it is nested in, each case over those
+# types as a block is written, as the added ones are never declared; each container as a function of the block's
+# parameters (nested.wap); the universe its types lie in; each type's count of indices; each case's count
 # of fields and the places of the fields that hold a type of the block, by type and then by case; whether its
 # recursors may compute into any universe or into Prop only; and the flags of check 7: a structure (one type, one
 # case, no indices, holding no value of itself) and K (a proposition of one type, one case without fields)
 class InductiveFacts {
 	block: InductiveBlock
+	types: list<Term>
+	plain: InductiveBlock
 	nested: list<Term>
 	level: Level
 	indices: list<int>
@@ -111,12 +114,12 @@ class InductiveFacts {
 	k: bool
 }
 
-# What iota reads of a recursor: its type and that type's cases, by name, with each case's count of fields; the
+# What iota reads of a recursor: its type and that type's cases, each a constant at the block's level parameters, with each case's count of fields; the
 # counts of the binders it takes before the major premise; one computation rule per case, a closed function of the
 # parameters, the motives, the minor premises and the case's fields; and K (the block's flag)
 class RecursorFacts {
-	of: text
-	cases: list<text>
+	of: Term
+	cases: list<Term>
 	fields: list<int>
 	parameters: int
 	motives: int
@@ -126,14 +129,23 @@ class RecursorFacts {
 	k: bool
 }
 
+# a type's place in its block, 0 for a constant of none of its types
+type_place(facts: InductiveFacts, type: Term): int := facts.types.index_where(own => is_constant(own, type))
+# a case of a block's type at the type's levels, by its place: a block declares each type with its cases right after
+# it, so a case's id is its type's and its place
+block_case(facts: InductiveFacts, type: Term, place: int): Term := constant(constant_id(type) + place, facts.block.types#(type_place(facts, type)).cases#place.name, constant_levels(type))
+
 # A declaration: its name, the names of its level parameters, its type, and what it is
 class Declaration { name: text; levels: list<text>; type: Term; kind: DeclarationKind }
 
-# the facts of a structure a name declares (7, check 7: one type, one case, no indices, holding no value of
-# itself), ø for any other name
-structure_facts(e: Environment, name: text): InductiveFacts? := match (e.declarations.get(name) ?? return ø).kind {
-	Inductive(facts) => if facts.structure and facts.block.types#1.name == name then facts else ø
-	_ => ø
+# the facts of a structure a constant names (7, check 7: one type, one case, no indices, holding no value of
+# itself), ø for any other constant
+structure_facts(e: Environment, constant: Term): InductiveFacts? := {
+	d = declared_at(e, constant_id(constant)) ?? return ø
+	match d.kind {
+		Inductive(facts) => if facts.structure and facts.block.types#1.name == d.name then facts else ø
+		_ => ø
+	}
 }
 
 # the value a use of the declaration unfolds to (6.4 delta), ø for one that never unfolds
@@ -143,21 +155,30 @@ unfolding(d: Declaration): Term? := match d.kind {
 	_ => ø
 }
 
-# The declarations accepted so far, and each one's place in the order of declaring, from 1: of two definitions the
-# later one unfolds first (6.5)
+# The declarations accepted so far, by id: the id is the place in the order of declaring, from 1, so of two
+# definitions the later one unfolds first (6.5). Ids are never given twice: a declaration taken back (`back_to`) keeps
+# its place in the log and is never found again
 class Environment {
-	declarations: map<text, Declaration> = {}
-	places: map<text, int> = {}
-	# the axioms each declaration rests on, through everything its type and its value name
-	axioms: map<text, list<text>> = {}
+	log: list<Declaration> = []
+	# the ids taken back
+	taken_back: map<int, bool> = {}
+	# the scope being read, the id each name means there: its own names, where a declaration added is named and no
+	# name is declared twice, and the names it sees from outside, which its own hide. Whoever reads a module sets the
+	# module's (two modules may declare one name)
+	ids: map<text, int> = {}
+	outer: map<text, int> = {}
+	# the axioms each declaration rests on, by id, through everything its type and its value name
+	axioms: map<int, list<int>> = {}
 	# the number type and the shortcuts, once the numbers statement bound them (numbers.wap)
 	numbers: Numbers? = ø
-	# the function a text literal applies to the number it spells, once the texts statement bound it (numbers.wap)
-	texts: text? = ø
+	# the function a text literal stands for and the list it takes, once the texts statement bound them (numbers.wap)
+	texts: Texts? = ø
 	# the pair and the unit types, once the products statement bound them (below.wap)
 	products: Products? = ø
-	# the courses below.wap made, so a course of the same name the program declared is never taken for one
-	courses: list<text> = []
+	# the quotient and the maker of its values, once the quotients statement declared them (quotients.wap)
+	quotients: Quotients? = ø
+	# the ids of the courses below.wap made, so a course of the same name the program declared is never taken for one
+	courses: list<int> = []
 	# what it accepted, in order, as it was given: what an export writes (export.wap)
 	accepted: list<Accepted> = []
 }
@@ -167,55 +188,66 @@ enum Accepted {
 	AcceptedBlock(block: InductiveBlock)
 	AcceptedBinding(word: text, names: list<text>)
 }
-# the pair type and its one case, the unit type and its one case
-class Products { pair: text; intro: text; unit: text; one: text }
-declaration(e: Environment, name: text): Declaration? := e.declarations.get(name)
+# the pair type and its one case, the unit type and its one case, each a constant
+class Products { pair: Term; intro: Term; unit: Term; one: Term }
+# the quotient type and the maker of its values, each a constant
+class Quotients { former: Term; made: Term }
+declaration(e: Environment, name: text): Declaration? := e.log#(named_id(e, name) ?? return ø)
+# the id a name means in the scope being read
+named_id(e: Environment, name: text): int? := e.ids.get(name) ?? e.outer.get(name)
+# a scope being read, kept to be read in again: what a module declared, entered again where another module goes on
+# from it
+class KeptScope { own: map<text, int>; outer: map<text, int> }
+scope_kept(e: Environment): KeptScope := KeptScope(copy(e.ids), copy(e.outer))
+scope_entered(e: Environment, scope: KeptScope) := {
+	e.ids = copy(scope.own)
+	e.outer = copy(scope.outer)
+}
 # the declaration of a name that must be declared, else refused
+# the declaration of an id while it is live; ø for an id taken back or never given
+declared_at(e: Environment, id: int): Declaration? := if id >= 1 and id <= #e.log and not e.taken_back.has(id) then e.log#id else ø
+# a constant's declaration, refused where it is taken back
+declaration_of(e: Environment, constant: Term): Declaration := match constant.shape {
+	Constant(name, levels, id) => declared_at(e, id) ?? refused(UNKNOWN_NAME, "nothing is named ${name} here")
+	_ => raise "only a constant names a declaration"
+}
+# Declarations added together, made given the ids they take, so one may name another before it is added (a block's
+# types in its cases, a recursor in its rules, a quotient's former in its other parts); each checked once the ones
+# before it are added. Where making or a check refuses, none is added
+declared_together(e: Environment, names: list<text>, made: (list<int>) -> list<Declaration>, checked: (Declaration) -> T): list<Declaration> := kept_if_given(e, () => {
+	size = #e.log
+	declarations = made((1 to #names).list().map(at => size + at))
+	if #e.log != size or declarations.map(d => d.name) != names { raise "declarations made together are added by declared_together alone, in the order of their names" }
+	for d in declarations {
+		added(e, d)
+		checked(d)
+	}
+	declarations
+})!
+# a declaration by its name as a constant at these levels
+constant_of(e: Environment, name: text, levels: list<Level>): Term := constant(place(e, name), name, levels)
 declared_named(e: Environment, name: text): Declaration := {
 	d = declaration(e, name)
 	if d is ø { refused(UNKNOWN_NAME, "nothing is named ${name}") }
 	d!
 }
-place(e: Environment, name: text): int := e.places.get(name) ?? 0
-# another environment holding the same declarations, which may grow without this one growing
-copied(e: Environment): Environment := {
-	copy = Environment()
-	copy.declarations.update(e.declarations)
-	copy.places.update(e.places)
-	copy.axioms.update(e.axioms)
-	copy.numbers = e.numbers
-	copy.products = e.products
-	copy.texts = e.texts
-	copy.courses += e.courses
-	copy.accepted += e.accepted
-	copy
-}
+place(e: Environment, name: text): int := named_id(e, name) ?? 0
+# the ids given so far, the live ones and those taken back
+size(e: Environment): int := #e.log
+# the names the scope being read sees, those from outside first
+declared_names(e: Environment): list<text> := e.outer.keys().filter(name => not e.ids.has(name)) + e.ids.keys()
 # Every axiom a declaration rests on (`axioms of name`): an axiom rests on itself, any other declaration on what the
 # names in its type and its value rest on, an opaque value's names too
-axioms_of(e: Environment, name: text): list<text> := e.axioms.get(name) ?? []
+axioms_of(e: Environment, constant: Term): list<text> := (e.axioms.get(constant_id(constant)) ?? []).map(id => e.log#id.name)
 # the axioms a declaration rests on as `axioms of` prints them, `[hard]`
-axioms_shown(e: Environment, name: text): text := "[${axioms_of(e, name).join(", ")}]"
-# what a new declaration of these terms rests on, recorded under its name; `own` is yes for an axiom
-rests_on(e: Environment, name: text, terms: list<Term>, own: bool) := {
-	named: map<text, bool> = {}
-	for t in terms { constants_named(t, named) }
-	resting: list<text> = if own then [name] else []
-	for used in named.keys() {
-		for axiom in axioms_of(e, used) { if not resting.contains(axiom) { resting += [axiom] } }
+axioms_shown(e: Environment, constant: Term): text := "[${axioms_of(e, constant).join(", ")}]"
+# what the declaration of this id rests on, through the constants of these terms; `own` is yes for an axiom
+rests_on(e: Environment, id: int, terms: list<Term>, own: bool) := {
+	resting: list<int> = if own then [id] else []
+	for used in terms.flat_map(constants_in) {
+		for axiom in e.axioms.get(constant_id(used)) ?? [] { if not resting.contains(axiom) { resting += [axiom] } }
 	}
-	e.axioms[name] = resting
-}
-# the constants a term names, each once, gathered into a map whose keys they are
-constants_named(t: Term, named: map<text, bool>) := {
-	match t.shape {
-		Constant(name, levels) => { named[name] = yes }
-		Apply(function, argument) => { constants_named(function, named); constants_named(argument, named) }
-		Lambda(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
-		Pi(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
-		LetIn(binder, type, value, body) => { constants_named(type, named); constants_named(value, named); constants_named(body, named) }
-		Projection(structure, field, of) => { named[structure] = yes; constants_named(of, named) }
-		_ => ø
-	}
+	e.axioms[id] = resting
 }
 # whether a declaration was stated as written, not made by a block or the quotients
 stated(d: Declaration): bool := match d.kind {
@@ -228,35 +260,57 @@ stated(d: Declaration): bool := match d.kind {
 	Recursor(facts) => no
 	Quotient(part) => no
 }
-# a declaration becomes part of the environment, checked first by typing.wap's `declared` or inductive.wap; one stated as
-# written is recorded for an export
+# a declaration becomes part of the environment, checked first by typing.wap's `declared` or inductive.wap, its name
+# new in the scope being read; one stated as written is recorded for an export
 added(e: Environment, d: Declaration) := {
-	e.places[d.name] = #e.places + 1
-	e.declarations[d.name] = d
+	if e.ids.has(d.name) { refused(NAME_TAKEN, "${d.name} is declared already") }
+	e.log += [d]
+	e.ids[d.name] = #e.log
 	if stated(d) { e.accepted += [AcceptedDeclaration(d)] }
 }
 
-# how far the environment reached, so what was declared after can be withdrawn
-class Reach { places: int; accepted: int }
-reach_of(e: Environment): Reach := Reach(#e.places, #e.accepted)
-# the declarations made since a reach taken out again: a search that found nothing leaves no laws behind
-withdrawn(e: Environment, reach: Reach) := {
-	if #e.places == reach.places { return }
-	for name in e.places.keys().filter(name => e.places[name] > reach.places) {
-		e.declarations.remove(name)
-		e.places.remove(name)
-		e.axioms.remove(name)
+# How far the environment reached, and what the binding statements had bound by then, so what was declared after
+# is taken back: a refused statement, a search that found nothing, a block's types held as axioms while it is checked
+class Reach {
+	size: int = 0
+	accepted: int = 0
+	courses: int = 0
+	numbers: Numbers? = ø
+	texts: Texts? = ø
+	products: Products? = ø
+	quotients: Quotients? = ø
+}
+mark(e: Environment): Reach := Reach(#e.log, #e.accepted, #e.courses, e.numbers, e.texts, e.products, e.quotients)
+# the environment taken back to a reach: each declaration made since is taken back and loses its name, its id stays
+# given, so a term or a kept answer naming it finds nothing; the bindings and the courses are what they were then
+back_to(e: Environment, reach: Reach) := {
+	for id in reach.size + 1 to #e.log {
+		e.taken_back[id] = yes
+		e.axioms.remove(id)
+		name = e.log#id.name
+		if e.ids.get(name) == id { e.ids.remove(name) }
 	}
 	e.accepted = e.accepted.take(reach.accepted)
+	e.courses = e.courses.take(reach.courses)
+	e.numbers = reach.numbers
+	e.texts = reach.texts
+	e.products = reach.products
+	e.quotients = reach.quotients
+}
+# Every take-back is this: what an attempt gives, kept with what it declared; where it gives ø or refuses, the
+# environment taken back to where it was before it, never by hand
+kept_if_given(e: Environment, attempt: () -> T?): T? := {
+	reach = mark(e)
+	given = try { attempt() } catch refusal {
+		back_to(e, reach)
+		raise refusal.message
+	}
+	if given is ø { back_to(e, reach) }
+	given
 }
 
-# The checks every declaration passes before its type is read, an inductive block's names and levels too: its names
-# are not declared yet, its level parameters are distinct, and its terms are closed
-names_new(e: Environment, names: list<text>) := {
-	for at in 1 to #names {
-		if declaration(e, names#at) is not ø or names.take(at - 1).contains(names#at) { refused(NAME_TAKEN, "${names#at} is declared already") }
-	}
-}
+# The checks every declaration passes before its type is read, an inductive block's levels too: its level parameters
+# are distinct and its terms are closed; that its name is new, `added` checks
 levels_distinct(levels: list<text>) := {
 	for at in 1 to #levels {
 		if levels.take(at - 1).contains(levels#at) { refused(LEVEL_PARAMETER, "the level parameter ${levels#at} is named twice") }

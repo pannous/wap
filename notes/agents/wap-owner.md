@@ -63,6 +63,18 @@ wap/
   kernel/                     the kernel layer: the emitter's whole input language
     forms.wap                 the kernel forms, each a named pattern of Node
     surface.wap               the forms rules write and typing turns into kernel forms (Item, Variable)
+    terms.wap                 the type theory's terms, locally nameless (notes/theory.md, notes/coc-plan.md 6.1)
+    levels.wap                universe levels compared (6.2)
+    environment.wap           the declarations accepted, the state of one check, the refusals (6.6)
+    compute.wap               a term computed to its head (6.4)
+    equal.wap                 definitional equality (6.5)
+    typing.wap                a term's type, a declaration checked (6.3, 6.6)
+    inductive.wap             an inductive block checked (7, checks 1 to 5)
+    nested.wap                a block nested in another inductive type made plain (7)
+    recursors.wap             a block's recursors and their computation rules (7, checks 6 and 7)
+    quotients.wap             the quotients statement (6.4, 6.6)
+    numbers.wap               the numbers, shortcut and texts statements (6.7)
+    show.wap                  a term shown in wap notation
     primitives.wap            the host's operations a Prim names, each a row of the wasm types it takes and gives
     opcodes.wap               the wasm format's codes: section ids, value and heap types, opcodes
 
@@ -225,7 +237,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 
 | stage | owner | files (under wap/) |
 |---|---|---|
-| lead: the queue, the contracts, the self-build | wap-supervisor | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp, compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap, kernel/surface.wap; the test/wap/ scripts no other row names |
+| lead: the queue, the contracts, the self-build | wap-supervisor | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp, compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/; the test/wap/ scripts no other row names |
 | front: read, operators, rules, lowering | wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap, extensions/packed.wap, extensions/warm.wap |
 | types: declare, bind, type | wap-binding | core/analyze/, core/paths.wap |
 | back: emitter, runtime, native | wap-emitter | core/emit/, extensions/wasm/, extensions/c/, extensions/native/; test/wap/test_native.sh, test/wap/test_guardrails.wap, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |

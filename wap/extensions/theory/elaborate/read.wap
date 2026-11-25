@@ -5,13 +5,13 @@
 # found binders get a hole each, its written ones an argument each; the call's result is made the type wanted before
 # its arguments are read, so they are read with more known. While a definition's header is read, a one-letter name
 # nothing binds is a letter: a found binder of the definition.
-use "../terms.wap"
-use "../levels.wap"
-use "../environment.wap"
-use "../numbers.wap"
-use "../compute.wap"
-use "../typing.wap"
-use "../show.wap"
+use "../../../kernel/terms.wap"
+use "../../../kernel/levels.wap"
+use "../../../kernel/environment.wap"
+use "../../../kernel/numbers.wap"
+use "../../../kernel/compute.wap"
+use "../../../kernel/typing.wap"
+use "../../../kernel/show.wap"
 use "../explicit.wap"
 use "../../../kernel/forms.wap"
 use "../../../core/type_notation.wap"
@@ -56,6 +56,11 @@ LETTER_LENGTH := 1
 # the prelude's cases of a list, what `[a, b]` is made of
 LIST_ITEM := "list.item"
 LIST_EMPTY := "list.empty"
+# the one name found, ø for none; two or more are refused by the rule, `what` naming them all as written
+the_only(found: list<text>, rule: text, what: text): text? := {
+	if #found > 1 { refused(rule, "${what} ${found.map(written_name).join(" and ")}: keep one") }
+	if found is empty then ø else found#1
+}
 
 # The program elaborated so far: the kernel's environment, and what the kernel does not keep: how many found binders
 # each declaration takes before its written ones and how many binders its header has in all (a block's types and
@@ -113,7 +118,8 @@ class Theory {
 	# the overload trials the statement being read has made
 	trials: int = 0
 }
-# another theory holding the same, which may grow without this one growing
+# another theory holding the same, kept to be restored to: its refusals and layouts copies the theory's own growing
+# leaves as they were
 copied(p: Theory): Theory := {
 	other = kept_of(p)
 	other.refused_names = copy(p.refused_names)
@@ -139,9 +145,10 @@ layout_written(p: Theory, name: text, layout: Layout) := {
 	p.layouts[name] = layout
 	p.laid_out += [name]
 }
-# a theory made to hold again what another holds, each part a copy: what a statement wrote since is gone
+# a theory made to hold again what another holds, each part a copy but the environment, which all share: what a
+# statement declared there is taken back by the environment's own kept_if_given
 held(p: Theory, from: Theory) := {
-	p.environment = copied(from.environment)
+	p.environment = from.environment
 	p.found = copy(from.found)
 	p.binders = copy(from.binders)
 	p.overloads = copy(from.overloads)
@@ -254,8 +261,8 @@ form_elaborated(x: Elaborating, n: Node, wanted: Term?): Term := match n {
 	Number(value) => number_elaborated(x, value, wanted)
 	True => bool_value(x, YES)
 	False => bool_value(x, NO)
-	Text(value) => text_literal(x.theory.environment, value)
-	Char(value) => text_literal(x.theory.environment, text(value))
+	Text(value) => quoted(value)
+	Char(value) => quoted(text(value))
 	If(condition, then_part, else_part) => if_elaborated(x, condition, then_part, else_part, wanted)
 	Case(subject, arms) => match_elaborated(x, subject, arms.map(arm_written), wanted)
 	Get(subject, key) => match key {
@@ -286,10 +293,10 @@ case_given(x: Elaborating, name: text, fields: list<Node>): Node := {
 levelled(x: Elaborating, written: Node, levels: list<Node>, wanted: Term?): Term := {
 	t = form_elaborated(x, written, wanted)
 	name = match head(t).shape {
-		Constant(name, held) => name
+		Constant(name, held, _) => name
 		_ => refused(UNKNOWN_FORM, "${text(written)} names no declaration to give levels")
 	}
-	if not unified(x.el, head(t), constant(name, levels.map(level => level_written(x, level)))) { refused(VALUE_TYPE, "${text(written)} takes ${#declaration(x.theory.environment, name)!.levels} levels, not ${#levels}") }
+	if not unified(x.el, head(t), constant_of(x.theory.environment, name, levels.map(level => level_written(x, level)))) { refused(VALUE_TYPE, "${text(written)} takes ${#declaration(x.theory.environment, name)!.levels} levels, not ${#levels}") }
 	t
 }
 # the function an item read by its place calls, `xs#i` being Get(xs, i), a field read by its name, `p.x`, Get(p, "x")
@@ -396,7 +403,7 @@ declared_read(x: Elaborating, name: text, arguments: list<Argument>, wanted: Ter
 declared_holes(x: Elaborating, name: text, count: int?): Given := {
 	d = declaration(x.theory.environment, name)!
 	levels = d.levels.map(level => level_hole(x.el))
-	holes_given(x, name, constant(name, levels), with_levels(d.type, d.levels, levels), count)
+	holes_given(x, name, constant_of(x.theory.environment, name, levels), with_levels(d.type, d.levels, levels), count)
 }
 # A function given a hole for each of its first `count` binders, for all of them where count is ø: its found binders,
 # a trait at its types, a decision's parts. A hole whose type is a trait is kept for the search
@@ -475,7 +482,7 @@ read_alone(x: Elaborating, node: Node): Argument := {
 }
 # whether a term is a case of a type given a numeral, at any depth of its fields
 numeral_in_cases(p: Theory, t: Term): bool := match head(t).shape {
-	Constant(name, levels) => declares_case(p, name) and holds_numeral(t)
+	Constant(name, levels, _) => declares_case(p, name) and holds_numeral(t)
 	_ => no
 }
 declares_case(p: Theory, name: text): bool := match (declaration(p.environment, name) ?? return no).kind {

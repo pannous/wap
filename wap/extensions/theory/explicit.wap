@@ -3,10 +3,11 @@
 #
 # A name is looked up among the binders around it, innermost first, then among the declarations; anything else is
 # refused. A level name that nothing binds is a level parameter of its statement, in the order of first appearance.
-use "terms.wap"
-use "levels.wap"
-use "environment.wap"
-use "numbers.wap"
+use "../../kernel/terms.wap"
+use "../../kernel/levels.wap"
+use "../../kernel/environment.wap"
+use "../../kernel/numbers.wap"
+use "../../kernel/show.wap"
 use "../../kernel/forms.wap"
 
 # the words of the spellings: sorts, levels and the statements' first words
@@ -34,7 +35,6 @@ FUNCTION := "=>"
 DEFINE := ":="
 LET := "="
 LEVEL_ADD := "+"
-DOT := "."
 # the brackets parameters are written in after a name: `Pair(A: Type, B: Type)`, `list<T>`
 PARAMETER_BRACKETS := [Bracket.Round, Bracket.Less]
 # the name of a binder written without one, `A -> B`
@@ -59,12 +59,10 @@ RUNS_WORD := "runs"
 LAYOUT := "layout"
 PROGRAM_LAYOUT := "only the prelude says how the host runs what it declares: a program's ${RUNS_WORD}(…) would be believed unproved"
 
-# The state of reading one statement: the declarations a name may be, the level parameters met so far, and the
-# types of the block being read, which stand inside it without levels
+# The state of reading one statement: the declarations a name may be and the level parameters met so far
 class Reading {
 	environment: Environment
 	levels: list<text> = []
-	block: list<text> = []
 }
 
 # A program's statements in the units they are read in: the enums next to each other that name one another, directly
@@ -195,20 +193,16 @@ parameters_of(head: Node): list<Node> := match head {
 # after the first name are the block's, and every header and case is read with them in front. The headers are read
 # before the cases, so the block's level parameters are all met when a case names one of its types
 block_read(e: Environment, enums: list<Node>): InductiveBlock := {
-	r = Reading(e, block: enums.map(statement => enum_name(statement)))
-	types = enums.map(statement => enum_read(r, statement))
+	r = Reading(e)
+	names = enums.map(statement => enum_name(statement))
+	headers = enums.map(statement => BlockType(enum_name(statement), bound_read(r, parameters_of(enum_named(statement)), header_type(enum_head(statement)), [], yes), []))
+	types = (1 to #enums).list().map(at => BlockType(names#at, headers#at.type, enum_written(enums#at)!.cases.map(case => case_read(r, names#at, parameters_of(enum_named(enums#at)), case, headers))))
 	InductiveBlock(r.levels, #parameters_of(enum_named(enums#1)), types)
 }
-# one enum of a block, its header and cases read under its own parameters: the kernel refuses a block whose parameters differ
-enum_read(r: Reading, statement: Node): BlockType := {
-	name = enum_name(statement)
-	parameters = parameters_of(enum_named(statement))
-	header = bound_read(r, parameters, header_type(enum_head(statement)), [], yes)
-	BlockType(name, header, enum_written(statement)!.cases.map(case => case_read(r, name, parameters, case)))
-}
-# `case(x: B): Name(p, i)`, declared as `Name.case`: the block's parameters, the case's fields, its result
-case_read(r: Reading, type: text, parameters: list<Node>, case: Node): WrittenCase := match case {
-	Key(named, Op.Colon, result) => WrittenCase("${type}${DOT}${name_of(named)}", bound_read(r, parameters + parameters_of(named), result, [], yes))
+# `case(x: B): Name(p, i)`, declared as `Name.case`: over the block's types, the block's parameters, the case's
+# fields, its result
+case_read(r: Reading, type: text, parameters: list<Node>, case: Node, types: list<BlockType>): WrittenCase := match case {
+	Key(named, Op.Colon, result) => WrittenCase("${type}${DOT}${name_of(named)}", types.reverse().fold(bound_read(r, parameters + parameters_of(named), result, types.map(type => type.name), yes), (inner, outer) => pi(outer.name, outer.type, inner)))
 	_ => unreadable(case)
 }
 # an enum statement taken apart: its head `Name(p: A): type` and its cases
@@ -252,11 +246,11 @@ cases_ending(items: list<Node>): EnumWritten? := match items#(#items) {
 term_read(r: Reading, n: Node, scope: list<text>): Term := match n {
 	Symbol(name) => name_read(r, name, scope)
 	Number(value) => numeral(value as int)
-	Text(value) => text_literal(r.environment, value)
-	Char(value) => text_literal(r.environment, text(value))
+	Text(value) => quoted(value)
+	Char(value) => quoted(text(value))
 	Call(called, arguments) => operation_read(r, text(called), arguments, scope, n)
 	Key(written, Op.None, List(items, Bracket.Round, separator)) => applied_read(r, written, items, scope)
-	Key(written, Op.None, List(items, Bracket.Square, separator)) => constant(text(written), items.map(level => level_read(r, level)))
+	Key(written, Op.None, List(items, Bracket.Square, separator)) => constant_of(r.environment, text(written), items.map(level => level_read(r, level)))
 	List(items, Bracket.Round, separator) => if #items == 1 then term_read(r, items#1, scope) else unreadable(n)
 	List(items, Bracket.Curly, separator) => let_read(r, items, scope)
 	_ => unreadable(n)
@@ -265,11 +259,10 @@ term_read(r: Reading, n: Node, scope: list<text>): Term := match n {
 name_read(r: Reading, name: text, scope: list<text>): Term := {
 	place = scope.reverse().index_of(name)
 	if place > 0 { return bound(place - 1) }
-	if name in r.block { return constant(name, r.levels.map(level => Parameter(level))) }
 	if name == PROP_WORD { return PROP }
 	if name == TYPE_WORD { return type_at(Zero) }
 	if declaration(r.environment, name) is ø { refused(UNKNOWN_NAME, "${name} is neither a binder around it nor declared") }
-	constant(name, [])
+	constant_of(r.environment, name, [])
 }
 # `Type(u)`, `Sort(u)`, `projection(Pair, 1, p)` for a field of a structure value, or a function applied to its
 # arguments, the first one first
@@ -277,7 +270,7 @@ applied_read(r: Reading, written: Node, arguments: list<Node>, scope: list<text>
 	word = text(written)
 	if #arguments == 1 and word == TYPE_WORD { return type_at(level_read(r, arguments#1)) }
 	if #arguments == 1 and word == SORT_WORD { return universe(level_read(r, arguments#1)) }
-	if #arguments == 3 and word == PROJECTION_WORD { return projection(text(arguments#1), whole_read(arguments#2), term_read(r, arguments#3, scope)) }
+	if #arguments == 3 and word == PROJECTION_WORD { return projection(constant_of(r.environment, text(arguments#1), []), whole_read(arguments#2), term_read(r, arguments#3, scope)) }
 	apply_all(term_read(r, written, scope), arguments.map(argument => term_read(r, argument, scope)))
 }
 # a function type, a function, or a dotted name: `(x: A) -> B`, `A -> B`, `(x: A) => b`, `And.intro`
