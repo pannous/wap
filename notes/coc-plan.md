@@ -859,6 +859,16 @@ by the second opinion, not by a test.
   two readings fit, refuse and name both.
 - **Compile time.** Every fact is now built through the kernel. Each T step measures the wall time of the
   self-build (`--stage 2`) before it lands: at most a fifth more than the step before, else it goes to the user.
+  The baseline before T3, a warm compile of `print "Hello"` on the Mac at 07e358d8, 350 ms in all
+  (scripts/compile-steps.wap measures it again):
+  | step | ms |
+  |---|---|
+  | the warm state brought in | 12 |
+  | the rules compiled (types/rules.wap, sugar/, the C function rules) | 56 |
+  | the types module declared, read from types.wasm | 187 |
+  | the program declared | 1 |
+  | typed, the library functions it calls included | 92 |
+  | emitted and encoded | 1 |
 - **The reach of the provers** decides how many laws read Proved. It grows a prover at a time and never blocks a
   program: an unproved law is Tested, an unproved obligation a check.
 - **Growing in place.** The compiler is written in wap and built from a seed, so each T step keeps its own source
