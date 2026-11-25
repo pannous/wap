@@ -854,8 +854,8 @@ by the second opinion, not by a test.
   walked in loops. Terms become interned, each with a number, when the first census asks for it.
 - **Ambiguity.** Overloads, conversions and arguments left out meet in the elaborator. The rule stays wap's: where
   two readings fit, refuse and name both.
-- **Compile time.** Every fact is now built through the kernel. The census has a gate on compile time, and each
-  T step is measured against it before it lands.
+- **Compile time.** Every fact is now built through the kernel. Each T step measures the wall time of the
+  self-build (`--stage 2`) before it lands: at most a fifth more than the step before, else it goes to the user.
 - **The reach of the provers** decides how many laws read Proved. It grows a prover at a time and never blocks a
   program: an unproved law is Tested, an unproved obligation a check.
 - **Growing in place.** The compiler is written in wap and built from a seed, so each T step keeps its own source
