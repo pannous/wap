@@ -40,7 +40,7 @@ computed_folded(c: Checker, t: Term): Term := {
 				if given is empty { break }
 				result = beta(leading, given)
 			}
-			Constant(name, levels, _) => { result = eliminated(c, name, levels, given) ?? break }
+			Constant(name, levels, _) => { result = eliminated(c, leading, given) ?? break }
 			Projection(structure, field, of) => { result = apply_all(field_of(c, structure, field, of) ?? break, given) }
 			Quoted(value) => { result = apply_all(text_opened(c, value), given) }
 			_ => break
@@ -50,10 +50,10 @@ computed_folded(c: Checker, t: Term): Term := {
 	result
 }
 # a recursor or a quotient's way out applied to a made value, computed one step; ø for any other head
-eliminated(c: Checker, name: text, levels: list<Level>, given: list<Term>): Term? := {
-	d = declaration(c.environment, name) ?? return ø
+eliminated(c: Checker, constant: Term, given: list<Term>): Term? := {
+	d = declared_at(c.environment, constant_id(constant)) ?? return ø
 	match d.kind {
-		Recursor(facts) => iota(c, facts, rule => with_levels(rule, d.levels, levels), given)
+		Recursor(facts) => iota(c, facts, rule => with_levels(rule, d.levels, constant_levels(constant)), given)
 		Quotient(part) => quotient_step(c, part, given)
 		_ => ø
 	}
@@ -80,10 +80,7 @@ before_major(facts: RecursorFacts): int := shared_by(facts) + facts.indices
 # a case's fields: the last of its arguments, after its type's parameters
 case_fields(value: Term, count: int): list<Term> := arguments(value).drop(#arguments(value) - count)
 # the place of a term's head among the recursor's cases, 0 for no case of its type
-case_place(facts: RecursorFacts, t: Term): int := match head(t).shape {
-	Constant(case, levels, _) => facts.cases.index_of(case)
-	_ => 0
-}
+case_place(facts: RecursorFacts, t: Term): int := facts.cases.index_where(case => is_constant(head(t), case))
 # The case a value of a type with one case stands for when it is no case application (6.4), built at the parameters
 # of the value's type; ø for a value that stands for none. K: a proof of a proposition whose case has no fields is
 # that case when their types are equal. A structure's value that is no proof is its case given the value's
@@ -91,22 +88,19 @@ case_place(facts: RecursorFacts, t: Term): int := match head(t).shape {
 case_standing(c: Checker, facts: RecursorFacts, value: Term): Term? := {
 	if not facts.k and structure_facts(c.environment, facts.of) is ø { return ø }
 	type = computed(c, type_of(c, value))
-	levels = match head(type).shape {
-		Constant(name, levels, _) => if name == facts.of then levels else return ø
-		_ => return ø
-	}
-	case = apply_all(constant_of(c.environment, facts.cases#1, levels), arguments(type).take(#arguments(type) - facts.indices))
+	if not is_constant(head(type), facts.of) { return ø }
+	case = apply_all(at_levels(facts.cases#1, constant_levels(head(type))), arguments(type).take(#arguments(type) - facts.indices))
 	if facts.k { return if equal(c, type_of(c, case), type) then case else ø }
 	if is_proposition(c, type) { return ø }
 	apply_all(case, (1 .. facts.fields#1 + 1).map(at => projection(facts.of, at, value)))
 }
 # A field of a structure value made by its case (6.4): the case's argument at the field's place after the structure's
 # parameters; ø for a value that computes to no case application
-field_of(c: Checker, structure: text, field: int, of: Term): Term? := {
+field_of(c: Checker, structure: Term, field: int, of: Term): Term? := {
 	facts = structure_facts(c.environment, structure) ?? return ø
 	shared = facts.block.parameters
 	made = computed(c, of)
-	if not made_by(made, facts.block.types#1.cases#1.name, shared + facts.fields#1#1) { return ø }
+	if not made_by(made, structure_case(structure, facts), shared + facts.fields#1#1) { return ø }
 	arguments(made)#(shared + field)
 }
 # A quotient's lift or induct applied to a value made by quotient.of (6.4): its function applied to the value the
@@ -116,14 +110,13 @@ quotient_step(c: Checker, part: QuotientPart, given: list<Term>): Term? := {
 	major = quotient_major(part)
 	if major == 0 or #given < major { return ø }
 	made = computed(c, given#major)
-	if not made_by(made, QUOTIENT_OF, 3) { return ø }
+	if not made_by(made, constant_of(c.environment, QUOTIENT_OF, []), 3) { return ø }
 	apply_all(given#QUOTIENT_FUNCTION, [arguments(made)#3] + given.drop(major))
 }
-# whether a term is the named constant applied to exactly so many arguments
-made_by(t: Term, name: text, count: int): bool := #arguments(t) == count and match head(t).shape {
-	Constant(head_name, levels, _) => head_name == name
-	_ => no
-}
+# a structure's one case: a block declares each type with its cases right after it, so the case's id follows the type's
+structure_case(structure: Term, facts: InductiveFacts): Term := constant(constant_id(structure) + 1, facts.block.types#1.cases#1.name, constant_levels(structure))
+# whether a term is this constant applied to exactly so many arguments
+made_by(t: Term, constant: Term, count: int): bool := #arguments(t) == count and is_constant(head(t), constant)
 # a function of nested binders applied to arguments: as many binders as there are arguments eaten at once, the
 # arguments it does not take applied to what is left
 beta(function: Term, given: list<Term>): Term := {
