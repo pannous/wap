@@ -127,9 +127,37 @@ window_opened() := {
 	sides = enlarged_sides()
 	window.sdl_window = SDL_CreateWindow(WINDOW_TITLE, sides[0], sides[1], (if on_mac() then SDL_WINDOW_METAL else 0) + SDL_WINDOW_RESIZABLE)
 	if window.sdl_window == 0 { raise "window: " + SDL_GetError() }
-	window.view = if on_mac() then SDL_Metal_CreateView(window.sdl_window) else SDL_GetPointerProperty(SDL_GetWindowProperties(window.sdl_window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, 0)
+	window.view = window_view()
 	window.open_now = yes
 	window.title_ns = SDL_GetTicksNS()
+}
+# the system a window shows on, which a GPU surface is made for by the window's handles there (window_addresses)
+enum WindowSystem { Metal, Win32, Wayland, X11 }
+window_system(): WindowSystem := {
+	if on_mac() { return Metal }
+	if on_windows() { return Win32 }
+	if SDL_GetCurrentVideoDriver() == "wayland" then Wayland else X11
+}
+# the window's own handle on its system: its Metal view, its HWND, its Wayland surface, its X11 window number
+window_view(): int := {
+	properties = SDL_GetWindowProperties(window.sdl_window)
+	match window_system() {
+		Metal => SDL_Metal_CreateView(window.sdl_window)
+		Win32 => SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WIN32_HWND_POINTER, 0)
+		Wayland => SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, 0)
+		X11 => SDL_GetNumberProperty(properties, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0)
+	}
+}
+# the two C addresses a GPU surface for the window's layer is made of, by its system: the Metal layer; the program's
+# module and the HWND; the Wayland display and surface; the X11 display and window number
+window_addresses(layer: int): list<int> := {
+	properties = SDL_GetWindowProperties(window.sdl_window)
+	match window_system() {
+		Metal => [handle_pointer(layer), 0]
+		Win32 => [handle_pointer(GetModuleHandleA(0)), handle_pointer(layer)]
+		Wayland => [handle_pointer(SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, 0)), handle_pointer(layer)]
+		X11 => [handle_pointer(SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, 0)), layer]
+	}
 }
 window_closed() := {
 	if window.view != 0 and on_mac() { SDL_Metal_DestroyView(window.view) }
@@ -262,7 +290,7 @@ paint_scale_set(scale: int) := {
 paint_timing_set(timed: bool) := { window.paint_timing = timed }
 # a window its user closed ends the run
 run_ended_if_closed() := { if window.closed_by_user { exit(0) } }
-# the window's Metal layer (Windows: its HWND) for a painting of width × height, the window opened by the first; 0 where none opens. A
+# the window's Metal layer (elsewhere its view, window_view) for a painting of width × height, the window opened by the first; 0 where none opens. A
 # window the program gave no size takes its first painting's. Closed by its user, the run ends
 window_layer(pixels_wide: int, pixels_high: int): int := {
 	painting_width = pixels_wide ÷ window.paint_scale

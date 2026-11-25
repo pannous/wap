@@ -155,6 +155,21 @@ check "a native program's records" "$(native_ran records 'class Point { x: int; 
 p = Point{x: 3, label: "a"}
 p.x = p.x + 4
 print "${p.label} ${p.x}"')" "a 7"
+# maps in a native program, held in its memory (types/memory_lists.wap): a literal, an entry read, changed and added,
+# a count, a walk of its keys and values, and enough keys that it finds them by their hash
+check "a native program's maps" "$(native_ran maps 'ages = {ada: 36, bo: 7}
+ages["bo"] = 8
+ages["cy"] = 1
+for at in 1 to 10 { ages["k${at}"] = at }
+for name, age in ages { if age > 5 { print "${name} ${age}" } }
+print "${#ages} ages, k7 is ${ages["k7"]}, has zed: ${ages.has("zed")}"')" "ada 36
+bo 8
+k6 6
+k7 7
+k8 8
+k9 9
+k10 10
+13 ages, k7 is 7, has zed: no"
 check "a native program's slices" "$(native_ran slices 'xs = ["a", "b", "c"]
 print xs[.. 2].join("+") + " " + xs.drop(1).join("+")')" "a+b b+c"
 # a module's `export` is exported by the program that uses it too, under its plain name: C calls back the module's
@@ -326,4 +341,8 @@ print "${t.month} ${t.day} ${t.yearday}"')" "2 2 61"
 # a class extending another, its instance passed where the class it extends is taken (wiki/class.md), run by the native wap
 printf '%s\n' 'class Shape { x: int; twice() := x * 2 }' 'class Square extends Shape { side: int }' 'shape_x(s: Shape) := s.x' 'print shape_x(Square(3, 4)) + Square(3, 4).twice()' >"$stage/extends.wap"
 check "wap runs a class extending another" "$(cd "$stage" && "$native_wap" extends.wap 2>&1)" "9"
+# a C function from a library named by its path (card native-other-platforms), which the executable loads when the program calls it
+printf '%s\n' 'long doubled(long x) { return 2 * x; }' >"$stage/doubled.c" && cc -shared -o "$stage/libdoubled.dylib" "$stage/doubled.c"
+check "a native program calls C from a library named by its path" "$(native_ran doubled_by_path "doubled(x: i64): i64 from '$stage/libdoubled.dylib'
+exit(doubled(21))" >/dev/null; echo $?)" "42"
 exit $((failures > 0))
