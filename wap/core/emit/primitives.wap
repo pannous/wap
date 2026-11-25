@@ -17,7 +17,7 @@ use "../type_notation.wap"
 NO_UNLESS_YES = I32_EQZ + if_block(i32_const(0) + RETURN)
 
 # The operations a helper function of the module performs: operation → the function that builds the helper
-HELPERS = {"text_written": writing_function, "text_placed": placing_function, "memory_held": memory_holding_function, "array_slice": slicing_function, "raise_text": raising_function, "text_equal": text_equality_function, "text_joined": joining_function, "case_name": case_naming_function}
+HELPERS = {"memory_held": memory_holding_function, "raise_text": raising_function, "case_name": case_naming_function}
 # the lists a map holds, not copied: its keys and its values, an entry the same place in both, and its slots
 MAP_FIELDS = {"map_keys_held": MAP_KEYS, "map_values_held": MAP_VALUES, "map_slots_held": MAP_SLOTS}
 
@@ -40,7 +40,8 @@ text_operations(p: Program) as map<text, WasmOperation> := {
 	text = text_layout(p.m)
 	{
 		"array.get_u": WasmOperation([text, I32], [I32], instruction(ARRAY_GET_U, [bytes])), "array.len": WasmOperation([text], [I32], ARRAY_LEN),
-		"array.new_default": WasmOperation([I32], [text], instruction(ARRAY_NEW_DEFAULT, [bytes])), "array.set": WasmOperation([text, I32, I32], [], instruction(ARRAY_SET, [bytes]))
+		"array.new_default": WasmOperation([I32], [text], instruction(ARRAY_NEW_DEFAULT, [bytes])), "array.set": WasmOperation([text, I32, I32], [], instruction(ARRAY_SET, [bytes])),
+		"array.copy": WasmOperation([text, I32, text, I32, I32], [], instruction(ARRAY_COPY, [bytes, bytes]))
 	}
 }
 # the code of an operation of wasm types: as many operands as it takes, each int it takes as an i32 wrapped, its
@@ -136,6 +137,8 @@ helper(p: Program, operation: text, build: (Program) -> int) as int := {
 }
 # a call of the helper function of an operation
 helper_call(p: Program, operation: text, build: (Program) -> int) as list<int> := instruction(CALL, [helper(p, operation, build)])
+# a call of one of the types library's functions the emitter calls itself (kernel/primitives.wap RUNTIME_WORDS)
+runtime_call(p: Program, word: text) as list<int> := instruction(CALL, [p.helpers.get(word) ?? refused(Text(word), "the types library defines no such function")])
 
 # the body run for each count from 0 while it stays below the limit, the count in that local
 counted(local: int, limit: list<int>, body: list<int>) as list<int> := {
@@ -143,26 +146,6 @@ counted(local: int, limit: list<int>, body: list<int>) as list<int> := {
 	i32_const(0) + local_set(local) + looped(count + limit + I32_GE_U + instruction(BRANCH_IF, [1]) + body + count + i32_const(1) + I32_ADD + local_set(local) + instruction(BRANCH, [0]))
 }
 
-# The helper of text_joined: a new text of the first's bytes, then the second's. Its locals: 0 and 1 the texts, 2 the
-# new one.
-joining_function(p: Program) as int := {
-	type = text_type(p.m)
-	items_in = local => local_get(local) + ARRAY_LEN
-	joined = local_get(2)
-	copy = (at, local) => joined + at + local_get(local) + i32_const(0) + items_in(local) + instruction(ARRAY_COPY, [type, type])
-	made = items_in(0) + items_in(1) + I32_ADD + instruction(ARRAY_NEW_DEFAULT, [type]) + local_set(2)
-	added_function(p.m, [nullable(type), nullable(type)], [nullable(type)], [nullable(type)], made + copy(i32_const(0), 0) + copy(items_in(0), 1) + joined)
-}
-
-# The helper of array_slice(t, from, count): a new text of count bytes of t, from the place `from` counting from 0.
-# Its locals: 0 the text, 1 from, 2 count, 3 the new text. A slice past the end traps.
-# DEBT: A slice past a list's end traps: wasm's array.copy stops the program without naming the user's line. Refusing
-#   it by name needs bounds checks the slice's caller writes, e.g. the types module's `slice` taking a Range and
-#   raising when it does not fit.
-slicing_function(p: Program) as int := {
-	text = text_layout(p.m)
-	added_function(p.m, [text, I64, I64], [text], [text], slice_copied(text_type(p.m), local_get(0)) + local_get(3))
-}
 # a slice's new array of an array type in local 3: `count` (local 2) items copied from the array `source` gives, from
 # the place `from` (local 1), both ints
 slice_copied(array: int, source: list<int>) as list<int> := int_local(2) + instruction(ARRAY_NEW_DEFAULT, [array]) + local_set(3) + local_get(3) + i32_const(0) + source + int_local(1) + int_local(2) + instruction(ARRAY_COPY, [array, array])
