@@ -41,3 +41,37 @@ export c_callback_fired(slot: int, a: int, b: int, c: int, d: int, e: int, g: in
 	types = callback_types[slot]
 	c_called_back(callbacks[slot], (0 upto #types).map(i => if types[i] == "handle" then c_handle_of(given[i]) else given[i]))
 }
+
+# The program's functions JavaScript is given (lib/host/native_host/webview_bridge.js): js_function(f) hands JS
+# {"$callback": slot, "handed": n}, which the bridge makes a JS function. JS calls it back through js_called_back with
+# its arguments, of which the function takes as many as it has parameters (Array.from gives each item's index too). A
+# slot each handing, a slot JS let go (js_released) taken again; each handing counts, so a release that arrives after
+# the slot was handed again frees nothing
+js_functions: list<(list<any>) -> any> = []
+js_handed: list<int> = []
+js_free_slots: list<int> = []
+js_function(f: () -> T): map<text, int> := js_slot(given => f())
+js_function(f: (any) -> T): map<text, int> := js_slot(given => f(given[0]))
+js_function(f: (any, any) -> T): map<text, int> := js_slot(given => f(given[0], given[1]))
+js_function(f: (any, any, any) -> T): map<text, int> := js_slot(given => f(given[0], given[1], given[2]))
+js_slot(called: (list<any>) -> any): map<text, int> := {
+	if js_free_slots is empty {
+		js_functions.add(called)
+		js_handed.add(0)
+	}
+	slot = if js_free_slots is empty then #js_functions - 1 else js_free_slots.pop()
+	js_functions[slot] = called
+	js_handed[slot] += 1
+	{"$callback": slot, "handed": js_handed[slot]}
+}
+# JS calling the function of the slot with its arguments: its result
+js_called_back(slot: int, given: list<any>): any := js_functions[slot](given)
+# what a slot JS let go of holds
+let_go(given: list<any>): any := raise "JS called a function back it had let go"
+# JS letting go of the slot's handing
+js_released(slot: int, handed: int) := {
+	if js_handed[slot] == handed and not js_free_slots.contains(slot) {
+		js_functions[slot] = let_go
+		js_free_slots.add(slot)
+	}
+}

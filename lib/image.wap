@@ -1,0 +1,134 @@
+# The standard module image: pictures (color's Picture, Colors row by row from the top left) loaded, made, changed,
+# shown and saved. `image("photo.jpg")` reads a BMP, a baseline JPEG or a PNG; `image(64, 48, pixel)` makes one from a
+# function of the column and row. Each change gives a new picture: flipped, mirrored, cropped, tinted, grayed, blurred,
+# each_pixel. paint shows one in the window, with no window (`--no-window`) as a PNG in the temporary folder; save
+# writes a .bmp, by any other name a PNG
+use bits
+use color
+use file
+use path
+use jpeg
+use png
+use math
+use "host/native_host/window.wap"
+use "host/native_host/gpu.wap"
+
+# what a file's first bytes say it holds (png has PNG's)
+BMP_SIGNATURE := [66, 77]
+JPEG_SIGNATURE := [255, 216]
+# how the eye weighs red, green and blue in a gray
+EYE_WEIGHTS := [0.299, 0.587, 0.114]
+# the folder in the temporary one a painting goes to where no window shows it: paint.png, then paint-2.png …
+PAINT_FOLDER := "wap-paint"
+paintings = 0
+
+# the picture in the file, a BMP, a JPEG or a PNG by its first bytes, never by its name
+image(path: text): Picture := {
+	bytes = read_bytes(path)
+	if starts_with_bytes(bytes, BMP_SIGNATURE) { return bmp_picture(bytes) }
+	if starts_with_bytes(bytes, JPEG_SIGNATURE) { return jpeg_picture(bytes) }
+	if starts_with_bytes(bytes, PNG_SIGNATURE) { return png_picture(bytes) }
+	raise path + " is no BMP, JPEG or PNG: image reads those three"
+}
+starts_with_bytes(bytes: list<int>, start: list<int>): bool := #bytes >= #start and bytes[0 .. #start] == start
+
+# a new picture: each pixel the color pixel(column, row) gives, or one color all over
+image(width: int, height: int, pixel: (int, int) -> Color): Picture := Picture(width, height, (0 upto width * height).map(at => pixel(at % width, at ÷ width)))
+image(width: int, height: int, fill: Color): Picture := image(width, height, (x, y) => fill)
+
+# the changes said as commands too: photo.crop(20, 10, 120, 90).mirror.tint(orange, 0.3); `gray` stays color's
+alias flip => flipped
+alias mirror => mirrored
+alias crop => cropped
+alias tint => tinted
+alias blur => blurred
+
+# the pixel at the column and row, counted from 0 at the top left
+pixel_at(picture: Picture, x: int, y: int): Color := picture.pixels[y * picture.width + x]
+# the picture of its size, each pixel what `pixel(column, row)` gives
+remade(picture: Picture, pixel: (int, int) -> Color): Picture := image(picture.width, picture.height, pixel)
+# the picture changed pixel by pixel
+each_pixel(picture: Picture, changed: (Color) -> Color): Picture := Picture(picture.width, picture.height, picture.pixels.map(changed))
+# upside down, and left to right
+flipped(picture: Picture): Picture := remade(picture, (x, y) => pixel_at(picture, x, picture.height - 1 - y))
+mirrored(picture: Picture): Picture := remade(picture, (x, y) => pixel_at(picture, picture.width - 1 - x, y))
+# the part of it width × height from the column and row
+cropped(picture: Picture, left: int, top: int, width: int, height: int): Picture := image(width, height, (x, y) => pixel_at(picture, left + x, top + y))
+# each pixel moved toward the color by the amount, 0 none, 1 all the way
+tinted(picture: Picture, tint: Color, amount: float = 0.5): Picture := each_pixel(picture, color => mix(color, tint, amount))
+# each pixel's brightness as gray
+grayed(picture: Picture): Picture := each_pixel(picture, gray_of)
+gray_of(color: Color): Color := {
+	parts = channels(color)
+	brightness = BRIGHTEST * (0 upto 3).map(i => EYE_WEIGHTS[i] * parts[i]).sum()
+	rgb(brightness, brightness, brightness)
+}
+# each pixel the mean of the square around it, radius pixels each way (a box blur, its edges clamped)
+blurred(picture: Picture, radius: int = 2): Picture := remade(picture, (x, y) => square_mean(picture, x, y, radius))
+square_mean(picture: Picture, x: int, y: int, radius: int): Color := {
+	around = reach(y, radius, picture.height).flat_map(row => reach(x, radius, picture.width).map(column => pixel_at(picture, column, row)))
+	mean = shift => float(around.map(color => channel_byte(color, shift)).sum()) / #around
+	rgb(mean(RED_SHIFT), mean(GREEN_SHIFT), mean(BLUE_SHIFT))
+}
+# the places at most radius from at, inside 0 up to size
+reach(at: int, radius: int, size: int): list<int> := max(0, at - radius) upto min(size, at + radius + 1)
+
+# a picture on the screen: in the window, else as a PNG in the temporary folder, its path said on standard error
+paint(picture: Picture) := {
+	if window_possible() and picture_shown(picture) == 1 { return }
+	path = painting_path()
+	save(picture, path)
+	eprint("painted ${picture.width}×${picture.height}: ${path}")
+}
+# paint(pixels, width, height): a list of 0xAARRGGBB numbers, row by row
+paint(pixels: list<int>, width: int, height: int) := paint(Picture(width, height, pixels.map(argb => Color(argb))))
+# the next painting's file
+painting_path(): text := {
+	global paintings
+	paintings = paintings + 1
+	folder = path_join(temp_folder(), PAINT_FOLDER)
+	ensured_folder(folder)
+	path_join(folder, if paintings == 1 then "paint.png" else "paint-${paintings}.png")
+}
+# save(picture, "photo.png"): written as the file's name says, a .bmp, any other a PNG, its transparency kept
+save(picture: Picture, file: text) := write_bytes(file, if lower(file).ends_with(".bmp") then bmp_bytes(picture) else png_bytes(picture))
+
+# BMP (Windows bitmap): a 14-byte file header, a 40-byte info header, then the rows bottom up, 3 or 4 bytes a pixel in
+# blue, green, red order, each row padded to 4 bytes. Uncompressed 24- and 32-bit ones are read
+BMP_FILE_HEADER := 14
+BMP_INFO_HEADER := 40
+BMP_ROW_ALIGN := 4
+BMP_WRITTEN_BITS := 24
+# the info header's bytes after its bit count, all 0 in a BMP image writes (compression, sizes, palette)
+BMP_INFO_UNUSED := 24
+BMP_READ_BITS := [24, 32]
+BMP_CHANNEL_SHIFTS := [BLUE_SHIFT, GREEN_SHIFT, RED_SHIFT]
+bmp_picture(bytes: list<int>): Picture := {
+	little = (at, size) => from_little_endian(bytes[at .. at + size])
+	start = little(10, 4)
+	width = little(18, 4)
+	stored_height = signed(little(22, 4), 32)
+	bits_per_pixel = little(28, 2)
+	if little(30, 4) != 0 or not BMP_READ_BITS.contains(bits_per_pixel) { raise "image reads uncompressed 24- and 32-bit BMPs, this one has ${bits_per_pixel} bits a pixel, compression ${little(30, 4)}" }
+	height = abs(stored_height)
+	per_pixel = bits_per_pixel ÷ 8
+	row_size = bmp_row_size(width, per_pixel)
+	# (a negative height stores the rows top down)
+	row_at = y => start + row_size * (if stored_height > 0 then height - 1 - y else y)
+	image(width, height, (x, y) => bmp_pixel(bytes, row_at(y) + per_pixel * x))
+}
+bmp_pixel(bytes: list<int>, at: int): Color := rgb(bytes[at + 2], bytes[at + 1], bytes[at])
+bmp_row_size(width: int, per_pixel: int): int := (width * per_pixel + BMP_ROW_ALIGN - 1) ÷ BMP_ROW_ALIGN * BMP_ROW_ALIGN
+# the picture as a 24-bit BMP's bytes, rows bottom up
+bmp_bytes(picture: Picture): list<int> := {
+	row_size = bmp_row_size(picture.width, 3)
+	headers = BMP_FILE_HEADER + BMP_INFO_HEADER
+	padding = zeros(row_size - 3 * picture.width)
+	# each header field: its value and its size in bytes
+	fields = [[headers + row_size * picture.height, 4], [0, 4], [headers, 4], [BMP_INFO_HEADER, 4], [picture.width, 4],
+		[picture.height, 4], [1, 2], [BMP_WRITTEN_BITS, 2]]
+	rows = (0 upto picture.height).flat_map(y => (0 upto picture.width).flat_map(x => bmp_channels(pixel_at(picture, x, picture.height - 1 - y))) + padding)
+	BMP_SIGNATURE + fields.flat_map(field => little_endian(field[0], field[1])) + zeros(BMP_INFO_UNUSED) + rows
+}
+bmp_channels(color: Color): list<int> := BMP_CHANNEL_SHIFTS.map(shift => channel_byte(color, shift))
+zeros(count: int): list<int> := (0 upto count).map(at => 0)
