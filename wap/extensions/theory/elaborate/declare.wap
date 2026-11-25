@@ -31,9 +31,12 @@ use "lifted.wap"
 LEVEL_NAMES := ["u", "v", "w"]
 # the refusal of a theorem without a proof
 UNPROVED_THEOREM := "unproved theorem"
-# the refusal of a host's operation as a body the theory cannot take: of a proposition, which the host proves
-# nothing of, or of no written type, whose effects nothing says
+# the refusal of a host's operation as a body the theory cannot take: in a program, whose host's operation would be
+# believed unproved, or of no written type, whose effects nothing says
 HOSTED := "host's operation"
+# the refusal of a host's operation giving a proposition, which the host proves nothing of (an opaque proof of an
+# empty type would prove anything)
+HOSTED_PROPOSITION := "hosted proposition"
 # the proof that leaves a gap: the statement is declared as an axiom, and every report names it
 ASSUME_WORD := "assume"
 # the proof that names laws for the provers to try first: `:= by add_zero, add_commutes`
@@ -136,7 +139,9 @@ definition_elaborated(p: Theory, word: text, head: Node, written_parameters: lis
 	header = header_read(x, parameters, written_type, typed)
 	written = header.written
 	result = header.result ?? (if hosted then computation(x, limited!.bound!, nothing_type(x, Successor(Zero))) else ø)
-	if hosted and result is not ø and may_be_proposition(x, result!) { refused(HOSTED, "${name} gives a proposition, or a type that may be one, which a host's operation cannot prove: give a type of data, or prove it after `:=`") }
+	if hosted and result is not ø and may_be_proposition(x, result!) { refused(HOSTED_PROPOSITION, "${name} gives a proposition, or a type that may be one, which a host's operation cannot prove: give a type of data, or prove it after `:=`") }
+	language = file_key(head) in p.language_files
+	if hosted and not language { refused(HOSTED, "${name} is the host's operation, which only the language every program gets names: a program's would be believed unproved, so write its body in wap") }
 	x.recursing = Recursion(name, written)
 	assumed = value is not ø and text(value!) == ASSUME_WORD
 	by_laws = if value is ø then ø else laws_named(p, value!)
@@ -167,7 +172,6 @@ definition_elaborated(p: Theory, word: text, head: Node, written_parameters: lis
 		return ø
 	}
 	if given is not ø { within_bound(x, name, terms#1, given!.bound) }
-	language = file_key(head) in p.language_files
 	declaration = overloaded(p, Declaration(name, x.reading.levels, terms#1, declaration_kind(if diverged then OPAQUE_WORD else word, proof)), #x.letters, #variables, language)
 	# a host's operation runs as the host has it; a word of the language the prelude declares already is the
 	# prelude's, which the theory reads, and the host runs the language's body for it (notes/theory.md "The run trust
@@ -196,8 +200,9 @@ may_be_proposition(x: Elaborating, type: Term): bool := match computed(x.el.c, f
 	Sort(level) => not never_zero(simplified(level))
 	_ => yes
 }
-# the file a node was written in, as modules are kept
-file_key(n: Node): text := module_key(file_of(n) ?? "")
+# the file a node was written in, as modules are kept; a node holds it from the reader, or from the code it was made of
+# (placed_like), so one without is a node the elaborator made bare
+file_key(n: Node): text := module_key(file_of(n) ?? raise("the elaborator made `${n}` without the file it was written in"))
 # whether a body is an operation of the host's, alone or as a block's one statement
 is_hosted(body: Node): bool := match body {
 	Prim(operation, arguments) => yes
@@ -269,7 +274,7 @@ quantified_head(head: Node): Quantified := {
 	# `for` lines alone are no statement: the law reads as written
 	if count == 0 or count == #lines or not is_binder(head) { return Quantified(head, []) }
 	rest = lines.drop(count)
-	Quantified(Key(symbol(binder_name(head)), Op.Colon, if #rest == 1 then rest#1 else List(rest, Bracket.Curly, Separator.Newline)), lines.take(count).map(line => for_binder(line)!))
+	Quantified(placed_like(Key(symbol(binder_name(head)), Op.Colon, if #rest == 1 then rest#1 else List(rest, Bracket.Curly, Separator.Newline)), head), lines.take(count).map(line => for_binder(line)!))
 }
 # the binder of a line `for x: T`, ø for any other line
 for_binder(line: Node): Node? := match line {
@@ -293,7 +298,7 @@ named_law(p: Theory, name: text): Declaration := declaration(p.environment, kern
 overloaded(p: Theory, d: Declaration, found: int, own: int, language: bool = no): Declaration := {
 	parts = binders_written(d.type, [], own)
 	taken = parts.taken.drop(found)
-	same = prelude_signature(p, d.name, taken)
+	same = prelude_signature(p, d.name, Written(taken, parts.result))
 	# a word of the language the prelude declares with this signature is that declaration (definition_elaborated)
 	if language and same is not ø { return Declaration(same!, d.levels, d.type, d.kind) }
 	key = keyed(p, d.name, taken, parts.result, same)
@@ -325,22 +330,28 @@ declared_name(p: Theory, name: text, same: text?): text := {
 	p.hidden[name] = name + HIDING_MARK
 	p.hidden[name]
 }
-# the prelude's declaration of a name taking these types: the name's own, or an overload of it; ø where it has none
-prelude_signature(p: Theory, name: text, taken: list<text>): text? := {
+# the prelude's declaration of a name of this signature, taking these types and giving this result: the name's own, or
+# an overload of it; ø where it has none
+prelude_signature(p: Theory, name: text, signature: Written): text? := {
 	kernel = kernel_name(p, name)
-	if from_prelude(p, kernel) and taken == taken_by(p, kernel) { return kernel }
-	taking = "${kernel}(${taken.join(", ")})"
-	if from_prelude(p, taking) then taking else ø
+	same = (key: text) => from_prelude(p, key) and same_signature(signature_of(p, key), signature)
+	if same(kernel) { return kernel }
+	taking = "${kernel}(${signature.taken.join(", ")})"
+	if same(taking) then taking else ø
 }
 # the prelude's type of a name, which a type of that name hides: a type's signature is its name alone
 prelude_type(p: Theory, name: text): text? := {
 	kernel = kernel_name(p, name)
 	if from_prelude(p, kernel) and gives_type(p, kernel) then kernel else ø
 }
-# the types a declaration takes, as written, its found binders left out
-taken_by(p: Theory, key: text): list<text> := binders_written(declaration(p.environment, key)!.type, [], binders_of(p, key)).taken.drop(letters_found(p, key))
+# the types a declaration takes, as written, its found binders left out, and its result
+signature_of(p: Theory, key: text): Written := {
+	written = binders_written(declaration(p.environment, key)!.type, [], binders_of(p, key))
+	Written(written.taken.drop(letters_found(p, key)), written.result)
+}
 # a type's first `own` binders' types and what is left, its result, as written
 class Written { taken: list<text>; result: text }
+same_signature(a: Written, b: Written): bool := a.taken == b.taken and a.result == b.result
 binders_written(type: Term, names: list<text>, own: int): Written := match type.shape {
 	Pi(binder, domain, body) => if own == 0 then Written([], shown_in(type, names, no_free_names())) else {
 		inner = binders_written(body, names + [binder], own - 1)
