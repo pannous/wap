@@ -912,14 +912,14 @@ texts.
 | S2 running from terms | erase, lower and emit from run terms, behind an option | every test program prints the same both ways; the benchmarks within their guardrails |
 | R0 agreement | the census also counts the test programs that print the same both ways (`both_ways` of test/wap/scripted.wap over every test program), a ratchet beside the accepted count; a theory feature lands only when it lowers neither | `x := 0 - 3; x` prints -3 both ways; the agreement count, which only grows |
 | R1 one meaning per word | the words both typers read mean one thing (13): a numeral has the type its place wants, else the default; `int`, a count and a bool mean what number.md and bool.md say, in the prelude and in wap/types alike | `0 - 3` is -3 compiled, checked and run from terms; `#xs - 1` the same three ways |
-| R2 one table of primitives | wap/kernel/primitives.wap holds one row per host operation: its name, the wasm types it takes and gives, its builder; the emitter finds an operation by one lookup; a `runs(…)` body is a `prim` of that table, checked against its row (9.7), and no wap spelling of a host operation is typed or checked | `runs(add, prim i64.add(m, n))` accepted, a body of the wrong width refused naming the row; the trust base listed by a command from the `runs(…)` declarations |
+| R2 one table of primitives | wap/kernel/primitives.wap holds one row per host operation: its name, the wasm types it takes and gives, its builder; the emitter finds an operation by one lookup; a `runs(…)` body is a `prim` of that table, checked against its row (9.7), and the Prim(shown) mark goes into the row, and no wap spelling of a host operation is typed or checked | `runs(add, prim i64.add(m, n))` accepted, a body of the wrong width refused naming the row; the trust base listed by a command from the `runs(…)` declarations |
 | R3 layouts | every prelude type has its row (9.7): numbers, lists, texts, optional values, records | a program over texts and records runs from its terms; `axioms of` shows no layout outside the prelude |
 | R4 running from terms | erase lowers a run term into the forms today's emitter reads, each node carrying the layout erase takes from its kernel type; lowering never infers a layout | the agreement count reaches every test program the census accepts; the benchmarks within their guardrails |
 | R5 one choice | where the gate shows the two typers apart (a literal's type, an overload, a conversion), the elaborator's choice is made the language's; the old typer follows it only for a literal's type, every other difference is exempted in the gate by name until R7a | every test program prints the same both ways; the census accepts every statement of the compiler, lib/ and the tests |
 | R6 one door | check, verify, run and census are modes of one door after one reading of the prelude; a statement's writes are kept apart and joined to the environment when it is accepted, so nothing is copied per statement or taken back | a program's `runs(…)` refused at one place; a refused statement leaves no trace a later one sees; the census within its time gate |
 | R7a new stages behind an option | the compiler built through elaborate, check, erase and emit behind an option; a plain compile elaborates and checks every statement | `--stage 2` through the new stages is a fixed point; the benchmarks unchanged |
 | R7b seed | the seed refreshed from R7a's compiler | test_hello and test_self from the new seed |
-| R7c typer gone | wap/core/analyze goes | every test as before R7b |
+| R7c typer gone | wap/core/analyze goes, and with it the typed_readings global | every test as before R7b |
 | R7d one library | the prelude and wap/types are one library, each word declared once with its `prim` body; the seed rule binds here | `char` is `text where #it == 1` and nothing else; the trust base listed by a command |
 | R7e kernel moved | the kernel moves to wap/kernel | `--stage 2` again |
 
@@ -997,8 +997,6 @@ Decided by the user (2026-11-24):
 - A name can be given a value of another type; from there on it holds that type, and where two paths meet, their
   union. A name declared with `let`, `const` or a written type keeps its type (section 4, 9.5).
 - The theory's refusal tests are exempt from "no refusal tests": they pin `refused by <rule>`, never the message.
-- **`int`** is the whole numbers, as wiki/laws.md promises; `i64` is the wrapping type, the whole numbers up to
-  2^64. The emitter keeps a fast path with a test for overflow.
 - **Classical logic** is not in the prelude: it declares two axioms, `proposition_extensionality` and
   `quotient_sound`; excluded middle and choice come only with `use classical`, and every report names them. A
   condition of an `if` must be decidable either way.
@@ -1022,17 +1020,19 @@ Decided by the user (2026-11-24):
   (`3 === 3.0` is no) and no `equals` of the program in it. It is refused on a quotient and on functions, and is
   never the identity of two objects.
 
+Decided by the user (2026-11-25):
+- **`int`** is the whole numbers, unbounded and exact; the proofs see only that. Its storage is picked by context:
+  i32 or i64 where the value provably fits, a big number where it might not (R3, R4). `nat` is `int where it >= 0`.
+  `i32` and `i64` are the wrapping machine words, written only where wrapping is wanted. Until the storage is picked
+  by context, a compiled `int` wraps silently (no overflow test, no big numbers in the compiler's build).
+- **A numeral** where no type is wanted is an `int`; `nat` only where a `nat` is wanted. `0 - 3` is -3 everywhere.
+- **A count minus a count**: `#xs - 1` is -1 on an empty list.
+- **A leading annotation** (`@runs …`) belongs to the whole phrase it leads, operated code and enums included.
+
 Open, with the recommendation first and its cost in core; with the user through the interviewer:
 
 1. **W0 and `wap verify`.** Recommended: the Lean model and the Lean prover retire at milestones R7 and P3; until
    then they stay beside the new ones. 0 core lines.
-3. **A numeral's default** (R1). Recommended: a whole numeral where no type is wanted is an `int`, the whole numbers;
-   `nat` only where a `nat` is wanted. `0 - 3` is -3 everywhere. 1 to 5 core lines (core/analyze reads it as today).
-4. **`int` as decided** (R1). Recommended: keep the decision; the overflow test on the fast path takes big numbers
-   (lib/magnitude.wap) into every build, the compiler's included, which costs its size and a seed refresh. The other
-   reading keeps `int` the wrapping i64 for now and moves the decision to R7.
-5. **A count minus a count** (R1). Recommended: `#xs` is an `int` in the language and a `nat` only inside proofs, so
-   `#xs - 1` is -1 on an empty list, never 0. 0 core lines.
 2. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
    `refl`; `axiom`, `assume`; `by`, `chain`; `decreasing`; the axioms' names. Settled on the wiki pages.
 
