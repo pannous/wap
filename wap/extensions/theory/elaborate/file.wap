@@ -3,6 +3,9 @@
 # the switch: an enum or class unit is read as written, a statement that binds names (`products(Pair, Unit)`) as the
 # theory's door reads it, any other statement lowered alone first.
 use "../../../core/pipeline.wap"
+use "../../../core/analyze/declarations.wap"
+use "../../../core/analyze/modules.wap"
+use "../../../core/stage.wap"
 use "../../../core/parse/reader.wap"
 use "../../../core/language.wap"
 use "../../../core/rules/lowering.wap"
@@ -76,8 +79,6 @@ explicit_overloaded(p: Theory, unit: list<Node>): Statement := {
 prelude_file(p: Theory, file: text): text := in_folder(p.wap_folder, "${PRELUDE_FOLDER}/${file}.wap")
 # a file's statements, each with the lines that belong to it
 file_units(language: Language, path: text): list<list<Node>> := module_units(operated_file(language, path))
-# a module's statements, each with the lines that belong to it
-module_units(code: Node): list<list<Node>> := units_of(statements_of(code))
 # the statements of a file as written, read alone, its uses and operators unread
 written_units(path: text): list<list<Node>> := units_of(statements_of(notation(read(path), path)))
 
@@ -90,9 +91,16 @@ door_run(p: Theory, given: list<text>, work: (DoorArguments) -> ø) := {
 		work(arguments)
 	} catch refusal { stopped_by(refusal) }
 }
-# the elaborator's door: the prelude checked, then the program file's statements elaborated in order into the theory
+# the elaborator's door: the prelude checked, then the modules the program uses and its own statements elaborated in
+# order into the theory
 door_elaborated(p: Theory, given: list<text>) := door_run(p, given, arguments => {
-	for unit in program_units(p, door_program(arguments)) { unit_elaborated(p, unit) }
+	language = base_language()
+	prelude_checked(p, language)
+	modules = program_modules(language, door_program(arguments))
+	p.sets = places_set(modules)
+	for module in modules {
+		for unit in module_units(module) { unit_elaborated(p, unit) }
+	}
 })
 # the language as a program is lowered in, loaded from a wap folder: a parameter the types module declares a function,
 # `filter`'s condition, takes its argument naming it as that function
@@ -101,11 +109,19 @@ spellings_loaded(p: Theory, wap_folder: text) := {
 	rules_files_loaded(p.spellings, p.wap_folder)
 	p.spellings.declarations = Declarations(declarations_by_name(language_loaded(base_language(), p.wap_folder).signatures))
 }
-# the prelude checked into a theory, then the statements of a program file, in order, to elaborate into it
-program_units(p: Theory, program: text): list<list<Node>> := {
-	language = base_language()
-	prelude_checked(p, language)
+# a program file's code after the modules it uses, theirs first, each read once (wiki/use.md): the modules to
+# elaborate in order
+program_modules(language: Language, program: text): list<Node> := {
 	code = operated_file(language, program)
-	p.sets = places_set(code)
-	module_units(code)
+	modules_of(language, code) + [code]
+}
+# the modules code uses, theirs first, each file read and operated once
+modules_of(language: Language, code: Node): list<Node> := modules_used(code, file => operated_file(language, file))
+# a module's statements, each with the lines that belong to it; a `use` line is read as its module, no statement
+module_units(code: Node): list<list<Node>> := units_of(statements_of(code).filter(statement => phrase_part(statement, USE_WORD) is ø))
+# the key a module's theory is kept by: its file, a standard module's as a program writes it (`lib/math.wap`) whether
+# a program names it or `use math` finds it in the library beside the running module
+source_key(code: Node): text := {
+	file = module_key(file_of(code) ?? "")
+	if file.starts_with(module_key(in_folder(program.folder, LIBRARY_FOLDER)) + "/") then library_path(file) else file
 }

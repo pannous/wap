@@ -1,25 +1,76 @@
 # The elaborator's census (notes/coc-plan.md S1, test/wap/ratchet_census.sh): `wap scripts/theory-census.wap --tree
 # <root> program.wap…` elaborates and checks every statement of each program as the elaborator's door does, each
-# program alone on the prelude, but a refusal ends only its statement and takes back what that statement wrote. It
-# prints each refusal as `refused <program>: <refusal>`, then the total, `accepted n of N statements`.
+# program on the prelude and the modules it uses, but a refusal ends only its statement and takes back what that
+# statement wrote. Modules are elaborated once for all the programs that start with them, and their statements are
+# counted where a module is itself a program of the census. It prints each refusal as `refused <program>: <refusal>`,
+# then the total, `accepted n of N statements`.
 use "../wap/extensions/theory/elaborate/file.wap"
 use "../wap/extensions/theory/elaborate/read.wap"
+use "../wap/extensions/theory/elaborate/declare.wap"
 use "../wap/extensions/theory/options.wap"
 use "../wap/extensions/theory/environment.wap"
+use "../wap/core/language.wap"
+use "../wap/core/pipeline.wap"
+use "../wap/core/analyze/declarations.wap"
 
 REFUSED_LINE := "refused "
 TOTAL_LINE := "accepted "
 
 refusal_printed(program: text, refusal: Error) := print "${REFUSED_LINE}${program}: ${refusal.message}"
-# a program's statements elaborated into a theory of its own, each refusal printed: how many the kernel accepted, of
-# how many; a program the elaborator cannot read has all its statements refused
-program_counted(spellings: Theory, program: text): list<int> := {
-	p = copied(spellings)
+# the census's one language, its files read once; the prelude's theory; each module's theory, of the prelude, the
+# modules it uses and its own statements, made once, with how many of its statements the kernel accepted, of how many;
+# the modules whose theory is being made, which a module using one back cannot start from
+class Census { language: Language; prelude: Theory? = ø; theories: map<text, Theory> = {}; counts: map<text, list<int>> = {}; making: list<text> = [] }
+# a program's statements elaborated on the modules it uses, each refusal printed: how many the kernel accepted, of how
+# many; a program the elaborator cannot read has all its statements refused
+program_counted(census: Census, spellings: Theory, program: text): list<int> := {
 	try {
-		taken = program_units(p, program).map(unit => statement_accepted(p, program, unit))
-		return [#taken.filter(accepted => accepted), #taken]
-	} catch refusal { refusal_printed(program, refusal) }
+		code = operated_file(census.language, program)
+		theory_of(census, spellings, code)
+		return census.counts#source_key(code)
+	} catch refusal {
+		# the modules being made when it was refused are all this program's, none made
+		census.making = []
+		refusal_printed(program, refusal)
+	}
 	[0, #written_units(program)]
+}
+# a module's theory, made once a census: on the theory of the modules it uses, its statements, each counted
+theory_of(census: Census, spellings: Theory, code: Node): Theory := {
+	key = source_key(code)
+	if census.theories.has(key) { return census.theories#key }
+	census.making += [key]
+	p = theory_using(census, spellings, used_of(census, code))
+	p.sets = places_set(used_of(census, code) + [code])
+	taken = module_units(code).map(unit => statement_accepted(p, key, unit))
+	census.counts[key] = [#taken.filter(accepted => accepted), #taken]
+	census.theories[key] = p
+	census.making = census.making.filter(making => making != key)
+	p
+}
+# a theory of the prelude and these modules, in order: a copy of the theory of the one using the most of them, the
+# others elaborated on it
+theory_using(census: Census, spellings: Theory, modules: list<Node>): Theory := {
+	widest: Node? = ø
+	for module in modules {
+		if not (source_key(module) in census.making) and (widest is ø or #used_of(census, module) > #used_of(census, widest!)) { widest = module }
+	}
+	if widest is ø { return copied(prelude_theory(census, spellings)) }
+	p = copied(theory_of(census, spellings, widest!))
+	covered = used_of(census, widest!).map(source_key) + [source_key(widest!)]
+	for module in modules.filter(module => not (source_key(module) in covered)) {
+		for unit in module_units(module) { statement_accepted(p, source_key(module), unit) }
+	}
+	p
+}
+used_of(census: Census, code: Node): list<Node> := modules_of(census.language, code)
+prelude_theory(census: Census, spellings: Theory): Theory := {
+	if census.prelude is ø {
+		p = copied(spellings)
+		prelude_checked(p, census.language)
+		census.prelude = p
+	}
+	census.prelude!
 }
 # whether the kernel accepted a statement, its refusal printed and what it wrote into the theory taken back
 statement_accepted(p: Theory, program: text, unit: list<Node>): bool := {
@@ -34,6 +85,7 @@ statement_accepted(p: Theory, program: text, unit: list<Node>): bool := {
 
 spellings = Theory()
 door_run(spellings, args, arguments => {
-	counts = arguments.programs.map(program => program_counted(spellings, program))
+	census = Census(base_language())
+	counts = arguments.programs.map(program => program_counted(census, spellings, program))
 	print "${TOTAL_LINE}${counts.map(c => c#1).sum} of ${counts.map(c => c#2).sum} statements"
 })
