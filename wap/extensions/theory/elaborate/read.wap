@@ -130,15 +130,6 @@ kernel_name(p: Theory, name: text): text := {
 	hiding = p.hidden.get(owner) ?? return name
 	hiding + name[#owner ..]
 }
-# the kernel name a program's new declaration takes: a name the prelude declared it hides from here on, one lookup
-# order, the program's names before the prelude's
-declared_name(p: Theory, name: text): text := {
-	kernel = kernel_name(p, name)
-	at = place(p.environment, kernel)
-	if at == 0 or at > p.prelude_size { return kernel }
-	p.hidden[name] = name + HIDING_MARK
-	p.hidden[name]
-}
 # The reading of one declaration: its elaboration, which holds the binders in scope, the level names written
 # (explicit.wap's Reading); while its header is read, the letters found, as their variables; the holes for
 # instances of traits, which a search fills (instances.wap)
@@ -276,6 +267,15 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 	bound = named(x.el, name)
 	if bound is not ø { return given_arguments(x, bound!, type_of(x.el.c, bound!), arguments, wanted) }
 	if x.recursing is not ø and name == x.recursing!.name {
+		# a call of the name being defined is resolved among its overloads by its arguments, like any call: only one no
+		# declaration takes calls the definition itself, its recursion
+		kept = snapshot(x)
+		declared = try { declared_call(x, name, arguments, wanted) } catch e {
+			if not e.message.starts_with(REFUSED) { raise e.message }
+			put_back(x, kept)
+			ø
+		}
+		if declared is not ø { return declared! }
 		x.recursing!.called = yes
 		return recursive_call_elaborated(x, arguments, wanted)
 	}
@@ -288,13 +288,8 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 		qualified = "${text(named_form(arguments#1))}${DOT}${name}"
 		if declarations_named(x.theory, qualified) is not empty { return name_elaborated(x, qualified, arguments.drop(1), wanted) }
 	}
-	template = x.theory.templates.get(name)
-	# a template's versions are found by their types (templates.wap), never tried as declarations, so which call came
-	# first does not choose
-	candidates = declarations_named(x.theory, name).filter(candidate => template is ø or not template!.versions.any(version => version.name == candidate))
-	traits = traits_of(x.theory, name)
-	if #candidates == 1 and traits is empty and template is ø { return declared_given(x, candidates#1, arguments, wanted) }
-	if candidates is not empty or traits is not empty or template is not ø { return overload_elaborated(x, name, candidates, traits, template, arguments, wanted) }
+	declared = declared_call(x, name, arguments, wanted)
+	if declared is not ø { return declared! }
 	if x.header and #name == LETTER_LENGTH {
 		letter = scoped(x.el, name, wanted ?? hole_over(x.el, "the type of ${name}", any_sort(x), x.letters))
 		x.letters += [letter]
@@ -305,6 +300,18 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 	respelled(x, if arguments is empty then symbol(name) else Call(symbol(name), arguments), wanted, UNKNOWN_NAME, "${name} is neither a binder around it nor declared")
 }
 
+# a name's declaration given the arguments, the one of its overloads, traits' operations and template versions they
+# fit; ø for a name nothing declares
+declared_call(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?): Term? := {
+	template = x.theory.templates.get(name)
+	# a template's versions are found by their types (templates.wap), never tried as declarations, so which call came
+	# first does not choose
+	candidates = declarations_named(x.theory, name).filter(candidate => template is ø or not template!.versions.any(version => version.name == candidate))
+	traits = traits_of(x.theory, name)
+	if #candidates == 1 and traits is empty and template is ø { return declared_given(x, candidates#1, arguments, wanted) }
+	if candidates is not empty or traits is not empty or template is not ø { return overload_elaborated(x, name, candidates, traits, template, arguments, wanted) }
+	ø
+}
 # A declaration at a level hole for each of its level parameters, a hole for each found binder, then its written
 # binders given the arguments
 declared_given(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?): Term := declared_read(x, name, unread(arguments), wanted)
