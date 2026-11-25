@@ -1,0 +1,107 @@
+# The standard module feeds (wiki/world.md): events from the internet as one kind of value, a Feed. `feed.next()` takes
+# its events one at a time, ø once the source has ended, `feed.take(n)` the next n. A source module (lib/wikipedia.wap,
+# lib/earthquakes.wap, lib/polymarket.wap) makes its feed with streamed, polled or watched and names its URL.
+# A stream is read in windows of curl; each window resumes from the last event's id, so nothing is lost between windows.
+use process
+use json
+use text
+use units
+use list
+
+# how long one curl window of a server-sent event stream stays open
+STREAM_WINDOW_SECONDS = 3
+# how sources name themselves to the servers they read
+USER_AGENT = "wap-feeds/0.1"
+# curl ends a window it timed out with this exit status: a normal end, not a failure
+CURL_TIMED_OUT = 28
+SSE_DATA = "data: "
+SSE_ID = "id: "
+
+# a source of events: refill() gives the next batch (a list, maybe empty) or ø once the source has ended; keeps(e)
+# says which events the feed passes on
+class Feed {
+	refill: () -> list<any>?
+	keeps: (any) -> bool
+	pending: list<any> = []
+	ended: bool = no
+}
+
+next(feed: Feed): any := {
+	while #feed.pending == 0 and not feed.ended {
+		more = feed.refill()
+		if more is ø { feed.ended = yes } else { feed.pending = feed.pending + more.filter(feed.keeps) }
+	}
+	if #feed.pending == 0 then ø else {
+		oldest = feed.pending#1
+		feed.pending = feed.pending[1:]
+		oldest
+	}
+}
+take(feed: Feed, n: int): list<any> := [feed.next() for i in 1 to n]
+
+kept_all(event: any): bool := yes
+
+# server-sent events (text/event-stream): each event's data, read as JSON
+class Stream { url: text, last_id: text = "" }
+
+streamed(url: text, keeps: (any) -> bool = kept_all): Feed := {
+	stream = Stream(url)
+	Feed(refill: () => stream_window(stream), keeps: keeps)
+}
+
+stream_window(stream: Stream): list<any> := {
+	answer = run(sse_command(stream))
+	if answer.status != 0 and answer.status != CURL_TIMED_OUT { raise "the event stream ${stream.url} failed: ${answer.err}" }
+	# the last block is cut off by the window's end unless a blank line closed it; the next window repeats it
+	blocks = answer.out.split("\n\n")
+	events: list<any> = []
+	for block in blocks[0:#blocks - 1] {
+		lines = block.split("\n")
+		data = lines.filter(line => line.starts_with(SSE_DATA)).map(line => line.remove_prefix(SSE_DATA))
+		ids = lines.filter(line => line.starts_with(SSE_ID)).map(line => line.remove_prefix(SSE_ID))
+		if ids is not empty { stream.last_id = ids#1 }
+		if data is not empty { events.add(parse_json(data.join("\n"))) }
+	}
+	events
+}
+
+sse_command(stream: Stream): list<text> := {
+	words = ["curl", "-sN", "--max-time", "${STREAM_WINDOW_SECONDS}", "-A", USER_AGENT, "-H", "Accept: text/event-stream"]
+	resumed = if stream.last_id == "" then [] else ["-H", "Last-Event-ID: ${stream.last_id}"]
+	words + resumed + [stream.url]
+}
+
+# a source asked again each period: poll() gives its current items, key(item) tells them apart; the feed gives each
+# item once, the first poll's included
+class Poll { period: Quantity, seen: map<text, bool> = {}, polls: int = 0 }
+
+polled(period: Quantity, poll: () -> list<any>, key: (any) -> text): Feed := {
+	state = Poll(period)
+	Feed(refill: () => fresh_items(state, poll, key), keeps: kept_all)
+}
+
+fresh_items(state: Poll, poll: () -> list<any>, key: (any) -> text): list<any> := {
+	if state.polls > 0 { sleep(state.period) }
+	state.polls += 1
+	fresh = poll().filter(item => not state.seen.has(key(item)))
+	for item in fresh { state.seen[key(item)] = yes }
+	fresh
+}
+
+# a single value asked again each period: the feed gives it at first and then each time it changes
+class Watch { period: Quantity, last: any = ø, asked: bool = no }
+
+watched(period: Quantity, current: () -> any): Feed := {
+	state = Watch(period)
+	Feed(refill: () => changed_value(state, current), keeps: kept_all)
+}
+
+changed_value(state: Watch, current: () -> any): list<any> := {
+	if state.asked { sleep(state.period) }
+	state.asked = yes
+	now = current()
+	if now == state.last then [] else {
+		state.last = now
+		[now]
+	}
+}

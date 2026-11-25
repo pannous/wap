@@ -1,20 +1,29 @@
 # The standard module foreign: the program's side of a C function it calls, a foreign line `getenv(name: text): text from 'c'` (its rule:
 # extensions/c/foreign.wap; the section that describes it for the native warp: extensions/c/functions.wap). A text goes to C
-# as the address of its bytes and a NUL, the texts of one call one after another in the memory from BYTES_AT; a text C
-# gives back is copied from where its pointer points, an empty one for NULL. An int32 crossing to C is an address of the
-# module's memory, which the native warp gives C as its pointer. A module whose foreign lines call C uses it; outside the
-# types module, so only a program that calls C imports C's memmove, free, strnlen and memcpy, which a host without C
-# (wasmtime) lacks.
+# as the address of its bytes and a NUL, the texts of one call one after another in the memory from BYTES_AT, after those
+# of the calls it runs within; a text C gives back is copied from where its pointer points, an empty one for NULL. An
+# int32 crossing to C is an address of the module's memory, which the native warp gives C as its pointer. A module whose
+# foreign lines call C uses it; outside the types module, so only a program that calls C imports C's memmove, free,
+# strnlen and memcpy, which a host without C (wasmtime) lacks.
 # (the types module's host machinery, beside this library wherever wap is: in the compiler's folder)
 use "../types/host.wap"
 
-# a call's out-pointers (`sqlite3 **`), each a C pointer's slot from BYTES_AT, its texts after them
-OUT_SLOTS := 4
 POINTER_BYTES := 8
-OUTS_END := BYTES_AT + OUT_SLOTS * POINTER_BYTES
-# where the next text of a C call goes; the out-pointers a call was given
-c_texts_end = OUTS_END
+# how many callbacks of C run: a call made while none runs is outermost and starts from the beginning, so one that
+# raised before it ended leaves nothing behind
+c_callbacks_running = 0
+# The C call running: where its next text goes; its first out-pointer's slot (`sqlite3 **`), 0 when it has none; of
+# the copies of the lists handed to the calls running (handed_at), how many and where the running call's still to be
+# read back start
+c_texts_end = BYTES_AT
 c_outs = 0
+c_handed = 0
+c_handed_from = 0
+# a call made while another runs (from a callback of its C, or in one of its arguments) places its texts, slots and
+# copies after the running one's, so it overwrites none of them, and gives it its state back when it ends
+class CCall { texts_end: int; outs: int; handed: int; handed_from: int; callbacks: int }
+# DEBT: Where texts are GC values, the host's words (a file read, a path) still place their bytes from BYTES_AT
+#   (host.wap scratch): one used by a callback overwrites the texts of the call that called it back.
 # the count of the call's last bytes, which a `length` parameter after them gets
 c_bytes_count = 0
 # the most bytes a text C gives back is read for
@@ -24,8 +33,38 @@ STRUCT_IN_REGISTERS := 16
 # the number before a run's first handle, far from any a program writes, so a number written by hand is no handle
 HANDLE_BASE := 700000000
 
-# the texts of a new call, placed from the start again
-c_call_started() := { global c_texts_end = OUTS_END; global c_outs = 0 }
+# a new call, its texts placed after those of the calls running, whose state it gives back
+c_call_started(): CCall := {
+	global c_texts_end
+	global c_outs
+	global c_handed
+	global c_handed_from
+	global c_callbacks_running
+	if c_callbacks_running < 1 {
+		c_texts_end = BYTES_AT
+		c_handed = 0
+	}
+	outer = CCall(c_texts_end, c_outs, c_handed, c_handed_from, c_callbacks_running)
+	c_outs = 0
+	c_handed_from = c_handed
+	outer
+}
+# the call ended: the one it ran within running again, as it was
+c_call_ended(outer: CCall): ø := {
+	global c_texts_end = outer.texts_end
+	global c_outs = outer.outs
+	global c_handed = outer.handed
+	global c_handed_from = outer.handed_from
+	global c_callbacks_running = outer.callbacks
+}
+# a callback of C called with C's arguments: the C calls it makes run within the call that called it back
+c_called_back(callback: (list<int>) -> int, given: list<int>): int := {
+	global c_callbacks_running
+	c_callbacks_running = c_callbacks_running + 1
+	result = callback(given)
+	c_callbacks_running = c_callbacks_running - 1
+	result
+}
 # a text as C takes it, the address of its bytes and a NUL: its own where texts are in the memory, else a copy placed
 c_text(t: text): int32 := c_address(c_text_at(t))
 # (a C function that writes into its text, mkstemps, writes into the text itself where texts are in the memory: give
@@ -70,9 +109,9 @@ c_address(at: int): int32 := prim i32.wrap_i64(at)
 # an out-pointer for C to fill, the call's next slot, NULL until it does
 c_out(): int32 := {
 	global c_outs
-	at = BYTES_AT + c_outs * POINTER_BYTES
+	at = c_reserved(POINTER_BYTES)
 	set_memory_int(at, 0)
-	global c_outs = c_outs + 1
+	if c_outs == 0 { global c_outs = at }
 	c_address(at)
 }
 # The handles of this run (wiki/c.md): a C pointer as the number it crosses as, never an address wap computes with,
@@ -90,7 +129,7 @@ c_pointer_of(handle: int): int := if handle == 0 then 0 else if handle > HANDLE_
 c_handle(status: int): int := {
 	global c_outs
 	if c_outs == 0 { return status }
-	pointer = memory_int(BYTES_AT)
+	pointer = memory_int(c_outs)
 	if pointer == 0 { raise "C gave no pointer, its status ${status}" }
 	pointer
 }
@@ -98,15 +137,15 @@ c_text_from(pointer: int): text := if pointer == 0 then "" else c_copied(pointer
 # a text C gives back as a pointer to its length (8 bytes) and its bytes, which the caller frees
 c_counted_text(pointer: int): text := {
 	if pointer == 0 { return "" }
-	c_copy(c_address(BYTES_AT), pointer, POINTER_BYTES)
-	copied = c_copied(pointer + POINTER_BYTES, memory_int(BYTES_AT))
+	at = c_reserved(POINTER_BYTES)
+	c_copy(c_address(at), pointer, POINTER_BYTES)
+	copied = c_copied(pointer + POINTER_BYTES, memory_int(at))
 	c_free(pointer)
 	copied
 }
-# `count` bytes at a C pointer, as a text: copied straight into a new one where texts are in the memory, else through
-# the memory from BYTES_AT
+# `count` bytes at a C pointer, as a text: copied through the call's memory
 c_copied(pointer: int, count: int): text := {
-	at = scratch(count)
+	at = c_reserved(count)
 	c_copy(c_address(at), pointer, count)
 	memory_text(at, count)
 }
@@ -162,23 +201,71 @@ BYTE_RANGE := 256
 # them, as a GC array has no address, and copied back into the list once the call returns (items_returned), as C may
 # write into them. The memory may move when it grows: no C side may keep it.
 items_handed(xs: list<T>): int := {
-	global handed_at
 	if items_address(xs) != 0 { return items_address(xs) }
 	width = item_bytes(xs)
 	at = c_reserved(#xs * width)
 	for place in 0 upto #xs { item_placed(at + place * width, xs[place]) }
+	copy_handed(at)
+}
+# the copy at that address handed to the call running, after the copies of its parameters before it
+copy_handed(at: int): int := {
+	global handed_at
+	global c_handed
+	handed_at = handed_at.take(c_handed)
 	handed_at.add(at)
+	c_handed = c_handed + 1
 	at
 }
 # the list's items as C left them in their copy, the first of the call's copies still to be read back
 items_returned(xs: list<T>) := {
 	global handed_at
+	global c_handed_from
 	if items_address(xs) != 0 { return }
-	at = handed_at#1
-	handed_at = handed_at.drop(1)
-	for place in 0 upto #xs { xs[place] = item_found(xs, at + place * item_bytes(xs)) }
+	at = handed_at#(c_handed_from + 1)
+	c_handed_from = c_handed_from + 1
+	for place in 0 upto #xs { xs[place] = item_found(xs[place], at + place * item_bytes(xs)) }
 }
-# where the copies of the lists handed to the C call running are, in the order of its parameters
+# where the copies of the lists handed to the C calls running are, in the order of their parameters, the innermost
+# call's last (c_handed)
 handed_at: list<int> = []
 item_placed(at: int, item: T) := prim item.store(at, item)
-item_found(xs: list<T>, at: int): T := prim item.load(at)
+item_found(model: T, at: int): T := prim item.load(at)
+
+# A record handed to C (extensions/c/foreign.wap, a class parameter): its fields copied as C lays out a struct of them,
+# each at the next multiple of its own width, the whole a multiple of its widest, and read back once the call returns
+c_record_bytes(widths: list<int>): int := aligned(widths.fold(0, field_end), widths.max)
+# where a field of that width ends, placed after the fields ending there
+field_end(end: int, width: int): int := aligned(end, width) + width
+aligned(at: int, width: int): int := (at + width - 1) ÷ width * width
+# the record being handed or read back: where it is, and where its next field starts in it
+c_record_at = 0
+c_record_end = 0
+c_record_started(widths: list<int>): ø := {
+	global c_record_at
+	global c_record_end
+	c_record_at = copy_handed(c_reserved(c_record_bytes(widths)))
+	c_record_end = 0
+}
+c_record_address(): int32 := {
+	global c_record_at
+	c_address(c_record_at)
+}
+c_field_placed(value: T) := item_placed(c_field_next(value_bytes(value)), value)
+# where the record's next field of that width starts
+c_field_next(width: int): int := {
+	global c_record_at
+	global c_record_end
+	c_record_end = field_end(c_record_end, width)
+	c_record_at + c_record_end - width
+}
+# the record's fields as C left them, the first of the call's copies still to be read back
+c_record_returned(): ø := {
+	global c_handed_from
+	global c_record_at
+	global c_record_end
+	global handed_at
+	c_handed_from = c_handed_from + 1
+	c_record_at = handed_at#c_handed_from
+	c_record_end = 0
+}
+value_bytes(x: T): int := item_bytes([x])

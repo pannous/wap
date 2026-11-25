@@ -20,8 +20,6 @@ groups.
 | channels.warp | `channel()`, `channel $name` | plain | `channel(): Channel`, `channel(name: text): MachineChannel` |
 | channels.warp | `$c.send($v)`, `$c.receive()` over `channel $name` | plain | methods of the class `MachineChannel` |
 | channels.warp | `on message from $name {…}` | plain | `on(message_from: text, handler: block)`, a phrase with a block parameter |
-| exact_values.warp | `$x as exact`, `exact $x` | plain | the conversion `exact(x)`; `as exact` and `exact x` are calls of it |
-| exact_values.warp | `as precise`, `precise $x` | copy | the word alias `precise → exact` |
 | sound.warp | `play {…}`, `play({…})` | mechanism: data | `play(score: data)`; the bracketed call and the spaced one are the same call |
 | sound.warp | `tune {…}`, `tune({…})` | copy | the word alias `tune → play` |
 | uncertain.warp | `$a certainly > $b`, `certainly <` | copy | `certainly` changes nothing: `a > b` |

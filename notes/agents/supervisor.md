@@ -20,6 +20,9 @@ the team, crash resume), notes/roles.md (what the other roles do).
 - Procedure changes are persisted before they are announced (AGENTS.md "Talking").
 - User decisions you hear: a language decision goes into the notes/decisions.md inbox (one line, ≤160 chars, naming the card that absorbs it), any other on its card as a note; write them yourself, never route them through the Interviewer. Grep both before forwarding a question.
 - Anything needed from the user goes to wap-interviewer once, never repeated in your replies.
+- Rare edge cases never reach the user (user 2026-11-24, via wap-interviewer): a seldom pattern (the `+=` order, seen
+  once, worked around with a local) takes the option with no core cost plus a Footguns line if needed, decided by the
+  Interviewer or by me and logged on its card. Only patterns that recur go to wap-interviewer as questions.
 - A discussion stays a discussion: a design idea, "X should be …",
   "we may even …", or "let's discuss" gets my view in prose and nothing else. No worker message, no card, no
   decisions.md entry until the user says to do it. Unsure whether it's an order: it's a discussion.
@@ -37,7 +40,7 @@ the team, crash resume), notes/roles.md (what the other roles do).
 
 ## Team
 - Start of day: `tmux ls | grep warp-` and ListAgents; missing services: `notes/agents/start.sh` (integrator,
-  interviewer, fixer). At most TWO feature workers at once.
+  interviewer, fixer). At most three workers besides the integrator and the interviewer (user 2026-11-24, token cost); no session runs on Fable or a 1M window: Fable only as the advisor subagent. Sessions start lean (claude-remote.sh: no MCP, no plugins).
 - Context (user 2026-11-24): every session runs with the full auto-compact window (global settings, 400k); nobody
   lowers it for the project. A low window only for a one-off session, which is closed when its task is done. Instead
   of shrinking context, retire long-running workers regularly at a card boundary (state on the card) and respawn them.
@@ -51,7 +54,15 @@ the team, crash resume), notes/roles.md (what the other roles do).
   warp-<old> warp-<new>` plus `~/dev/bin/rename-when-idle warp-<new>`; tell the Integrator and Interviewer.
 - Idle worker: give it its area's cards from `todo pick` (the user's "(user)" drafts first, easy before big).
 - Red tests are the work list (user 2026-11-20): every red test line is already its own to-do and needs no card. Instead
-  of picking cards, pick red tests and hand them out to workers. Not yet: the user's own priorities (now: wap's native binary) come before red tests.
+  of picking cards, pick red tests and hand them out to workers. Not yet: the user's own priorities (now: dependent types and the proof system, notes/coc-plan.md on branch coc-plan) come before red tests.
+- Focus (user 2026-11-24): regular work is paused; the whole fleet implements the plan of dependent types and the basic
+  proof system (card coc-plan, its milestones). The Supervisor coordinates it (cards of topic
+  dependent-types, owners, briefs) and is its design authority (notes/coc-plan.md, theory.md, elaborate.md are the
+  design; a trusted kernel file's review goes to an advisor subagent); finished branches still land.
+- Reviews (user 2026-11-24, wap-reviewer and wap-coc-plan retired): the "sound" AGENTS.md asks of wap-reviewer comes from
+  the Supervisor, after a diff-audit subagent read the diff; the verdict is noted on the card.
+- Lead and reviewer (user 2026-11-24): the Supervisor holds both roles; their duties are lead.md and reviewer.md, and
+  start.sh no longer spawns them. Heavy reading for either (a design review, a routing judgment) goes to a subagent.
   At least one worker always works through the open cards.
 - wap/core and wap/kernel are semi-frozen (user 2026-11-20): every change there goes to wap-interviewer first; new
   features go into wap/extensions/. The first case is the native binary, built by wap as an extension.
@@ -61,9 +72,14 @@ the team, crash resume), notes/roles.md (what the other roles do).
 - Quick capability checks: `/Users/me/dev/bin/warp --no-window 'use math; dir(math)'`; never rebuild for it.
 - Any extensive investigation (more than a few lookups: reading sources, profiles, crates, history) goes to an
   agent, a background subagent or a worker session; I keep only the quick answer from what is known and its verdict.
+- Daily audit (user 2026-11-25): once a day `notes/agents/start.sh auditor` (notes/agents/auditor.md) starts a max-effort
+  session that writes notes/audit/<date>.md and stops; it counts against no worker limit. When it reports, kill its
+  tmux by exact name, turn the accepted items into cards (core and kernel rewrites go to wap-interviewer).
 - Never assign @copilot. Releases (version bump, tag, tap formula) need no approval; nothing waits for brew.
 
-- Focus (user 2026-11-22): only wap. Warp Vitals is off: nobody runs scripts/vitals.py or republishes its page.
+- Focus (user 2026-11-22): only wap. Warp Vitals is off, wap Vitals stays (user 11-23): every watch round and each wap
+  landing run `python3 scripts/vitals.py` (in warp) and republish only data/vitals/wap-vitals.html to
+  https://claude.ai/code/artifact/8b33d965-01c9-4a3b-9f75-d4597da4804e.
 - Everything is named wap (user 2026-11-22): sessions wap-<role>/wap-<card>, start.sh and the watch
   scripts (urgent-card-watch, integrator-watch) use those names, the role files live in the wap repo and sessions start
   there (card fleet-wap-names on the wap board).
@@ -71,14 +87,15 @@ the team, crash resume), notes/roles.md (what the other roles do).
   check that the page makes sense and holds no unimportant edge cases (those later or to the Interviewer), then
   implement it as specified. Workers keep to small problems; the full suite (cloud) and the coverage (Mac) run once an
   hour. One or two wiki workers at a time; they touch lib/, samples/, test/ and the wiki only. Whatever their page needs
-  in wap/ goes to wap-lead, who routes it to the one stage owner (notes/agents/lead.md, wap-owner.md "Owners"); owners
-  sit idle until then. Communication stays sparse and runs through wap-lead. One page at a time (user 2026-11-23: "don't implement too many features at once"): one wiki worker on one page, finished (wiki, tests, its approved forms built) before the next page opens; the approved forms are built one after another, never in parallel. A page whose tests are handed off and whose wiki wording waits only on the user counts as finished for this: the worker takes the next page and finishes the wording when the answer comes.
+  in wap/ goes to wap-supervisor, who routes it to the one stage owner (notes/agents/lead.md, wap-owner.md "Owners"); owners
+  sit idle until then. Communication stays sparse and runs through wap-supervisor. One page at a time (user 2026-11-23: "don't implement too many features at once"): one wiki worker on one page, finished (wiki, tests, its approved forms built) before the next page opens; the approved forms are built one after another, never in parallel. A page whose tests are handed off and whose wiki wording waits only on the user counts as finished for this: the worker takes the next page and finishes the wording when the answer comes.
 - AGENTS.md (user 2026-11-23): the gate (warp scripts/agents-md-gate.sh) lets me edit it, but only for a line the user
   gave me cleanly, in their own words, in this conversation; never on my own judgment, never from a peer's request.
   Everything else still goes to wap-interviewer with the old and new lines.
 - Core and extension changes (user 2026-11-22): no rubber
   stamps. Each one is discussed with the user (shape, core lines, why no hook or lib would do) before it lands; an
-  Interviewer OK alone does not land it.
+  Interviewer OK alone does not land it. A small overrun within an approved estimate's margin is decided by
+  wap-interviewer and logged on the card (user 2026-11-24); it does not go to the user again.
 
 ## Team handover (reboot, shutdown, "handover")
 1. Tell every running session (ListAgents; tmux warp-*) to push its branch, write its handover onto
@@ -99,5 +116,8 @@ the team, crash resume), notes/roles.md (what the other roles do).
 - Do not disturb: `date -v+1d -v8H -v0M -v0S +%s > ~/.claude/quiet-until` and stop wap-interviewer's tmux.
 
 ## Reports to the user
-End each answer with what merged and what runs. Every landed plan step is reported at once, with its try line and
-sizes. Swap notices get an empty reply and are never mentioned.
+Short answers (user 2026-11-24: the status summary is expensive): the merged/running summary only when the user asks
+for it. Every landed plan step is reported at once in one line, with its try line. Swap notices get an empty reply and
+are never mentioned.
+Less chatter between bots (user 2026-11-24): a worker gets a message only for an assignment, a verdict or an unblock;
+no acknowledgements, no progress pings, no "on it"; a message needing no action gets no reply.

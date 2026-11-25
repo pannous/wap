@@ -1,0 +1,62 @@
+# Proof by induction (wiki/proof.md "By induction"; notes/coc-plan.md P4): a goal over a value of an enum is what
+# the enum's recursor concludes, the recursor taken as a law. Its value is the parameter and its motive the goal with
+# that parameter made a binder, which unifying the recursor's conclusion with the goal finds; each case's premise,
+# the goal at the case under its fields and the hypotheses that it holds of the fields of the enum itself, is proved
+# by the provers before this one. So `fact(n) > 0` is proved along fact's own recursion: at zero by computing, at a
+# successor by the helper law, its premises the hypothesis at the field and computing
+use "../theory/terms.wap"
+use "../theory/environment.wap"
+use "../theory/typing.wap"
+use "../theory/compute.wap"
+use "../theory/recursors.wap"
+use "../theory/elaborate/state.wap"
+use "../theory/elaborate/unify.wap"
+use "../theory/elaborate/match.wap"
+use "goals.wap"
+use "computing.wap"
+use "facts.wap"
+use "rewriting.wap"
+use "introduction.wap"
+use "apart.wap"
+use "linear.wap"
+
+# the provers a case's premise is proved by
+CASE_PROVERS: list<(Goal) -> Term?> := [by_computing, by_cases_apart, by_fact, by_rewriting, by_introduction, by_linear_arithmetic]
+# how deep a case is taken apart again, along another parameter, before the search gives up on it: `x * y > 0`
+# from `x > 0 and y > 0` takes x apart and then y
+INDUCTION_DEPTH := 2
+
+by_induction(goal: Goal): Term? := {
+	for parameter in goal.parameters {
+		proof = along(goal, parameter)
+		if proof is not ø { return proof }
+	}
+	ø
+}
+# the goal proved by the recursor of a parameter's type, the parameter its value and the goal over it its motive, the
+# hypotheses about the parameter its premises again, so each case has them at its own value; ø for a parameter the
+# goal does not use, a type of no enum, of several naming each other, or with indices
+along(goal: Goal, value: Term): Term? := {
+	el = goal.el
+	type = computed(el.c, type_of(el.c, value))
+	recursor = case_recursor(el.c, type) ?? return ø
+	facts = recursor_facts(el.c.environment, recursor.name)!
+	about = goal.parameters.drop(goal.parameters.index_where(parameter => same(parameter, value))).filter(parameter => uses(filled(el, type_of(el.c, parameter)), value))
+	reverted = Goal(el, goal.parameters, closed_filled(el, goal.statement, about, no), goal.named, goal.depth)
+	if not uses(reverted.statement, value) { return ø }
+	motive = closed_filled(el, reverted.statement, [value], yes)
+	proof = applied_law(reverted, recursor, instance => unified(el, instance.holes#(facts.parameters + 1), motive) and valued(el, instance.holes.last, value, type), premise => case_proved(goal, premise)) ?? return ø
+	apply_all(proof, about)
+}
+# a hole given a value of the type it is given at
+valued(el: Elaboration, hole: Term, value: Term, type: Term): bool := unified(el, type_of(el.c, hole), type) and unified(el, hole, value)
+# a case's premise proved under its fields and hypotheses, the proof a function of them
+case_proved(goal: Goal, premise: Term): bool := {
+	el = goal.el
+	case = goal_of(el, filled(el, type_of(el.c, premise)), goal.named)
+	within = Goal(el, goal.parameters + case.parameters, case.statement, goal.named, goal.depth + 1)
+	proof = first_proof(within, if within.depth < INDUCTION_DEPTH then CASE_PROVERS + by_induction else CASE_PROVERS) ?? return no
+	unified(el, premise, closed_filled(el, proof, case.parameters, yes))
+}
+# whether a term holds a free variable
+uses(t: Term, variable: Term): bool := abstracted(t, variable_id(variable)).loose > t.loose

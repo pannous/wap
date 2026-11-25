@@ -27,15 +27,41 @@ NARROWING_WORD = "narrowed"
 dispatching(called: Node, candidates: list<Signature>, types: list, s: TypingState) as Signature? := {
 	counted = candidates.filter(definition => takes_count(definition, #types, s))
 	if not counted.any(definition => tested_places(definition, types, s) != [] or generic_place(definition, types, s) != ø) { return ø }
-	name = name_for("${called}(${types_text(types)})", defined_name(define_of(counted#1, s)), called)
+	dispatching_named(dispatcher_name(called, counted, types, s), called, counted, types, s)
+}
+dispatcher_name(called: Node, counted: list<Signature>, types: list, s: TypingState) as Node := name_for("${called}(${types_text(types)})", defined_name(define_of(counted#1, s)), called)
+# the dispatching function of that name over the definitions that take the arguments' count
+dispatching_named(name: Node, called: Node, counted: list<Signature>, types: list, s: TypingState) as Signature := {
 	known = definition_keyed(place_key(name), s)
 	if known != ø { return known }
 	reads = parameters_of(name, types)
 	order = ranked(counted, s)
 	dispatch = Dispatch(called, name, order, types, reads)
-	made = dispatcher_made(name, reads, dispatch_body(dispatch, s), order.map(definition => if has_letters(definition.result, s.records) then ø else definition.result), s)
-	if order.any(definition => generic_place(definition, types, s) != ø) { s.dispatches.add(dispatch) }
+	generic = order.filter(definition => generic_place(definition, types, s) != ø)
+	made = dispatcher_made(name, reads, dispatch_body(dispatch, s), (taking_of(dispatch, s) + generic).map(definition => if has_letters(definition.result, s.records) then ø else definition.result), s)
+	if generic is not empty { s.dispatches.add(dispatch) }
 	made
+}
+# The dispatchers a module exports under the plain words its own definitions overload (wiki/wasm-representation.md
+# "Export names"): for a word's overloads of one count of parameters, the dispatcher of as many any values, typed as a
+# call would type it though only the host calls it, its name EXPORTED_AS the word; none for a word taking a shape of
+# Node, `kind(d: Duo)`, which no value a host gives is
+# DEBT: A word with a generic list or map overload exports no dispatcher: its choice for each boxed type is typed even
+#   where the instance refuses, `≈(list<T>)` for a list of a type without ≈. Paid off when generic_choices leaves
+#   out the boxed types whose instance refuses.
+# DEBT: A dispatcher links the types module (its refusal of a type no overload takes, a char read as a text), so a
+#   host calling a module's export without the types module beside it traps at instantiation. Paid off when a
+#   dispatcher's refusal and reads are the module's own code.
+exported_dispatchers(defined: list<Signature>, s: TypingState) := {
+	own = defined.filter(definition => is_function(definition))
+	for word in own.map(definition => definition.name).unique {
+		overloads = own.filter(definition => definition.name == word)
+		types = overloads#1.parameters.map(type => ANY_SYMBOL)
+		if #overloads > 1 and overloads.all(each => #each.parameters == #types) and overloads.any(definition => tested_places(definition, types, s) != []) and overloads.all(definition => generic_place(definition, types, s) == ø and definition.parameters.all(type => type == ø or narrowed_type(shaped(type!, s)) == ø)) {
+			made = dispatching_named(with_fact(dispatcher_name(symbol(word), overloads, types, s), EXPORTED_AS, Text(word)), symbol(word), overloads, types, s)
+			function_typed(made, made.parameters, s, made.definer)
+		}
+	}
 }
 # A dispatch as typing writes it: the word called, the dispatcher's name, the definitions in their ranking, the
 # argument types and the parameters that read them; how many of the boxed types its choices cover
@@ -47,12 +73,14 @@ dispatch_body(dispatch: Dispatch, s: TypingState) as Node := {
 	dispatch.covered = #boxed_known(s)
 	reads = dispatch.reads
 	types = dispatch.types
-	taking = dispatch.order.filter(definition => takes_fitting(definition, tested_reads(definition, reads, types, s), s))
+	taking = taking_of(dispatch, s)
 	untested = taking.filter(definition => tested_places(definition, types, s) == [])
 	last = if untested is empty then raised("${dispatch.called}: no definition takes these values' types", dispatch.name, s) else named_call(text(dispatch.called), untested, reads, dispatch.name, s)
 	tried = taking.filter(definition => tested_places(definition, types, s) != []).map(definition => Choice(tests_of(definition, reads, types, s, dispatch.name), named_call(definition.name, [definition], reads, dispatch.name, s)))
 	chained(tried + dispatch.order.flat_map(definition => generic_choices(definition, dispatch, s)), last, dispatch.name)
 }
+# the definitions that take the values once their tests pass
+taking_of(dispatch: Dispatch, s: TypingState) as list<Signature> := dispatch.order.filter(definition => takes_fitting(definition, tested_reads(definition, dispatch.reads, dispatch.types, s), s))
 # the place where a definition takes a list or a map of its own letters, `xs: list<T>`, or any list or map, `xs: list`,
 # that an any is given at; ø where it takes none
 generic_place(definition: Signature, types: list, s: TypingState) as int? := (1 to #types).find(at => {
@@ -81,18 +109,20 @@ taken(definition: Signature, at: int, boxed: list<Node>, s: TypingState) as list
 #   it was compiled: a program's list<Foo> in an any, handed to such a module's function that calls text(x), raises
 #   "no definition takes these values' types" when it runs. Paid off when a program's boxed types reach the dispatchers
 #   of the modules it uses, or such a call is refused at compile time naming the module's function.
-dispatches_completed(s: TypingState) := {
+dispatches_completed(s: TypingState) as bool := {
 	before: list<Node> = []
+	grown = no
 	while s.dispatches.any(dispatch => dispatch.covered < #boxed_known(s)) {
 		known = boxed_known(s)
 		retyped = s.dispatches.filter(dispatch => dispatch.covered < #known and known[dispatch.covered ..].any(type => fits_generic(dispatch, type, s)))
 		for dispatch in s.dispatches { if not retyped.contains(dispatch) { dispatch.covered = #known } }
-		for dispatch in retyped { dispatcher_retyped(dispatch, s) }
+		for dispatch in retyped { grown = dispatcher_retyped(dispatch, s) or grown }
 		fresh = boxed_known(s)[#known ..]
 		deeper = deeper_type(fresh, before)
 		if deeper != ø { refused(retyped#1.name, "${retyped#1.called} with an any boxes ever deeper types, ${type_text(deeper!)}: say the type the any holds where it is used") }
 		before = fresh
 	}
+	grown
 }
 # a type of these that holds one of those, ø for none
 deeper_type(fresh: list<Node>, before: list<Node>) as Node? := fresh.find(type => before.any(old => holds_type(type, old)))
@@ -107,7 +137,8 @@ boxed_known(s: TypingState) as list<Node> := {
 	for type in s.boxed.map(each => settled_type(each, s)) { if not has_unknowns(type) and not known.any(other => same_type(other, type)) { known.add(type) } }
 	known
 }
-dispatcher_retyped(dispatch: Dispatch, s: TypingState) := {
+# whether its result changed: the callers typed before took the old one
+dispatcher_retyped(dispatch: Dispatch, s: TypingState) as bool := {
 	key = place_key(dispatch.name)
 	define = define_of(definition_keyed(key, s) ?? refused(dispatch.name, "a dispatcher is held"), s)
 	retyped: Define = match define { Define(name, parameters, body) => refitted(Define(name, parameters, dispatch_body(dispatch, s)), define) }
@@ -116,7 +147,8 @@ dispatcher_retyped(dispatch: Dispatch, s: TypingState) := {
 	typed = instances_of(key, s)
 	s.functions = s.functions.filter(each => each.function.key != key)
 	s.instances[key] = []
-	for instance in typed { function_typed(instance.function, instance.arguments, s, dispatch.name) }
+	# each instance retyped, so map, not any
+	typed.map(instance => not same_type(function_typed(instance.function, instance.arguments, s, dispatch.name).result ?? ANY_SYMBOL, instance.result ?? ANY_SYMBOL)).contains(yes)
 }
 # The dispatching function a read of this field on an any means, `.name(any)`; ø when no record has the field
 field_dispatching(key: Node, s: TypingState) as Signature? := {
@@ -141,7 +173,7 @@ parameters_of(name: Node, types: list) as list := (1 to #types).map(at => {
 # result written when every choice writes its own, so a choice calling back through the dispatch finds it
 dispatcher_made(name: Node, reads: list, body: Node, results: list<Node?>, s: TypingState) as Signature := {
 	# joined_type is ø where either is: a choice without a written result writes none
-	result = results.drop(1).fold(results#1, (a, b) -> held_joined(a, b, s))
+	result = if results is empty then ø else results.drop(1).fold(results#1, (a, b) => held_joined(a, b, s))
 	written = if result == ø then name else Key(name, Op.Colon, result)
 	dispatcher = placed_like(Define(written, List(reads.map(read => Key(read, Op.Colon, value_of(read, "for a dispatcher's parameter"))), Bracket.Round, Separator.Comma), body), name)
 	s.dispatchers += [dispatcher]
@@ -152,20 +184,14 @@ held_joined(a: Node?, b: Node?, s: TypingState) as Node? := if a != ø and b != 
 # a dispatch's choice: its tests, and the code that runs once they all pass
 class Choice { tests: list<Node>; code: Node }
 # the choices tried in order: the first whose tests all pass runs, else the last
-chained(choices: list<Choice>, last: Node, at: Node) as Node := {
-	chain = last
-	for place in 0 upto #choices {
-		choice = choices#(#choices - place)
-		condition = choice.tests.drop(1).fold(choice.tests#1, (both, test) -> placed_like(If(both, test, False), at))
-		chain = placed_like(If(condition, choice.code, chain), at)
-	}
-	chain
-}
+chained(choices: list<Choice>, last: Node, at: Node) as Node := choices.reverse.fold(last, (chain, choice) => placed_like(If(all_passing(choice.tests, at), choice.code, chain), at))
+# the test that passes once all of these pass, each tried only after the ones before it
+all_passing(tests: list<Node>, at: Node) as Node := tests.drop(1).fold(tests#1, (both, test) => placed_like(If(both, test, False), at))
 # the places where a definition wants a type the any or number its argument gives may box, or a shape of its
 # argument's type: an `is` test there chooses it
 # a parameter's type a test chooses by: written, no any, no generic letter, none that takes its argument's own type
 dispatchable(type: Node?, records: Records) as bool := once_typed(type, records) and type != ANY_SYMBOL
-tested_places(definition: Signature, types: list, s: TypingState) as list := (1 to #types).filter(at => {
+tested_places(definition: Signature, types: list, s: TypingState) as list<int> := (1 to #types).filter(at => {
 	wanted = definition.parameters#at
 	wanted != ø and dispatchable(wanted, s.records) and tested_fit(wanted, types#at, s)
 })

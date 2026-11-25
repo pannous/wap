@@ -6,6 +6,13 @@ The fleet rules are AGENTS.md (loaded automatically).
 
 You receive finished work handed to you (AGENTS.md "Handoff"): you apply and check it on the user's Mac and push it. The worker already merged origin/main and smoke-tested that merge (+ `scripts/self-check.sh` for core/). You repeat no test. You watch main.
 
+Workers never wait on you (user 2026-11-25): when a worker's next step depends on a landing (T1b building on T1),
+tell it "go" as soon as the merged tree compiles; smoke, census and the self build run after that, and a red is fixed
+forward by its worker.
+
+wap Vitals stays (user 11-23): after each landing run `python3 scripts/vitals.py` in warp and republish
+data/vitals/wap-vitals.html to https://claude.ai/code/artifact/8b33d965-01c9-4a3b-9f75-d4597da4804e.
+
 The user does not read your output (user 11-21): reply to a landing,
 hold or handoff with one line at most, or nothing; never repeat open items, try lines or questions in your output.
 Those go once to wap-interviewer, which owns everything for the user.

@@ -9,20 +9,25 @@ use "../types/operators.wap"
 use "analyze/calls.wap"
 use "parse/operator_table.wap"
 use "parse/lexemes.wap"
+use "parse/cascade.wap"
 
 # the operator that defines, whose left side is a definition's head
 DEFINE_SPELLING = ":="
 # how deep the statements being printed are indented, a tab each
 format_depth = [0]
 
-formatted(language: Language, n: Node) as text := annotations_text(language, n) + (text_written(n) ?? written(language, n))
+formatted(language: Language, n: Node) as text := annotations_text(language, n) + (text_written(n) ?? reading_text(language, n) ?? written(language, n))
+# a phrase as typing read it, where the parameter counts decided it: `sin cos 0` prints as `sin(cos(0))`
+reading_text(language: Language, n: Node) as text? := written(language, typed_readings.get(reading_key(reading_head(n) ?? return ø)) ?? return ø)
+# the word that leads a phrase or a call
+reading_head(n: Node) as Node? := match n { Call(called, arguments) => called; List(items, bracket, separator) => if items is empty then ø else items#1; _ => ø }
 # the spelling the program wrote, where the reader gave its code another shape (core/stage.wap WRITTEN)
 text_written(n: Node) as text? := match fact_of(n, WRITTEN) { Text(spelling) => spelling; _ => ø }
 
 written(language: Language, n: Node) as text := match n {
 	Call(called, arguments) => call_text(language, n, called, arguments)
-	# statements, and a bracket written with its items on lines after it, one per line: a phrase or a row one statement
-	List(items, bracket, separator) => if separator == Separator.Newline then statements_text(language, items, bracket) else if fact_of(n, OWN_LINES) != ø then statements_text(language, [if #items == 1 then items#1 else List(items, Bracket.None, separator)], bracket) else list_text(language, items, bracket, separator)
+	# statements, and a bracket written with its items on lines after it, each line of items as written
+	List(items, bracket, separator) => if separator == Separator.Newline then statements_text(language, items, bracket) else if fact_of(n, OWN_LINES) != ø then statements_text(language, rows_of(items, separator), bracket, trim(separator_text(separator))) else list_text(language, items, bracket, separator)
 	Key(left, Op.Colon, right) => key_text(language, left) + ": " + formatted(language, right)
 	Key(head, Op.None, group) => formatted(language, head) + (if group is Empty then "()" else formatted(language, group))
 	Number(value) => if value is float and not "${value}".contains(".") and not "${value}".contains("e") then "${value}.0" else "${value}"
@@ -34,12 +39,7 @@ written(language: Language, n: Node) as text := match n {
 }
 
 # the `@annotations` the reader found before the code, each with its `@`
-annotations_text(language: Language, n: Node) as text := {
-	said = fact_of(n, "meta")
-	if said == ø { return "" }
-	annotations = phrase_items(said)
-	annotations.map(annotation => "@" + formatted(language, annotation) + " ").join("")
-}
+annotations_text(language: Language, n: Node) as text := annotations_of(n).map(annotation => "@" + formatted(language, annotation) + " ").join("")
 
 # a definition's head, a function's written result type after `as`, the canonical word (wiki/function.md):
 # `f(x): int` prints as `f(x) as int`; a typed name keeps its `:`, `x: int`
@@ -88,9 +88,9 @@ compound_text(language: Language, written: Node, arguments: list) as text := mat
 enum Side { Left, Right }
 
 # an operand of an operator, in brackets only when it would not be applied first without them: `1 + (2 * 3)` prints
-# as `1 + 2 * 3`, `(1 + 2) * 3` keeps its brackets; a parameter list keeps its own, `(int) -> int`
+# as `1 + 2 * 3`, `(1 + 2) * 3` keeps its brackets; a parameter list keeps its own, `(int) -> int`, a text with holes its quotes
 operand_text(language: Language, operand: Node, call: Node, side: Side) as text := {
-	inner = if side == Side.Left and group_written(language, call) == parameters_group then operand else ungrouped(operand)
+	inner = if side == Side.Left and group_written(language, call) == parameters_group or text_written(operand) != ø then operand else ungrouped(operand)
 	if needs_brackets(language, inner, call, side) then "(" + formatted(language, inner) + ")" else formatted(language, inner)
 }
 
@@ -135,13 +135,24 @@ list_text(language: Language, items: list, bracket: Bracket, separator: Separato
 	opening(bracket) + shown.join(separator_text(separator)) + closing(bracket)
 }
 
-# Statements one per line, each with the comments and blank lines above it and its line's comment after it; those of a
-# bracket indented one tab deeper than the bracket
-statements_text(language: Language, items: list, bracket: Bracket) as text := {
+# the items of a bracket by the line each was written on, a line of several one row: `[1, 2,⏎ 3]` is rows 1, 2 and 3
+rows_of(items: list, separator: Separator) as list<Node> := {
+	rows: list<Node> = []
+	row: list<Node> = []
+	for item in items {
+		if row is not empty and line_of(item) != line_of(row#1) { rows.add(phrase_of(row, separator)); row = [] }
+		row.add(item)
+	}
+	rows + [phrase_of(row, separator)]
+}
+
+# Statements one per line, each with the comments and blank lines above it, the mark that ends it but the last, and its
+# line's comment after it; those of a bracket indented one tab deeper than the bracket
+statements_text(language: Language, items: list, bracket: Bracket, mark: text = "") as text := {
 	outer = format_depth[0]
 	format_depth[0] = if bracket == Bracket.None then outer else outer + 1
 	indent = "\t" * format_depth[0]
-	lines = items.map(item => comment_lines(said(item, COMMENT), indent).map(line => line + "\n").join("") + indent + formatted(language, item) + trailing_text(said(item, TRAILING), indent))
+	lines = (1 to #items).map(at => comment_lines(said(items#at, COMMENT), indent).map(line => line + "\n").join("") + indent + formatted(language, items#at) + (if at < #items then mark else "") + trailing_text(said(items#at, TRAILING), indent))
 	format_depth[0] = outer
 	if bracket == Bracket.None then lines.join("\n") else opening(bracket) + "\n" + lines.join("\n") + "\n" + "\t" * outer + closing(bracket)
 }

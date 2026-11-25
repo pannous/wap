@@ -43,18 +43,22 @@ in_folder(folder: text, file: text) as text := normalized_path(folder + "/" + fi
 # a file's notation, its source read by the reader the language has for its ending (compiler.wap hands them in: a
 # compiled module's), else as text
 read_notation(language: Language, file: text) as Node := readable(notation_of(language, file))
-# a file's notation, the files its `use` lines name operated first: the blocks after the raw words it and they
-# define are read raw
+# a file's notation, the files its `use` lines name operated first: what follows the words of a raw or phrase
+# parameter it and they define is read unparsed
 notation_of(language: Language, file: text) as Node := {
 	source = source_of(language, file)
 	uses = uses_written(source, file)
 	for used in uses { operated_file(language, used) }
-	language.raw_words[file] = (raw_words_written(source) + uses.flat_map(used => language.raw_words.get(used) ?? [])).unique
-	notation(source, file, language.raw_words[file])
+	unparsed = unparsed_written(source)
+	for used in uses.filter(used => language.unparsed.has(used)) { unparsed.update(language.unparsed[used]) }
+	language.unparsed[file] = unparsed
+	notation(source, file, unparsed)
 }
 source_of(language: Language, file: text) as text := {
 	ending = "." + file.split(".").last
-	if language.readers.has(ending) then language.readers[ending](file) else read(file)
+	source = if language.readers.has(ending) then language.readers[ending](file) else read(file)
+	sources_read[file] = source
+	source
 }
 # notation the reader could read, an Error of it refused where the reader failed (core/parse/reader.wap notation)
 readable(code: Node) as Node := match code {
@@ -79,8 +83,11 @@ operated_once(language: Language, file: text, program: bool) as Node := {
 		if program { words_listed(language, words) }
 		# the files it uses first, so their operators read in it too, `use math` before ‖x‖; a use back finds it read
 		language.operated[file] = Operated(notation, words)
-		for used in used_files(notation) { operated_file(language, used) }
+		uses = used_files(notation)
+		for used in uses { operated_file(language, used) }
+		language.reading = handed(language.aliases_of, uses)
 		language.operated[file] = Operated(operated_notation(language, file, notation), words)
+		language.aliases_of[file] = language.reading
 	} else if program { words_listed(language, language.operated[file].words) }
 	language.operated[file].code
 }
@@ -125,8 +132,9 @@ declared_module(language: Language, code: Node) as Module := module_declared(dec
 # and the standard library's words beyond, a word of a module it does not use bound to that module (standard_brought)
 prepared(language: Language, module: Module, modules: list<Module>, types: Module) as Block := bound_program(lowered_module(language, module, modules, types), library_around(module, types), modules_of_uses(module, modules), language.standard)
 # a declared module lowered, the declaration rules first (stage 2), reading what the module, the modules it uses and
-# the types module declare
+# the types module declare; a library module the warm state brought in lowered already
 lowered_module(language: Language, module: Module, modules: list<Module>, types: Module) as Block := {
+	if language.lowered.has(module_key(module.file)) { return language.lowered[module_key(module.file)] }
 	uses = modules_of_uses(module, modules)
 	lowered_program(language, declared_rewritten(language, module, library_around(module, types) + uses.flat_map(used => used.signatures)))
 }
@@ -139,11 +147,11 @@ narrowed(used: Module, words: list<text>) as Module := if words is empty then us
 standard_brought(language: Language, modules: list<Module>, named: list<Node>) as list<Module> := {
 	files = named.map(standard_file).unique
 	for file in files { if ruled(operated_file(language, file)) { refused(named.find(name => standard_file(name) == file)!, "${file_module_name(file)} has rules, which change what code means: write use ${file_module_name(file)}") } }
-	# a word a rule wrote is brought in unsaid: the program never named it
-	written = named.filter(name => not has_fact(name, DERIVED))
+	# a word a rule wrote is brought in unsaid: the program never named it; a use-free module's word needs no use
+	written = named.filter(name => not has_fact(name, DERIVED) and not (standard_module(name) in language.use_free_modules))
 	for word in written.map(name => text(name)).unique {
 		name = written.find(first => text(first) == word)!
-		module = file_module_name(standard_file(name))
+		module = standard_module(name)
 		hint(place_of(name) + "${name} comes from ${module}: write use ${module}")
 	}
 	brought = files.flat_map(file => used_modules(language, operated_file(language, file)) + [used_module(language, operated_file(language, file))]).unique.filter(module => not modules.any(other => other.file == module.file))
@@ -153,6 +161,7 @@ standard_brought(language: Language, modules: list<Module>, named: list<Node>) a
 standard_named(n: Node) as list<Node> := if is_kind_word(fact_of(n, BINDING), DefinitionKind.Standard) then [n] else direct_parts(n).flat_map(standard_named)
 # the module a standard word was bound to
 standard_file(name: Node) as text := text(fact_of(name, DEFINED_AT)!)
+standard_module(name: Node) as text := file_module_name(standard_file(name))
 # a module using the standard modules whose words it names, seeing those words alone
 standard_used(module: Module, named: list<Node>) as Module := if named is empty then module else Module(module.file, module.code, module.uses + named.map(standard_file).unique, module.signatures, module.named + named)
 # whether operated code declares rules
@@ -161,29 +170,36 @@ ruled(code: Node) as bool := top_level_statements(code).any(statement => match s
 # itself
 library_around(module: Module, types: Module) as list<Signature> := if module.file == types.file then [] else types.signatures
 # the modules prepared in order, each bound among all the modules, their statements as one block
-modules_prepared(language: Language, preparing: list<Module>, modules: list<Module>, types: Module) as Block := Block(preparing.flat_map(module => statements_in(prepared(language, module, modules, types))))
+modules_prepared(language: Language, preparing: list<Module>, modules: list<Module>, types: Module, program: text) as Block := Block(preparing.flat_map(module => called_only(module, statements_in(prepared(language, module, modules, types)), program)))
+# a used module's definitions are typed, and so emitted, once something calls them, as the types module's are; the
+# program's own and the exports always are
+called_only(module: Module, statements: list, program: text) as list := {
+	exported = fact_items(module.code, EXPORTS).map(name => text(name))
+	statements.map(statement => if statement is Define and module.file != program and not exported.contains(text(defined_name(statement))) then with_fact(statement, TYPED_WHEN_CALLED, True) else statement)
+}
 # the types module's code after the modules it uses, whose words only the types module sees: its functions bound once
 # typing reaches them (core/analyze/scope.wap library_bound)
 library_code_of(language: Language, types: Module) as Library := {
 	uses = used_modules(language, types.code)
 	library = library_bound(lowered_module(language, types, uses, types), modules_of_uses(types, uses))
-	Library(Block(statements_in(modules_prepared(language, uses, uses, types)) + statements_in(library.code)), library.scope, (uses + [types]).flat_map(module => module.signatures))
+	Library(Block(statements_in(modules_prepared(language, uses, uses, types, types.file)) + statements_in(library.code)), library.scope, (uses + [types]).flat_map(module => module.signatures))
 }
 # the program with the modules it uses, theirs first: a module's statements run before the code that uses it, its
 # functions are there for any caller; typed, then rewritten by the typed rules. The types module compiled as the program
 # is its own library, with none around it. A module the types module uses is the library's, declared once per compile
-# (core/language.wap): the program binds to it, never prepares it again
+# (core/language.wap): the program binds to it, never prepares it again. The program names the file whose definitions
+# are typed though nothing calls them, "" for none
 # DEBT: One types file compiled alone as the program (types/floats.wap) still brings its definitions twice, the file
 #   being the program and part of the library around it: calls.wap refuses "two definitions share the key". Off the
 #   census: only the whole types module compiles as a program. Paid off by binding such a file inside the rest of the
 #   types module only.
-typed_modules(language: Language, modules: list<Module>, types: Module) as Block := {
+typed_modules(language: Language, modules: list<Module>, types: Module, program: text) as Block := {
 	own = module_key(modules.last.file) == module_key(types.file)
 	held = if own then [] else used_modules(language, types.code).map(module => module.file)
 	program_modules = modules.filter(module => not (module.file in held))
-	whole = with_fact(modules_prepared(language, program_modules, modules, types), SCRIPT, True)
+	whole = with_fact(modules_prepared(language, program_modules, modules, types, program), SCRIPT, True)
 	named = standard_named(whole)
-	if named is not empty { return typed_modules(language, standard_brought(language, modules, named), types) }
+	if named is not empty { return typed_modules(language, standard_brought(language, modules, named), types, program) }
 	library_code = if own then Library(Block([]), scope_around([], [])) else library_code_of(language, types)
 	typed_by_rules(language, whole, if own then [] else types.signatures, library_code, program_modules.flat_map(module => module.signatures), modules.last.signatures)
 }
