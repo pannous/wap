@@ -90,6 +90,10 @@ class Theory {
 	values: list<Term> = []
 	# the names of the statements the theory refused and took back, each with that refusal (file.wap unit_taken)
 	refused_names: map<text, text> = {}
+	# the host's spelling of each function the program that runs has already: those of the language every program
+	# gets, the files they are written in, and those whose body is the host's operation (declare.wap hosted_spelling)
+	hosted: map<text, text> = {}
+	language_files: list<text> = []
 	# the wap folder the door is given (options.wap), in which its prelude is found
 	wap_folder: text = ""
 	# the overload trials the statement being read has made
@@ -122,6 +126,8 @@ held(p: Theory, from: Theory) := {
 	p.templates = copy(from.templates)
 	p.wap_folder = from.wap_folder
 	p.refused_names = copy(from.refused_names)
+	p.hosted = copy(from.hosted)
+	p.language_files = from.language_files
 }
 # A written name's kernel name: the program's declaration where one hides the prelude's, a dotted name its owner's,
 # `nat.zero` the program's nat's case
@@ -424,7 +430,7 @@ declarations_named(p: Theory, name: text): list<text> := {
 overload_elaborated(x: Elaborating, name: text, candidates: list<text>, traits: list<text>, template: Template?, arguments: list<Node>, wanted: Term?): Term := {
 	read = arguments.map(argument => read_alone(x, argument))
 	trials = declarations_tried(x, candidates, read, wanted)
-	fitting = fits(nearest(trials))
+	fitting = fits(nearest(x.theory, trials, #arguments))
 	if fitting is empty and template is not ø { return version_called(x, name, template!, read, wanted) }
 	if fitting is empty and traits is not empty { return trait_operation(x, name, traits, read, wanted) }
 	fit = the_only(fitting, OVERLOAD, "${name} here is")
@@ -486,13 +492,28 @@ undone(x: Elaborating, attempt: () -> T): T := {
 	given
 }
 # the trials that fit with the fewest indirect steps, and those that do not fit: a direct fit beats a fit through a
-# conversion, equal fits tie
-nearest(trials: list<Trial>): list<Trial> := {
+# conversion, a whole call a part of one, a specific one a general one, equal fits tie
+nearest(p: Theory, trials: list<Trial>, given: int): list<Trial> := {
 	fitting = trials.filter(trial => trial.refusal is ø)
 	if fitting is empty { return trials }
 	fewest = fitting.map(trial => trial.indirect).min()
-	trials.filter(trial => trial.refusal is not ø or trial.indirect == fewest)
+	# of those, a declaration for the types given before one for any type, `==(a: T, b: T)`: the fewest letters found
+	closest = fitting.filter(trial => trial.indirect == fewest)
+	# of those, one taking just the arguments given before one given only some, `turned(x)` of `turned(x, when)`
+	least = closest.map(trial => left_open(p, trial.candidate, given)).min()
+	whole = closest.filter(trial => left_open(p, trial.candidate, given) == least)
+	# and one for the types given before one for any type, `==(a: T, b: T)`: the fewest letters found
+	general = whole.map(trial => letters_found(p, trial.candidate)).min()
+	trials.filter(trial => trial.refusal is not ø or (whole.any(fit => fit.candidate == trial.candidate) and letters_found(p, trial.candidate) == general))
 }
+# how many of its written parameters a declaration leaves open given so many arguments
+left_open(p: Theory, key: text, given: int): int := (p.binders.get(key) ?? 0) - letters_found(p, key) - given
+# whether the prelude declares this key
+from_prelude(p: Theory, key: text): bool := {
+	at = place(p.environment, key)
+	at > 0 and at <= p.prelude_size
+}
+letters_found(p: Theory, key: text): int := p.found.get(key) ?? 0
 # the refusal an attempt meets, ø where it fits
 refusal_of(candidate: text, attempt: text -> Term): text? := try { attempt(candidate); ø } catch e { mismatch(e, UNFIT); e.message.replace(REFUSED, "") }
 
