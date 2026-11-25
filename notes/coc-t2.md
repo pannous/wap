@@ -65,12 +65,12 @@ class Environment {
 
 - **One environment, changed in place, taken back as a whole.** The theory, its checkers and the provers' goals all
   hold one Environment, so `declared(e, d)` appends to it rather than returning a new one. Every take-back goes
-  through one of two scoped forms in environment.wap: `held_back(e, attempt)` always takes back what the attempt
-  declared (a block's types assumed as axioms while it is checked and its recursors made), and
-  `kept_if_given(e, attempt)` keeps it where the attempt gives a value and takes it back where it gives ø or
-  refuses (a refused statement, a template's try, a prover that found nothing). Both rest on `mark` and `back_to`,
-  which nothing outside environment.wap calls, so no caller can forget a rollback. The bindings (`numbers`, `texts`,
-  `products`) and the courses below.wap made are taken back with the declarations.
+  through one scoped form in environment.wap: `kept_if_given(e, attempt)` keeps what the attempt declared where it
+  gives a value and takes it back where it gives ø or refuses (a refused statement, a template's try, a prover that
+  found nothing). It rests on `mark` and `back_to`, which nothing outside environment.wap calls, so no caller can
+  forget a rollback. The bindings (`numbers`, `texts`, `products`) and the courses below.wap made are taken back with
+  the declarations. Checking a block and making its recursors declare nothing to take back: the block's types are
+  variables of the checker then (below).
 - **The log keeps its ids.** A declaration taken back loses its name, its id stays given: anything still pointing
   into the given-up attempt (a term naming one of its constants, a stale `c.types` cache entry) finds no live
   declaration and is refused ("unknown name"), never read as some later declaration.
@@ -96,7 +96,7 @@ class Environment {
   constants. This lands with T2d, planned here before it.
 **Deleted by this:**
 - in the kernel: `copied` (13 lines), `reach_of` and `withdrawn`, the `places` and `declarations` maps, and the copy
-  in inductive.wap `holding` (the types are assumed inside `held_back`); with T2d `names_new` (6) and `ids`;
+  in inductive.wap `holding` and recursors.wap's axioms (the block's types are variables); with T2d `names_new` (6) and `ids`;
 - in prove/goals.wap: the reach/withdraw pair (`kept_if_given`);
 - in elaborate/read.wap `held`: the environment line (`p.environment = copied(from.environment)` becomes a plain
   assignment of the old value).
@@ -204,7 +204,7 @@ theory test areas (`bash test/wap/run.sh --wait theory`) and the census green.
 |---|---|---|---|
 | T2a move | `git mv` the 12 files into wap/kernel, then a pure path edit of every `use` (elaborate 19 files, run 3, second 1, prove, door, scripts/theory-census.wap); SIZE_NODES += 21,312 | +2,241 moved, 0 new | census (418/418 typed), theory areas, test_hello |
 | T2b i64 | `Numeral(i64)`, the overflow checks, magnitude out of the kernel, the `Text` literal and the new texts statement; export and second/ read it | −15, +10, +30 (outside: +22) | theory areas, test_theory_second, the new lines: a shortcut past 2^63 does not fire; a long text literal checks |
-| T2c log | the log with its ids, `held_back` and `kept_if_given` the only take-backs; the deletions above | −50, +35 | theory areas, prove's tests |
+| T2c log | the log with its ids, `kept_if_given` the only take-back; the deletions above | −50, +35 | theory areas, prove's tests |
 | T2d ids | `Constant(id, levels)`, `show` by id, `names_new` goes, the facts hold ids; a block's types as free variables, given their ids on acceptance, `holding` goes; the door and the elaborator resolve a written name to an id through their own scope (the extension's lines, not the kernel's) | −8 − 6, +20 + 15 (elaborate +40) | theory areas, the new line: two modules with the same name |
 | T2e rules | the rule functions and the judgement table; `type_of` as their walk | +60 | theory areas; the theory census time ratio stays under 3 (checked once, then the census retires) |
 | T2f census | the theory census retires: `--theory`, THEORY_ACCEPTED and THEORY_TIME_RATIO leave ratchet_census.sh; scripts/theory-census.wap stays for whoever wants its numbers | 0 | the typing census |
