@@ -3,12 +3,13 @@
 # of the prelude runs by the host where its layout says how (`runs(…)`, elaborate/file.wap), else by its value, unfolded where it is used: the prelude
 # has no recursion, so unfolding ends. A function of the program runs as a Routine of its own, erased the first
 # time a value reaches it. A term no run term stands for yet is refused by the rule `running`.
-use "../terms.wap"
-use "../environment.wap"
-use "../typing.wap"
-use "../compute.wap"
+use "../../../kernel/terms.wap"
+use "../../../kernel/numbers.wap"
+use "../../../kernel/environment.wap"
+use "../../../kernel/typing.wap"
+use "../../../kernel/compute.wap"
 use "../below.wap"
-use "../show.wap"
+use "../../../kernel/show.wap"
 use "../elaborate/read.wap"
 use "../elaborate/file.wap"
 use "../explicit.wap"
@@ -55,6 +56,7 @@ running(p: Theory): Running := {
 run_of(e: Erasing, t: Term): Run := match t.shape {
 	Free(id) => Local(e.names.get(id) ?? refused(RUNNING, "this uses the values below a case, which runs by recursion"))
 	Numeral(value) => Natural(value)
+	Quoted(value) => run_of(e, text_opened(e.c, value))
 	LetIn(binder, type, value, body) => {
 		held = run_of(e, value)
 		variable = named_variable(e, binder, type)
@@ -69,8 +71,8 @@ run_of(e: Erasing, t: Term): Run := match t.shape {
 	_ => applied(e, head(t), arguments(t))
 }
 # a field of a structure's value as it runs: the layout of the structure's one case takes it out of the value
-projected(e: Erasing, structure: text, field: int, of: Term): Run := {
-	facts = structure_facts(e.p.environment, structure) ?? refused(RUNNING, "${structure} is no structure whose field a projection takes")
+projected(e: Erasing, structure: Term, field: int, of: Term): Run := {
+	facts = structure_facts(e.p.environment, structure) ?? refused(RUNNING, "${constant_name(structure)} is no structure whose field a projection takes")
 	case = facts.block.types#1.cases#1.name
 	layout = e.p.layouts.get(case) ?? refused(RUNNING, "a field of ${case} is taken, and the host has no layout for its type yet")
 	names = binder_names(declared_named(e.p.environment, case).type)
@@ -81,14 +83,14 @@ projected(e: Erasing, structure: text, field: int, of: Term): Run := {
 # a head applied to its arguments as it runs: a host's spelling, a choice of a recursor or a course, a call of a
 # program's function, a prelude function unfolded
 applied(e: Erasing, function: Term, given: list<Term>): Run := match function.shape {
-	Constant(name, levels) => {
+	Constant(name, levels, _) => {
 		layout = e.p.layouts.get(name)
 		if layout is not ø { return host_run(e, function, name, layout!, given) }
 		match declared_named(e.p.environment, name).kind {
 			Recursor(facts) => return chosen(e, name, facts, given)
 			_ => ø
 		}
-		if name in e.p.environment.courses { return coursed(e, name, given) }
+		if place(e.p.environment, name) in e.p.environment.courses { return coursed(e, name, given) }
 		if not from_prelude(e.p, name) {
 			definition_erased(e, name)
 			kept = data_runs(e, given)
@@ -119,11 +121,12 @@ chosen(e: Erasing, name: text, facts: RecursorFacts, given: list<Term>): Run := 
 	first_minor = facts.parameters + facts.motives
 	major = first_minor + facts.minors + facts.indices + 1
 	taking(name, given, major)
-	if facts.cases is empty { refused(RUNNING, "${name} chooses among no cases: no value of ${facts.of} runs") }
+	type = constant_name(facts.of)
+	if facts.cases is empty { refused(RUNNING, "${name} chooses among no cases: no value of ${type} runs") }
 	subject = run_of(e, given#major)
 	held = named_variable(e, CHOSEN, type_of(e.c, given#major))
-	below = recursive_fields(e, facts.of)
-	alternatives = (1 to #facts.cases).map(at => alternative(e, facts.cases#at, facts.fields#at, below#at, given#(first_minor + at), given.drop(major)))
+	below = recursive_fields(e, type)
+	alternatives = (1 to #facts.cases).map(at => alternative(e, constant_name(facts.cases#at), facts.fields#at, below#at, given#(first_minor + at), given.drop(major)))
 	Choose(subject, e.names[variable_id(held)], alternatives)
 }
 # how many fields of each case of a type hold a value of its block, an induction hypothesis each
@@ -267,7 +270,7 @@ host_type(p: Theory, c: Checker, type: Term, unlaid: (Term) -> text): text := {
 }
 # the layout of the declaration a type applies
 layout_of(p: Theory, type: Term): Layout? := match head(type).shape {
-	Constant(name, levels) => p.layouts.get(name)
+	Constant(name, levels, _) => p.layouts.get(name)
 	_ => ø
 }
 
