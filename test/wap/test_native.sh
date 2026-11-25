@@ -345,4 +345,11 @@ check "wap runs a class extending another" "$(cd "$stage" && "$native_wap" exten
 printf '%s\n' 'long doubled(long x) { return 2 * x; }' >"$stage/doubled.c" && cc -shared -o "$stage/libdoubled.dylib" "$stage/doubled.c"
 check "a native program calls C from a library named by its path" "$(native_ran doubled_by_path "doubled(x: i64): i64 from '$stage/libdoubled.dylib'
 exit(doubled(21))" >/dev/null; echo $?)" "42"
+# wap format keeps an else-if chain written over lines as it reads, and the formatted program runs (card format-else-if)
+printf '%s\n' 'x = 2' 'if x == 1 { print 1 }' 'else if x == 2 { print 2 }' 'else { print 3 }' >"$stage/else_if.wap"
+check "wap format keeps an else-if chain over lines" "$(cd "$stage" && "$native_wap" format else_if.wap >else_if_formatted.wap && cat else_if_formatted.wap && "$native_wap" else_if_formatted.wap 2>&1)" "x = 2
+if x == 1 {print 1}
+else if x == 2 {print 2}
+else {print 3}
+2"
 exit $((failures > 0))
