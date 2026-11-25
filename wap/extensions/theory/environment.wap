@@ -7,6 +7,9 @@ use "numbers.wap"
 # how many steps of computing a declaration's check may take before it is refused as "gave up": the same count on
 # every machine
 STEP_BUDGET := 10000000
+# how deep a case computed to find another's may nest, `x + 700000000` taking the numeral apart down to a stuck x:
+# past it the check gave up too, before the machine's stack does
+DEPTH_BUDGET := 10000
 
 # The rules a refusal names, in plain words: `refused by argument type: int is a Type, and box takes a Type(1)`. A
 # test pins the rule, never the message after it
@@ -40,6 +43,8 @@ NOT_EXPLICIT := "not explicit"
 QUOTIENTS := "quotients"
 PRODUCTS := "products"
 TEXTS := "texts"
+# a term no run term stands for yet: what a program runs is erased from it (run/erase.wap)
+RUNNING := "running"
 
 refused(rule: text, found: text) := raise REFUSED + rule + ": " + found
 # a door's run stopped by its first refusal, printed as its one line, with a failure
@@ -50,10 +55,14 @@ stopped_by(refusal: Error) := {
 # the refusals of an ill-typed term: a value or an argument of another type than the one wanted, or a value whose
 # condition computes to no where a subtype is wanted
 ILL_TYPED := [VALUE_TYPE, ARGUMENT_TYPE, CONDITION]
-# a refusal a try reads as no: an ill-typed term's; any other error is raised again as it was (a raise carries its
-# text alone)
-# whether a refusal is one of these rules, the ill-typed ones by default; any other is raised again
-mismatch(e: Error, rules: list<text> = ILL_TYPED): bool := if rules.any(rule => e.message.starts_with(REFUSED + rule)) then no else raise e.message
+# An error a try reads as a refusal by one of these rules, any rule by default; any other error, a bug, is raised
+# again as it was (a raise carries its text alone)
+refusal_only(e: Error, rules: list<text> = [""]) := if not rules.any(rule => e.message.starts_with(REFUSED + rule)) { raise e.message }
+# a refusal a try reads as no: an ill-typed term's by default
+mismatch(e: Error, rules: list<text> = ILL_TYPED): bool := {
+	refusal_only(e, rules)
+	no
+}
 
 # --- declarations
 
@@ -284,11 +293,13 @@ class Checker {
 	filled_in: (Term) -> Term = (t: Term) => t
 	steps: int = 0
 	budget: int = STEP_BUDGET
+	depth: int = 0
 	heads: Memory = Memory()
 	types: Memory = Memory()
 	equalities: Memory = Memory()
 }
-checker(e: Environment, levels: list<text>): Checker := Checker(e, levels)
+# a checker's levels its own: a hole's level it adds (elaborate/state.wap) leaves the declaration's levels as they are
+checker(e: Environment, levels: list<text>): Checker := Checker(e, copy(levels))
 
 # The free variable of a binder the kernel goes into (terms.wap: locally nameless): `(x: A) => b` is checked as
 # `instantiated(b, hypothesis(c, "x", A))`
@@ -312,4 +323,15 @@ closed_typed(c: Checker, t: Term, variables: list<Term>, function: bool, typed: 
 stepped(c: Checker) := {
 	c.steps += 1
 	if c.steps > c.budget { refused(GAVE_UP, "the check took more than ${c.budget} steps") }
+}
+# a computation one level deeper, refused as given up past the depth budget
+deeper(c: Checker, computation: () -> Term): Term := {
+	if c.depth >= DEPTH_BUDGET { refused(GAVE_UP, "the check nested more than ${DEPTH_BUDGET} cases deep") }
+	c.depth += 1
+	result = try { computation() } catch e {
+		c.depth -= 1
+		raise e.message
+	}
+	c.depth -= 1
+	result
 }

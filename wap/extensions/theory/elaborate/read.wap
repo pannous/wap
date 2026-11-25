@@ -37,9 +37,11 @@ use "statements.wap"
 OVERLOAD := "overload"
 # the refusal of a call no declaration of its name fits
 NO_FIT := "no fitting overload"
+# the refusal of a call that leaves out arguments its function takes (wiki/function.md "Partial application")
+MISSING_ARGUMENTS := "missing arguments"
 # the refusals of a declaration tried that does not fit: an argument of another type, also one no declaration of its
-# name fits, and more arguments than it takes
-UNFIT := ILL_TYPED + [NO_FIT, NOT_A_FUNCTION]
+# name fits, and more or fewer arguments than it takes
+UNFIT := ILL_TYPED + [NO_FIT, NOT_A_FUNCTION, MISSING_ARGUMENTS]
 # the refusal of a proof by a law stated without one
 UNPROVED_LAW := "unproved law"
 UNKNOWN_FORM := "unknown form"
@@ -47,6 +49,8 @@ UNKNOWN_FORM := "unknown form"
 TRIAL_LIMIT := 10000
 # what the program left out on purpose: a hole
 HOLE_WORD := "_"
+# the function a negative number is written with: `-3` is -(3)
+NEGATION := "-"
 # the length of a letter's name
 LETTER_LENGTH := 1
 # the prelude's cases of a list, what `[a, b]` is made of
@@ -72,12 +76,25 @@ class Theory {
 	# the laws, theorems and axioms in the order they are stated, which `wap verify` reports; those an `assume` left open
 	stated: list<text> = []
 	assumed: list<text> = []
+	# what a report calls a law named by no word of the program (file.wap short_law_formed)
+	labels: map<text, text> = {}
+	# each name the program's code gives a value, `x = 1` or `x += 1`, at any depth: the places it is set
+	# (declare.wap places_set)
+	sets: map<text, list<Node>> = {}
 	# the declarations the prelude made, the first ones in place; and the names a program's declaration hides of them,
 	# each written name's kernel name
 	prelude_size: int = 0
 	hidden: map<text, text> = {}
 	# the bodies as written of the functions that may not end, which run by them and are declared opaque
 	run_bodies: map<text, Node> = {}
+	# the bodies the functions that call themselves run by, their calls of themselves calls of the constant
+	# (declare.wap run_body_kept), and why one could not be kept
+	run_terms: map<text, Term> = {}
+	run_refusals: map<text, text> = {}
+	# whether the answers to `type of`, `axioms of` and `effects of` are printed (declare.wap answered)
+	answering: bool = yes
+	# the values the program's statements compute, in order (declare.wap computed)
+	values: list<Term> = []
 	# the wap folder the door is given (options.wap), in which its prelude is found
 	wap_folder: text = ""
 	# the overload trials the statement being read has made
@@ -100,9 +117,15 @@ held(p: Theory, from: Theory) := {
 	p.spellings = from.spellings
 	p.stated = copy(from.stated)
 	p.assumed = copy(from.assumed)
+	p.labels = copy(from.labels)
+	p.sets = copy(from.sets)
 	p.prelude_size = from.prelude_size
 	p.hidden = copy(from.hidden)
 	p.run_bodies = copy(from.run_bodies)
+	p.run_terms = copy(from.run_terms)
+	p.run_refusals = copy(from.run_refusals)
+	p.values = copy(from.values)
+	p.answering = from.answering
 	p.templates = copy(from.templates)
 	p.wap_folder = from.wap_folder
 }
@@ -132,6 +155,8 @@ class Elaborating {
 	header: bool = no
 	letters: list<Term> = []
 	recursing: Recursion? = ø
+	# a function's body read again as written (declare.wap run_body_kept): its calls of itself call its declaration
+	itself: Itself? = ø
 	below: list<Below> = []
 	instances: list<Term> = []
 	course: Course? = ø
@@ -152,6 +177,8 @@ class Elaborating {
 	# how many terms were made of a type wanted other than their own, so a fit with fewer such steps wins an overload
 	indirect: int = 0
 }
+# a function as its body calls it, by its written name, and the declaration such a call is of
+class Itself { written: text; name: text }
 elaborating(p: Theory): Elaborating := Elaborating(p, elaboration(p.environment, []), Reading(p.environment))
 
 # A term of the type wanted (ø: any)
@@ -173,10 +200,17 @@ made_of(x: Elaborating, t: Term, wanted: Term): Term := {
 	}
 }
 
+# A number as written: a whole one at least 0 a numeral; a negative one the negation of its size, `-3` is -(3); one
+# with a fraction is refused, no term of the theory holds it yet, and never read as its whole part
+number_elaborated(x: Elaborating, value: number, wanted: Term?): Term := {
+	if not (value is int) { refused(UNKNOWN_FORM, "${value} has a fraction, which no number of the theory holds yet") }
+	if value < 0 { return elaborated(x, Call(symbol(NEGATION), [Number(-value)]), wanted) }
+	numeral(value as int)
+}
 form_elaborated(x: Elaborating, n: Node, wanted: Term?): Term := match n {
 	Symbol(name) => if name == HOLE_WORD then hole(x.el, HOLE_WORD, wanted ?? hole(x.el, "the type of ${HOLE_WORD}", any_sort(x))) else name_elaborated(x, name, [], wanted)
 	Empty => nothing_elaborated(x, wanted)
-	Number(value) => numeral(value as int)
+	Number(value) => number_elaborated(x, value, wanted)
 	True => bool_value(x, YES)
 	False => bool_value(x, NO)
 	Text(value) => text_literal(x.theory.environment, value)
@@ -247,7 +281,11 @@ call_elaborated(x: Elaborating, called: Node, arguments: list<Node>, wanted: Ter
 name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?): Term := {
 	bound = named(x.el, name)
 	if bound is not ø { return given_arguments(x, bound!, type_of(x.el.c, bound!), arguments, wanted) }
-	if x.recursing is not ø and name == x.recursing!.name { return recursive_call_elaborated(x, arguments, wanted) }
+	if x.recursing is not ø and name == x.recursing!.name {
+		x.recursing!.called = yes
+		return recursive_call_elaborated(x, arguments, wanted)
+	}
+	if x.itself is not ø and name == x.itself!.written { return declared_given(x, x.itself!.name, arguments, wanted) }
 	if arguments is empty and name == PROP_WORD { return PROP }
 	if arguments is empty and name == TYPE_WORD { return type_at(Zero) }
 	# `list.item(x, rest)`, which the rules write as `item(list, x, rest)`: the declaration under the first argument's
@@ -279,8 +317,13 @@ declared_given(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?)
 declared_read(x: Elaborating, name: text, arguments: list<Argument>, wanted: Term?): Term := {
 	if wanted is not ø and declaration(x.theory.environment, name)!.kind is Recursor { return recursor_given(x, name, arguments, wanted!) }
 	# every binder given, the found ones too, as an explicit program calls it: no hole
-	own = x.theory.binders.get(name) ?? binders_counted(declaration(x.theory.environment, name)!.type)
+	header = x.theory.binders.get(name)
+	own = header ?? binders_counted(declaration(x.theory.environment, name)!.type)
 	found = if #arguments == own then 0 else x.theory.found.get(name) ?? 0
+	# a function declared with parameters is given each written one; a value of a function type, its binders no
+	# parameters, may be given fewer
+	written = own - (x.theory.found.get(name) ?? 0)
+	if header is not ø and arguments is not empty and #arguments < written { refused(MISSING_ARGUMENTS, "${name} takes ${written} arguments and is given ${#arguments}: give each") }
 	given = declared_holes(x, name, found)
 	arguments_given(x, given.function, given.type, arguments, wanted)
 }
@@ -347,7 +390,7 @@ term_alone(x: Elaborating, argument: Argument): Term := match argument {
 read_alone(x: Elaborating, node: Node): Argument := {
 	if names_it(node) { return Unread(node) }
 	try { guarded(x, snapshot(x), () => Elaborated(elaborated(x, node, ø))) } catch e {
-		if not e.message.starts_with(REFUSED) { raise e.message }
+		refusal_only(e)
 		Unread(node)
 	}
 }
