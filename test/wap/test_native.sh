@@ -57,8 +57,8 @@ check "wap build makes a program a native executable named as it" "$(cd "$tree" 
 # an argument that names no program file is code, run as a program is (core/native/warp.warp is_warp_file)
 check "wap runs code given in place of a file" "$("$native_wap" '1+1' 2>&1)" "2"
 # code given runs without a TMPDIR too, as under cron: its files go to the user's temporary folder
-# no window under --no-window: a program calling a C function marked `! Device` (wiki/effects.md) stops at the call
-check "wap --no-window refuses a program that opens a window" "$(cd "$stage" && printf '%s\n' "InitWindow(width: i64, height: i64, title: text): ø from 'raylib' ! Device" 'InitWindow(8, 8, "shown")' >window.wap && "$native_wap" --no-window window.wap 2>&1; echo $?)" "wap: InitWindow from raylib opens a window or a sound device: refused under --no-window
+# no window under --no-window: a program calling a C function annotated `@Device` (wiki/c.md) stops at the call
+check "wap --no-window refuses a program that opens a window" "$(cd "$stage" && printf '%s\n' "@Device InitWindow(width: i64, height: i64, title: text): ø from 'no_such_library'" 'InitWindow(8, 8, "shown")' >window.wap && "$native_wap" --no-window window.wap 2>&1; echo $?)" "wap: InitWindow from no_such_library opens a window or a sound device: refused under --no-window
 1"
 check "wap runs code given in place of a file without a TMPDIR" "$(env -u TMPDIR "$native_wap" '1+1' 2>&1)" "2"
 check "a program file stays after its run" "$(cd "$stage" && "$native_wap" hello.wap >/dev/null && ls hello.wap)" "hello.wap"
@@ -155,6 +155,21 @@ check "a native program's records" "$(native_ran records 'class Point { x: int; 
 p = Point{x: 3, label: "a"}
 p.x = p.x + 4
 print "${p.label} ${p.x}"')" "a 7"
+# maps in a native program, held in its memory (types/memory_lists.wap): a literal, an entry read, changed and added,
+# a count, a walk of its keys and values, and enough keys that it finds them by their hash
+check "a native program's maps" "$(native_ran maps 'ages = {ada: 36, bo: 7}
+ages["bo"] = 8
+ages["cy"] = 1
+for at in 1 to 10 { ages["k${at}"] = at }
+for name, age in ages { if age > 5 { print "${name} ${age}" } }
+print "${#ages} ages, k7 is ${ages["k7"]}, has zed: ${ages.has("zed")}"')" "ada 36
+bo 8
+k6 6
+k7 7
+k8 8
+k9 9
+k10 10
+13 ages, k7 is 7, has zed: no"
 check "a native program's slices" "$(native_ran slices 'xs = ["a", "b", "c"]
 print xs[.. 2].join("+") + " " + xs.drop(1).join("+")')" "a+b b+c"
 # a module's `export` is exported by the program that uses it too, under its plain name: C calls back the module's

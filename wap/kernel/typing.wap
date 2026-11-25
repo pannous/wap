@@ -17,56 +17,103 @@ use "show.wap"
 # The type of t (6.3), kept for the rest of the check. A free variable is never made twice, so a term with free
 # variables keeps its type too: a hole stays a free variable in the kept type, and the type is given back with what an
 # elaboration found since filled in
-type_of(c: Checker, t: Term): Term := {
-	earlier = remembered(c.types, t)
-	if earlier is not ø { return c.filled_in(earlier!) }
-	found = type_found(c, t)
-	remember(c.types, t, found)
-	c.filled_in(found)
+type_of(c: Checker, t: Term): Term := judgement(c, t).type
+# The judgement of a term: the one made earlier in this check, else the rules' conclusion of the judgements of its
+# parts, bottom-up; its type with what an elaboration found filled in
+judgement(c: Checker, t: Term): Checked := {
+	made = earlier_judgement(c, t) ?? {
+		concluded = rules_walked(c, t)
+		c.judged[t.hash] = (c.judged.get(t.hash) ?? []) + [#c.judgements]
+		concluded
+	}
+	Checked(made.term, c.filled_in(made.type))
 }
-type_found(c: Checker, t: Term): Term := match t.shape {
+earlier_judgement(c: Checker, t: Term): Checked? := {
+	for number in c.judged.get(t.hash) ?? [] { if same(c.judgements#number.term, t) { return c.judgements#number } }
+	ø
+}
+rules_walked(c: Checker, t: Term): Checked := match t.shape {
 	Bound(index) => refused(NOT_CLOSED, "a variable bound nowhere reached typing")
-	Free(id) => hypothesis_of(c, id).type
-	# Sort(u) is a Sort(u + 1): no universe holds itself
-	Sort(level) => {
-		levels_declared(c, level)
-		universe(Successor(level))
-	}
-	Constant(name, levels, _) => constant_type(c, t)
-	Apply(function, argument) => application_type(c, t)
-	# `(x: A) => b` is a `(x: A) -> B`, where B is the type of b
+	Free(id) => free_rule(c, t)
+	Sort(level) => sort_rule(c, level)
+	Constant(name, levels, _) => constant_rule(c, t)
+	Apply(function, argument) => arguments(t).fold(judgement(c, head(t)), (applied, given) => apply_rule(c, applied, judgement(c, given)))
 	Lambda(binder, domain, body) => {
-		level_of(c, domain)
+		domain_judged = judgement(c, domain)
 		variable = hypothesis(c, binder, domain)
-		pi(binder, domain, abstracted(type_of(c, instantiated(body, variable)), variable_id(variable)))
+		lambda_rule(c, t, binder, domain_judged, variable, judgement(c, instantiated(body, variable)))
 	}
-	# `(x: A) -> B` is a Sort(imax(u, v)) for A in Sort(u) and B in Sort(v): a function type that ends in a
-	# proposition is a proposition, every other one lies at the larger of the two levels
 	Pi(binder, domain, body) => {
-		from = level_of(c, domain)
-		to = level_of(c, instantiated(body, hypothesis(c, binder, domain)))
-		universe(imax_level(from, to))
+		domain_judged = judgement(c, domain)
+		pi_rule(c, t, domain_judged, judgement(c, instantiated(body, hypothesis(c, binder, domain))))
 	}
-	# a let has the type of its body with the value put in
-	LetIn(binder, type, value, body) => {
-		level_of(c, type)
-		given = type_of(c, value)
-		if not equal(c, given, type) { refused(VALUE_TYPE, "${binder} is declared a ${shown(type)}, its value ${shown(value)} is a ${shown(given)}") }
-		type_of(c, instantiated(body, value))
-	}
-	# a number has the number type the numbers statement bound
-	Numeral(value) => (c.environment.numbers ?? refused(NO_NUMBERS, "the number ${value} belongs to no type: no numbers are declared")).number
-	# a text has the type the texts statement's function gives
-	Quoted(value) => (c.environment.texts ?? refused(TEXTS, "the text ${shown(t)} belongs to no type: no texts are declared")).type
-	Projection(structure, field, of) => projection_type(c, structure, field, of)
+	LetIn(binder, type, value, body) => let_rule(c, t, binder, judgement(c, type), judgement(c, value), judgement(c, instantiated(body, value)))
+	Numeral(value) => numeral_rule(c, t)
+	Quoted(value) => quoted_rule(c, t)
+	Projection(structure, field, of) => projection_rule(c, structure, field, judgement(c, of))
 }
+
+# --- the rules, one per row of 6.3: each takes its premises as judgements, checks them, and concludes one judgement,
+# kept in the checker's table
+
+concluded(c: Checker, term: Term, type: Term): Checked := {
+	made = Checked(term, type)
+	c.judgements.add(made)
+	made
+}
+# a free variable has the type the checker gave it
+free_rule(c: Checker, t: Term): Checked := concluded(c, t, hypothesis_of(c, variable_id(t)).type)
+# Sort(u) is a Sort(u + 1): no universe holds itself
+sort_rule(c: Checker, level: Level): Checked := {
+	levels_declared(c, level)
+	concluded(c, universe(level), universe(Successor(level)))
+}
+# a constant has its declared type at the levels it is given, which are exactly as many as it has parameters
+constant_rule(c: Checker, t: Term): Checked := {
+	d = declaration_of(c.environment, t)
+	levels = constant_levels(t)
+	if #levels != #d.levels { refused(LEVEL_COUNT, "${d.name} takes ${counted(#d.levels, "level")} and is given ${#levels}") }
+	for level in levels { levels_declared(c, level) }
+	concluded(c, t, with_levels(d.type, d.levels, levels))
+}
+# `f(a)` has the result type of f with a put in: the type of f computes to a function type, and the type of a equals
+# its domain
+apply_rule(c: Checker, function: Checked, argument: Checked): Checked := {
+	function_type = computed(c, function.type)
+	match function_type.shape {
+		Pi(binder, domain, body) => {
+			if not equal(c, argument.type, domain) { refused(ARGUMENT_TYPE, "${shown(argument.term)} is a ${shown(argument.type)}, and ${shown(function.term)} takes a ${shown(domain)}") }
+			concluded(c, apply(function.term, argument.term), instantiated(body, argument.term))
+		}
+		_ => refused(NOT_A_FUNCTION, "${shown(function.term)} is a ${shown(function_type)}, no function, and is given ${shown(argument.term)}")
+	}
+}
+# `(x: A) => b` is a `(x: A) -> B` for A a type and b a B with x a variable of type A
+lambda_rule(c: Checker, t: Term, binder: text, domain: Checked, variable: Term, body: Checked): Checked := {
+	sort_level(computed(c, domain.type))
+	concluded(c, t, pi(binder, domain.term, abstracted(body.type, variable_id(variable))))
+}
+# `(x: A) -> B` is a Sort(imax(u, v)) for A in Sort(u) and B in Sort(v): a function type that ends in a proposition is
+# a proposition, every other one lies at the larger of the two levels
+pi_rule(c: Checker, t: Term, domain: Checked, body: Checked): Checked := concluded(c, t, universe(imax_level(sort_level(computed(c, domain.type)), sort_level(computed(c, body.type)))))
+# a let has the type of its body with the value put in, the value of the type declared
+let_rule(c: Checker, t: Term, binder: text, type: Checked, value: Checked, body: Checked): Checked := {
+	sort_level(computed(c, type.type))
+	if not equal(c, value.type, type.term) { refused(VALUE_TYPE, "${binder} is declared a ${shown(type.term)}, its value ${shown(value.term)} is a ${shown(value.type)}") }
+	concluded(c, t, body.type)
+}
+# a number has the number type the numbers statement bound
+numeral_rule(c: Checker, t: Term): Checked := concluded(c, t, (c.environment.numbers ?? refused(NO_NUMBERS, "the number ${shown(t)} belongs to no type: no numbers are declared")).number)
+# a text has the type the texts statement's function gives
+quoted_rule(c: Checker, t: Term): Checked := concluded(c, t, (c.environment.texts ?? refused(TEXTS, "the text ${shown(t)} belongs to no type: no texts are declared")).type)
 
 # A field of a structure value (6.3): the value's type computes to the structure at its parameters, and the field
 # has the type the structure's case gives it, with those parameters and the fields before it put in, each as the
 # projection of the same value. Out of a proof only a proof is taken, and no field passes that a later one's type
 # names unless it is a proof itself: the witness of an `exists` stays inside
-projection_type(c: Checker, structure: Term, field: int, of: Term): Term := {
-	type = computed(c, type_of(c, of))
+projection_rule(c: Checker, structure: Term, field: int, judged: Checked): Checked := {
+	of = judged.term
+	type = computed(c, judged.type)
 	name = constant_name(structure)
 	if not is_constant(head(type), structure) { refused(NOT_A_STRUCTURE, "${shown(of)} is a ${shown(type)}, no ${name}") }
 	levels = constant_levels(head(type))
@@ -90,7 +137,7 @@ projection_type(c: Checker, structure: Term, field: int, of: Term): Term := {
 	match rest.shape {
 		Pi(binder, domain, body) => {
 			if proof and not is_proposition(c, domain) { refused(DATA_FROM_PROOF, "field ${field} of ${shown(of)} is data, and ${shown(of)} is a proof") }
-			domain
+			concluded(c, projection(structure, field, of), domain)
 		}
 		_ => refused(NOT_A_STRUCTURE, "${name}'s case has no field ${field}")
 	}
@@ -113,37 +160,8 @@ levels_declared(c: Checker, level: Level) := {
 	}
 }
 
-# a constant has its declared type at the levels it is given, which are exactly as many as it has parameters
-constant_type(c: Checker, t: Term): Term := {
-	d = declaration_of(c.environment, t)
-	levels = constant_levels(t)
-	if #levels != #d.levels { refused(LEVEL_COUNT, "${d.name} takes ${counted(#d.levels, "level")} and is given ${#levels}") }
-	for level in levels { levels_declared(c, level) }
-	with_levels(d.type, d.levels, levels)
-}
-
 # a count with its word: "1 level", "2 levels"
 counted(count: int, word: text): text := "${count} ${word}" + (if count == 1 then "" else "s")
-
-# `f(a)` has the result type of f with a put in: the type of f computes to a function type, and the type of a
-# equals its domain. A chain of applications is typed in one walk from its head
-application_type(c: Checker, t: Term): Term := {
-	applied = head(t)
-	type = type_of(c, applied)
-	for argument in arguments(t) {
-		function_type = computed(c, type)
-		match function_type.shape {
-			Pi(binder, domain, body) => {
-				given = type_of(c, argument)
-				if not equal(c, given, domain) { refused(ARGUMENT_TYPE, "${shown(argument)} is a ${shown(given)}, and ${shown(applied)} takes a ${shown(domain)}") }
-				type = instantiated(body, argument)
-			}
-			_ => refused(NOT_A_FUNCTION, "${shown(applied)} is a ${shown(function_type)}, no function, and is given ${shown(argument)}")
-		}
-		applied = apply(applied, argument)
-	}
-	type
-}
 
 # A declaration checked and then part of the environment (6.6): its name is new, its level parameters are distinct,
 # its terms are closed, its type is a type, and its value's type equals its type; a theorem's type is a proposition.
@@ -151,25 +169,23 @@ application_type(c: Checker, t: Term): Term := {
 declared(e: Environment, d: Declaration) := {
 	levels_distinct(d.levels)
 	closed(d.type, d.name)
-	c = checker(e, d.levels)
-	level = level_of(c, d.type)
-	checked: Term? = match d.kind {
+	value: Term? = match d.kind {
 		Axiom => ø
-		Defined(value) => value_checked(c, d, value)
-		Theorem(value) => {
-			if not is_zero(simplified(level)) { refused(NOT_A_PROPOSITION, "${d.name} is a law of ${shown(d.type)}, which is a ${shown(universe(level))}, no proposition") }
-			value_checked(c, d, value)
-		}
-		Opaque(value) => value_checked(c, d, value)
+		Defined(value) => value
+		Theorem(value) => value
+		Opaque(value) => value
 		_ => refused(UNKNOWN_NAME, "${d.name} is of a block, which inductive.wap declares")
 	}
-	added(e, d)
-	rests_on(e, size(e), [d.type] + (if checked is ø then [] else [checked!]), checked is ø)
+	if value is not ø { closed(value!, d.name) }
+	c = checker(e, d.levels)
+	declaration_rule(c, d, judgement(c, d.type), if value is ø then ø else judgement(c, value!))
 }
-# a value that has its declaration's type
-value_checked(c: Checker, d: Declaration, value: Term): Term := {
-	closed(value, d.name)
-	given = type_of(c, value)
-	if not equal(c, given, d.type) { refused(VALUE_TYPE, "${d.name} is declared a ${shown(d.type)}, its value ${shown(value)} is a ${shown(given)}") }
-	value
+# the rule that lets a declaration in: its type is a type, a theorem's a proposition, and its value has its type; it
+# rests on what its type and its value name, an axiom on itself too
+declaration_rule(c: Checker, d: Declaration, type: Checked, value: Checked?) := {
+	level = sort_level(computed(c, type.type))
+	if d.kind is Theorem and not is_zero(simplified(level)) { refused(NOT_A_PROPOSITION, "${d.name} is a law of ${shown(d.type)}, which is a ${shown(universe(level))}, no proposition") }
+	if value is not ø and not equal(c, value!.type, d.type) { refused(VALUE_TYPE, "${d.name} is declared a ${shown(d.type)}, its value ${shown(value!.term)} is a ${shown(value!.type)}") }
+	added(c.environment, d)
+	rests_on(c.environment, size(c.environment), [d.type] + (if value is ø then [] else [value!.term]), value is ø)
 }
