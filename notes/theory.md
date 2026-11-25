@@ -226,7 +226,7 @@ function type takes no part in that count.
 ## The declarations that bind names
 
 The kernel names no type of the prelude (plan 5.4). Four statements of the explicit corner bind the ones a
-mechanism needs (bindings.wap). Each is checked; `quotients` and `numbers` stand once, and a later `products`
+mechanism needs (bindings.wap), and `texts` a fifth. Each is checked; `quotients` and `numbers` stand once, and a later `products`
 stands instead of an earlier one, as a below already made keeps the pair it was made of.
 
 **`quotients(Equal)`** (K5, plan 6.6). `Equal` must have the shape of equality: a block of one type with one level
@@ -257,6 +257,14 @@ the indices, the value and its below. The kernel checks both like any definition
 or level parameters, in `Type`, with a case without fields and then a case with one field of `nat`; `bool.yes` a
 case of a block of one type with two cases without fields, in `Type`; `Equal` as above. From then on a number has
 the type `nat`, and where a rule asks for a case, 0 is the first case and n + 1 the second applied to the number n.
+
+**`texts(text_of, list.empty, list.item)`** (L3, plan 5.4, notes/coc-t2.md, from T2b). A text literal is the
+kernel's second literal. `list` must have the shape of prelude/data.wap's: one type with one level parameter `u` and
+one parameter `T: Sort(u)`, in `Sort(max(1, u))`, a case without fields, then a case of a `T` and a list of `T`;
+`text_of` must be `list[1](nat) -> X` without level parameters, after the numbers statement. From then on a text
+literal has the type `X`, and where a rule asks for a case it is `text_of` applied to the list of its code points,
+each a number. Until T2b the statement is `texts(text_of)`, and a literal is `text_of` of the number that spells it:
+a 1 and then its code points, base 0x110000.
 
 **`shortcut(kind, function, theorems…)`**, one per shortcut, in the order of this table. `N` is the number type, `Z`
 and `S` its cases, `yes` and `no` the truth values. The kernel builds each statement as written here, the `==`
@@ -289,7 +297,8 @@ a program and compares what the door says. A line for a refusal compares the par
 
 ## The run trust base
 
-What runs is believed where the kernel cannot see it (notes/coc-plan.md 9.7, 10.2): the kernel's own computation, and
+What runs is believed where the kernel cannot see it (notes/coc-plan.md 9.7, 10.2): the kernel's own computation
+(from T2b its shortcuts on i64 with the overflow check, and a text literal opened into its code points), and
 the layouts of the prelude, each a `runs(…)` statement after the declaration it is about, which erase reads in place
 of the declaration's value (`elaborate/file.wap` layout_noted). Only the prelude writes them: every door refuses a
 program's own. The run door checks each before it runs anything (`run/erase.wap` layouts_checked): a spelling is
