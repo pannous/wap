@@ -2,7 +2,7 @@
 # A wap program built to a native executable: compiled by wap to a module, which wasm2c writes as C, which cc
 # builds with wasm2c's runtime, lib/native/wasi.c and the C glue of its imports (main.c, glue.awk beside this
 # script). wasm2c takes no GC type, so its texts, lists, enums and class instances are in the module's memory
-# (memory.wap beside this script), as the compiler writes them that reads types/memory_texts.wap and
+# (memory.wap beside this script), as the compiler writes them for `native`, which reads types/memory_texts.wap and
 # types/memory_lists.wap in the place of types/text_bytes.wap and types/list_items.wap; an uncaught raise is written to
 # stderr. Maps, `any`, enums whose cases have fields and try/catch stay GC values it cannot use.
 #   wap/extensions/native/build.sh [--standalone] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]
@@ -63,14 +63,10 @@ wasm2c=$(command -v wasm2c) || { echo "no wasm2c on the PATH (brew install wabt)
 wabt="$(cd -P "$(dirname "$(readlink -f "$wasm2c")")/.." && pwd -P)"
 building="$executable.build"
 mkdir -p "$building" && building="$(cd -P "$building" && pwd -P)"
-# the compiler beside what it reads (scripts/lib/wap-beside.sh), a text's layout the native one
 source "$here/../../../scripts/lib/wap-beside.sh"
-mkdir -p "$building/compiler"
-(cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$building/compiler/") && cp "$compiler" "$building/compiler/wap.wasm"
-# (the library the compiler compiled once, types.wasm, and its warm state are the GC ones: a native build reads
-# its library anew, from its sources, --sources)
-cp "$building/compiler/types/memory_texts.wap" "$building/compiler/types/text_bytes.wap" && cp "$building/compiler/types/memory_lists.wap" "$building/compiler/types/list_items.wap"
-wap_ran "$building/compiler/wap.wasm" --sources native "$program" "$building/$MODULE_NAME.wasm"
+# (the library the compiler compiled once, types.wasm, and its warm state are the GC ones: a native build reads its
+# library anew, from its sources, --sources)
+wap_ran "$compiler" --sources native "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
 seed=()
 if [ -n "$standalone" ]; then
