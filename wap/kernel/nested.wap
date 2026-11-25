@@ -15,22 +15,22 @@ use "inductive.wap"
 # program writes
 NESTED_MARK := "#"
 
-# The nesting being undone: the block's names and its level parameters, the free variables of its parameters, the
-# containers found so far and the types added for them
+# The nesting being undone: the block, the free variables of its parameters, the variables standing for its types and
+# for those added, the containers found so far and the types added for them
 class Unnesting {
 	c: Checker
 	block: InductiveBlock
 	parameters: list<Term>
-	names: list<text>
+	types: list<Term>
 	containers: list<Term> = []
 	added: list<BlockType> = []
 }
 
-# The block made plain, and for each type added, the container it stands for as a function of the block's
-# parameters; a block without nesting is itself
-class Unnested { block: InductiveBlock; nested: list<Term> }
-unnested(c: Checker, block: InductiveBlock, parameters: list<Term>): Unnested := {
-	u = Unnesting(c, block, parameters, type_names(block))
+# The block made plain, the variable standing for each of its types, and for each type added, the container it stands
+# for as a function of the block's parameters; a block without nesting is itself
+class Unnested { block: InductiveBlock; types: list<Term>; nested: list<Term> }
+unnested(c: Checker, block: InductiveBlock, parameters: list<Term>, variables: list<Term>): Unnested := {
+	u = Unnesting(c, block, parameters, variables)
 	types = block.types.map(type => type_unnested(u, type))
 	# a type added may nest a container itself, adding more while it is read
 	at = 1
@@ -38,7 +38,7 @@ unnested(c: Checker, block: InductiveBlock, parameters: list<Term>): Unnested :=
 		u.added#at = type_unnested(u, u.added#at)
 		at += 1
 	}
-	Unnested(InductiveBlock(block.levels, block.parameters, types + u.added), u.containers.map(container => over_parameters(u, container, yes)))
+	Unnested(InductiveBlock(block.levels, block.parameters, types + u.added), u.types, u.containers.map(container => over_parameters(u, container, yes)))
 }
 type_unnested(u: Unnesting, type: BlockType): BlockType := BlockType(type.name, type.type, type.cases.map(case => case_unnested(u, case)))
 
@@ -57,9 +57,9 @@ nests(u: Unnesting, t: Term): bool := container_of(u, t) is not ø or parts(t).a
 # A term with each container of the block's types replaced by the type added for it. Under a binder the variable
 # is a free one, so the parameters' variables are told from a case's own
 replaced(u: Unnesting, t: Term): Term := {
-	if not mentions(t, u.names) { return t }
+	if not holds(t, u.types) { return t }
 	container = container_of(u, t)
-	if container is not ø { return apply_all(constant(added_for(u, container!), u.block.levels.map(level => Parameter(level))), u.parameters + arguments(t).drop(#arguments(container!))) }
+	if container is not ø { return apply_all(added_for(u, container!), u.parameters + arguments(t).drop(#arguments(container!))) }
 	match t.shape {
 		Apply(function, argument) => apply(replaced(u, function), replaced(u, argument))
 		Pi(binder, domain, body) => {
@@ -82,9 +82,9 @@ container_of(u: Unnesting, t: Term): Term? := {
 	given = arguments(t)
 	if #given < facts.block.parameters { return ø }
 	parameters = given.take(facts.block.parameters)
-	if not parameters.any(parameter => mentions(parameter, u.names)) { return ø }
-	if given.drop(facts.block.parameters).any(index => mentions(index, u.names)) { refused(STRICT_POSITIVITY, "${shown(t)} holds a type of its block in an index") }
-	if parameters.any(parameter => free_variables(parameter).any(id => not u.parameters.any(variable => same(variable, free(id))))) { refused(STRICT_POSITIVITY, "${shown(t)} holds a variable of its case") }
+	if not parameters.any(parameter => holds(parameter, u.types)) { return ø }
+	if given.drop(facts.block.parameters).any(index => holds(index, u.types)) { refused(STRICT_POSITIVITY, "${shown(t)} holds a type of its block in an index") }
+	if parameters.any(parameter => free_variables(parameter).any(id => place_among(free(id), u.parameters + u.types) == 0)) { refused(STRICT_POSITIVITY, "${shown(t)} holds a variable of its case") }
 	apply_all(head(t), parameters)
 }
 
@@ -97,18 +97,19 @@ inductive_facts(c: Checker, t: Term): InductiveFacts? := match t.shape {
 	_ => ø
 }
 
-# The type added for a container, added when it is new: the block's parameters, then the container's indices, in
-# the container's universe, which the block's must be (enum header); its cases the container's as declared, at its
-# levels and parameters, so a container that was nested itself is unnested again in turn
-added_for(u: Unnesting, container: Term): text := {
-	for at in 1 to #u.containers { if same(u.containers#at, container) { return u.added#at.name } }
-	name = "${u.names#1}${NESTED_MARK}${#u.containers + 1}"
+# The variable of the type added for a container, added when it is new: the block's parameters, then the
+# container's indices, in the container's universe, which the block's must be (enum header); its cases the
+# container's as declared, at its levels and parameters, so a container that was nested itself is unnested again in turn
+added_for(u: Unnesting, container: Term): Term := {
+	written = #u.block.types
+	for at in 1 to #u.containers { if same(u.containers#at, container) { return u.types#(written + at) } }
+	name = "${u.block.types#1.name}${NESTED_MARK}${#u.containers + 1}"
 	cases = container_cases(u.c, head(container))
 	header = at_container(u, constant_name(head(container)), container)
 	u.containers += [container]
 	u.added += [BlockType(name, header, cases.map(case => WrittenCase("${name}.${case.name}", at_container(u, case.name, container))))]
-	added(u.c.environment, Declaration(name, u.block.levels, header, Axiom))
-	name
+	u.types += [hypothesis(u.c, name, header)]
+	u.types#(written + #u.containers)
 }
 
 # the type of a declaration of the container, its own or a case's, at the container's levels and parameters, closed
