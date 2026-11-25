@@ -14,16 +14,17 @@ seed="$(dirname "$(readlink -f "$wap")")/wap-seed/wap.wasm"
 # wap's compiler built by itself <n> times into <folder>, a folder holding it already kept; prints the module, or the
 # failed step's error. A module reads its types module beside itself (the host reads no link out of a folder): wap0.wasm
 # is the source compiled by the seed beside the seed's types module, so a rule form the tree's types module is the first
-# to write is known; wap1.wasm the source compiled by wap0 beside a copy of the tree's types module, each next one by
-# the one before. The folder is built whole beside it and then put in its place, so scripts sharing it never read half a
-# module or a types being copied
-# the warm state a compiler embeds (wap/compiler.wap WARM_STATE): written from the sources by the compiler before it,
-# beside each build's own copy first, so a script sharing the tree never embeds half of one
+# to write is known; wap1.wasm the source compiled by wap0 beside the folder's types module, each next one by the one
+# before. The folder is built whole beside it, from its own copy of the source, and then put in its place, so scripts
+# sharing it never read half a module, and two building it at once never embed each other's library or warm state
+# the warm state a compiler embeds (wap/compiler.wap WARM_STATE) and the library it holds, copied into the tree after a
+# build, for a compiler run from the tree's source
 warm_state="$tree/$WAP_WARM"
 library_module="$tree/$WAP_LIBRARY_MODULE"
-warm_written() {
-	$wap "$1" --sources warm "$warm_state.$$" 2>&1 && mv "$warm_state.$$" "$warm_state"
-}
+# the compiler's own source files, listed from the tree's root, which test_self and the census walk: the theory
+# (wap/extensions/theory) and its provers (wap/extensions/prove) stay outside the build until the switch (S3);
+# test_theory and test_theory_verify cover them
+compiler_sources() { git ls-files 'wap/*.wap' ':!wap/extensions/theory' ':!wap/extensions/prove'; }
 compiler_built() {
 	local folder=$1 last=$2 said
 	# (what the build says is printed only when it fails: a notice of a build that went on is no part of the path)
@@ -31,25 +32,30 @@ compiler_built() {
 	echo "$folder/wap$last.wasm"
 }
 folder_built() {
-	local building=$1.$$ built=$1.$$/wap0.wasm n
-	mkdir -p "$building" && wap_beside_copied "$tree" "$building" || return 1
-	[ -f "$warm_state" ] || : >"$warm_state"
-	[ -f "$library_module" ] || : >"$library_module"
-	$wap "$seed" "$source_compiler" "$built" 2>&1 || return 1
-	# the library compiled once, which each compiler built next holds (extensions/wasm/library.wap), by wap0, which is
-	# this tree's source as each next one is, from the sources (wap0 holds whatever library and warm state the tree had):
-	# beside the compiler, where the warm states read it, and in the tree, where each build takes it
-	$wap "$built" --sources "$building/types/types.wap" "$building/types.wasm" 2>&1 || return 1
-	cp "$building/types.wasm" "$library_module.$$" && mv "$library_module.$$" "$library_module" || return 1
-	for ((n = 1; n <= $2; n++)); do
-		warm_written "$built" || return 1
-		$wap "$built" --sources "$source_compiler" "$building/wap$n.wasm" 2>&1 || return 1
-		built="$building/wap$n.wasm"
-	done
+	local building=$1.$$
+	mkdir -p "$building" && wap_beside_copied "$tree" "$building" && (cd "$tree/wap" && cp -R "${WAP_SOURCE[@]}" "$building/") || return 1
+	# each step run in the folder on relative paths, as a module names the files it was compiled from: two builds of one
+	# source are the same bytes wherever they ran
+	(cd "$building" && steps_built "$2") || return 1
 	# another script may have put the same folder in place meanwhile: the first one stays
 	[ -f "$1/wap$2.wasm" ] && { rm -rf "$building"; return; }
-	rm -rf "$1" && mv "$building" "$1"
+	rm -rf "$1" && mv "$building" "$1" || return 1
+	tree_copied "$1/${WAP_LIBRARY_MODULE##*/}" "$library_module" && tree_copied "$1/${WAP_WARM##*/}" "$warm_state"
 }
+# the compilers of folder_built, in the folder: wap0 holds no library and no warm state, reading the sources; the
+# library is compiled once by it, from the sources, and each next compiler holds it and the warm state the one before
+# wrote beside it, run by its full path so the state's paths are marked as the wap folder's (extensions/warm.wap marked)
+# and a compile from any other folder finds them
+steps_built() {
+	local n source=compiler.wap library=${WAP_LIBRARY_MODULE##*/} warm=${WAP_WARM##*/}
+	: >"$library" && : >"$warm" && $wap "$seed" "$source" wap0.wasm 2>&1 || return 1
+	$wap wap0.wasm --sources types/types.wap "$library" 2>&1 || return 1
+	for ((n = 1; n <= $1; n++)); do
+		$wap "$PWD/wap$((n - 1)).wasm" --sources warm "$warm" 2>&1 && $wap "wap$((n - 1)).wasm" --sources "$source" "wap$n.wasm" 2>&1 || return 1
+	done
+}
+# a built file put in the tree whole, so a reader never sees half of it
+tree_copied() { cp "$1" "$2.$$" && mv "$2.$$" "$2"; }
 # the compiler under test: the module a test script is given as its first arguments, --compiler <module>
 # (test/wap/run.sh --stage passes one wap built of itself), else wap1, this tree's source compiled by the seed, built
 # once for each state of wap/ and lib/ and shared by every script
@@ -58,12 +64,14 @@ else
 	sources=$(cd "$tree" && { cat "$seed"; find wap "$WAP_LIBRARY" \( -name '*.wap' -o -name '*.warp' -o -name '*.c' -o -name '*.h' \) | sort | xargs cat; } | shasum | cut -c1-16)
 	compiler=$(compiler_built "$data/wap1-$sources" 1) || { echo "wap1: $compiler" >&2; exit 1; }
 fi
-# native_wap_built <folder>: the tree's native wap (wap/extensions/native/driver.wap) built into the folder, bin/wap with
-# the compiler under test beside it as its seed and wasmtime's library; prints its path or the build's error
+# native_wap_built <folder> [--standalone]: the tree's native wap (wap/extensions/native/driver.wap) built into the
+# folder, bin/wap with the compiler under test beside it as its seed and wasmtime's library, the seed built into it too
+# with --standalone (build.sh); prints its path or the build's error
 native_wap_built() {
-	mkdir -p "$1/wap-seed" "$1/lib" && (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$1/wap-seed/") && cp "$compiler" "$1/wap-seed/wap.wasm" \
+	wap_linked "$1"
+	mkdir -p "$1/wap-seed" "$1/lib" && (cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$1/wap-seed/") && cp "$compiler" "$1/wap-seed/wap.wasm" && wap_tools_built "$tree" "$1/wap-seed/wap.wasm" \
 		&& cp "$(cd -P "$(dirname "$wap")/lib" && pwd -P)"/libwarp_wasmtime.* "$1/lib/" \
-		&& "$tree/wap/extensions/native/build.sh" "$compiler" "$tree/wap/extensions/native/driver.wap" "$1/wap" -L"$1/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib >"$1/build.log" 2>&1 \
+		&& "$tree/wap/extensions/native/build.sh" ${2-} "$1/wap-seed/wap.wasm" "$tree/wap/extensions/native/driver.wap" "$1/wap" "${WAP_LINKED[@]}" >"$1/build.log" 2>&1 \
 		|| { echo "the tree's native wap did not build: $(tail -3 "$1/build.log")" >&2; return 1; }
 	echo "$1/wap"
 }

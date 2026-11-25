@@ -6,7 +6,7 @@
 # `added_text`, `exported`) and turned into bytes once, by `module_bytes`.
 # Format reference: https://webassembly.github.io/spec/core/binary/
 
-use "opcodes.wap"
+use "../../kernel/opcodes.wap"
 use "memory.wap"
 
 # A module in the making. Imports come first among the functions, so a function's index is counted after them. Each
@@ -37,6 +37,8 @@ class WasmModule {
 	# types known by a name, each its index; the names whose type is being built; the indices reserved for names
 	# that referred back to themselves while the recursion group holding them is still open
 	named: map<text, int> = {}
+	# the struct of each class extending another, the struct of the class it extends
+	supertypes: map<int, int> = {}
 	naming: list<text> = []
 	reserved: list<int> = []
 	# the imported functions, for the name section profilers and backtraces show and an extension's description of them
@@ -260,13 +262,17 @@ added_text(m: WasmModule, bytes: list<int>) as int := {
 	#m.texts - 1
 }
 
-# A reference to a function of the module, `ref.func`, its index declared for the element section
+# A reference to a function of the module, `ref.func`, its index declared for the element section; in the memory, where
+# no value is a reference, the function's slot in the module's table, which `call_indirect` calls
 function_reference(m: WasmModule, index: int) as list<int> := {
 	if not (index in m.referenced) { m.referenced += [index] }
-	instruction(REF_FUNC, [index])
+	if m.memory != ø then i32_const(index_where(m.referenced, each => each == index) - 1) else instruction(REF_FUNC, [index])
 }
-# the element section, one declarative segment of the functions referred to; none when no function is
-declared_references(m: WasmModule) as list<int> := if m.referenced is empty then [] else section(ELEMENT_SECTION, [DECLARED_FUNCTIONS + counted(m.referenced.map(unsigned))])
+# the element section, one segment of the functions referred to: declarative, or in the memory the one filling the
+# table from slot 0; none when no function is
+declared_references(m: WasmModule) as list<int> := if m.referenced is empty then [] else section(ELEMENT_SECTION, [(if m.memory != ø then [ACTIVE_SEGMENT] + i32_const(0) + END else DECLARED_FUNCTIONS) + counted(m.referenced.map(unsigned))])
+# the table of the functions referred to, in the memory
+function_table(m: WasmModule) as list<int> := if m.memory == ø or m.referenced is empty then [] else section(TABLE_SECTION, [FUNCREF + [0x00] + unsigned(#m.referenced)])
 # The whole module, its sections in the order the format requires.
 module_bytes(m: WasmModule) as list<int> := {
 	declarations = m.functions.map(function => unsigned(function.type_index))
@@ -276,7 +282,7 @@ module_bytes(m: WasmModule) as list<int> := {
 	# a program calling the compiled library runs on the library's memory
 	memory_import = if not m.imported_functions.any(function => function.module == m.tag_module) then [] else [named(m.tag_module) + named(MEMORY_EXPORT) + [MEMORY_KIND] + memory_pages#1]
 	segment_count = [DATA_COUNT_SECTION] + bytes_vector(unsigned(#passive))
-	MAGIC + VERSION + section(TYPE_SECTION, type_entries(m)) + section(IMPORT_SECTION, m.imports + memory_import + m.global_imports + m.tag_imports) + section(FUNCTION_SECTION, declarations) + section(MEMORY_SECTION, if memory_import is empty then memory_pages else []) + section(TAG_SECTION, m.tags) + section(GLOBAL_SECTION, m.globals.map(global => global.type + [global.mutability] + global.initial + END)) + section(EXPORT_SECTION, m.exports) + declared_references(m) + segment_count + section(CODE_SECTION, codes) + section(DATA_SECTION, passive) + names_section(m) + (if m.header is empty then [] else custom_section(WAP_SECTION, m.header.bytes))
+	MAGIC + VERSION + section(TYPE_SECTION, type_entries(m)) + section(IMPORT_SECTION, m.imports + memory_import + m.global_imports + m.tag_imports) + section(FUNCTION_SECTION, declarations) + function_table(m) + section(MEMORY_SECTION, if memory_import is empty then memory_pages else []) + section(TAG_SECTION, m.tags) + section(GLOBAL_SECTION, m.globals.map(global => global.type + [global.mutability] + global.initial + END)) + section(EXPORT_SECTION, m.exports) + declared_references(m) + segment_count + section(CODE_SECTION, codes) + section(DATA_SECTION, passive) + names_section(m) + (if m.header is empty then [] else custom_section(WAP_SECTION, m.header.bytes))
 }
 # the custom section `name`, its subsection of function names, each a function's index and name in their order
 NAME_SECTION = "name"

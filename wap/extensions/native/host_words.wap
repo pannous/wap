@@ -30,6 +30,9 @@ RECORD_BYTES := NAME_SLOT + 8
 NO_RESULT := -1
 # the C names this file finds, the library of main.c's
 callback_name(): int32 := prim data_address("wap_host_callback")
+# WASI's path_readlink as main.c answers it, wasmtime's following no link to an absolute path (types/host.wap real_path)
+READLINK_NAME := "path_readlink"
+readlink_name(): int32 := prim data_address("wap_path_readlink")
 c_library(): int32 := prim data_address("c")
 fired_name(): int32 := prim data_address("c_callback_fired")
 FIRED_NAME_BYTES := 16
@@ -51,20 +54,22 @@ wasmtime_linker_define_func(linker: i64, module: i64, module_size: i64, name: i6
 wasmtime_caller_context(caller: i64): i64 from 'c'
 wasmtime_caller_export_get(caller: int, name: int32, size: int, item_at: int): int := prim foreign("c", "wasmtime_caller_export_get", caller, name, size, item_at)
 wasmtime_memory_data(context: i64, memory_at: i64): i64 from 'c'
-free(block: i64): ø from 'c'
 
 # whether an import of the module of that name is a C function's
-is_c_import(module: text): bool := module != "wasi_snapshot_preview1" and module != "host"
+is_c_import(module: text): bool := module != WASI_MODULE and module != "host"
 # the import, `from` and `name` its host name vectors (size, data), defined in the linker as the C function of its name
 c_function_defined(linker: int, imported: int, from: int, name: int): int := {
-	type = wasm_externtype_as_functype_const(wasm_importtype_type(imported))
+	type = import_type(imported)
 	record = host_block(RECORD_BYTES)
 	set_long_at(record + FUNCTION_SLOT, 0)
 	set_long_at(record + LIBRARY_SLOT, strndup(long_at(from + 8), long_at(from)))
 	set_long_at(record + NAME_SLOT, strndup(long_at(name + 8), long_at(name)))
 	set_long_at(record + RESULT_SLOT, result_kind(type))
-	wasmtime_linker_define_func(linker, long_at(from + 8), long_at(from), long_at(name + 8), long_at(name), type, native_function(host_of(c_library()), host_of(callback_name())), record, 0)
+	import_defined(linker, imported, from, name, callback_name(), record)
 }
+# the import defined in the linker as the C function of the executable's at `callback`, called with `data`
+import_defined(linker: int, imported: int, from: int, name: int, callback: int32, data: int): int := wasmtime_linker_define_func(linker, long_at(from + 8), long_at(from), long_at(name + 8), long_at(name), import_type(imported), native_function(host_of(c_library()), host_of(callback)), data, 0)
+import_type(imported: int): int := wasm_externtype_as_functype_const(wasm_importtype_type(imported))
 # the kind of a function type's one result, NO_RESULT for none
 result_kind(type: int): int := {
 	results = wasm_functype_results(type)
@@ -117,7 +122,7 @@ word32_at(at: int): int32 := prim i32.load(at)
 # an address of the memory as C's pointer, the address 0 as NULL
 c_pointer(memory: int, address: int): int := if address == 0 then 0 else memory + address
 # C calling back the function a program handed it (lib/callbacks.wap c_callback; lib/native/callbacks.h, whose
-# trampoline of the slot calls the driver's export c_callback_answered): the export c_callback_fired(slot, a, b, c, d,
+# trampoline of the slot calls the driver's export c_callback_fired): the export c_callback_fired(slot, a, b, c, d,
 # e, f) of the module whose C call is in progress, its int result C's
 callback_answered(slot: int, a: int, b: int, c: int, d: int, e: int, f: int): int := {
 	global calling

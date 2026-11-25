@@ -1,0 +1,49 @@
+# Proof by a case of a proposition (wiki/proposition.md: `A and B` is proved by a proof of each, `A or B` by a proof
+# of one): a goal that is an enum is what one of its cases concludes, the case taken as a law, each premise it leaves
+# open answered: by a hypothesis, by computing, or by a case again. A law's premises are answered the same way, so
+# `x > 0 and y > 0` is given by the hypotheses and computing, joined by And's one case
+use "../theory/terms.wap"
+use "../theory/environment.wap"
+use "../theory/typing.wap"
+use "../theory/compute.wap"
+use "../theory/elaborate/state.wap"
+use "../theory/elaborate/unify.wap"
+use "goals.wap"
+use "computing.wap"
+
+# how deep premises are answered, a case's premises asking for cases again, before the search gives up on them:
+# `enum Loop: Prop { make(h: Loop): Loop }` would ask forever
+PREMISE_DEPTH := 8
+# the provers a premise left open is answered by
+PREMISE_PROVERS: list<(Goal) -> Term?> := [by_hypothesis, by_computing, by_introduction]
+
+by_introduction(goal: Goal): Term? := {
+	el = goal.el
+	enum = match head(computed(el.c, goal.statement)).shape {
+		Constant(name, levels) => name
+		_ => return ø
+	}
+	block = match (declaration(el.c.environment, enum) ?? return ø).kind {
+		Inductive(facts) => facts.block
+		_ => return ø
+	}
+	for case in (block.types.find(type => type.name == enum) ?? return ø).cases {
+		proof = applied_law(goal, declaration(el.c.environment, case.name) ?? return ø, instance => yes, premise => premise_answered(goal, premise))
+		if proof is not ø { return proof }
+	}
+	ø
+}
+# a hypothesis whose type is the goal
+by_hypothesis(goal: Goal): Term? := goal.parameters.find(parameter => attempt(goal.el, () => if unified(goal.el, type_of(goal.el.c, parameter), goal.statement) then parameter else ø) is not ø)
+# a premise a law's conclusion left open, given a proof of its type, the answers of a failed try taken back; a value
+# premise is never guessed: what the conclusion and the other premises give it is its value, else the law fails open
+premise_answered(goal: Goal, premise: Term): bool := {
+	el = goal.el
+	wanted = filled(el, type_of(el.c, premise))
+	if not is_proposition(el.c, wanted) { return yes }
+	if goal.depth == PREMISE_DEPTH { return no }
+	attempt(el, () => {
+		proof = first_proof(Goal(el, goal.parameters, wanted, goal.named, goal.depth + 1), PREMISE_PROVERS) ?? return ø
+		if unified(el, premise, proof) then proof else ø
+	}) is not ø
+}

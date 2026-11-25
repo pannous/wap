@@ -5,17 +5,24 @@
 # (warp-simplifier, 2026-11-19). Move both by hand when the census's total line shows better. The compiler's own source stays fully typed (dynamic
 # typing, any, is for programs; user decision via warp-lead, 2026-11-18): no place of it is typed any, outside the
 # types, the language programs get.
-# Run it with bash test/wap/ratchet_census.sh [--compiler <module>] (or test/wap/run.sh --wait test/wap/ratchet_census.sh, never in run.sh's
-# default set: about 1 min more); its modules run on the native wap on PATH
+# Run it with bash test/wap/ratchet_census.sh [--compiler <module>] [--theory] (or test/wap/run.sh --wait test/wap/ratchet_census.sh, never in run.sh's
+# default set: about 6 min more); its modules run on the native wap on PATH
 # files outside the types module: a types file is no program but every program's library, typed function by function
 # (warp-lead, 2026-11-18)
 FILES_TYPED_WHOLE=62
 FUNCTIONS_UNTYPED=0
 # wap's size, the nodes its reader makes of its source (scripts/wap-size.warp), may not rise above the ceiling: only a
 # real simplification lowers it
-SIZE_NODES=135092
+SIZE_NODES=143253
+# the theory's elaborator (notes/coc-plan.md S1, scripts/theory-census.wap) over the compiler's source, lib/ and the
+# test programs: the statements it accepts may not drop below the floor, and its wall time stays under the ratio times
+# the typing census's, measured in the same run. It runs only with --theory (the landings touching wap/extensions/theory
+# or wap/extensions/prove, and the hourly full run): about 4 min more
+THEORY_ACCEPTED=2209
+THEORY_TIME_RATIO=3
 
 source "$(dirname "$0")/compile.sh"
+theory=$([ "$1" = --theory ] && echo yes)
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
 # a merge not yet committed lists each conflicted file once per side, which counts it three times: refuse
 unmerged=$(cd "$root" && git ls-files --unmerged 'wap/*.wap' | cut -f2 | sort -u)
@@ -28,11 +35,26 @@ report="$stage/census.out"
 census="$stage/wap-census.wasm"
 # the compiler's source finds its standard modules (`use foreign`) beside the census, as beside a compiler
 wap_beside_copied "$root" "$stage" || exit 1
+# each census timed inside its job slot, so waiting for the slot is not counted: its report ends with time's `real` line
+timed() { scripts/job-slot.sh /usr/bin/time -p "$@"; }
+seconds() { sed -n 's/^real //p' "$1"; }
 (cd "$root" && $wap "$compiler" scripts/wap-census.warp "$census" >"$report" 2>&1 &&
-	scripts/job-slot.sh $wap "$census" $(git ls-files 'wap/*.wap') >"$report" 2>&1)
+	timed $wap "$census" $(compiler_sources) >"$report" 2>&1)
+theory_report="$stage/theory-census.out"
+theory_census="$stage/theory-census.wasm"
+if [ -n "$theory" ]; then
+	# the standard library beside the census, as beside a compiler: `use math` finds lib/math.wap there
+	ln -s "$root/lib" "$stage/lib"
+	(cd "$root" && $wap "$compiler" scripts/theory-census.wap "$theory_census" >"$theory_report" 2>&1 &&
+		timed $wap "$theory_census" --tree . $(compiler_sources) $(git ls-files 'lib/*.wap') test/check.wap test/test_*.wap >"$theory_report" 2>&1)
+	theory_status=$?
+	accepted=$(sed -n 's/^accepted \([0-9]*\) of [0-9]* statements$/\1/p' "$theory_report")
+	# a census that failed has no time to compare: a quick crash is no fast census
+	time_ratio=$([ $theory_status -eq 0 ] && awk -v theory="$(seconds "$theory_report")" -v typing="$(seconds "$report")" 'BEGIN { if (theory != "" && typing > 0) printf "%d", theory / typing + 0.999 }')
+fi
 total=$(grep '^total' "$report" | cut -f2)
 measure="$stage/wap-size.wasm"
-size=$(cd "$root" && $wap "$compiler" scripts/wap-size.warp "$measure" 2>&1 && $wap "$measure" $(git ls-files 'wap/*.wap') | sed -n 's/^total\t//p')
+size=$(cd "$root" && $wap "$compiler" scripts/wap-size.warp "$measure" 2>&1 && $wap "$measure" $(compiler_sources) | sed -n 's/^total\t//p')
 whole=$(echo "$total" | sed -n 's/^\([0-9]*\) of .* files typed whole.*/\1/p')
 counted=$(echo "$total" | sed -n 's/.*files typed whole, \([0-9]*\) of \([0-9]*\) functions typed.*/\2 - \1/p')
 untyped=$([ -n "$counted" ] && echo $(($counted)))
@@ -45,6 +67,10 @@ at_least() { [ -n "$1" ] && [ "$1" -ge "$2" ] && echo yes || echo "${1:-no total
 check "the files wap types whole stay at least $FILES_TYPED_WHOLE ($total)" "$(at_least "$whole" $FILES_TYPED_WHOLE)" "yes"
 check "the functions wap does not type alone stay at most $FUNCTIONS_UNTYPED" "$(at_most "$untyped" $FUNCTIONS_UNTYPED)" "yes"
 check "wap's size stays at most $SIZE_NODES nodes" "$(at_most "$size" $SIZE_NODES)" "yes"
+if [ -n "$theory" ]; then
+	check "the theory accepts at least $THEORY_ACCEPTED statements ($(grep '^accepted' "$theory_report"))" "$(at_least "$accepted" $THEORY_ACCEPTED)" "yes"
+	check "the theory's census takes at most $THEORY_TIME_RATIO times the typing census's time ($(seconds "$theory_report") s, $(seconds "$report") s)" "$(at_most "$time_ratio" $THEORY_TIME_RATIO)" "yes"
+fi
 check "wap reads, lowers and binds its own source" "$(if [ -n "$total" ]; then grep '^front' "$report"; else echo "no total line"; fi)" ""
 check "no place of the compiler's own source is typed any" "$( [ -n "$total" ] && echo "$compiler_anys" || echo "no total line")" ""
 exit $((failures > 0))

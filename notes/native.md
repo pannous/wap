@@ -21,13 +21,15 @@ warp-host-fixer; this file is the inventory.
 - Lists in a native program likewise: a list is the address of its header in the memory, [count][room][items block],
   the items 8 bytes each (core/emit/primitives.wap item.load/item.store by the item's layout); the build reads
   types/memory_lists.wap in the place of types/list_items.wap, and typing writes a list literal as calls of
-  its `reserved` and `extended` under the same switch, values_in_memory. A list grows in place, its block copied to one
+  its `reserved` and `extended` under the same switch, the compile's MemoryLayout (core/emit/memory.wap; a native build's is
+  extensions/native/memory.wap NATIVE_MEMORY, its built_by). A list grows in place, its block copied to one
   twice as large, every name holding it seeing the item; the old block is never freed, like a text. Maps, `any` and
   enums whose cases have fields stay GC values a native program cannot use yet.
 - Enums of cases without fields in a native program: a case is its tag, an i32, compared by i32.eq (core/emit/values.wap
   enum_layout, tagged), as a class's instance is its address.
 - An uncaught raise in a native program: its text and a line end on stderr, then exit status 1, no exception thrown
-  (core/emit/host.wap memory_raised). try/catch stays GC-only.
+  (core/emit/host.wap raising_function, by the MemoryLayout's `raised`: extensions/native/memory.wap
+  raise_written). try/catch stays GC-only.
 
 ## Not yet
 - A lib module's function as the callback C calls: lib/callbacks.wap's `export c_callback_fired` is no wap form, and a

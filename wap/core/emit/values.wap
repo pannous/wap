@@ -8,7 +8,7 @@
 # DEBT: its constants are read at the top of the files beside it, so it names its uses: `use folder` would run those
 #   first. Paid off when top-level statements run in the order their values need, or constants are read lazily.
 use "wasm.wap"
-use "opcodes.wap"
+use "../../kernel/opcodes.wap"
 use "../stage.wap"
 use "../type_notation.wap"
 use "../errors.wap"
@@ -46,15 +46,15 @@ memory_layout(m: WasmModule, word: text) as list<int>? := if m.memory == ø then
 # the code of a literal, or ø for a node that is none
 literal(n: Node, m: WasmModule) as Code? := match n {
 	Text(value) => text_literal(value, m)
-	_ => constant(n)
+	_ => constant(n, m)
 }
 # a literal's code where it is a constant expression, which a global may start with: all but a text's
-constant(n: Node) as Code? := match n {
+constant(n: Node, m: WasmModule) as Code? := match n {
 	Number(value) => if value is int then Code(I64, i64_const(value)) else Code(F64, f64_const(value))
 	Char(value) => Code(I32, i32_const(ord(value)))
 	True => Code(I32, i32_const(1))
 	False => Code(I32, i32_const(0))
-	Empty => Code(ANYREF, null_of(ANY_HEAP))
+	Empty => missing_value(m)
 	_ => ø
 }
 
@@ -69,8 +69,10 @@ layout_of(type_name: Node, m: WasmModule, records: Records, at: Node? = ø) as l
 		record = record_named(records, type)
 		if WORD_LAYOUTS.has(name) then WORD_LAYOUTS[name] else if name == TEXT_TYPE then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == MAP_TYPE then nullable(map_base(m)) else if name == ENUM_TYPE then enum_layout(m) else if record == ø then ø else if plain_enums(m) and cases_of(record!).all(case => case_fields(case) is empty) then I32 else nullable(struct_of(record, m, records))
 	}
-	# a compound type the memory lays out none of is refused whole, before its parts, which have no place of their own
-	_ => if m.memory != ø then memory_refused(type_name, at ?? type_name) else {
+	# a compound type the memory lays out none of is refused whole, before its parts, which have no place of their own;
+	# a function value in the memory is the address of what it captures, or of its function's table slot beside them;
+	# an optional the address of its value or of the box holding it, 0 its ø
+	_ => if m.memory != ø then (if function_value_parts(type_name) != ø or function_parts(type_name) != ø or base_of_optional(type_name) != ø then I32 else memory_refused(type_name, at ?? type_name)) else {
 		index = list_index(type_name, m, records) ?? function_value_index(type_name, m, records) ?? signature_value_index(type_name, m, records) ?? map_index(type_name, m, records)
 		if index == ø then optional_layout(type_name, m, records) else nullable(index)
 	}
@@ -100,6 +102,10 @@ optional_layout(type: Node, m: WasmModule, records: Records) as list<int>? := {
 	if held in PLAIN_VALUES then nullable(box_index(m, text(base))) else held
 }
 PLAIN_VALUES = [I32, I64, F32, F64]
+# an optional's ø: GC's null, or the memory's address 0
+missing_value(m: WasmModule) as Code := if m.memory != ø then Code(I32, i32_const(0)) else Code(ANYREF, null_of(ANY_HEAP))
+# the test of an optional on the stack for its ø
+missing_tested(m: WasmModule) as list<int> := if m.memory != ø then I32_EQZ else REF_IS_NULL
 # The box of a plain value of a type, `int`: a struct of the value, one type for each type word, so a value in an `any`
 # is told apart by its box at run time
 box_index(m: WasmModule, word: text) as int := plain_typed(m, word, layout => struct_type([field_type(layout, IMMUTABLE)]))
@@ -135,7 +141,9 @@ signature_value_index(type: Node, m: WasmModule, records: Records) as int? := {
 # a value of a signature: the reference to its function beside what it captures
 signature_struct(parts: FunctionType, m: WasmModule, records: Records) as int := added_type(m, struct_type([field_type(nullable(signature_function_index(parts, m, records)), IMMUTABLE), field_type(ANYREF, IMMUTABLE)]))
 # the function a value of a signature refers to: what it captures, then the signature's parameters
-signature_function_index(parts: FunctionType, m: WasmModule, records: Records) as int := added_type(m, function_type([ANYREF] + signature_parameters(parts, m, records), signature_results(parts, m, records)))
+signature_function_index(parts: FunctionType, m: WasmModule, records: Records) as int := added_type(m, function_type([captures_layout(m)] + signature_parameters(parts, m, records), signature_results(parts, m, records)))
+# what a value of a signature captures: any struct, or in the memory its address
+captures_layout(m: WasmModule) as list<int> := if m.memory != ø then I32 else ANYREF
 signature_parameters(parts: FunctionType, m: WasmModule, records: Records) as list<list<int>> := parts.parameters.map(parameter => known_layout(parameter, m, records))
 signature_results(parts: FunctionType, m: WasmModule, records: Records) as list<list<int>> := if text(parts.result) == EMPTY_TYPE then [] else [known_layout(parts.result, m, records)]
 # a type's layout, refused when the emitter has none for it yet
@@ -167,21 +175,25 @@ item_array(item: Node, m: WasmModule, records: Records) as int? := {
 # The GC type of a record: its tag first, then a struct of its fields' layouts, in the order the class writes them.
 # An enum's is open to its cases, a case with fields extending it with them; a class is as an enum of one case, its
 # tag its name's (class_tag), so two classes of one shape stay apart, in every module. Records that refer to each
-# other are one recursion group. The base and the fields whose types name no record are built before the other fields,
-# whose types may reserve the record's index: a supertype comes before its subtypes, and the group holds only the
+# other are one recursion group. The base, the enum base or the struct of the class it extends, is built before the
+# record's own index is asked for, and the fields whose types name no record before the other fields, whose types may
+# reserve the record's index: a supertype comes before its subtypes, and the group holds only the
 # types that refer to its records, so a text or a list<int> is the same type in every module.
 struct_of(record: Record, m: WasmModule, records: Records) as int := {
+	extended = class_extended(record)
+	base = if extended == ø then enum_base(m) else struct_of(record_named(records, extended) ?? refused(extended!, "a class extends a class the program declares"), m, records)
 	key = place_key(record_declared(record))
 	built = named_index(m, key)
 	if built != ø { return built }
-	base = enum_base(m)
 	for field in fields_of(record).filter(field => not names_record(field_declared(field), records)) { known_layout(field_declared(field), m, records) }
-	named_added(m, key, open_type([base], struct_type([TAG_FIELD] + field_layouts(fields_of(record), m, records))))
+	at = named_added(m, key, open_type([base], struct_type([TAG_FIELD] + field_layouts(fields_of(record), m, records))))
+	if extended != ø { m.supertypes[at] = base }
+	at
 }
 # whether a type is a record or has one among its parts, `list<Tree>`
 names_record(type: Node?, records: Records) as bool := record_named(records, type) != ø or (type_parts(type) ?? []).any(part => names_record(part, records))
 # a class's tag, its name's hash: the same in every module declaring the class
-class_tag(record: Record) as int := text(record_declared(record)).bytes.fold(0, (hash, byte) -> (hash * TAG_BASE + byte) % TAG_RANGE)
+class_tag(record: Record) as int := text(record_declared(record)).bytes.fold(0, (hash, byte) => (hash * TAG_BASE + byte) % TAG_RANGE)
 # the GC type every enum's extends: its case's tag, which the instructions of `tagged` read. In the memory (a native
 # build) a case of no fields is its tag alone, an i32, as a class's instance is its address
 enum_base(m: WasmModule) as int := added_type(m, open_type([], struct_type([TAG_FIELD])))

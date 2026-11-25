@@ -1,0 +1,144 @@
+# A block whose types occur nested under another inductive type made a plain block (notes/coc-plan.md 7, "Nested
+# types"; this folder's files: notes/theory.md): each container at its arguments, `list(Tree)`, becomes one more
+# type of the block, with the container's cases copied in, and every occurrence of it is replaced by that type. The
+# plain block is checked as any other; a container that uses its parameter negatively fails strict positivity there.
+
+use "terms.wap"
+use "environment.wap"
+use "compute.wap"
+use "equal.wap"
+use "typing.wap"
+use "show.wap"
+use "inductive.wap"
+
+# a type of the block added for a container takes the first type's name and this mark and its count, a name no
+# program writes
+NESTED_MARK := "#"
+
+# The nesting being undone: the block's names and its level parameters, the free variables of its parameters, the
+# containers found so far and the types added for them
+class Unnesting {
+	c: Checker
+	block: InductiveBlock
+	parameters: list<Term>
+	names: list<text>
+	containers: list<Term> = []
+	added: list<BlockType> = []
+}
+
+# The block made plain, and for each type added, the container it stands for as a function of the block's
+# parameters; a block without nesting is itself
+class Unnested { block: InductiveBlock; nested: list<Term> }
+unnested(c: Checker, block: InductiveBlock, parameters: list<Term>): Unnested := {
+	u = Unnesting(c, block, parameters, type_names(block))
+	types = block.types.map(type => type_unnested(u, type))
+	# a type added may nest a container itself, adding more while it is read
+	at = 1
+	while at <= #u.added {
+		u.added#at = type_unnested(u, u.added#at)
+		at += 1
+	}
+	Unnested(InductiveBlock(block.levels, block.parameters, types + u.added), u.containers.map(container => over_parameters(u, container, yes)))
+}
+type_unnested(u: Unnesting, type: BlockType): BlockType := BlockType(type.name, type.type, type.cases.map(case => case_unnested(u, case)))
+
+# a case whose type holds no container of the block's types is itself, and so is one written with fewer binders than
+# the block's parameters, which its check refuses
+case_unnested(u: Unnesting, case: WrittenCase): WrittenCase := {
+	if #binders_entered(u.c, case.type).entered < #u.parameters { return case }
+	inside = passed(u.c, case.type, u.parameters)
+	if not nests(u, inside) { return case }
+	WrittenCase(case.name, over_parameters(u, replaced(u, inside), no))
+}
+
+# whether a term holds a type of the block as an argument of another inductive type
+nests(u: Unnesting, t: Term): bool := container_of(u, t) is not ø or parts(t).any(part => nests(u, part))
+
+# A term with each container of the block's types replaced by the type added for it. Under a binder the variable
+# is a free one, so the parameters' variables are told from a case's own
+replaced(u: Unnesting, t: Term): Term := {
+	if not mentions(t, u.names) { return t }
+	container = container_of(u, t)
+	if container is not ø { return apply_all(constant(added_for(u, container!), u.block.levels.map(level => Parameter(level))), u.parameters + arguments(t).drop(#arguments(container!))) }
+	match t.shape {
+		Apply(function, argument) => apply(replaced(u, function), replaced(u, argument))
+		Pi(binder, domain, body) => {
+			variable = hypothesis(u.c, binder, domain)
+			pi(binder, replaced(u, domain), abstracted(replaced(u, instantiated(body, variable)), variable_id(variable)))
+		}
+		Lambda(binder, domain, body) => {
+			variable = hypothesis(u.c, binder, domain)
+			lambda(binder, replaced(u, domain), abstracted(replaced(u, instantiated(body, variable)), variable_id(variable)))
+		}
+		_ => t
+	}
+}
+
+# The container a term applies when it is an inductive type, not of the block, whose parameters hold a type of the
+# block: that type applied to its parameters alone; its indices hold no type of the block, and its parameters no
+# variable but the block's parameters (the rule strict positivity)
+container_of(u: Unnesting, t: Term): Term? := {
+	facts = inductive_facts(u.c, head(t)) ?? return ø
+	given = arguments(t)
+	if #given < facts.block.parameters { return ø }
+	parameters = given.take(facts.block.parameters)
+	if not parameters.any(parameter => mentions(parameter, u.names)) { return ø }
+	if given.drop(facts.block.parameters).any(index => mentions(index, u.names)) { refused(STRICT_POSITIVITY, "${shown(t)} holds a type of its block in an index") }
+	if parameters.any(parameter => free_variables(parameter).any(id => not u.parameters.any(variable => same(variable, free(id))))) { refused(STRICT_POSITIVITY, "${shown(t)} holds a variable of its case") }
+	apply_all(head(t), parameters)
+}
+
+# the facts of an inductive type a term names, ø for any other term
+inductive_facts(c: Checker, t: Term): InductiveFacts? := match t.shape {
+	Constant(name, levels) => match (declaration(c.environment, name) ?? return ø).kind {
+		Inductive(facts) => facts
+		_ => ø
+	}
+	_ => ø
+}
+
+# The type added for a container, added when it is new: the block's parameters, then the container's indices, in
+# the container's universe, which the block's must be (enum header); its cases the container's as declared, at its
+# levels and parameters, so a container that was nested itself is unnested again in turn
+added_for(u: Unnesting, container: Term): text := {
+	for at in 1 to #u.containers { if same(u.containers#at, container) { return u.added#at.name } }
+	name = "${u.names#1}${NESTED_MARK}${#u.containers + 1}"
+	cases = container_cases(u.c, head(container))
+	header = at_container(u, constant_name(head(container)), container)
+	u.containers += [container]
+	u.added += [BlockType(name, header, cases.map(case => WrittenCase("${name}.${case.name}", at_container(u, case.name, container))))]
+	added(u.c.environment, Declaration(name, u.block.levels, header, Axiom))
+	name
+}
+
+# the type of a declaration of the container, its own or a case's, at the container's levels and parameters, closed
+# over the block's parameters
+at_container(u: Unnesting, declared: text, container: Term): Term := {
+	declared_as = declaration(u.c.environment, declared)!
+	over_parameters(u, passed(u.c, with_levels(declared_as.type, declared_as.levels, constant_levels(head(container))), arguments(container)), no)
+}
+
+# the cases of an inductive type, as written, its constant given
+container_cases(c: Checker, type: Term): list<WrittenCase> := {
+	of = constant_name(type)
+	inductive_facts(c, type)!.block.types.find(written => written.name == of)!.cases
+}
+# a case of an inductive type at the type's levels, its constant and the case's place given
+case_constant(c: Checker, type: Term, place: int): Term := constant(container_cases(c, type)#place.name, constant_levels(type))
+
+# --- terms
+
+# a term under the block's parameters closed over them again: as a function type, or as a function
+over_parameters(u: Unnesting, t: Term, function: bool): Term := closed_over(u.c, t, u.parameters, function)
+
+# a function type given its first arguments: what it gives for them
+passed(c: Checker, t: Term, given: list<Term>): Term := given.fold(t, (rest, argument) => instantiated(binder_body(c, rest), argument))
+
+constant_name(t: Term): text := match t.shape {
+	Constant(name, levels) => name
+	_ => ""
+}
+constant_levels(t: Term): list<Level> := match t.shape {
+	Constant(name, levels) => levels
+	_ => []
+}

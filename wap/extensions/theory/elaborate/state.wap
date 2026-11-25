@@ -1,0 +1,199 @@
+# The state of an elaboration (notes/elaborate.md "Holes"): the holes that stand for what a program left out, and
+# their answers.
+#
+# A hole for a term is a free variable of the kernel that the elaborator may answer, so the kernel's typing and
+# computing work on a term with holes as they are: a hole is a variable nothing is known of. A hole depends on the
+# binders around it only as a function of them: it is made as that function, applied to their variables, so its
+# answer names no binder and stays good when the binders close. A hole for a level is a level parameter named by
+# LEVEL_HOLE and a number, a name no program writes. Nothing here is trusted: a term is filled and handed to the
+# kernel, which judges it whole.
+
+use "../terms.wap"
+use "../levels.wap"
+use "../environment.wap"
+use "../compute.wap"
+
+LEVEL_HOLE := "?"
+# the elaborator's own rules, which a refusal names
+CANNOT_FIND := "cannot find"
+
+# A hole: the id of its free variable, and the name the program would have written for what it stands for
+class Hole { id: int; name: text }
+# two terms, or two levels, still to be made equal, put off until a hole is answered
+class Problem { left: Term; right: Term }
+class LevelProblem { left: Level; right: Level }
+# The state of one declaration's elaboration: a checker, whose hypotheses hold the binders gone into and the holes
+# alike; the binders in scope, the outermost first; the holes by their ids and the answers found; the level holes'
+# answers; the problems put off
+class Elaboration {
+	c: Checker
+	scope: list<Term> = []
+	holes: map<int, Hole> = {}
+	answers: map<int, Term> = {}
+	level_holes: int = 0
+	level_answers: map<text, Level> = {}
+	problems: list<Problem> = []
+	level_problems: list<LevelProblem> = []
+}
+# a type the checker finds holds the answers found since: `x: T`, T's level answered after x was gone into
+elaboration(e: Environment, levels: list<text>): Elaboration := {
+	el = Elaboration(checker(e, levels))
+	el.c.filled_in = t => filled(el, t)
+	el
+}
+
+# A binder gone into: its variable, in scope by its name until it is left again
+scoped(el: Elaboration, binder: text, type: Term): Term := {
+	variable = hypothesis(el.c, binder, type)
+	el.scope += [variable]
+	variable
+}
+# binders left, wherever in the scope they stand
+unscoped(el: Elaboration, variables: list<Term>) := {
+	left = variables.map(variable_id)
+	el.scope = el.scope.filter(variable => not left.contains(variable_id(variable)))
+}
+# A term closed over binders, it and each binder's type filled first, so no answered hole stays in it
+closed_filled(el: Elaboration, t: Term, variables: list<Term>, function: bool): Term := closed_typed(el.c, filled(el, t), variables, function, variable => filled(el, hypothesis_of(el.c, variable_id(variable)).type))
+# the innermost binder in scope of a name
+named(el: Elaboration, name: text): Term? := el.scope.reverse().find(variable => hypothesis_of(el.c, variable_id(variable)).binder == name)
+
+# A new hole of a type: what a letter, a `_` or an argument left out stands for, a function of the binders in scope
+hole(el: Elaboration, name: text, type: Term): Term := hole_over(el, name, type, el.scope)
+# a hole that is a function of these binders only, applied to them: its type names no other binder
+hole_over(el: Elaboration, name: text, type: Term, variables: list<Term>): Term := {
+	function = hypothesis(el.c, name, closed_filled(el, type, variables, no))
+	id = variable_id(function)
+	el.holes[id] = Hole(id, name)
+	apply_all(function, variables)
+}
+# A new level hole, known to the checker as a level parameter of the declaration until it is answered or made one
+level_hole(el: Elaboration): Level := {
+	el.level_holes += 1
+	name = LEVEL_HOLE + "${el.level_holes}"
+	el.c.levels += [name]
+	Parameter(name)
+}
+is_level_hole(name: text): bool := name.starts_with(LEVEL_HOLE)
+
+# the hole a term is while it has no answer, ø for any other term
+unanswered(el: Elaboration, t: Term): Hole? := match t.shape {
+	Free(id) => if el.answers.has(id) then ø else el.holes.get(id)
+	_ => ø
+}
+
+# A level with every answered level hole replaced by its answer
+level_filled(el: Elaboration, level: Level): Level := match level {
+	Zero => level
+	Successor(of) => Successor(level_filled(el, of))
+	Max(left, right) => Max(level_filled(el, left), level_filled(el, right))
+	Imax(left, right) => Imax(level_filled(el, left), level_filled(el, right))
+	Parameter(name) => {
+		answer = el.level_answers.get(name) ?? return level
+		level_filled(el, answer)
+	}
+}
+# A term with every answered hole replaced by its answer, levels too: a term is filled before it is computed,
+# compared or handed on. An answer holds no loose variable and names no binder, so it is put in anywhere as it is;
+# an answered hole applied to its binders is the answer's body with them put in
+filled(el: Elaboration, t: Term): Term := {
+	if not t.holds_free and not t.holds_parameter { return t }
+	match t.shape {
+		Free(id) => {
+			answer = el.answers.get(id) ?? return t
+			shorter = filled(el, answer)
+			el.answers[id] = shorter
+			shorter
+		}
+		Sort(level) => universe(level_filled(el, level))
+		Constant(name, levels) => constant(name, levels.map(level => level_filled(el, level)))
+		Apply(function, argument) => {
+			applied = head(t)
+			given = arguments(t).map(each => filled(el, each))
+			if is_hole(el, applied) then beta(filled(el, applied), given) else apply_all(filled(el, applied), given)
+		}
+		Lambda(binder, domain, body) => bound_filled(el, binder, domain, body, (typed, inner) => lambda(binder, typed, inner))
+		Pi(binder, domain, body) => bound_filled(el, binder, domain, body, (typed, inner) => pi(binder, typed, inner))
+		LetIn(binder, type, value, body) => bound_filled(el, binder, type, body, (typed, inner) => let_in(binder, typed, filled(el, value), inner))
+		Projection(structure, field, of) => projection(structure, field, filled(el, of))
+		_ => t
+	}
+}
+# A binder's domain filled, then its body under it, the two made into the term again
+bound_filled(el: Elaboration, binder: text, domain: Term, body: Term, made: (Term, Term) -> Term): Term := {
+	typed = filled(el, domain)
+	made(typed, filled_under(el, binder, typed, body))
+}
+# A binder's body filled, its domain filled already. A body that uses the binder's variable and may hold a hole is gone into by a free
+# variable, as the kernel goes under a binder: an answer's body then takes closed arguments only
+filled_under(el: Elaboration, binder: text, domain: Term, body: Term): Term := {
+	if body.loose == 0 or not body.holds_free { return filled(el, body) }
+	variable = hypothesis(el.c, binder, domain)
+	abstracted(filled(el, instantiated(body, variable)), variable_id(variable))
+}
+
+# the holes without an answer that a filled term holds, by their ids, each once
+holes_in(el: Elaboration, t: Term): list<int> := {
+	if not t.holds_free { return [] }
+	match t.shape {
+		Free(id) => if el.holes.has(id) and not el.answers.has(id) then [id] else []
+		_ => parts(t).flat_map(part => holes_in(el, part)).unique()
+	}
+}
+# whether a term is a hole, answered or not; whether it is the variable of a binder
+is_hole(el: Elaboration, t: Term): bool := el.holes.has(variable_id(t))
+is_binder_variable(el: Elaboration, t: Term): bool := match t.shape {
+	Free(id) => not el.holes.has(id)
+	_ => no
+}
+# whether a term names the variable of a binder: what the answer to a hole may not do, since a hole depends on
+# binders only as a function of them. Another hole may be named: its own answer is judged when it comes
+names_binder(el: Elaboration, t: Term): bool := {
+	if not t.holds_free { return no }
+	if is_binder_variable(el, t) { return yes }
+	parts(t).any(part => names_binder(el, part))
+}
+# the level holes without an answer that a filled level names, and that a filled term names, each once
+level_holes_in(level: Level): list<text> := level_parameters(level).filter(name => is_level_hole(name))
+term_level_holes(t: Term): list<text> := term_levels(t).filter(name => is_level_hole(name))
+# the level parameters and holes a term names, each once
+term_levels(t: Term): list<text> := {
+	if not t.holds_parameter { return [] }
+	match t.shape {
+		Sort(level) => level_parameters(level)
+		Constant(name, levels) => levels.flat_map(level_parameters).unique()
+		_ => parts(t).flat_map(term_levels).unique()
+	}
+}
+
+# What the elaboration has found so far, kept to go back to when a reading fails: the answers, the problems, and
+# the binders in scope, which a reading that fails halfway leaves behind
+class Found { answers: map<int, Term>; level_answers: map<text, Level>; problems: list<Problem>; level_problems: list<LevelProblem>; scope: list<Term> }
+found_so_far(el: Elaboration): Found := found_copied(Found(el.answers, el.level_answers, el.problems, el.level_problems, el.scope))
+# a Found of its own, its maps and lists copies that grow apart from those it was made of (`+=` grows a list in place)
+found_copied(found: Found): Found := {
+	own = Found({}, {}, found.problems.copy(), found.level_problems.copy(), found.scope.copy())
+	own.answers.update(found.answers)
+	own.level_answers.update(found.level_answers)
+	own
+}
+# what an attempt gives, the answers it finds taken back
+taken_back(el: Elaboration, attempt: () -> T): T := {
+	kept = found_so_far(el)
+	given = attempt()
+	back_to(el, kept)
+	given
+}
+back_to(el: Elaboration, kept: Found) := {
+	own = found_copied(kept)
+	el.answers = own.answers
+	el.level_answers = own.level_answers
+	el.problems = own.problems
+	el.level_problems = own.level_problems
+	el.scope = own.scope
+}
+
+# What is still open when a declaration is done: the names of the holes without an answer, and whether every level
+# problem put off holds now. A declaration with either is refused by `cannot find`
+holes_left(el: Elaboration): list<text> := el.holes.keys().filter(id => not el.answers.has(id)).map(id => el.holes#id.name)
+level_problems_hold(el: Elaboration): bool := el.level_problems.all(problem => levels_equal(level_filled(el, problem.left), level_filled(el, problem.right)))

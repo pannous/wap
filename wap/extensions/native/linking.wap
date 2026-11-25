@@ -4,11 +4,19 @@
 # not there is said, never guessed.
 use foreign
 use "c.wap"
+use "../../types/host.wap"
 use "run.wap"
 
-COMPILER_BESIDE := "wap-seed/wap.wasm"
-# the library folder beside it
-LIBRARY_BESIDE := "lib"
+# wap's parts, in the seed folder beside this executable: the compiler, its library folder, the tools it runs
+# (scripts/lib/wap-beside.sh WAP_TOOLS)
+SEED_FOLDER := "wap-seed/"
+COMPILER_PART := "wap.wasm"
+LIBRARY_PART := "lib"
+# where a seed built into this executable (build.sh --standalone) is unpacked, under the user's home: a folder by its
+# name, each unpacking through a part of its own; the archive written there for tar
+CACHE_FOLDER := "/Library/Caches/wap/"
+PART_SUFFIX := ".XXXXXX"
+SEED_ARCHIVE := "/seed.tar"
 # macOS's longest path, which dyld writes this executable's into
 PATH_BYTES := 1024
 # a wasm file: its magic and version before the sections; a custom section's id; a LEB128 byte's payload and its
@@ -48,16 +56,49 @@ section_text(path: text, name: text): text := {
 leb_at(at: int): int := if host_byte(at) < LEB_PAYLOAD then host_byte(at) else host_byte(at) - LEB_PAYLOAD + LEB_PAYLOAD * leb_at(at + 1)
 leb_end(at: int): int := if host_byte(at) < LEB_PAYLOAD then at + 1 else leb_end(at + 1)
 # this executable's path (Linux's link, else macOS's dyld), its links followed (a link to it finds the wap-seed/ beside
-# the file itself, and WASI reads no path through a link to a place outside), with its file name replaced by the
-# compiler's
-compiler_found(): text := {
+# the file itself, and WASI reads no path through a link to a place outside)
+executable_found(): text := {
 	own = realpath("/proc/self/exe", 0)
 	if own == "" {
 		written = text_made(PATH_BYTES)
-		set_word(SIZE_AT, PATH_BYTES)
+		set_memory_word(SIZE_AT, PATH_BYTES)
 		_NSGetExecutablePath(written, host_of(pointer_at(SIZE_AT)))
 		own = realpath(written, 0)
 	}
-	folder_part(own) + COMPILER_BESIDE
+	own
 }
-compiler_path = compiler_found()
+# the seed built into this executable (main.c): its name, "" where it has none; its bytes
+wap_seed_name(): text from 'c'
+wap_seed(): i64 from 'c'
+wap_seed_size(): i64 from 'c'
+# the folder of wap's parts: the seed folder beside this executable, or the cache's folder the seed built into it is
+# unpacked into, at its first run
+seed_folder_found(): text := {
+	name = wap_seed_name()
+	if name == "" { return folder_part(executable_path) + SEED_FOLDER }
+	cache = getenv("HOME") + CACHE_FOLDER
+	folder = cache + name
+	if access(folder, EXISTS) != 0 { seed_unpacked(cache, folder) }
+	folder + "/"
+}
+# the seed built into this executable unpacked into the folder, through a part renamed to it, so a run never reads
+# half of it (another run's, renamed first, is the one kept); a seed not unpacked is said and ends the run
+seed_unpacked(cache: text, folder: text) := {
+	system("mkdir -p '${cache}'")
+	part = mkdtemp(cache + PART_SUFFIX)
+	archive = part + SEED_ARCHIVE
+	file = mkstemps(archive, 0)
+	c_write(file, wap_seed(), wap_seed_size())
+	close(file)
+	if system("tar -xf '${archive}' -C '${part}'") != 0 {
+		eprint("wap: the seed built into wap was not unpacked into ${part}")
+		exit(1)
+	}
+	unlink(archive)
+	if rename(part, folder) == 0 then 0 else system("rm -rf '${part}'")
+}
+# the path of a part of wap by its name in the seed folder: the one place a part is looked up
+seed_part(name: text): text := seed_folder + name
+executable_path = executable_found()
+seed_folder = seed_folder_found()
+compiler_path = seed_part(COMPILER_PART)

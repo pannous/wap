@@ -65,7 +65,8 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	Call(called, arguments) => module_call(n, called, arguments, scope, depth) ?? if is_type_test(called, scope) then type_test_bound(n, called, arguments, scope, depth) else if rest_named(n) != ø then refitted(Call(called, all_bound(arguments, scope, depth)), n) else field_called(n, called, arguments, scope, depth) ?? refitted(Call(called_bound(with_receiver(called, scope, depth), #arguments, scope, depth), arguments.map(argument => argument_bound(argument, scope, depth))), n)
 	Prim(operation, arguments) => refitted(Prim(operation, all_bound(arguments, scope, depth)), n)
 	If(condition, then_part, else_part) => refitted(If(bound(condition, scope, depth), bound(then_part, scope, depth), bound(else_part, scope, depth)), n)
-	While(condition, body) => refitted(While(bound(condition, scope, depth), bound(body, Scope(scope.layers, scope.looped or depth == PROGRAM_DEPTH, scope.standard), depth)), n)
+	While(condition, body) => refitted(While(bound(condition, scope, depth), bound(body, looped_scope(scope, depth), depth)), n)
+	For(place, count, body) => for_bound(n, place, count, body, scope, depth)
 	Try(body, handler) => refitted(Try(bound(body, scope, depth), handler_bound(handler, scope, depth)), n)
 	Case(subject, arms) => refitted(Case(bound(subject, scope, depth), arms.map(arm => arm_bound(arm, scope, depth))), n)
 	Return(value) => refitted(Return(bound(value, scope, depth)), n)
@@ -85,6 +86,8 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	True => n
 	False => n
 	Empty => n
+	# a type with parts where a value stands, `x := list<byte>`, is no value: types are written after a colon
+	Key(head, Op.None, List(items, Bracket.Less, separator)) => refused(n, "a type with parts is no value: write it as the type of one, after a colon, `x: ${n}`")
 	_ => refused(n, "the binding analysis reads only kernel forms; the lowering should have removed this")
 }
 # A written type with each record name in it bound to the Record its scope sees, `Box` of `b: Box` or `list<Box>?`
@@ -168,6 +171,13 @@ argument_bound(argument: Node, scope: Scope, depth: int) as Node := if is_named(
 is_named(argument: Node) as bool := match argument { Key(name, Op.Colon, value) => name is symbol; _ => no }
 # an instance's field or a map's entry, `x: 1`: its value bound, its name a word, no variable
 field_bound(field: Node, scope: Scope, depth: int) as Node := match field { Key(name, Op.Colon, value) => refitted(Key(name, Op.Colon, bound(value, scope, depth)), field); _ => refused(field, NOT_A_FIELD) }
+# the scope inside a loop's body, which runs again: a variable the program set before is read as it is now
+looped_scope(scope: Scope, depth: int) as Scope := Scope(scope.layers, scope.looped or depth == PROGRAM_DEPTH, scope.standard)
+# a counted loop, its place a variable of its body
+for_bound(n: Node, place: Node, count: Node, body: Node, scope: Scope, depth: int) as Node := {
+	inner = within(looped_scope(scope, depth), assigned_variables(n, place, scope, depth))
+	refitted(For(bound(place, inner, depth), bound(count, scope, depth), bound(body, inner, depth)), n)
+}
 # the scope inside a block: its variables, then what its statements define, innermost
 block_scope(block: Node, statements: list, scope: Scope, depth: int) as Scope := {
 	variables = within(scope, named_variables(block, scope, depth))

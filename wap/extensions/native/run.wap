@@ -2,16 +2,16 @@
 # a module's .wasm and C imports linked first; the memory where the driver, compiler loading and console keep words.
 use foreign
 use "c.wap"
+use "../../types/host.wap"
 use "host_words.wap"
 use "linking.wap"
 
-# --- the program's memory: the out-cells C and WASI fill, below the data at 65536 (core/emit/opcodes.wap) ---
+# --- the program's memory: the out-cells C and WASI fill, below the data at 65536 (kernel/opcodes.wap) ---
 STATUS_AT := 1032
 ARGUMENT_COUNT_AT := 1040
 ARGUMENT_BYTES_COUNT_AT := 1044
 SIZE_AT := 1048
-# the used modules' `finished()` functions the run's end calls: their context, their count, the host block of their
-# externs
+# the used modules' `finished()` the run's end calls: their context, their count, the host block of their externs
 finishing: int = 0
 finisher_count: int = 0
 FINISHERS := 16
@@ -46,27 +46,27 @@ TIME_CAP_PASSED := "wasm trap: interrupt"
 MEMORY_CAP_PASSED := "out of memory"
 # the program or module the run was given, named when it passes a cap (driver.wap)
 run_input: text = ""
-# C's whence for fseek, a C bool's byte, the file descriptor of standard error, a path's mode that asks whether it is
-# there, the mode of a file the driver writes (rw-r--r--)
-FROM_START := 0
-FROM_END := 2
+# a C bool's byte, a path's mode that asks whether it is there, the mode of a file the driver writes (rw-r--r--); C's
+# whence for fseek is WASI's (types/host.wap FROM_START, FROM_END)
 BOOL_BYTE := 256
-STANDARD_ERROR := 2
 FAILED := 1
 EXISTS := 0
 MODULE_SUFFIX := ".wasm"
+WASI_MODULE := "wasi_snapshot_preview1"
 # what a program's run calls, and a used module's: its top level but the value shown (core/emit/emitter.wap)
 MAIN_NAME := "main"
 INIT_NAME := "warp/start"
 # every module exports its memory: a module whose memory the linker holds was started already
 MEMORY_NAME := "memory"
-# what a used module exports to be called when the run ends (host.wap's: the queued sound heard out)
+# what a module exports to be called when the run ends (host.wap's: the queued sound heard out; timers.wap's: the
+# program's timers run)
 FINISHED_NAME := "finished()"
 
-# the run ended with this status, its temporary files gone (a path not made yet is an empty one, unlinking nothing)
+# the run ended with this status, its temporary files gone (a path not made yet is an empty one, unlinking nothing),
+# the modules' finished() run only after a run that went well
 ended(status: int) := {
 	global module_file
-	each_finished()
+	if status == 0 { each_finished() }
 	unlink(module_file)
 	exit(status)
 }
@@ -84,22 +84,16 @@ said_vector(vector: int): bool := {
 # whether a call failed: its error or trap said, the status at STATUS_AT; an exit() of status 0 is no failure, one of
 # another status a failure the program said itself
 failed(error: int, trap_at: int): bool := {
-	set_word(STATUS_AT, FAILED)
-	if error != 0 and wasmtime_error_exit_status(error, host_of(pointer_at(STATUS_AT))) % BOOL_BYTE != 0 then word_at(STATUS_AT) != 0 else if error != 0 then error_said(error) else if long_at(trap_at) != 0 then trap_said(long_at(trap_at)) else no
-}
-error_said(error: int): bool := {
+	set_memory_word(STATUS_AT, FAILED)
+	if error != 0 and wasmtime_error_exit_status(error, host_of(pointer_at(STATUS_AT))) % BOOL_BYTE != 0 { return memory_word(STATUS_AT) != 0 }
+	trap = long_at(trap_at)
+	if error == 0 and trap == 0 { return no }
 	message = host_block(VECTOR_BYTES)
-	wasmtime_error_message(error, message)
-	said_vector(message)
-}
-trap_said(trap: int): bool := {
-	message = host_block(VECTOR_BYTES)
-	wasm_trap_message(trap, message)
+	if error != 0 { wasmtime_error_message(error, message) } else { wasm_trap_message(trap, message) }
 	said_vector(message)
 }
 # the run ended where a step of wasmtime's setup failed
-checked(error: int) := if failed(error, host_block(8)) then ended(word_at(STATUS_AT))
-
+checked(error: int) := if failed(error, host_block(8)) then ended(memory_word(STATUS_AT))
 said_none(message: text): int := {
 	eprint(message)
 	0
@@ -134,7 +128,8 @@ engine_made(): int := {
 	made
 }
 # a store's context, within the run's caps, whose WASI gives the host argument list, the standard files (standard
-# input the text given, else (given none) the command's), the environment, the current folder and the root
+# input the text given, else the command's), the environment, the current folder by its real name (types/host.wap
+# real_path follows links from it) and the root
 context_made(arguments: list<text>): int := wasmtime_store_context(store_made(arguments))
 store_made(arguments: list<text>, input: text = ""): int := {
 	store = wasmtime_store_new(engine, 0, 0)
@@ -147,7 +142,7 @@ store_made(arguments: list<text>, input: text = ""): int := {
 	wasi_config_inherit_stdout(wasi)
 	wasi_config_inherit_stderr(wasi)
 	wasi_config_inherit_env(wasi)
-	wasi_config_preopen_dir(wasi, ".", ".", 1)
+	wasi_config_preopen_dir(wasi, ".", realpath(".", 0), 1)
 	wasi_config_preopen_dir(wasi, "/", "/", 1)
 	checked(wasmtime_context_set_wasi(context, wasi))
 	store
@@ -161,11 +156,12 @@ byte_vector(t: text): int := {
 linker_made(): int := {
 	linker = wasmtime_linker_new(engine)
 	checked(wasmtime_linker_define_wasi(linker))
+	wasmtime_linker_allow_shadowing(linker, 1)
 	linker
 }
 # the module of the file at the path, compiled by the engine; 0 where there is none, said
 module_compiled(path: text): int := {
-	set_word(STATUS_AT, FAILED)
+	set_memory_word(STATUS_AT, FAILED)
 	size_at = host_block(8)
 	bytes = file_read(path, size_at)
 	if bytes == 0 then said_none("wap: no module at ${path}") else module_of(bytes, long_at(size_at))
@@ -183,14 +179,14 @@ instance_ran(linker: int, context: int, module: int, importer: text, main: bool)
 	instance = host_block(INSTANCE_BYTES)
 	trap_at = host_block(8)
 	if failed(wasmtime_linker_instantiate(linker, context, module, instance, trap_at), trap_at) { return 0 }
-	if not main { finisher_kept(context, instance) }
+	finisher_kept(context, instance)
 	item = host_block(EXTERN_BYTES)
 	name = if main then MAIN_NAME else INIT_NAME
 	if wasmtime_instance_export_get(context, instance, name, byte_count(name), item) % BOOL_BYTE == 0 { return instance }
 	if failed(wasmtime_func_call(context, item + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, trap_at), trap_at) then 0 else instance
 }
 # each module the module imports by a .wasm name (`use "m.wasm"`) the linker holds no instance of yet run and kept in
-# it under its name, whether each was; each C function it imports defined as that C function (host_words.wap)
+# it under its name, whether each was; each C import as that C function (host_words.wap), path_readlink as main.c's
 imports_linked(linker: int, context: int, module: int, importer: text): bool := {
 	imports = host_block(VECTOR_BYTES)
 	wasmtime_module_imports(module, imports)
@@ -201,14 +197,15 @@ imports_linked(linker: int, context: int, module: int, importer: text): bool := 
 		from = wasm_importtype_module(imported)
 		name = wasm_importtype_name(imported)
 		module_name = vector_text(from)
-		held = wasmtime_linker_get(linker, context, from, name, host_block(EXTERN_BYTES)) % BOOL_BYTE != 0
-		if module_name.ends_with(MODULE_SUFFIX) and not held { linked = (if module_started(linker, context, from) then missing_word_said(name, module_name) else instance_defined(linker, context, module_name, importer, no)) and linked }
+		held = linker_holds(linker, context, from, name)
+		if module_name.ends_with(MODULE_SUFFIX) and not held { linked = (module_started(linker, context, from) or instance_defined(linker, context, module_name, importer, no)) and (linker_holds(linker, context, from, name) or missing_word_said(name, module_name)) and linked }
 		else if is_c_import(module_name) and not held { c_function_defined(linker, imported, from, name) }
+		else if module_name == WASI_MODULE and vector_text(name) == READLINK_NAME { import_defined(linker, imported, from, name, readlink_name(), 0) }
 		i += 1
 	}
 	linked
 }
-# the instance of a used module, its `finished()`, when it exports one, kept for the run's end
+# the instance of a module, the program's or one it uses, its `finished()`, when it exports one, kept for the run's end
 finisher_kept(context: int, instance: int): int := {
 	global finisher_count
 	item = finishers + EXTERN_BYTES * finisher_count
@@ -218,24 +215,23 @@ finisher_kept(context: int, instance: int): int := {
 	}
 	instance
 }
-# each kept `finished()` called, in the order its module was used
+# each kept `finished()` called, in the order its module was used; an exit or a failure inside one ends the run with
+# its status
 each_finished() := {
 	global finisher_count
 	global finishing
 	i = 0
 	while i < finisher_count {
-		wasmtime_func_call(finishing, finishers + EXTERN_BYTES * i + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, host_block(8))
+		trap_at = host_block(8)
+		if failed(wasmtime_func_call(finishing, finishers + EXTERN_BYTES * i + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, trap_at), trap_at) { ended(memory_word(STATUS_AT)) }
 		i += 1
 	}
 }
 # whether the linker holds the module of the name vector `from` already, by its memory
-module_started(linker: int, context: int, from: int): bool := {
-	memory = host_block(VECTOR_BYTES)
-	set_long_at(memory, byte_count(MEMORY_NAME))
-	set_long_at(memory + 8, host_of(c_text(MEMORY_NAME)))
-	wasmtime_linker_get(linker, context, from, memory, host_block(EXTERN_BYTES)) % BOOL_BYTE != 0
-}
-# a word the program imports, a host name vector, that its started module does not export, said; no
+module_started(linker: int, context: int, from: int): bool := linker_holds(linker, context, from, byte_vector(MEMORY_NAME))
+# whether the linker holds the word of the name vector `name` from the module of the name vector `from`
+linker_holds(linker: int, context: int, from: int, name: int): bool := wasmtime_linker_get(linker, context, from, name, host_block(EXTERN_BYTES)) % BOOL_BYTE != 0
+# a word the program imports, a host name vector, that its running module does not export, said; no
 missing_word_said(word: int, module_name: text): bool := said_none("wap: no ${vector_text(word)} in ${module_name}") != 0
 # the text of a host name vector (size, data)
 vector_text(vector: int): text := c_copied(long_at(vector + 8), long_at(vector))
@@ -285,9 +281,7 @@ temporary_path(template: text): text := temporary_folder() + template
 # TMPDIR, else the user's temporary folder
 temporary_folder(): text := {
 	given = getenv("TMPDIR")
-	if given != "" then given else user_temporary_folder()
-}
-user_temporary_folder(): text := {
+	if given != "" { return given }
 	folder = host_block(PATH_BYTES)
 	confstr(USER_TEMPORARY_FOLDER, folder, PATH_BYTES)
 	c_text_from(folder)
