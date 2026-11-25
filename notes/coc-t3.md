@@ -60,8 +60,10 @@ TYPE fact holds `Number(place)` in that table.
   a TYPE fact compared with `==` compares the types. A type word gets its constant's id from `words` the first time
   the door reads it, an opaque constant without levels. T3e and T3f move these ids to the program's kernel
   environment, once the prelude declares the words there.
-- **The table travels with the program,** not as a global: TypingState holds it while analyze types the program,
-  and the pipeline hands it to emit with the typed program. `value_type(n)` and emit's `type_of(n)` read through it.
+- **The table is the compile's own, as a symbol table is:** one value for the whole run in core/type_notation.wap
+  (`TYPES`), so `value_type(n)` and emit's `type_of(n)` read a fact through it without a parameter. Handing it down
+  would add a parameter to about 300 functions of analyze, emit and rules, and give nothing: a run compiles one
+  program, and a table that only grows reads the same from every stage.
 - **Signatures hold terms:** `Signature.parameters: list<Term?>` and `result: Term?`. declare reads each written
   type through the door as it builds them.
 - **The warm state is unchanged.** It packs the files read and the modules lowered, which is code with its types

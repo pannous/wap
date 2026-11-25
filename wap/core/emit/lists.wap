@@ -23,7 +23,7 @@ TYPED_HELPERS = {
 	"list_pop": popping_function, "list_slice": list_slicing_function
 }
 # a call of the helper of an operation on a value of this type
-typed_helper_called(operation: text, type: Node, p: Program) as list<int> := helper_call(p, "${operation} ${type}", q => TYPED_HELPERS[operation](q, type))
+typed_helper_called(operation: text, type: Term, p: Program) as list<int> := helper_call(p, "${operation} ${type}", q => TYPED_HELPERS[operation](q, type))
 # the count of any list, read from the list base every list's type extends
 counted_items(p: Program) as list<int> := instruction(STRUCT_GET, [list_base(p.m), LIST_COUNT_AT]) + I64_EXTEND_I32_U
 
@@ -33,13 +33,13 @@ list_made(item: Node, items: list<Code>, p: Program) as list<int> := i32_const(#
 
 # The helpers of list_item and list_set, an item at a place counted from 0, an int: locals 0 the list, 1 the place, for
 # list_set 2 the value. A place at or past the count raises.
-item_reading_function(p: Program, type: Node) as int := added_function(p.m, [list_layout(type, p), I64], [item_layout(type, p)], [], place_checked(type, p) + item_read(type, 0, int_local(1), p))
-item_setting_function(p: Program, type: Node) as int := added_function(p.m, [list_layout(type, p), I64, item_layout(type, p)], [], [], place_checked(type, p) + items_in(type, 0, p) + int_local(1) + local_get(2) + instruction(ARRAY_SET, [items_array(type, p)]))
-place_checked(type: Node, p: Program) as list<int> := int_local(1) + count_in(type, 0, p) + I32_GE_U + if_block(raised(NO_SUCH_ITEM, p))
+item_reading_function(p: Program, type: Term) as int := added_function(p.m, [list_layout(type, p), I64], [item_layout(type, p)], [], place_checked(type, p) + item_read(type, 0, int_local(1), p))
+item_setting_function(p: Program, type: Term) as int := added_function(p.m, [list_layout(type, p), I64, item_layout(type, p)], [], [], place_checked(type, p) + items_in(type, 0, p) + int_local(1) + local_get(2) + instruction(ARRAY_SET, [items_array(type, p)]))
+place_checked(type: Term, p: Program) as list<int> := int_local(1) + count_in(type, 0, p) + I32_GE_U + if_block(raised(NO_SUCH_ITEM, p))
 
 # The helper of list_add: the item put at the count, the array first copied into a larger one when full. Its locals:
 # 0 the list, 1 the item, 2 the larger array.
-adding_function(p: Program, type: Node) as int := {
+adding_function(p: Program, type: Term) as int := {
 	array = items_array(type, p)
 	full = count_in(type, 0, p) + items_in(type, 0, p) + ARRAY_LEN + I32_EQ
 	grown = items_in(type, 0, p) + ARRAY_LEN + i32_const(2) + I32_MUL + i32_const(GROWTH) + I32_ADD + instruction(ARRAY_NEW_DEFAULT, [array]) + local_set(2) + local_get(2) + i32_const(0) + items_in(type, 0, p) + i32_const(0) + count_in(type, 0, p) + instruction(ARRAY_COPY, [array, array]) + local_get(0) + local_get(2) + instruction(STRUCT_SET, [list_struct(type, p), LIST_ITEMS_AT])
@@ -47,14 +47,14 @@ adding_function(p: Program, type: Node) as int := {
 	added_function(p.m, [list_layout(type, p), item_layout(type, p)], [], [nullable(array)], full + if_block(grown) + put + counted_by(type, 1, p))
 }
 # The helper of list_pop: the last item taken off; an empty list raises. Its local: 0 the list.
-popping_function(p: Program, type: Node) as int := {
+popping_function(p: Program, type: Term) as int := {
 	none_left = count_in(type, 0, p) + I32_EQZ + if_block(raised(POPPED_EMPTY, p))
 	last = item_read(type, 0, count_in(type, 0, p), p)
 	added_function(p.m, [list_layout(type, p)], [item_layout(type, p)], [], none_left + counted_by(type, -1, p) + last)
 }
 # The helper of array_slice given a list: a new list of `count` items from the place `from`, counted from 0. Its
 # locals: 0 the list, 1 from, 2 count, 3 the new array. A slice past the count raises.
-list_slicing_function(p: Program, type: Node) as int := {
+list_slicing_function(p: Program, type: Term) as int := {
 	array = items_array(type, p)
 	checked = count_in(type, 0, p) + int_local(1) + int_local(2) + I32_ADD + I32_LT_U + if_block(raised(NO_SUCH_ITEM, p))
 	added_function(p.m, [list_layout(type, p), I64, I64], [list_layout(type, p)], [nullable(array)], checked + slice_copied(array, items_in(type, 0, p)) + int_local(2) + local_get(3) + instruction(STRUCT_NEW, [list_struct(type, p)]))
@@ -67,23 +67,23 @@ map_made(map: Node, keys: list<Code>, values: list<Code>, p: Program) as list<in
 }
 
 # the wasm types of a list: the struct, a reference to it, the array of its items, an item's layout
-list_struct(type: Node, p: Program) as int := list_index(type, p.m, p.records) ?? refused(type, NO_ITEM_LAYOUT)
+list_struct(type: Term, p: Program) as int := list_index(type, p.m, p.records) ?? refused(type, NO_ITEM_LAYOUT)
 # DEBT: one layout per item type (an array of i64 for list<int>, of references for list<Node>): a list<int> can't
 #   stand where a list of anything is wanted without a copy, and lists are shared, so a copy changes meaning. Paid off
 #   when every list and map holds references (small ints as i31, others boxed) and `list<int>` is a promise typing
 #   checks with a cast at the read: any list fits a bare `list`, the list words exist once.
-list_layout(type: Node, p: Program) as list<int> := nullable(list_struct(type, p))
-items_array(type: Node, p: Program) as int := items_index(type, p.m, p.records) ?? refused(type, NO_ITEM_LAYOUT)
-list_item(type: Node) as Node := item_type(type) ?? refused(type, "this list type names no item type")
-item_layout(type: Node, p: Program) as list<int> := known_layout(list_item(type), p)
+list_layout(type: Term, p: Program) as list<int> := nullable(list_struct(type, p))
+items_array(type: Term, p: Program) as int := items_index(type, p.m, p.records) ?? refused(type, NO_ITEM_LAYOUT)
+list_item(type: Term) as Node := item_type(type) ?? refused(type, "this list type names no item type")
+item_layout(type: Term, p: Program) as list<int> := known_layout(list_item(type), p)
 # the count or the items array of the list in a local, or of the one on the stack for ø
-count_in(type: Node, local: int?, p: Program) as list<int> := list_field(type, local, LIST_COUNT_AT, p)
-items_in(type: Node, local: int?, p: Program) as list<int> := list_field(type, local, LIST_ITEMS_AT, p)
+count_in(type: Term, local: int?, p: Program) as list<int> := list_field(type, local, LIST_COUNT_AT, p)
+items_in(type: Term, local: int?, p: Program) as list<int> := list_field(type, local, LIST_ITEMS_AT, p)
 # the item at a place of the list in a local, or of the one on the stack for ø
-item_read(type: Node, local: int?, place: list<int>, p: Program) as list<int> := items_in(type, local, p) + place + instruction(ARRAY_GET, [items_array(type, p)])
-list_field(type: Node, local: int?, at: int, p: Program) as list<int> := (if local == ø then [] else local_get(local)) + instruction(STRUCT_GET, [list_struct(type, p), at])
+item_read(type: Term, local: int?, place: list<int>, p: Program) as list<int> := items_in(type, local, p) + place + instruction(ARRAY_GET, [items_array(type, p)])
+list_field(type: Term, local: int?, at: int, p: Program) as list<int> := (if local == ø then [] else local_get(local)) + instruction(STRUCT_GET, [list_struct(type, p), at])
 # the list in local 0 counted up or down by one
-counted_by(type: Node, step: int, p: Program) as list<int> := local_get(0) + count_in(type, 0, p) + i32_const(step) + I32_ADD + instruction(STRUCT_SET, [list_struct(type, p), LIST_COUNT_AT])
+counted_by(type: Term, step: int, p: Program) as list<int> := local_get(0) + count_in(type, 0, p) + i32_const(step) + I32_ADD + instruction(STRUCT_SET, [list_struct(type, p), LIST_COUNT_AT])
 # a map's struct, the types of its lists of keys and of values
 map_struct(map: Node, p: Program) as int := map_index(map, p.m, p.records) ?? refused(map, "this is no map")
 # a map type's key type and value type, and the lists of them its parts are
