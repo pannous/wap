@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # A wap program built to a native executable: compiled by wap to a module, which wasm2c writes as C, which cc
 # builds with wasm2c's runtime, lib/native/wasi.c and the C glue of its imports (main.c, glue.awk beside this
-# script). The program uses no GC value: no list or raise; a text is in the module's memory, as the compiler writes one
-# that reads types/memory_texts.wap in the place of types/text_bytes.wap.
+# script). wasm2c takes no GC type, so its texts, lists, enums and class instances are in the module's memory
+# (memory.wap beside this script), as the compiler writes them that reads types/memory_texts.wap and
+# types/memory_lists.wap in the place of types/text_bytes.wap and types/list_items.wap; an uncaught raise is written to
+# stderr. Maps, `any`, enums whose cases have fields and try/catch stay GC values it cannot use.
 #   wap/extensions/native/build.sh [--standalone] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]
 # --standalone: the parts of the compiler's seed folder (scripts/lib/wap-beside.sh WAP_PARTS) built into the executable,
 # which the native wap unpacks once into its cache folder (main.c wap_seed, linking.wap seed_folder_found) in place of

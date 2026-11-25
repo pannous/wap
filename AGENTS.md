@@ -8,8 +8,8 @@ reason (to warp-interviewer) instead of quietly obeying or breaking it.
 
 wap: a data format and WebAssembly programming language, warp's successor. Its specification is ./wiki.
 https://github.com/pannous/wap
-- The compiler is written in wap and compiles itself (wap/compiler.wap): The native warp runs the modules (soon wap too)
-- The seed: wap.wasm beside the warp binary, with the types module and kernel it reads beside it (published as
+- The compiler is written in wap and compiles itself (wap/compiler.wap): the native wap runs the modules (wap/extensions/native)
+- The seed: wap.wasm beside the native wap, with the types module and kernel it reads beside it (published as
   pre-releases wap-seed-<date>-<sha8>, named by wap-seed.lock; scripts/refresh-seed.sh refreshes it). The tests'
   compiler is built from it (test/wap/compile.sh): the seed beside its own types module makes wap0, wap0 beside the tree's
   types module makes wap1.
@@ -53,7 +53,7 @@ bash test/wap/run.sh --wait <area>...     # the tests of what a change touches: 
 bash test/wap/run.sh --wait [--stage <n>]   # all scripts (the integrator), --stage: wap built of itself n times
 bash test/wap/ratchet_census.sh             # the census: every function of wap's source typed (the integrator)
 scripts/refresh-seed.sh [--check]           # wap's seed refreshed and published
-warp --no-window <module.wasm> <program.wap> <out.wasm>   # a compiler module run by the host
+wap <module.wasm> <program.wap> <out.wasm>   # a compiler module run by the native wap (wap/extensions/native)
 ```
 <!-- todo (card wap-command-options): wap app with test options as before-->
 
@@ -66,7 +66,7 @@ removed by whoever meets it.
 ## Folders
 - `test/` = every kept test: test programs test/test_<area>.wap (check.wap), test/wap/ the scripts for what a program cannot check; `data/` = kept but ignored: logs, builds, dumps (`data/<topic>/`).
 <!-- DONE (card shell-test-scripts) turn test/wap/*.sh into pure test/*.wap -->
-- `notes/` = the design: backbone.md (stages, milestones, Debts), wap.md (owners, layout), kernel.md, rules.md.
+- `notes/` = the design: backbone.md (stages, milestones), debts.md, theory.md, coc-plan.md; owners and layout in notes/agents/wap-owner.md.
   Notes say how things are, never how they came to be: no history, no "learned on <date>" stories; history is in git (user).
 <!-- todo (card wap-notes-cleanup): cleanup notes: Everything should already be in the specification, agents.md or roles !  -->
 
