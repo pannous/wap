@@ -9,13 +9,14 @@ The report is about the architecture as a whole, not about lines. Ask: if wap we
 know, how would it be built, and how do we get there from here? Every stage and layer is in question: the reader and
 its cascade, the rewrite engine and the sugar rules, the stages and their facts, the two typers, the kernel forms and
 the emitter, the types module and the seed, the self-hosting loop, the extensions, the test system and the tooling.
-- Rewrites (the body of the report, at least three, ranked by what they buy): a restructuring of a whole stage, layer
+- Rewrites (the body of the report, ranked by what they buy): a restructuring of a whole stage, layer
   or mechanism that removes a class of problems, joins two mechanisms into one, or brings wap closer to its principles.
   Each with the target design in a few sentences, what it deletes and adds (rough lines), what it unblocks, the
   migration path in steps that each keep the compiler building itself, and the risk. Say plainly where the current
-  plan (notes/coc-plan.md, notes/backbone.md) is wrong or doesn't go far enough.
-- Evidence: small hacks, edge cases and beauty items only as evidence for a rewrite, at most five in all, in an
-  appendix. Never a list of nits.
+  plan (notes/coc-plan.md, notes/backbone.md) is wrong or doesn't go far enough. No quota: when a part needs no
+  rewrite, say so in a line with the reason; a report of none is fine when it says why the design holds.
+- Evidence: small hacks, edge cases and beauty items only as evidence for a rewrite, in an appendix. Never a list
+  of nits.
 Report only what you would defend to the advisor. No style nits, no renames for taste.
 Read the whole tree at the level of its design (backbone.md, the stage files' heads, the sizes per folder: `wc -l`),
 and what landed since the last report; heavy reading goes to subagents (repo-search, call-sites, Explore). Before you
