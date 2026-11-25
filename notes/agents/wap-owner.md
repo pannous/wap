@@ -63,6 +63,9 @@ wap/
   kernel/                     the kernel layer: the emitter's whole input language
     forms.wap                 the kernel forms, each a named pattern of Node
     surface.wap               the forms rules write and typing turns into kernel forms (Item, Variable)
+    terms.wap … numbers.wap   the type theory's kernel (notes/theory.md, notes/coc-plan.md 6 and 7): terms, levels,
+                              typing, equality, computing, inductive types, recursors, quotients, the environment,
+                              show, numbers; the door wap/extensions/theory/check.wap and the elaborator use it
 
   core/                       the machinery: mechanisms only, no names of a domain
     pipeline.wap              one function per step from source to typed program, shared by compiler and census

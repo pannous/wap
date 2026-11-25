@@ -1,6 +1,7 @@
 # The theory's kernel: its files and what each gives the others
 
-The kernel of notes/coc-plan.md (sections 6 and 7) lies in `wap/extensions/theory/`, a module of its own beside the
+The kernel of notes/coc-plan.md (sections 6 and 7) lies in `wap/kernel/` (terms.wap to numbers.wap below); the door,
+the elaborator, the prelude and the rest of this table lie in `wap/extensions/theory/`, a module of its own beside the
 compiler. This note is the contract between its files: what each holds, the functions the others call, and the rules
 all of them keep. The plan says what the rules are; this note says where they live.
 
