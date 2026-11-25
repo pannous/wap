@@ -93,8 +93,8 @@ class WrittenCase { name: text; type: Term }
 class BlockType { name: text; type: Term; cases: list<WrittenCase> }
 class InductiveBlock { levels: list<text>; parameters: int; types: list<BlockType> }
 type_names(block: InductiveBlock): list<text> := block.types.map(type => type.name)
-# What checks 1 to 5 found of a block, so the recursors are made without finding it again: the block as declared; the
-# block made plain, its types first and then one for each container a type of it is nested in, each case over those
+# What checks 1 to 5 found of a block, so the recursors are made without finding it again: the block as declared and
+# its types' constants at its level parameters; the block made plain, its types first and then one for each container a type of it is nested in, each case over those
 # types as a block is written, as the added ones are never declared; each container as a function of the block's
 # parameters (nested.wap); the universe its types lie in; each type's count of indices; each case's count
 # of fields and the places of the fields that hold a type of the block, by type and then by case; whether its
@@ -102,6 +102,7 @@ type_names(block: InductiveBlock): list<text> := block.types.map(type => type.na
 # case, no indices, holding no value of itself) and K (a proposition of one type, one case without fields)
 class InductiveFacts {
 	block: InductiveBlock
+	types: list<Term>
 	plain: InductiveBlock
 	nested: list<Term>
 	level: Level
@@ -127,6 +128,12 @@ class RecursorFacts {
 	rules: list<Term>
 	k: bool
 }
+
+# a type's place in its block, 0 for a constant of none of its types
+type_place(facts: InductiveFacts, type: Term): int := facts.types.index_where(own => is_constant(own, type))
+# a case of a block's type at the type's levels, by its place: a block declares each type with its cases right after
+# it, so a case's id is its type's and its place
+block_case(facts: InductiveFacts, type: Term, place: int): Term := constant(constant_id(type) + place, facts.block.types#(type_place(facts, type)).cases#place.name, constant_levels(type))
 
 # A declaration: its name, the names of its level parameters, its type, and what it is
 class Declaration { name: text; levels: list<text>; type: Term; kind: DeclarationKind }
@@ -155,14 +162,16 @@ class Environment {
 	log: list<Declaration> = []
 	# the id of each live declaration, by its name
 	ids: map<text, int> = {}
-	# the axioms each declaration rests on, through everything its type and its value name
-	axioms: map<text, list<text>> = {}
+	# the axioms each declaration rests on, by id, through everything its type and its value name
+	axioms: map<int, list<int>> = {}
 	# the number type and the shortcuts, once the numbers statement bound them (numbers.wap)
 	numbers: Numbers? = ø
 	# the function a text literal stands for and the list it takes, once the texts statement bound them (numbers.wap)
 	texts: Texts? = ø
 	# the pair and the unit types, once the products statement bound them (below.wap)
 	products: Products? = ø
+	# the quotient and the maker of its values, once the quotients statement declared them (quotients.wap)
+	quotients: Quotients? = ø
 	# the courses below.wap made, so a course of the same name the program declared is never taken for one
 	courses: list<text> = []
 	# what it accepted, in order, as it was given: what an export writes (export.wap)
@@ -176,6 +185,8 @@ enum Accepted {
 }
 # the pair type and its one case, the unit type and its one case, each a constant
 class Products { pair: Term; intro: Term; unit: Term; one: Term }
+# the quotient type and the maker of its values, each a constant
+class Quotients { former: Term; made: Term }
 declaration(e: Environment, name: text): Declaration? := e.log#(e.ids.get(name) ?? return ø)
 # the declaration of a name that must be declared, else refused
 # the declaration of an id while it is live; ø for an id taken back or never given
@@ -215,30 +226,16 @@ size(e: Environment): int := #e.log
 declared_names(e: Environment): list<text> := e.ids.keys()
 # Every axiom a declaration rests on (`axioms of name`): an axiom rests on itself, any other declaration on what the
 # names in its type and its value rest on, an opaque value's names too
-axioms_of(e: Environment, name: text): list<text> := e.axioms.get(name) ?? []
+axioms_of(e: Environment, constant: Term): list<text> := (e.axioms.get(constant_id(constant)) ?? []).map(id => e.log#id.name)
 # the axioms a declaration rests on as `axioms of` prints them, `[hard]`
-axioms_shown(e: Environment, name: text): text := "[${axioms_of(e, name).join(", ")}]"
-# what a new declaration of these terms rests on, recorded under its name; `own` is yes for an axiom
-rests_on(e: Environment, name: text, terms: list<Term>, own: bool) := {
-	named: map<text, bool> = {}
-	for t in terms { constants_named(t, named) }
-	resting: list<text> = if own then [name] else []
-	for used in named.keys() {
-		for axiom in axioms_of(e, used) { if not resting.contains(axiom) { resting += [axiom] } }
+axioms_shown(e: Environment, constant: Term): text := "[${axioms_of(e, constant).join(", ")}]"
+# what the declaration of this id rests on, through the constants of these terms; `own` is yes for an axiom
+rests_on(e: Environment, id: int, terms: list<Term>, own: bool) := {
+	resting: list<int> = if own then [id] else []
+	for used in terms.flat_map(constants_in) {
+		for axiom in e.axioms.get(constant_id(used)) ?? [] { if not resting.contains(axiom) { resting += [axiom] } }
 	}
-	e.axioms[name] = resting
-}
-# the constants a term names, each once, gathered into a map whose keys they are
-constants_named(t: Term, named: map<text, bool>) := {
-	match t.shape {
-		Constant(name, levels, _) => { named[name] = yes }
-		Apply(function, argument) => { constants_named(function, named); constants_named(argument, named) }
-		Lambda(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
-		Pi(binder, domain, body) => { constants_named(domain, named); constants_named(body, named) }
-		LetIn(binder, type, value, body) => { constants_named(type, named); constants_named(value, named); constants_named(body, named) }
-		Projection(structure, field, of) => { named[constant_name(structure)] = yes; constants_named(of, named) }
-		_ => ø
-	}
+	e.axioms[id] = resting
 }
 # whether a declaration was stated as written, not made by a block or the quotients
 stated(d: Declaration): bool := match d.kind {
@@ -269,8 +266,9 @@ class Reach {
 	numbers: Numbers? = ø
 	texts: Texts? = ø
 	products: Products? = ø
+	quotients: Quotients? = ø
 }
-mark(e: Environment): Reach := Reach(#e.log, #e.accepted, #e.courses, e.numbers, e.texts, e.products)
+mark(e: Environment): Reach := Reach(#e.log, #e.accepted, #e.courses, e.numbers, e.texts, e.products, e.quotients)
 # the environment taken back to a reach: each declaration made since loses its name, its id stays given, so a term or
 # a kept answer naming it finds nothing; the bindings and the courses are what they were then
 back_to(e: Environment, reach: Reach) := {
@@ -278,7 +276,7 @@ back_to(e: Environment, reach: Reach) := {
 		name = e.log#id.name
 		if e.ids.get(name) == id {
 			e.ids.remove(name)
-			e.axioms.remove(name)
+			e.axioms.remove(id)
 		}
 	}
 	e.accepted = e.accepted.take(reach.accepted)
@@ -286,6 +284,7 @@ back_to(e: Environment, reach: Reach) := {
 	e.numbers = reach.numbers
 	e.texts = reach.texts
 	e.products = reach.products
+	e.quotients = reach.quotients
 }
 # Every take-back is this: what an attempt gives, kept with what it declared; where it gives ø or refuses, the
 # environment taken back to where it was before it, never by hand
