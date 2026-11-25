@@ -326,4 +326,8 @@ print "${t.month} ${t.day} ${t.yearday}"')" "2 2 61"
 # a class extending another, its instance passed where the class it extends is taken (wiki/class.md), run by the native wap
 printf '%s\n' 'class Shape { x: int; twice() := x * 2 }' 'class Square extends Shape { side: int }' 'shape_x(s: Shape) := s.x' 'print shape_x(Square(3, 4)) + Square(3, 4).twice()' >"$stage/extends.wap"
 check "wap runs a class extending another" "$(cd "$stage" && "$native_wap" extends.wap 2>&1)" "9"
+# a C function from a library named by its path (card native-other-platforms), which the executable loads when the program calls it
+printf '%s\n' 'long doubled(long x) { return 2 * x; }' >"$stage/doubled.c" && cc -shared -o "$stage/libdoubled.dylib" "$stage/doubled.c"
+check "a native program calls C from a library named by its path" "$(native_ran doubled_by_path "doubled(x: i64): i64 from '$stage/libdoubled.dylib'
+exit(doubled(21))" >/dev/null; echo $?)" "42"
 exit $((failures > 0))
