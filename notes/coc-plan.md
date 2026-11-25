@@ -21,7 +21,7 @@ cut and what is open.
 - The rules are those of Lean 4's kernel, the best-tested rules for exactly this list of features, with four
   stated departures (section 6). Nothing of Lean itself is used: syntax, elaborator, library and provers are wap's
   own, written in wap.
-- Cost: the compiler grows from about 12,300 lines to about 17,020, at the ceiling of 17,000, about 2,500 of them trusted.
+- Cost: the compiler grows from about 12,300 lines to about 17,020, near the ballpark of 17,000, about 2,500 of them trusted.
 
 ## 1 What is asked
 
@@ -353,8 +353,8 @@ options.wap: 441 lines) stays in the extension and uses wap/kernel.
 
 ### 5.3 Size
 
-The whole compiler (wap/core, wap/kernel, wap/types, sugar, compiler.wap and nodes.wap) stays under a ceiling of
-17,000 lines (user 2026-11-25). Today, counted with `wc -l` over the .wap files, and the target the steps of 11 add
+The whole compiler (wap/core, wap/kernel, wap/types, sugar, compiler.wap and nodes.wap) is guided by a ballpark of
+17,000 lines (user 2026-11-25), not a gate: a step that needs more lines gets them without a question. Today, counted with `wc -l` over the .wap files, and the target the steps of 11 add
 up to:
 
 | part | today | target | trusted |
@@ -368,19 +368,19 @@ up to:
 | compiler.wap, nodes.wap | 326 | 326 | no |
 | **the compiler** | **12,324** | **17,021** | |
 
-That is about 20 lines over the ceiling, with the emitter's step T1b (about −100) counted. It holds with about 20
-lines found in any step, or with T8 (storage by context) cut, which gives 16,841; and in every case only if
+That is about 20 lines above the ballpark, with the emitter's step T1b (about −100) counted; cutting T8 (storage
+by context) gives 16,841. The total holds near the ballpark only if
 the steps delete the five analyze files they replace (letters.wap, fits.wap, conditions.wap, matching.wap,
 dispatch.wap: 983 lines) and analyze's own numerals; kept, the compiler ends near 18,050. The estimates for T3 to T6
 rest on the theory extension's elaborator, which does the same work in about 2,175 lines plus below.wap (141) and
-run/erase.wap (315); an overrun of a few hundred lines in any of them passes the ceiling, and goes to the user.
+run/erase.wap (315); an overrun in any of them is taken as needed; each step reports its measured lines.
 
 Outside the compiler, in wap/extensions/proof, which only `wap check` and proofs load: the provers (951 lines today,
 2,000 to 3,000 with P3 and P4), the second opinion and its export (1,309), the arithmetic proofs, and the door
 `wap check` on the explicit spellings (441). wap/extensions/theory (8,425 lines today) is gone after T7: its kernel
 moved in, its elaborator deleted file by file as analyze takes each job over. The kernel has no unbounded
-arithmetic: its numbers are i64 with an overflow check (6.7). The size ceiling of wap's source
-(test/wap/ratchet_census.sh) is raised by hand with each step that lands, never past what 17,000 lines allow.
+arithmetic: its numbers are i64 with an overflow check (6.7). The size limit of wap's source
+(test/wap/ratchet_census.sh) is raised by hand with each step that lands, by what the step measured.
 
 ### 5.4 Core knows no library word
 
@@ -970,8 +970,9 @@ follow the theory extension's elaborator, which does the same work today:
 | T8 | 200 emit and types | 20 | | +180 |
 | **all** | **6,130** | **1,433** | **1,023 of analyze** | **+4,697** |
 
-The compiler ends at about 17,021 lines, about 20 over the ceiling of 17,000; it holds only with the deletions
-above and about 20 lines found, or T8 cut (5.3). A step that clearly overruns its estimate, or would pass the ceiling, goes to the user before it lands.
+The compiler ends at about 17,021 lines, near the ballpark of 17,000, with the deletions above (5.3). A step that
+needs more lines takes them and reports its measured lines; only a jump far above the ballpark goes to the
+interviewer.
 
 K7 any time after K2, in the proof extension.
 
@@ -1057,8 +1058,9 @@ Decided by the user (2026-11-25), the basis of track T:
   larger numbers in proofs comes from a module only proofs load.
 - **The provers (P3, P4), the second opinion (K7) and the arithmetic proofs** live in an extension that only
   `wap check` and proofs load.
-- **Size.** The whole compiler stays under about 17,000 lines (5.3). Each step reports its measured core and kernel
-  lines; a clear jump over its estimate or over the ceiling goes back to the user.
+- **Size.** About 17,000 lines for the whole compiler is a ballpark, not a gate (5.3): "If someone needs more, give
+  him more." Each step reports its measured core and kernel lines; only a jump far above the ballpark goes to the
+  interviewer.
 - The audit's Prim(shown) mark goes with the table of primitives (T1), the typed_readings global with the numbers
   step, where typing's readings become facts on the nodes (T3).
 - **`i64` is the integers modulo 2^64** (prelude/checked.wap: `quotient(int, wrapped_alike)`), as Lean's `Int64`.
@@ -1071,7 +1073,7 @@ Decided by the user (2026-11-25), after the audits:
 - **A checked library carried once, trusted as built.** A compiled library carries its declarations as the kernel
   accepted them when the library was built, with their erased bodies; templates, rules and class hierarchies still
   travel as source. The library's reader joins the trust base. About 60 lines in extensions/wasm, outside the
-  ceiling, deleting about 150 there (the warm state, one of two section readers); it lands by T5.
+  compiler's count, deleting about 150 there (the warm state, one of two section readers); it lands by T5.
 - **The emitter decides nothing it can be told**, as step T1b right after T1: about −100 lines (5.3).
 - **Native builds**, in the user's words: "use the full packet on demand and the small version whenever possible,
   consider adding the universal conversion mechanisms where needed". `wap build` makes the small executable (wasm2c,
@@ -1080,7 +1082,7 @@ Decided by the user (2026-11-25), after the audits:
   layout and takes the full one where that refuses. The memory layout keeps the forms it has; T5 and T8 emit their
   new forms for the GC layout only. A conversion between the layouts is written once, generally, where a value
   crosses from one to the other, and only when a program needs it. 0 core lines; about 60 in extensions/native (the
-  launcher and the choice), outside the ceiling.
+  launcher and the choice), outside the compiler's count.
 - **Both value layouts stay**; no spike, and the driver keeps the memory layout.
 - **One test command against a baseline**: the tests' known reds are listed once, and a run reports only what
   changed against them (card test-regression-known).
