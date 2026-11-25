@@ -76,6 +76,10 @@ class Environment {
   declaration and is refused ("unknown name"), never read as some later declaration.
 - **No name index in the kernel** (from T2d): `ids` leaves it. Which id a written name means belongs to the door's
   and the elaborator's scope: the door keeps its own `map<text, int>`, the elaborator one per module.
+- **The seam with TM** (notes/coc-tm.md): a module's scope is the theory extension's `map<text, int>`, keyed by
+  core's module_key, built from the scopes of the module's direct uses in written order and then its own
+  declarations, each from its declaration on. Core declares nothing for it: it reads only the key and the uses
+  (each module's Grammar `uses` once TM lands, modules_of until then).
 - **Ids, not names.** `Constant(id: int, levels)` replaces `Constant(name: text, levels)`. Hashing and comparing
   a constant becomes one integer operation. `show` prints `log.entries[id]`'s name, so a name's text is used only
   for showing. `Numbers`, `RecursorFacts`, `InductiveFacts` and `QuotientPart` hold ids. The kernel no longer has a
