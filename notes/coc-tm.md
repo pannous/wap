@@ -44,6 +44,8 @@ grammar(file) = base, then each used file's grammar merged in written order, the
                 each from where it stands on
 ```
 
+- **Transitive.** A `use` brings in the used module's whole grammar, including what that module uses, so syntax
+  carries on through each `use`.
 - **Merged** means rows are appended and maps are updated, the way `operators_declared` and `rules_loaded` add to
   the one table today. A row that comes twice (a diamond `use`) is the same row, and is kept once, as
   `rules_loaded` already keeps a rule loaded twice once. The name indexes and `looser_than` are rebuilt once per
@@ -139,6 +141,18 @@ Each is one landing, careful path (reader, self build, seed), measured against t
 declaration, or used in a file that does not `use` its module, stops reading. Before TM2 and TM3 a census of the
 tree lists every such place, and those places are edited in the step's first commit. If the seed's own source
 needs the old reading, the step lands after a seed refresh.
+
+## The wiki before TM2 and TM3
+
+The user approves each wiki change, sent through wap-interviewer with the old and the new text.
+
+- **wiki/use.md** says nothing on syntax. wiki/wasm-representation.md:32 says "A use brings in syntax too". Before
+  TM2, use.md needs a sentence of its own:
+  > "A module's operators, rules and aliases reach the files that use it, and the files that use those in turn; a
+  > file that does not use the module never sees them."
+- **wiki/operator.md:146** says "A declared operator binds like `+` and is known in the whole file". TM3 makes it
+  "known from its declaration on, in its file and in the files that use it". This is a rewrite of the spec, so it
+  needs the user's approval before TM3.
 
 ## Open
 
