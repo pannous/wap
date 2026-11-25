@@ -388,8 +388,10 @@ The kernel and the elaborator name no library word. Where a mechanism needs one,
 declaration:
 - **numbers**: which type number literals belong to, and which functions the arithmetic shortcuts stand for (6.7);
 - **quotient**: which type is the equality (6.6);
-- **texts**: a text literal is the library's function from the number that spells its code points, applied to that
-  number: a 1 and then the code points, base 0x110000, so every text has its own number (`texts(text_of)`). The kernel has one literal, the natural number;
+- **texts**: a text literal is the kernel's second literal, typed by the library's function from a list of code
+  points; where a rule asks for a constructor it opens into that function applied to the list of its code points,
+  each a number, as Lean's string literal does (`texts(text_of, list.empty, list.item)`, notes/coc-t2.md). The
+  kernel has two literals, the natural number and the text;
 - **conversions, instances, the computation type, decidable conditions**: declarations of the types module that the
   elaborator's general mechanisms read (section 8); spellings such as `T where c`, `T?` and `if` reach library
   functions through rules in sugar/.
@@ -408,7 +410,7 @@ short of a compiler that builds the kernel itself wrongly (10.2).
 ## 6 The kernel
 
 The rules are Lean 4's kernel's, stated here as wap builds them, with four departures. Three only narrow what is
-accepted: the natural number is the one literal (a text literal is a library function of a number); no library name
+accepted: the natural number and the text are the literals (a text opens into a library function of its code points); no library name
 is written in the kernel, each is bound by a declaration (5.4); a projection is allowed only out of a structure that
 does not hold itself. One adds equalities, and has its own argument: arithmetic on literals is switched on by
 theorems instead of being built in (6.7). Every rule has a test on both sides: something it accepts and something
@@ -426,7 +428,8 @@ it refuses (section 11).
 | function | binder name, domain, body | `x => b` |
 | function type | binder name, domain, body | `(x: A) -> B`; `A -> B` when the body ignores the binder |
 | let | name, type, value, body | |
-| number | a natural number below 2^63, an i64 | the one literal |
+| number | a natural number below 2^63, an i64 | a literal |
+| text | its code points | a literal, opened into the bound function of the list of its code points |
 | projection | structure name, field index, term | a field of a structure value |
 
 A level is zero, a successor, `max`, `imax` or a parameter name. Terms are complete: no hole, no overload, no
@@ -859,6 +862,16 @@ by the second opinion, not by a test.
   two readings fit, refuse and name both.
 - **Compile time.** Every fact is now built through the kernel. Each T step measures the wall time of the
   self-build (`--stage 2`) before it lands: at most a fifth more than the step before, else it goes to the user.
+  The baseline before T3, a warm compile of `print "Hello"` on the Mac at 07e358d8, 350 ms in all
+  (scripts/compile-steps.wap measures it again):
+  | step | ms |
+  |---|---|
+  | the warm state brought in | 12 |
+  | the rules compiled (types/rules.wap, sugar/, the C function rules) | 56 |
+  | the types module declared, read from types.wasm | 187 |
+  | the program declared | 1 |
+  | typed, the library functions it calls included | 92 |
+  | emitted and encoded | 1 |
 - **The reach of the provers** decides how many laws read Proved. It grows a prover at a time and never blocks a
   program: an unproved law is Tested, an unproved obligation a check.
 - **Growing in place.** The compiler is written in wap and built from a seed, so each T step keeps its own source
@@ -938,7 +951,7 @@ step, measured against the step before; more goes to the user.
 |---|---|---|
 | T1 one table of primitives | wap/kernel/primitives.wap holds one row per host operation: its name, the wasm types it takes and gives, its builder; the emitter finds an operation by one lookup, and the Prim(shown) mark goes into the row; a `runs(…)` body is a `prim` of that table, checked against its row (9.7), and no wap spelling of a host operation is typed or checked | `runs(add, prim i64.add(m, n))` accepted, a body of the wrong width refused naming the row; the trust base listed by a command from the `runs(…)` declarations |
 | T1b the emitter decides nothing it can be told | the runtime routines are written in wap, the value layouts are rows of T1's table, and erasure is a stage of its own; the emitter only writes what the table and the stage tell it | every test as before; a value layout changed in its row alone, no emitter line touched |
-| T2 the kernel inside | the kernel (terms, levels, typing, equality, computing, inductive types, recursors, quotients, the environment, show) moves from wap/extensions/theory into wap/kernel; its typing becomes rule functions that each make one `Checked(term, type)`, and a node's fact is a judgement's number; the environment keeps declarations by id and is persistent: checking a declaration gives a new environment or a refusal, so a refused statement needs no rollback and a name's text is only how it is shown; kernel numbers are i64 with an overflow check (6.7); the door `wap check` stays in the extension and uses wap/kernel; the theory census (its statement floor and time ratio in test/wap/ratchet_census.sh) retires, the typing census guards from here on | the K and L test files green through the compiler's kernel; `2 + 2 == 4` by `refl`; a shortcut whose result passes 2^63 does not fire; `--stage 2` a fixed point |
+| T2 the kernel inside | the kernel (terms, levels, typing, equality, computing, inductive types, recursors, quotients, the environment, show) moves from wap/extensions/theory into wap/kernel; its typing becomes rule functions that each make one `Checked(term, type)`, and a node's fact is a judgement's number; the environment keeps declarations by id and is persistent: checking a declaration gives a new environment or a refusal, so a refused statement needs no rollback and a name's text is only how it is shown; kernel numbers are i64 with an overflow check (6.7); the door `wap check` stays in the extension and uses wap/kernel; the theory census (its statement floor and time ratio in test/wap/ratchet_census.sh) retires, the typing census guards from here on, over wap/kernel too, its size ceiling raised by the kernel's measured nodes; how it is built: notes/coc-t2.md | the K and L test files green through the compiler's kernel; `2 + 2 == 4` by `refl`; a shortcut whose result passes 2^63 does not fire; two modules that declare the same name both accepted, each one's uses meaning its own (format.wap's `Side`); `--stage 2` a fixed point |
 | T3 numbers and arguments found | the typer's types are kernel terms, one representation, compared by computing and shown as notation only in messages and `format`; analyze's readers of the notation read terms. analyze types each function once: a recursive function's header is typed first, an assignment of another type is a new binding, and the retypings and the fresh start on a retype go, since a discarded round would leave checked judgements behind (the dispatcher's restart goes with T6, the restart for a standard module brought in with T5). A kind rule's output is typed in place, at the node's position, as that node, and never fires on its own output. analyze types numbers through the kernel: a numeral has the type its place wants, else `int`; `i32` and `i64` the wrapping words; `#xs` an `int`; letters and `_` found by unification (E1); the readings typing chose travel as facts, so the typed_readings global goes. Until T5 a function analyze typed enters the kernel as an opaque constant by its signature, counted by the census as assumed; the numbers prelude is read in the explicit spelling | `0 - 3` is -3; `#xs - 1` is -1 on an empty list; `type of 3` is `int`; `identity(3)` and `identity(int)`; a recursive function whose result type is found from its body; a kind rule's error names the line of the phrase it rewrote |
 | T4 subtypes | `where`, `type X < T`, the declared conversions; `nat` is `int where it >= 0`; an obligation proved by computing or by facts in scope, else a check with the effect Fail (E4, 3.2, 3.3, 3.9) | `d: char = "a"` accepted and `d: char = "ab"` refused by `condition`; `char` is `text where #it == 1` and nothing else; `effects of` a function with a check left is Fail |
 | T5 definitions, statements and inductive types | enums, classes, functions, `match`, blocks, variables, loops and exits become kernel declarations and terms as analyze types them: inductive blocks, recursors, structural recursion, a measure, else Div; unions, optional values and `any`; `extends` as the closed sum, built by analyze from the class declarations while the `inherited` rule keeps copying the fields; a compiled library carries, beside its signatures, the bodies that may unfold (definitions a type or a proof computes with), as a Lean module does, which replaces the signatures-only format of notes/compile_inputs.md; a compiled library's declarations are
@@ -949,8 +962,10 @@ carried once, as the kernel accepted them when it was built (13); the emitter er
 
 Order: K1, then K2 to K6 in a row, with K3 right after K2 since every program is full of numbers. L follows K as
 its table says. P1 and P2 follow K4; P3 and P4 follow P2, in the proof extension. T1 to T8 follow one another, T1b right after T1, each
-landing before the next begins. T1 and T2 change the kernel the seed reads beside it, so each takes the careful
-path: the new kernel added, the seed refreshed, then the old code deleted. Each of T3 to T6 deletes the files of
+landing before the next begins. T1 changes the kernel the seed reads beside it, so it takes the careful
+path: the new kernel added, the seed refreshed, then the old code deleted. T2 changes nothing the seed reads (the
+compiler reads only kernel/forms.wap and links no moved file until T3), so its sub-steps land on the normal path
+plus the census (notes/coc-t2.md); T3, the first step whose core uses wap/kernel's typing, takes the careful path. Each of T3 to T6 deletes the files of
 wap/extensions/theory/elaborate whose job analyze took over, so the two typers never both do one job. The E
 milestones are reached in the T steps that name them.
 
