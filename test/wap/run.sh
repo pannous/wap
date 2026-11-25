@@ -22,6 +22,8 @@ REDS="$results/reds.txt"
 # the systems a baseline line may be red on alone, by uname's name: this one and the other
 SYSTEMS=(Darwin Linux)
 SYSTEM=$(uname -s)
+# a test runs headless: whatever it shows is saved, never painted in a window (the native wap's --no-window)
+HEADLESS=--no-window
 OTHER_SYSTEM=$(printf '%s\n' "${SYSTEMS[@]}" | grep -vx "$SYSTEM")
 # two cores stay free for the user's apps
 cores=$(( $(getconf _NPROCESSORS_ONLN) - 2 ))
@@ -90,8 +92,8 @@ known() {
 one_run() {
 	in_scripts "$1" && case $1 in *.wap) set -- "$here/$(basename "$1")" "$2" ;; esac
 	case $1 in
-		"$here"/*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/script.wasm" 2>&1 && $wap "$stage/script.wasm" "$wap" "$compiler" "$stage" "$tree" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
-		*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/test.wasm" 2>&1 && $wap "$stage/test.wasm" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
+		"$here"/*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/script.wasm" 2>&1 && $wap $HEADLESS "$stage/script.wasm" "$wap" "$compiler" "$stage" "$tree" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
+		*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/test.wasm" 2>&1 && $wap $HEADLESS "$stage/test.wasm" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
 		*) bash "$1" ${2:+--compiler "$2"} ;;
 	esac
 }
