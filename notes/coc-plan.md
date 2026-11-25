@@ -368,7 +368,7 @@ up to:
 | compiler.wap, nodes.wap | 326 | 326 | no |
 | **the compiler** | **12,324** | **17,021** | |
 
-That is about 20 lines above the ballpark, with the emitter's step T1b (about −100) counted; cutting T8 (storage
+That is about 20 lines above the ballpark, with the emitter's step T1b (measured: core −43, kernel +18) counted; cutting T8 (storage
 by context) gives 16,841. The total holds near the ballpark only if
 the steps delete the five analyze files they replace (letters.wap, fits.wap, conditions.wap, matching.wap,
 dispatch.wap: 983 lines) and analyze's own numerals; kept, the compiler ends near 18,050. The estimates for T3 to T6
@@ -975,7 +975,7 @@ follow the theory extension's elaborator, which does the same work today:
 | step | added | deleted | analyze file replaced | net |
 |---|---|---|---|---|
 | T1 | 60 kernel (the table) | 80 emit (seven tables, the spelling check) | | -20 |
-| T1b | 0 | 100 emit (routines and layouts moved into wap and T1's rows) | | -100 |
+| T1b | 53 core, 18 kernel (the runtime words, the value layouts as rows), 58 types (texts in wap) | 96 core (five text routines, the layout tables), 46 types (the twins of the two builds) | | -13 |
 | T2 | 2,300 kernel (moved, show.wap included, the unbounded numbers left behind), 60 kernel (judgements), 40 kernel (the environment by id, persistent) | 0 | | +2,400 |
 | T3 | 350 analyze (unification 180, numerals at their expected type 170), 100 analyze (types as terms, the notation's readers), 40 analyze (one pass: headers first, assignments as bindings), 20 rules (kind rules in place), 200 types (the numbers prelude) | 524 (504 analyze: the 464 below and 40 of restarts and retypings; 20 rules: the refiring) | letters.wap (235), fits.wap (189), typed_readings and analyze's own numerals (40) | +186 |
 | T4 | 450 analyze (conditions, obligations, conversions, below), 100 types | 141 analyze | conditions.wap (141) | +409 |
@@ -1089,7 +1089,7 @@ Decided by the user (2026-11-25), after the audits:
   accepted them when the library was built, with their erased bodies; templates, rules and class hierarchies still
   travel as source. The library's reader joins the trust base. About 60 lines in extensions/wasm, outside the
   compiler's count, deleting about 150 there (the warm state, one of two section readers); it lands by T5.
-- **The emitter decides nothing it can be told**, as step T1b right after T1: about −100 lines (5.3).
+- **The emitter decides nothing it can be told**, as step T1b right after T1: core −43, kernel +18, types +12 (5.3); the branches on a build keeping its values in the memory are T5's.
 - **Native builds**, in the user's words: "use the full packet on demand and the small version whenever possible,
   consider adding the universal conversion mechanisms where needed". `wap build` makes the small executable (wasm2c,
   values in the memory) when the program fits that layout, and an executable running the program's .cwasm by
