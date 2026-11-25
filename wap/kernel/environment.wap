@@ -131,7 +131,7 @@ class Declaration { name: text; levels: list<text>; type: Term; kind: Declaratio
 
 # the facts of a structure a name declares (7, check 7: one type, one case, no indices, holding no value of
 # itself), ø for any other name
-structure_facts(e: Environment, name: text): InductiveFacts? := match (e.declarations.get(name) ?? return ø).kind {
+structure_facts(e: Environment, name: text): InductiveFacts? := match (declaration(e, name) ?? return ø).kind {
 	Inductive(facts) => if facts.structure and facts.block.types#1.name == name then facts else ø
 	_ => ø
 }
@@ -143,11 +143,13 @@ unfolding(d: Declaration): Term? := match d.kind {
 	_ => ø
 }
 
-# The declarations accepted so far, and each one's place in the order of declaring, from 1: of two definitions the
-# later one unfolds first (6.5)
+# The declarations accepted so far, by id: the id is the place in the order of declaring, from 1, so of two
+# definitions the later one unfolds first (6.5). Ids are never given twice: a declaration taken back (`back_to`) keeps
+# its place in the log, and only a name that finds a live id finds a declaration
 class Environment {
-	declarations: map<text, Declaration> = {}
-	places: map<text, int> = {}
+	log: list<Declaration> = []
+	# the id of each live declaration, by its name
+	ids: map<text, int> = {}
 	# the axioms each declaration rests on, through everything its type and its value name
 	axioms: map<text, list<text>> = {}
 	# the number type and the shortcuts, once the numbers statement bound them (numbers.wap)
@@ -169,27 +171,18 @@ enum Accepted {
 }
 # the pair type and its one case, the unit type and its one case
 class Products { pair: text; intro: text; unit: text; one: text }
-declaration(e: Environment, name: text): Declaration? := e.declarations.get(name)
+declaration(e: Environment, name: text): Declaration? := e.log#(e.ids.get(name) ?? return ø)
 # the declaration of a name that must be declared, else refused
 declared_named(e: Environment, name: text): Declaration := {
 	d = declaration(e, name)
 	if d is ø { refused(UNKNOWN_NAME, "nothing is named ${name}") }
 	d!
 }
-place(e: Environment, name: text): int := e.places.get(name) ?? 0
-# another environment holding the same declarations, which may grow without this one growing
-copied(e: Environment): Environment := {
-	copy = Environment()
-	copy.declarations.update(e.declarations)
-	copy.places.update(e.places)
-	copy.axioms.update(e.axioms)
-	copy.numbers = e.numbers
-	copy.products = e.products
-	copy.texts = e.texts
-	copy.courses += e.courses
-	copy.accepted += e.accepted
-	copy
-}
+place(e: Environment, name: text): int := e.ids.get(name) ?? 0
+# the ids given so far, the live ones and those taken back
+size(e: Environment): int := #e.log
+# the names of the live declarations, in the order of declaring
+declared_names(e: Environment): list<text> := e.ids.keys()
 # Every axiom a declaration rests on (`axioms of name`): an axiom rests on itself, any other declaration on what the
 # names in its type and its value rest on, an opaque value's names too
 axioms_of(e: Environment, name: text): list<text> := e.axioms.get(name) ?? []
@@ -231,23 +224,47 @@ stated(d: Declaration): bool := match d.kind {
 # a declaration becomes part of the environment, checked first by typing.wap's `declared` or inductive.wap; one stated as
 # written is recorded for an export
 added(e: Environment, d: Declaration) := {
-	e.places[d.name] = #e.places + 1
-	e.declarations[d.name] = d
+	e.log += [d]
+	e.ids[d.name] = #e.log
 	if stated(d) { e.accepted += [AcceptedDeclaration(d)] }
 }
 
-# how far the environment reached, so what was declared after can be withdrawn
-class Reach { places: int; accepted: int }
-reach_of(e: Environment): Reach := Reach(#e.places, #e.accepted)
-# the declarations made since a reach taken out again: a search that found nothing leaves no laws behind
-withdrawn(e: Environment, reach: Reach) := {
-	if #e.places == reach.places { return }
-	for name in e.places.keys().filter(name => e.places[name] > reach.places) {
-		e.declarations.remove(name)
-		e.places.remove(name)
-		e.axioms.remove(name)
+# How far the environment reached, and what the binding statements had bound by then, so what was declared after
+# is taken back: a refused statement, a search that found nothing, a block's types held as axioms while it is checked
+class Reach {
+	size: int = 0
+	accepted: int = 0
+	courses: int = 0
+	numbers: Numbers? = ø
+	texts: Texts? = ø
+	products: Products? = ø
+}
+mark(e: Environment): Reach := Reach(#e.log, #e.accepted, #e.courses, e.numbers, e.texts, e.products)
+# the environment taken back to a reach: each declaration made since loses its name, its id stays given, so a term or
+# a kept answer naming it finds nothing; the bindings and the courses are what they were then
+back_to(e: Environment, reach: Reach) := {
+	for id in reach.size + 1 to #e.log {
+		name = e.log#id.name
+		if e.ids.get(name) == id {
+			e.ids.remove(name)
+			e.axioms.remove(name)
+		}
 	}
 	e.accepted = e.accepted.take(reach.accepted)
+	e.courses = e.courses.take(reach.courses)
+	e.numbers = reach.numbers
+	e.texts = reach.texts
+	e.products = reach.products
+}
+# what an attempt gives, the environment taken back to where it was before it, whether it gave or refused
+held_back(e: Environment, attempt: () -> T): T := {
+	reach = mark(e)
+	result = try { attempt() } catch refusal {
+		back_to(e, reach)
+		raise refusal.message
+	}
+	back_to(e, reach)
+	result
 }
 
 # The checks every declaration passes before its type is read, an inductive block's names and levels too: its names
