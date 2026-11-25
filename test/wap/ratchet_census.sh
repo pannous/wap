@@ -13,7 +13,7 @@ FILES_TYPED_WHOLE=62
 FUNCTIONS_UNTYPED=0
 # wap's size, the nodes its reader makes of its source (scripts/wap-size.warp), may not rise above the ceiling: only a
 # real simplification lowers it
-SIZE_NODES=166086
+SIZE_NODES=166165
 # the theory's elaborator (notes/coc-plan.md S1, scripts/theory-census.wap) over the compiler's source, lib/ and the
 # test programs: the statements it accepts may not drop below the floor, and its wall time stays under the ratio times
 # the typing census's, measured in the same run. It runs only with --theory (the landings touching wap/extensions/theory
@@ -35,9 +35,10 @@ report="$stage/census.out"
 census="$stage/wap-census.wasm"
 # the compiler's source finds its standard modules (`use foreign`) beside the census, as beside a compiler
 wap_beside_copied "$root" "$stage" || exit 1
-# each census timed inside its job slot, so waiting for the slot is not counted: its report ends with time's `real` line
+# each census timed inside its job slot, so waiting for the slot is not counted; its CPU seconds (time's `user` and
+# `sys` lines), as test_self.sh counts them: the wall time swings twofold with the machine's load
 timed() { scripts/job-slot.sh /usr/bin/time -p "$@"; }
-seconds() { sed -n 's/^real //p' "$1"; }
+seconds() { awk '/^(user|sys) / { cpu += $2 } END { if (NR) printf "%.1f", cpu }' "$1"; }
 (cd "$root" && $wap "$compiler" scripts/wap-census.warp "$census" >"$report" 2>&1 &&
 	timed $wap "$census" $(compiler_sources) >"$report" 2>&1)
 theory_report="$stage/theory-census.out"

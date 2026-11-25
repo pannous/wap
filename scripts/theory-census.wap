@@ -14,13 +14,15 @@ use "../wap/core/pipeline.wap"
 use "../wap/core/analyze/declarations.wap"
 
 REFUSED_LINE := "refused "
+# the key the prelude's scope is kept under, no module's
+PRELUDE_SCOPE := ""
 TOTAL_LINE := "accepted "
 
 refusal_printed(program: text, refusal: text) := print "${REFUSED_LINE}${program}: ${refusal}"
 # the census's one language, its files read once; the types module every program gets; the prelude's theory; each module's theory, of the prelude, the
 # modules it uses and its own statements, made once, with how many of its statements the kernel accepted, of how many;
 # the modules whose theory is being made, which a module using one back cannot start from
-class Census { language: Language; preload: Preload; prelude: Theory? = ø; theories: map<text, Theory> = {}; counts: map<text, list<int>> = {}; making: list<text> = [] }
+class Census { language: Language; preload: Preload; prelude: Theory? = ø; theories: map<text, Theory> = {}; counts: map<text, list<int>> = {}; making: list<text> = []; scopes: map<text, KeptScope> = {} }
 # a program's statements elaborated on the modules it uses, each refusal printed: how many the kernel accepted, of how
 # many; a program the elaborator cannot read has all its statements refused
 program_counted(census: Census, spellings: Theory, program: text): list<int> := {
@@ -45,18 +47,24 @@ theory_of(census: Census, spellings: Theory, code: Node): Theory := {
 	taken = module_units(code).map(unit => statement_accepted(p, key, unit))
 	census.counts[key] = [#taken.filter(accepted => accepted), #taken]
 	census.theories[key] = p
+	census.scopes[key] = scope_kept(p.environment)
 	census.making = census.making.filter(making => making != key)
 	p
 }
-# a theory of the prelude and these modules, in order: a copy of the theory of the one using the most of them, the
-# others elaborated on it
+# a theory of the prelude and these modules, in order: a copy of the theory of the one using the most of them, in the
+# scope it ended in, the others elaborated on it. The theories share one environment, each its own scope
 theory_using(census: Census, spellings: Theory, modules: list<Node>): Theory := {
 	widest: Node? = ø
 	for module in modules {
 		if not (source_key(module) in census.making) and (widest is ø or #used_of(census, module) > #used_of(census, widest!)) { widest = module }
 	}
-	if widest is ø { return copied(prelude_theory(census, spellings)) }
+	if widest is ø {
+		prelude = copied(prelude_theory(census, spellings))
+		scope_entered(prelude.environment, census.scopes#PRELUDE_SCOPE)
+		return prelude
+	}
 	p = copied(theory_of(census, spellings, widest!))
+	scope_entered(p.environment, census.scopes#source_key(widest!))
 	covered = used_of(census, widest!).map(source_key) + [source_key(widest!)]
 	for module in modules.filter(module => not (source_key(module) in covered)) {
 		for unit in module_units(module) { statement_accepted(p, source_key(module), unit) }
@@ -69,6 +77,7 @@ prelude_theory(census: Census, spellings: Theory): Theory := {
 		p = copied(spellings)
 		prelude_checked(p, census.language)
 		census.prelude = p
+		census.scopes[PRELUDE_SCOPE] = scope_kept(p.environment)
 	}
 	census.prelude!
 }
