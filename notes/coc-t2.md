@@ -74,12 +74,18 @@ class Environment {
 - **The log keeps its ids.** A declaration taken back loses its name, its id stays given: anything still pointing
   into the given-up attempt (a term naming one of its constants, a stale `c.types` cache entry) finds no live
   declaration and is refused ("unknown name"), never read as some later declaration.
-- **No name index in the kernel** (from T2d): `ids` leaves it. Which id a written name means belongs to the door's
-  and the elaborator's scope: the door keeps its own `map<text, int>`, the elaborator one per module.
-- **The seam with TM** (notes/coc-tm.md): a module's scope is the theory extension's `map<text, int>`, keyed by
-  core's module_key, built from the scopes of the module's direct uses in written order and then its own
-  declarations, each from its declaration on. Core declares nothing for it: it reads only the key and the uses
-  (each module's Grammar `uses` once TM lands, modules_of until then).
+- **The kernel reads no name it is given.** It finds every declaration by id: constants, the facts of blocks and
+  recursors, projections, the bindings (numbers, texts, products, quotients) and the axioms a declaration rests on.
+  The binding statements take constants; the extension resolves their written names (bindings.wap `named_here`).
+- **The scope being read** is two maps on the environment, set by whoever reads a module: `ids`, the module's own
+  names, where `added` names a declaration and refuses a name declared twice, and `outer`, the names it sees from
+  outside, which its own hide. A declaration stays live by id whatever the scope (`taken_back` marks the ids taken
+  back), so two modules may declare the same name, each one's uses meaning its own.
+- **The seam with TM** (notes/coc-tm.md): the elaborator's door reads each module in its scope (elaborate/file.wap
+  `in_scope`): outside it, what the prelude and the language every program gets declare, then the own names of the
+  modules it uses, by core's module key. Core declares nothing for it: it reads only the key and the uses (each
+  module's Grammar `uses` once TM lands, modules_of until then). Once the elaborator files go (T3 on), the two maps
+  leave the environment for the reader's scopes.
 - **Ids, not names.** `Constant(id: int, levels)` replaces `Constant(name: text, levels)`. Hashing and comparing
   a constant becomes one integer operation. `show` prints `log.entries[id]`'s name, so a name's text is used only
   for showing. `Numbers`, `RecursorFacts`, `InductiveFacts` and `QuotientPart` hold ids. The kernel no longer has a

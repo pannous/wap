@@ -157,11 +157,16 @@ unfolding(d: Declaration): Term? := match d.kind {
 
 # The declarations accepted so far, by id: the id is the place in the order of declaring, from 1, so of two
 # definitions the later one unfolds first (6.5). Ids are never given twice: a declaration taken back (`back_to`) keeps
-# its place in the log, and only a name that finds a live id finds a declaration
+# its place in the log and is never found again
 class Environment {
 	log: list<Declaration> = []
-	# the id of each live declaration, by its name
+	# the ids taken back
+	taken_back: map<int, bool> = {}
+	# the scope being read, the id each name means there: its own names, where a declaration added is named and no
+	# name is declared twice, and the names it sees from outside, which its own hide. Whoever reads a module sets the
+	# module's (two modules may declare one name)
 	ids: map<text, int> = {}
+	outer: map<text, int> = {}
 	# the axioms each declaration rests on, by id, through everything its type and its value name
 	axioms: map<int, list<int>> = {}
 	# the number type and the shortcuts, once the numbers statement bound them (numbers.wap)
@@ -187,13 +192,12 @@ enum Accepted {
 class Products { pair: Term; intro: Term; unit: Term; one: Term }
 # the quotient type and the maker of its values, each a constant
 class Quotients { former: Term; made: Term }
-declaration(e: Environment, name: text): Declaration? := e.log#(e.ids.get(name) ?? return ø)
+declaration(e: Environment, name: text): Declaration? := e.log#(named_id(e, name) ?? return ø)
+# the id a name means in the scope being read
+named_id(e: Environment, name: text): int? := e.ids.get(name) ?? e.outer.get(name)
 # the declaration of a name that must be declared, else refused
 # the declaration of an id while it is live; ø for an id taken back or never given
-declared_at(e: Environment, id: int): Declaration? := {
-	d = if id >= 1 and id <= #e.log then e.log#id else return ø
-	if e.ids.get(d.name) == id then d else ø
-}
+declared_at(e: Environment, id: int): Declaration? := if id >= 1 and id <= #e.log and not e.taken_back.has(id) then e.log#id else ø
 # a constant's declaration, refused where it is taken back
 declaration_of(e: Environment, constant: Term): Declaration := match constant.shape {
 	Constant(name, levels, id) => declared_at(e, id) ?? refused(UNKNOWN_NAME, "nothing is named ${name} here")
@@ -219,11 +223,11 @@ declared_named(e: Environment, name: text): Declaration := {
 	if d is ø { refused(UNKNOWN_NAME, "nothing is named ${name}") }
 	d!
 }
-place(e: Environment, name: text): int := e.ids.get(name) ?? 0
+place(e: Environment, name: text): int := named_id(e, name) ?? 0
 # the ids given so far, the live ones and those taken back
 size(e: Environment): int := #e.log
-# the names of the live declarations, in the order of declaring
-declared_names(e: Environment): list<text> := e.ids.keys()
+# the names the scope being read sees, those from outside first
+declared_names(e: Environment): list<text> := e.outer.keys().filter(name => not e.ids.has(name)) + e.ids.keys()
 # Every axiom a declaration rests on (`axioms of name`): an axiom rests on itself, any other declaration on what the
 # names in its type and its value rest on, an opaque value's names too
 axioms_of(e: Environment, constant: Term): list<text> := (e.axioms.get(constant_id(constant)) ?? []).map(id => e.log#id.name)
@@ -249,7 +253,7 @@ stated(d: Declaration): bool := match d.kind {
 	Quotient(part) => no
 }
 # a declaration becomes part of the environment, checked first by typing.wap's `declared` or inductive.wap, its name
-# new; one stated as written is recorded for an export
+# new in the scope being read; one stated as written is recorded for an export
 added(e: Environment, d: Declaration) := {
 	if e.ids.has(d.name) { refused(NAME_TAKEN, "${d.name} is declared already") }
 	e.log += [d]
@@ -269,15 +273,14 @@ class Reach {
 	quotients: Quotients? = ø
 }
 mark(e: Environment): Reach := Reach(#e.log, #e.accepted, #e.courses, e.numbers, e.texts, e.products, e.quotients)
-# the environment taken back to a reach: each declaration made since loses its name, its id stays given, so a term or
-# a kept answer naming it finds nothing; the bindings and the courses are what they were then
+# the environment taken back to a reach: each declaration made since is taken back and loses its name, its id stays
+# given, so a term or a kept answer naming it finds nothing; the bindings and the courses are what they were then
 back_to(e: Environment, reach: Reach) := {
 	for id in reach.size + 1 to #e.log {
+		e.taken_back[id] = yes
+		e.axioms.remove(id)
 		name = e.log#id.name
-		if e.ids.get(name) == id {
-			e.ids.remove(name)
-			e.axioms.remove(id)
-		}
+		if e.ids.get(name) == id { e.ids.remove(name) }
 	}
 	e.accepted = e.accepted.take(reach.accepted)
 	e.courses = e.courses.take(reach.courses)
