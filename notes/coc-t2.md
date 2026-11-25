@@ -51,30 +51,31 @@ something and take it back, the code copies it (`copied`: every map, used in ind
 elaborator's `held`/`copied(p)`, and in templates' untyped tries) or rewinds it (`Reach`/`withdrawn`: used by the
 provers' goal search).
 
-The new shape:
+The shape:
 
 ```
-# a declaration the kernel accepted, by its id; a dropped one is a tombstone, its id never given again
-enum Entry { Live(declaration: Declaration, axioms: list<int>); Dropped }
-# every declaration accepted so far, by id; ids come from the counter and are never reused
-class Log { entries: list<Entry> = []; next: int = 1 }
-# an environment: the ids it holds reach up to `reach`, and what the binding statements bound by then
-class Environment { log: Log; reach: int = 0; numbers: Numbers? = ø; texts: Texts? = ø }
+class Environment {
+	# every declaration accepted so far, by id, its place in the log: ids are never given twice
+	log: list<Declaration> = []
+	# the id of each live declaration, by its name
+	ids: map<text, int> = {}
+	axioms: …; accepted: …; courses: …; numbers: Numbers? = ø; texts: Texts? = ø; products: Products? = ø
+}
 ```
 
-- **Checking returns a new environment or refuses.** `declared(e, d): Environment`, `block_declared`,
-  `numbers_declared` and the rest return an Environment that reaches the ids they appended. A refused statement
-  returns nothing, so the caller still holds `e`, and nothing needs to be rolled back. `declared(e, d)` hides the
-  representation: a persistent map can replace the log later without any caller changing.
-- **The log is shared, ids are monotonic.** Ids come from `Log.next` and are never reused. Appending to an
-  environment whose reach is behind the newest id first marks every live entry after that reach `Dropped`: those
-  came from an attempt that was given up (a refused statement, a template's try, a failed proof search). Since the
-  ids stay taken, anything still pointing into the dropped attempt (a term naming one of its constants, a stale
-  `c.types` cache entry, a stale environment) finds a tombstone and is refused ("unknown name"), never read as
-  some later declaration. The persistence is linear: an old environment can be returned to, but two newer ones
-  cannot both be extended; every current use is linear (elaborate, prove, the door), and a violation is loud.
-- **No name index in the kernel.** Which id a written name means belongs to the door's and the elaborator's scope
-  (`Log.named` is not kept): the door keeps its own `map<text, int>`, the elaborator one per module.
+- **One environment, changed in place, taken back as a whole.** The theory, its checkers and the provers' goals all
+  hold one Environment, so `declared(e, d)` appends to it rather than returning a new one. Every take-back goes
+  through one of two scoped forms in environment.wap: `held_back(e, attempt)` always takes back what the attempt
+  declared (a block's types assumed as axioms while it is checked and its recursors made), and
+  `kept_if_given(e, attempt)` keeps it where the attempt gives a value and takes it back where it gives ø or
+  refuses (a refused statement, a template's try, a prover that found nothing). Both rest on `mark` and `back_to`,
+  which nothing outside environment.wap calls, so no caller can forget a rollback. The bindings (`numbers`, `texts`,
+  `products`) and the courses below.wap made are taken back with the declarations.
+- **The log keeps its ids.** A declaration taken back loses its name, its id stays given: anything still pointing
+  into the given-up attempt (a term naming one of its constants, a stale `c.types` cache entry) finds no live
+  declaration and is refused ("unknown name"), never read as some later declaration.
+- **No name index in the kernel** (from T2d): `ids` leaves it. Which id a written name means belongs to the door's
+  and the elaborator's scope: the door keeps its own `map<text, int>`, the elaborator one per module.
 - **Ids, not names.** `Constant(id: int, levels)` replaces `Constant(name: text, levels)`. Hashing and comparing
   a constant becomes one integer operation. `show` prints `log.entries[id]`'s name, so a name's text is used only
   for showing. `Numbers`, `RecursorFacts`, `InductiveFacts` and `QuotientPart` hold ids. The kernel no longer has a
@@ -93,15 +94,10 @@ class Environment { log: Log; reach: int = 0; numbers: Numbers? = ø; texts: Tex
   acceptance the kernel takes the fresh ids and substitutes each type's constant for its variable in every case
   and recursor. `holding` goes, and the elaborator (blocks.wap) and explicit.wap write free variables instead of
   constants. This lands with T2d, planned here before it.
-- **below.wap's side state is keyed by id.** `products` and the courses below.wap made are kept by the id of
-  their statement and of each course's declaration, and count only while that id is live in the environment at
-  hand. A refused statement's course becomes a tombstone with its declaration, so it is never taken for a course
-  of a later environment (today a refused statement leaves it behind in `courses`).
-
 **Deleted by this:**
-- in the kernel: `copied` (13 lines), `Reach`, `reach_of` and `withdrawn` (14), the `places` and `accepted` maps,
-  `names_new` (6), and the copy in inductive.wap `holding` (it becomes an environment that reaches further);
-- in prove/goals.wap: the reach/withdraw pair;
+- in the kernel: `copied` (13 lines), `reach_of` and `withdrawn`, the `places` and `declarations` maps, and the copy
+  in inductive.wap `holding` (the types are assumed inside `held_back`); with T2d `names_new` (6) and `ids`;
+- in prove/goals.wap: the reach/withdraw pair (`kept_if_given`);
 - in elaborate/read.wap `held`: the environment line (`p.environment = copied(from.environment)` becomes a plain
   assignment of the old value).
 
@@ -208,14 +204,14 @@ theory test areas (`bash test/wap/run.sh --wait theory`) and the census green.
 |---|---|---|---|
 | T2a move | `git mv` the 12 files into wap/kernel, then a pure path edit of every `use` (elaborate 19 files, run 3, second 1, prove, door, scripts/theory-census.wap); SIZE_NODES += 21,312 | +2,241 moved, 0 new | census (418/418 typed), theory areas, test_hello |
 | T2b i64 | `Numeral(i64)`, the overflow checks, magnitude out of the kernel, the `Text` literal and the new texts statement; export and second/ read it | −15, +10, +30 (outside: +22) | theory areas, test_theory_second, the new lines: a shortcut past 2^63 does not fire; a long text literal checks |
-| T2c persistent | `Log` with its counter and tombstones, `Environment(log, reach, …)`, every `declared…` returns an environment; the deletions above; callers assign instead of mutating; below.wap's state keyed by id | −50, +35 | theory areas, prove's tests |
+| T2c log | the log with its ids, `held_back` and `kept_if_given` the only take-backs; the deletions above | −50, +35 | theory areas, prove's tests |
 | T2d ids | `Constant(id, levels)`, `show` by id, `names_new` goes, the facts hold ids; a block's types as free variables, given their ids on acceptance, `holding` goes; the door and the elaborator resolve a written name to an id through their own scope (the extension's lines, not the kernel's) | −8 − 6, +20 + 15 (elaborate +40) | theory areas, the new line: two modules with the same name |
 | T2e rules | the rule functions and the judgement table; `type_of` as their walk | +60 | theory areas; the theory census time ratio stays under 3 (checked once, then the census retires) |
 | T2f census | the theory census retires: `--theory`, THEORY_ACCEPTED and THEORY_TIME_RATIO leave ratchet_census.sh; scripts/theory-census.wap stays for whoever wants its numbers | 0 | the typing census |
 
 T2a goes first so that every later diff is read in its final place. T2b's text literal is decided (no form a
 program writes changes). T2e comes last among the
-kernel steps because its rules read ids and return environments.
+kernel steps because its rules read ids.
 
 ## The estimate
 
