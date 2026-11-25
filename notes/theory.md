@@ -324,3 +324,15 @@ Three limits follow, and the kernel is written around them:
 - **A map keyed by an enum value** hashes the case name only, so terms that share a head share a slot: caches are
   keyed by a term's int `hash`.
 No two terms are made one (interning) yet: `same` stays the one place that would change when shared terms cost too much.
+
+## The run trust base
+
+What a program runs is not always what the theory proves of it. Each such pair is a claim nobody checks:
+- **The language's words the prelude has too.** A types-module declaration with the signature of a prelude
+  declaration is that declaration (elaborate/declare.wap overloaded): proofs read the prelude's definition, and the
+  program runs the types module's body. The pairs the tests rely on are int's `+`, `-` (both arities), `*`, `==`,
+  `<`, `>`, `>=`.
+- **The host's operations.** A function whose body is `prim …` is a constant of its written type, never unfolded; it
+  runs as the host's operation. One at a proposition is refused, and one with neither a written type nor a limit
+  after its body (`! IO`) too, since nothing says what it does.
+- **The prelude's own host spellings** (run/hosts.wap HOST_FUNCTIONS): a number runs as a machine int.
