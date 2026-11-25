@@ -31,10 +31,11 @@ AT_MOST_DIFFERENCE := "at_most_difference"
 EQUALS_SOUND := "equals_sound"
 CHOSEN_DECIDED := "chosen_decided"
 CHOSEN_AT_YES := "chosen_at_yes"
+BEYOND_AT_MOST := "beyond_at_most"
 SYMMETRIC := "equal_symmetric"
 TRANSITIVE := "equal_transitive"
 CONGRUENT := "equal_congruent"
-LAWS := [ZERO_ADD, ADD_ASSOCIATIVE, ADD_SWAPPED, ADD_CANCEL, AT_MOST_ADD, AT_MOST_DIFFERENCE, EQUALS_SOUND, CHOSEN_DECIDED, CHOSEN_AT_YES, SYMMETRIC, TRANSITIVE, CONGRUENT]
+LAWS := [ZERO_ADD, ADD_ASSOCIATIVE, ADD_SWAPPED, ADD_CANCEL, AT_MOST_ADD, AT_MOST_DIFFERENCE, EQUALS_SOUND, CHOSEN_DECIDED, CHOSEN_AT_YES, BEYOND_AT_MOST, SYMMETRIC, TRANSITIVE, CONGRUENT]
 # the level of the numbers' type
 ONE_LEVEL := Successor(Zero)
 # how many rows the elimination holds before it gives up
@@ -62,7 +63,7 @@ class Bound { left: Term; difference: Term; right: Term; proof: Term }
 class Row { coefficients: list<int>; number: int; sources: list<int> }
 # what makes t at least u: `t + gap == u`
 # a choice by a truth value: the function choosing, its parts at no and at yes, and the truth value deciding
-class Choice { chooser: Term; at_no: Term; at_yes: Term; decided: Term }
+class TruthChoice { chooser: Term; at_no: Term; at_yes: Term; decided: Term }
 class Gap { gap: Term; equated: Equated }
 
 by_linear_arithmetic(goal: Goal): Term? := {
@@ -120,7 +121,7 @@ chosen_proof(s: Sums, bounds: list<Bound>, wanted: Term): Term? := {
 	carried(s.c, equation(s, truth, affirmed, choice.decided), law(SYMMETRIC, [ONE_LEVEL], [truth, choice.decided, affirmed, sure]), at_yes, v => apply(choice.chooser, v))
 }
 # t as a choice by a truth value, ø where it computes to none
-choice_of(s: Sums, t: Term): Choice? := {
+choice_of(s: Sums, t: Term): TruthChoice? := {
 	choice = computed_folded(s.c, t)
 	recursor = match head(choice).shape {
 		Constant(name, levels) => name
@@ -130,16 +131,23 @@ choice_of(s: Sums, t: Term): Choice? := {
 	given = arguments(choice)
 	if facts.of != s.n.truth or #given != before_major(facts) + 1 { return ø }
 	part = case => given#(facts.parameters + facts.motives + facts.cases.index_where(found => found == case))
-	Choice(apply_all(head(choice), given.take(#given - 1)), part(s.n.no_case), part(s.n.yes_case), given.last())
+	TruthChoice(apply_all(head(choice), given.take(#given - 1)), part(s.n.no_case), part(s.n.yes_case), given.last())
 }
 
 # --- the hypotheses
 
-# what a hypothesis bounds: `a == b` of numbers both ways, `a <= b` and `a == b` of truth values made yes
+# what a hypothesis bounds: `a == b` of numbers both ways, `a <= b` and `a == b` of truth values made yes, and
+# `not (a <= b)`, `a > b`, made yes as `b + 1 <= a`
 bounds_of(s: Sums, type: Term, proof: Term): list<Bound> := {
 	equation = equation_of(s.c, type) ?? return chosen_bounds(s, type, proof)
 	if of_numbers(s, equation) { return equal_bounds(s, equation.left, equation.right, proof) }
 	if not made_yes(s, equation) { return [] }
+	beyond = beyond_of(s, equation.left)
+	if beyond is not ø {
+		a = beyond!#1
+		b = beyond!#2
+		return bounds_of(s, truth_stated(s, apply_all(s.at_most, [apply(constant(s.n.successor, []), b), a])), law(BEYOND_AT_MOST, [], [a, b, proof]))
+	}
 	compared = called(s, equation.left, s.at_most)
 	if compared is not ø {
 		a = compared!#1
@@ -305,8 +313,16 @@ skeleton(s: Sums, t: Term, replaced: (Term) -> Term): Term := {
 	found = unfolded_until(s, t, part => is_sum_part(s, part)) ?? return replaced(atom_of(s, t))
 	apply_all(head(found), arguments(found).map(part => skeleton(s, part, replaced)))
 }
-# t as one unknown: a difference kept as one, so the bounds of differences name it, anything else computed
-atom_of(s: Sums, t: Term): Term := unfolded_until(s, t, part => calls(part, s.subtract)) ?? computed(s.c, t)
+# t as one unknown: a difference kept as one, so the bounds of differences name it, anything else computed with its
+# arguments, so one unknown written two ways, `#xs` of a value and of its subset's, is one
+atom_of(s: Sums, t: Term): Term := unfolded_until(s, t, part => calls(part, s.subtract)) ?? spine_computed(s.c, t)
+spine_computed(c: Checker, t: Term): Term := {
+	found = computed(c, t)
+	match found.shape {
+		Projection(structure, field, of) => projection(structure, field, spine_computed(c, of))
+		_ => apply_all(head(found), arguments(found).map(argument => spine_computed(c, argument)))
+	}
+}
 # a number, the zero case, a successor, or a sum: what a sum is read of
 is_sum_part(s: Sums, t: Term): bool := match head(t).shape {
 	Numeral(value) => small(value) is not ø
@@ -387,6 +403,15 @@ made_yes(s: Sums, equation: Equation): bool := is_named(s, equation.type, s.n.tr
 # the arguments of the two-number call of a function that t unfolds to, ø where it unfolds to none
 called(s: Sums, t: Term, function: Term): list<Term>? := arguments(unfolded_until(s, t, found => calls(found, function)) ?? return ø)
 calls(t: Term, function: Term): bool := #arguments(t) == 2 and same(head(t), function)
+# the numbers of `not (a <= b)` t unfolds to, a choice by `a <= b` that is yes at no and no at yes; ø for another term
+beyond_of(s: Sums, t: Term): list<Term>? := {
+	negation = unfolded_until(s, t, found => negation_of(s, found) is not ø) ?? return ø
+	called(s, negation_of(s, negation)!.decided, s.at_most)
+}
+negation_of(s: Sums, t: Term): TruthChoice? := {
+	choice = choice_of(s, t) ?? return ø
+	if is_named(s, choice.at_no, s.n.yes_case) and is_named(s, choice.at_yes, s.n.no_case) then choice else ø
+}
 # t unfolded, one step at a time, until it fits; ø where it unfolds no further first
 unfolded_until(s: Sums, t: Term, fits: (Term) -> bool): Term? := {
 	found = computed_folded(s.c, t)
