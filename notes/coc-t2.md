@@ -152,7 +152,8 @@ Checker.judgements: list<Checked>
 
 The kernel stops using lib/magnitude (`use magnitude` in terms, typing, show and numbers; 12 call sites).
 
-- `Numeral(value: int)`. Literals from source already arrive as `value as int` (explicit.wap, elaborate/read.wap).
+- `Numeral(value: i64)`, written with the wrapping word: `int` is the unbounded whole numbers (wiki/number.md,
+  test/test_number_wanted.wap), and the kernel's bound is 6.7's, not storage's. Literals from source already arrive as `value as int` (explicit.wap, elaborate/read.wap).
   A literal the reader cannot hold is the reader's refusal.
 - The seven shortcuts compute on int, and only when the result fits. Every numeral is non-negative, so the check is
   `a <= MAX - b` for add, `b == 0 or a <= MAX ÷ b` for multiply, and nothing for subtract, divide, remainder and the
@@ -206,7 +207,7 @@ theory test areas (`bash test/wap/run.sh --wait theory`) and the census green.
 | step | what | lines (kernel) | checks |
 |---|---|---|---|
 | T2a move | `git mv` the 12 files into wap/kernel, then a pure path edit of every `use` (elaborate 19 files, run 3, second 1, prove, door, scripts/theory-census.wap); SIZE_NODES += 21,312 | +2,241 moved, 0 new | census (418/418 typed), theory areas, test_hello |
-| T2b i64 | `Numeral(int)`, the overflow checks, magnitude out of the kernel, the `Text` literal and the new texts statement; export and second/ read it | −15, +10, +30 (outside: +22) | theory areas, test_theory_second, the new lines: a shortcut past 2^63 does not fire; a long text literal checks |
+| T2b i64 | `Numeral(i64)`, the overflow checks, magnitude out of the kernel, the `Text` literal and the new texts statement; export and second/ read it | −15, +10, +30 (outside: +22) | theory areas, test_theory_second, the new lines: a shortcut past 2^63 does not fire; a long text literal checks |
 | T2c persistent | `Log` with its counter and tombstones, `Environment(log, reach, …)`, every `declared…` returns an environment; the deletions above; callers assign instead of mutating; below.wap's state keyed by id | −50, +35 | theory areas, prove's tests |
 | T2d ids | `Constant(id, levels)`, `show` by id, `names_new` goes, the facts hold ids; a block's types as free variables, given their ids on acceptance, `holding` goes; the door and the elaborator resolve a written name to an id through their own scope (the extension's lines, not the kernel's) | −8 − 6, +20 + 15 (elaborate +40) | theory areas, the new line: two modules with the same name |
 | T2e rules | the rule functions and the judgement table; `type_of` as their walk | +60 | theory areas; the theory census time ratio stays under 3 (checked once, then the census retires) |
