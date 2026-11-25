@@ -325,6 +325,10 @@ The types module adds two more, made by the declarations themselves (elaborate/d
   neither a written type nor a limit after its body (`! IO`) too, since nothing says what it does. A program's own
   `prim …` is refused: what it runs would be believed unproved, as a program's `runs(…)` would.
 
+The compiler adds one outside the theory: its warm state (extensions/warm.wap). The rules it brings in were checked
+to terminate when the state was written, and `rules_checked` marks them checked without checking them again, so the
+rules of a warm state are believed as built.
+
 ## A second opinion
 
 A program either door accepts can be written out: `export("file")` writes what the environment accepted, in order
