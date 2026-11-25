@@ -3,8 +3,10 @@
 # modules use, calling their main with the module's path as its program's
 WASMTIME_PROPOSALS=gc=y,function-references=y,exceptions=y
 # wap_ran <module.wasm> [<arguments>…]: the module run with the arguments, its status the run's
-wap_ran() {
-	if command -v wap >/dev/null; then wap "$@"; return; fi
+wap_ran() { if command -v wap >/dev/null; then wap "$@"; else wasmtime_ran "$@"; fi; }
+# wasmtime_ran <module.wasm> [<arguments>…]: the module run on wasmtime's own command, as the native wap runs it; a
+# machine with no native wap yet takes a `wap` command that does only this (.github/workflows/windows.yml)
+wasmtime_ran() {
 	local read=() argument
 	for argument in "$@"; do read+=("$(module_path "$argument")"); done
 	MSYS_NO_PATHCONV=1 wasmtime run -W "$WASMTIME_PROPOSALS" --dir . --dir "$(root_folder)" --invoke main --argv0 "${read[0]}" "$(host_path "$1")" "${read[@]:1}"
