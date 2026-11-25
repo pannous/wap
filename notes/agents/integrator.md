@@ -10,6 +10,9 @@ Workers never wait on you (user 2026-11-25): when a worker's next step depends o
 tell it "go" as soon as the merged tree compiles; smoke, census and the self build run after that, and a red is fixed
 forward by its worker.
 
+wap Vitals stays (user 11-23): after each landing run `python3 scripts/vitals.py` in warp and republish
+data/vitals/wap-vitals.html to https://claude.ai/code/artifact/8b33d965-01c9-4a3b-9f75-d4597da4804e.
+
 The user does not read your output (user 11-21): reply to a landing,
 hold or handoff with one line at most, or nothing; never repeat open items, try lines or questions in your output.
 Those go once to wap-interviewer, which owns everything for the user.
