@@ -40,8 +40,8 @@ NO_FIT := "no fitting overload"
 # the refusal of a call that leaves out arguments its function takes (wiki/function.md "Partial application")
 MISSING_ARGUMENTS := "missing arguments"
 # the refusals of a declaration tried that does not fit: an argument of another type, also one no declaration of its
-# name fits, and more or fewer arguments than it takes
-UNFIT := ILL_TYPED + [NO_FIT, NOT_A_FUNCTION, MISSING_ARGUMENTS]
+# name fits, more or fewer arguments than it takes, and a computation where a value is wanted
+UNFIT := ILL_TYPED + [NO_FIT, NOT_A_FUNCTION, MISSING_ARGUMENTS, EFFECT]
 # the refusal of a proof by a law stated without one
 UNPROVED_LAW := "unproved law"
 UNKNOWN_FORM := "unknown form"
@@ -87,8 +87,11 @@ class Theory {
 	hidden: map<text, text> = {}
 	# the bodies as written of the functions that may not end, which run by them and are declared opaque
 	run_bodies: map<text, Node> = {}
-	# how the host runs what the prelude lays out, by name (file.wap layout_noted)
+	# how the host runs what the prelude lays out, by name (file.wap layout_noted), and the functions of the types
+	# module the host runs by their own name (declare.wap hosted_spelling)
 	layouts: map<text, Layout> = {}
+	# the names the statement being read laid out, which taking it back takes out of the layouts (taken_back)
+	laid_out: list<text> = []
 	# the bodies the functions that call themselves run by, their calls of themselves calls of the constant
 	# (declare.wap run_body_kept), and why one could not be kept
 	run_terms: map<text, Term> = {}
@@ -97,6 +100,14 @@ class Theory {
 	answering: bool = yes
 	# the values the program's statements compute, in order (declare.wap computed)
 	values: list<Term> = []
+	# the names of the statements the theory refused and took back, each with that refusal (file.wap unit_taken)
+	refused_names: map<text, text> = {}
+	# the files of the language every program gets
+	language_files: list<text> = []
+	# whether the statement being read is of those files
+	language: bool = no
+	# where the language's declarations end, after the prelude's: the program's own come after
+	language_size: int = 0
 	# the wap folder the door is given (options.wap), in which its prelude is found
 	wap_folder: text = ""
 	# the overload trials the statement being read has made
@@ -104,9 +115,29 @@ class Theory {
 }
 # another theory holding the same, which may grow without this one growing
 copied(p: Theory): Theory := {
-	copy = Theory()
-	held(copy, p)
-	copy
+	other = kept_of(p)
+	other.refused_names = copy(p.refused_names)
+	other.layouts = copy(p.layouts)
+	other
+}
+# what a theory holds before a statement, to take the statement back by: what the module keeps shared
+kept_of(p: Theory): Theory := {
+	kept = Theory()
+	held(kept, p)
+	kept
+}
+# a theory taken back to what it held before a statement (kept_of): the layouts the statement wrote taken out of the
+# map it shares with the module
+taken_back(p: Theory, before: Theory) := {
+	held(p, before)
+	for name in p.laid_out { p.layouts.remove(name) }
+	p.laid_out = []
+}
+# how the host runs a name, written once: a second layout would replace the first unseen, so it is refused
+layout_written(p: Theory, name: text, layout: Layout) := {
+	if p.layouts.has(name) { refused(LAYOUT, "${name} is laid out twice: the host runs it one way") }
+	p.layouts[name] = layout
+	p.laid_out += [name]
 }
 # a theory made to hold again what another holds, each part a copy: what a statement wrote since is gone
 held(p: Theory, from: Theory) := {
@@ -124,13 +155,18 @@ held(p: Theory, from: Theory) := {
 	p.prelude_size = from.prelude_size
 	p.hidden = copy(from.hidden)
 	p.run_bodies = copy(from.run_bodies)
-	p.layouts = copy(from.layouts)
 	p.run_terms = copy(from.run_terms)
 	p.run_refusals = copy(from.run_refusals)
 	p.values = copy(from.values)
 	p.answering = from.answering
 	p.templates = copy(from.templates)
 	p.wap_folder = from.wap_folder
+	p.language_files = from.language_files
+	p.language_size = from.language_size
+	# kept by the module, not the statement: a statement taken back keeps the refusals of the names it declares
+	# (file.wap unit_taken), and the layouts it wrote are taken out by taken_back
+	p.refused_names = from.refused_names
+	p.layouts = from.layouts
 }
 # A written name's kernel name: the program's declaration where one hides the prelude's, a dotted name its owner's,
 # `nat.zero` the program's nat's case
@@ -138,15 +174,6 @@ kernel_name(p: Theory, name: text): text := {
 	owner = name.split(DOT)#1
 	hiding = p.hidden.get(owner) ?? return name
 	hiding + name[#owner ..]
-}
-# the kernel name a program's new declaration takes: a name the prelude declared it hides from here on, one lookup
-# order, the program's names before the prelude's
-declared_name(p: Theory, name: text): text := {
-	kernel = kernel_name(p, name)
-	at = place(p.environment, kernel)
-	if at == 0 or at > p.prelude_size { return kernel }
-	p.hidden[name] = name + HIDING_MARK
-	p.hidden[name]
 }
 # The reading of one declaration: its elaboration, which holds the binders in scope, the level names written
 # (explicit.wap's Reading); while its header is read, the letters found, as their variables; the holes for
@@ -177,8 +204,12 @@ class Elaborating {
 	lifting: bool = no
 	pending: list<Pending> = []
 	lifts: list<text> = []
-	# how many terms were made of a type wanted other than their own, so a fit with fewer such steps wins an overload
+	# how many terms were made of a type wanted other than their own, so a fit with fewer such steps wins an overload;
+	# of a call's result, of a numeral, which is read at the type its place wants (a nat made an int is no step of the
+	# argument's), counted apart
 	indirect: int = 0
+	result_steps: int = 0
+	literal_steps: int = 0
 }
 # How the host runs a declaration of the prelude (file.wap layout_noted), plain wap with each argument at its place,
 # `$1` for the first: a function's or a case's value, a type's wap type; a case's test that a value at `$1` is of it
@@ -200,7 +231,10 @@ made_of(x: Elaborating, t: Term, wanted: Term): Term := {
 	if unified(x.el, given, wanted) { return t }
 	have = filled(x.el, given)
 	want = filled(x.el, wanted)
-	x.indirect += 1
+	match t.shape {
+		Numeral(value) => x.literal_steps += 1
+		_ => x.indirect += 1
+	}
 	converted(x, t, have, want) ?? gone_down(x, t, have, want) ?? injected(x, t, have, want) ?? lifted_into(x, t, have, want) ?? ran(x, t, have, want) ?? {
 		computation_refused(x, t, have)
 		refused(VALUE_TYPE, "${shown(filled(x.el, t))} is a ${shown(have)}, where a ${shown(want)} is wanted")
@@ -294,6 +328,15 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 	bound = named(x.el, name)
 	if bound is not ø { return given_arguments(x, bound!, type_of(x.el.c, bound!), arguments, wanted) }
 	if x.recursing is not ø and name == x.recursing!.name {
+		# a call of the name being defined is resolved among its overloads by its arguments, like any call: only one no
+		# declaration takes calls the definition itself, its recursion
+		kept = snapshot(x)
+		declared = try { declared_call(x, name, arguments, wanted) } catch e {
+			if not e.message.starts_with(REFUSED) { raise e.message }
+			put_back(x, kept)
+			ø
+		}
+		if declared is not ø { return declared! }
 		x.recursing!.called = yes
 		return recursive_call_elaborated(x, arguments, wanted)
 	}
@@ -306,6 +349,23 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 		qualified = "${text(named_form(arguments#1))}${DOT}${name}"
 		if declarations_named(x.theory, qualified) is not empty { return name_elaborated(x, qualified, arguments.drop(1), wanted) }
 	}
+	declared = declared_call(x, name, arguments, wanted)
+	if declared is not ø { return declared! }
+	if x.header and #name == LETTER_LENGTH {
+		letter = scoped(x.el, name, wanted ?? hole_over(x.el, "the type of ${name}", any_sort(x), x.letters))
+		x.letters += [letter]
+		return given_arguments(x, letter, type_of(x.el.c, letter), arguments, wanted)
+	}
+	if name in x.theory.unproved_laws { refused(UNPROVED_LAW, "${name} is a law without a proof, a hint and never a proof: prove it after `:=`") }
+	# a refused declaration's name, or a name it owns, `tree.leaf` of a refused enum tree
+	refusal = x.theory.refused_names.get(name) ?? x.theory.refused_names.get(name.split(DOT)#1)
+	if refusal is not ø { refused(REFUSED_DECLARATION, refusal!) }
+	respelled(x, if arguments is empty then symbol(name) else Call(symbol(name), arguments), wanted, UNKNOWN_NAME, "${name} is neither a binder around it nor declared")
+}
+
+# a name's declaration given the arguments, the one of its overloads, traits' operations and template versions they
+# fit; ø for a name nothing declares
+declared_call(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?): Term? := {
 	template = x.theory.templates.get(name)
 	# a template's versions are found by their types (templates.wap), never tried as declarations, so which call came
 	# first does not choose
@@ -313,15 +373,8 @@ name_elaborated(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?
 	traits = traits_of(x.theory, name)
 	if #candidates == 1 and traits is empty and template is ø { return declared_given(x, candidates#1, arguments, wanted) }
 	if candidates is not empty or traits is not empty or template is not ø { return overload_elaborated(x, name, candidates, traits, template, arguments, wanted) }
-	if x.header and #name == LETTER_LENGTH {
-		letter = scoped(x.el, name, wanted ?? hole_over(x.el, "the type of ${name}", any_sort(x), x.letters))
-		x.letters += [letter]
-		return given_arguments(x, letter, type_of(x.el.c, letter), arguments, wanted)
-	}
-	if name in x.theory.unproved_laws { refused(UNPROVED_LAW, "${name} is a law without a proof, a hint and never a proof: prove it after `:=`") }
-	respelled(x, if arguments is empty then symbol(name) else Call(symbol(name), arguments), wanted, UNKNOWN_NAME, "${name} is neither a binder around it nor declared")
+	ø
 }
-
 # A declaration at a level hole for each of its level parameters, a hole for each found binder, then its written
 # binders given the arguments
 declared_given(x: Elaborating, name: text, arguments: list<Node>, wanted: Term?): Term := declared_read(x, name, unread(arguments), wanted)
@@ -330,7 +383,7 @@ declared_read(x: Elaborating, name: text, arguments: list<Argument>, wanted: Ter
 	if wanted is not ø and declaration(x.theory.environment, name)!.kind is Recursor { return recursor_given(x, name, arguments, wanted!) }
 	# every binder given, the found ones too, as an explicit program calls it: no hole
 	header = x.theory.binders.get(name)
-	own = header ?? binders_counted(declaration(x.theory.environment, name)!.type)
+	own = binders_of(x.theory, name)
 	found = if #arguments == own then 0 else x.theory.found.get(name) ?? 0
 	# a function declared with parameters is given each written one; a value of a function type, its binders no
 	# parameters, may be given fewer
@@ -402,14 +455,34 @@ term_alone(x: Elaborating, argument: Argument): Term := match argument {
 }
 # an argument read alone, without a type wanted; unread still where it cannot be, all it found put back, so a
 # lambda without binder types, an argument naming `it` or an overload chosen by its result is read against each
-# parameter's type
+# parameter's type. So is a value built of cases holding a numeral, which alone is read as a nat where the place may
+# want another type, as `[4, 5]` or `([4, 5])` is a list<int> where one is wanted; a numeral itself is read alone and
+# made of the type wanted, a step `nearest` counts, and so is a call's result (an operator chain read
+# again for each overload would be tried exponentially often)
 read_alone(x: Elaborating, node: Node): Argument := {
 	if names_it(node) { return Unread(node) }
-	try { guarded(x, snapshot(x), () => Elaborated(elaborated(x, node, ø))) } catch e {
+	kept = snapshot(x)
+	read = try { guarded(x, kept, () => elaborated(x, node, ø)) } catch e {
 		refusal_only(e)
-		Unread(node)
+		ø
 	}
+	if read is ø { return Unread(node) }
+	if numeral_in_cases(x.theory, filled(x.el, read!)) {
+		put_back(x, kept)
+		return Unread(node)
+	}
+	Elaborated(read!)
 }
+# whether a term is a case of a type given a numeral, at any depth of its fields
+numeral_in_cases(p: Theory, t: Term): bool := match head(t).shape {
+	Constant(name, levels) => declares_case(p, name) and holds_numeral(t)
+	_ => no
+}
+declares_case(p: Theory, name: text): bool := match (declaration(p.environment, name) ?? return no).kind {
+	Constructor(of, place, own) => yes
+	_ => no
+}
+holds_numeral(t: Term): bool := t.shape is Numeral or parts(t).any(holds_numeral)
 # an argument naming `it` where a function of one value is wanted is that function of it, as lowering reads one where
 # a declared parameter takes a function (wiki/function.md): `nat where it == 1` is filter(nat, it => it == 1)
 it_read(x: Elaborating, argument: Node, domain: Term): Node :=
@@ -443,7 +516,7 @@ declarations_named(p: Theory, name: text): list<text> := {
 overload_elaborated(x: Elaborating, name: text, candidates: list<text>, traits: list<text>, template: Template?, arguments: list<Node>, wanted: Term?): Term := {
 	read = arguments.map(argument => read_alone(x, argument))
 	trials = declarations_tried(x, candidates, read, wanted)
-	fitting = fits(nearest(trials))
+	fitting = fits(nearest(x.theory, trials, #arguments, wanted is not ø and is_sort(computed(x.el.c, filled(x.el, wanted!)))))
 	if fitting is empty and template is not ø { return version_called(x, name, template!, read, wanted) }
 	if fitting is empty and traits is not empty { return trait_operation(x, name, traits, read, wanted) }
 	fit = the_only(fitting, OVERLOAD, "${name} here is")
@@ -454,10 +527,11 @@ overload_elaborated(x: Elaborating, name: text, candidates: list<text>, traits: 
 fitting_declarations(x: Elaborating, candidates: list<text>, arguments: list<Node>, wanted: Term?): list<text> := fits(declarations_tried(x, candidates, unread(arguments), wanted))
 declarations_tried(x: Elaborating, candidates: list<text>, arguments: list<Argument>, wanted: Term?): list<Trial> := trials_of(x, candidates, candidate => {
 	given = declared_read(x, candidate, arguments, wanted)
-	# a result made of the type wanted is the place's step, no step of the fit: only the arguments' count
+	# a result made of the type wanted is the place's step, counted after the arguments'
 	if wanted is ø { return given }
 	steps = x.indirect
 	made = made_of(x, given, wanted!)
+	x.result_steps += x.indirect - steps
 	x.indirect = steps
 	made
 })
@@ -466,13 +540,13 @@ fitting(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<tex
 fits(trials: list<Trial>): list<text> := trials.filter(trial => trial.refusal is ø).map(trial => trial.candidate)
 # a candidate an attempt was given: the refusal it met, ø where it fits, and how many terms it made of a type other
 # than their own
-class Trial { candidate: text; refusal: text?; indirect: int }
+class Trial { candidate: text; refusal: text?; indirect: int; result: int; literals: int }
 # each candidate given to an attempt, the answers it gives taken back
 trials_of(x: Elaborating, candidates: list<text>, attempt: text -> Term): list<Trial> := candidates.map(candidate => undone(x, () => {
 	trial_counted(x.theory)
-	before = x.indirect
+	before = snapshot(x)
 	refusal = refusal_of(candidate, attempt)
-	Trial(candidate, refusal, x.indirect - before)
+	Trial(candidate, refusal, x.indirect - before.indirect, x.result_steps - before.result_steps, x.literal_steps - before.literal_steps)
 }))
 # one more candidate tried in this statement: past the limit the statement is given up
 trial_counted(p: Theory) := {
@@ -481,8 +555,8 @@ trial_counted(p: Theory) := {
 }
 # what a read may change, kept to be put back: the answers found, the arm being read, the letters, instance holes,
 # effects and lifts noted, the indirect steps counted, the course and the round read, the levels made
-class Snapshot { found: Found; arm: ArmState; letters: int; instances: int; pending: int; lifts: int; indirect: int; without_course: text?; round_given: list<text>?; levels: int }
-snapshot(x: Elaborating): Snapshot := Snapshot(found_so_far(x.el), arm_kept(x), #x.letters, #x.instances, #x.pending, #x.lifts, x.indirect, x.without_course, x.round_given, #x.el.c.levels)
+class Snapshot { found: Found; arm: ArmState; letters: int; instances: int; pending: int; lifts: int; indirect: int; result_steps: int; literal_steps: int; without_course: text?; round_given: list<text>?; levels: int }
+snapshot(x: Elaborating): Snapshot := Snapshot(found_so_far(x.el), arm_kept(x), #x.letters, #x.instances, #x.pending, #x.lifts, x.indirect, x.result_steps, x.literal_steps, x.without_course, x.round_given, #x.el.c.levels)
 put_back(x: Elaborating, kept: Snapshot) := {
 	back_to(x.el, kept.found)
 	arm_restored(x, kept.arm)
@@ -491,6 +565,8 @@ put_back(x: Elaborating, kept: Snapshot) := {
 	x.pending = x.pending.take(kept.pending)
 	x.lifts = x.lifts.take(kept.lifts)
 	x.indirect = kept.indirect
+	x.result_steps = kept.result_steps
+	x.literal_steps = kept.literal_steps
 	x.without_course = kept.without_course
 	x.round_given = kept.round_given
 	x.el.c.levels = x.el.c.levels.take(kept.levels)
@@ -504,14 +580,44 @@ undone(x: Elaborating, attempt: () -> T): T := {
 	put_back(x, kept)
 	given
 }
-# the trials that fit with the fewest indirect steps, and those that do not fit: a direct fit beats a fit through a
-# conversion, equal fits tie
-nearest(trials: list<Trial>): list<Trial> := {
+# the trials that do not fit, and those that fit best: a direct fit beats a fit through a conversion, of its arguments
+# first, then of its result, so a numeral is read at the type its place wants, `abs(0 - 3)` subtracts ints; a whole
+# call a part of one, `turned(x)` of `turned(x, when)`, one for the types given one for any type, `==(a: T, b: T)`;
+# equal fits tie
+nearest(p: Theory, trials: list<Trial>, given: int, type_wanted: bool): list<Trial> := {
 	fitting = trials.filter(trial => trial.refusal is ø)
 	if fitting is empty { return trials }
-	fewest = fitting.map(trial => trial.indirect).min()
-	trials.filter(trial => trial.refusal is not ø or trial.indirect == fewest)
+	# in a type's place, one giving a type before one giving data: `a implies b` the proposition, `bool` the type
+	types = if type_wanted then fitting.filter(trial => gives_type(p, trial.candidate)) else []
+	best = fewest_by(if types is empty then fitting else types, trial => trial.indirect)
+	best = fewest_by(best, trial => trial.result)
+	best = fewest_by(best, trial => left_open(p, trial.candidate, given))
+	best = fewest_by(best, trial => letters_found(p, trial.candidate))
+	# and, where nothing else tells them apart, a numeral at its own type: `1 + 2` adds nats
+	best = fewest_by(best, trial => trial.literals)
+	trials.filter(trial => trial.refusal is not ø) + best
 }
+# the trials a measure gives the least
+fewest_by(trials: list<Trial>, measure: (Trial) -> int): list<Trial> := {
+	least = trials.map(measure).min()
+	trials.filter(trial => measure(trial) == least)
+}
+# whether a declaration gives a type, a proposition among them
+gives_type(p: Theory, key: text): bool := is_sort(result_of(declaration(p.environment, key)!.type))
+# how many of its written parameters a declaration leaves open given so many arguments
+left_open(p: Theory, key: text, given: int): int := binders_of(p, key) - letters_found(p, key) - given
+# how many binders a declaration's calls give: as many as its header wrote, or every one of its type's
+binders_of(p: Theory, key: text): int := p.binders.get(key) ?? binders_counted(declaration(p.environment, key)!.type)
+# whether the program declared this key, past the prelude and the language every program gets
+from_program(p: Theory, key: text): bool := place(p.environment, key) > max(p.prelude_size, p.language_size)
+# whether the prelude declares this key
+from_prelude(p: Theory, key: text): bool := {
+	at = place(p.environment, key)
+	at > 0 and at <= p.prelude_size
+}
+# how many of a declaration's binders its header found, not wrote: none of a declaration no header was read for, a
+# binding's (`products(Pair, Unit)`) or a law the elaborator states itself (`f.unfolds`), whose binders are all given
+letters_found(p: Theory, key: text): int := p.found.get(key) ?? 0
 # the refusal an attempt meets, ø where it fits
 refusal_of(candidate: text, attempt: text -> Term): text? := try { attempt(candidate); ø } catch e { mismatch(e, UNFIT); e.message.replace(REFUSED, "") }
 
