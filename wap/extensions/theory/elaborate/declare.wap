@@ -13,6 +13,8 @@ use "../explicit.wap"
 use "../export.wap"
 use "../../../kernel/forms.wap"
 use "../../../core/type_notation.wap"
+use "../../../core/stage.wap"
+use "../../../core/parse/operator_table.wap"
 use "state.wap"
 use "read.wap"
 use "recursion.wap"
@@ -38,9 +40,11 @@ REPORTED_WORDS := [AXIOM_WORD, LAW_WORD, THEOREM_WORD]
 # the law that a function calling itself equals its body as written: `<function>.unfolds`
 UNFOLDS := ".unfolds"
 
-# A statement of a program in the lowered forms: a definition, an axiom, `type of e`, `export("file")` or a value
+# A statement of a program in the lowered forms: a definition, a constant, an axiom, `type of e`, `export("file")` or a
+# value
 statement_elaborated(p: Theory, statement: Node) := match statement {
 	Define(named, parameters, value) => declaration_elaborated(p, "", statement)
+	Set(target, value) => if target is symbol or target is Key then constant_elaborated(p, target, value) else computed(p, statement)
 	Call(called, arguments) => {
 		word = text(called)
 		typed = asked_about(QUESTION_WORDS, word, arguments)
@@ -55,6 +59,35 @@ statement_elaborated(p: Theory, statement: Node) := match statement {
 	}
 	_ => computed(p, statement)
 }
+
+# A name given a value at the top of a program, `c: char = "a"`, is a constant, defined as that value, when nothing else
+# ever sets it: no other line, no function's body, no module the program uses (wiki/subtype.md)
+constant_elaborated(p: Theory, target: Node, value: Node) := {
+	name = declared_name(target)
+	places = p.sets.get(text(name)) ?? []
+	if #places > 1 {
+		again = places.find(place => line_of(place) != line_of(name) or column_of(place) != column_of(name)) ?? places.last
+		refused(SET_AGAIN, "${name} is set again on line ${line_of(again) ?? 0}: a name set once is a constant, one set again a variable the theory does not follow")
+	}
+	definition_elaborated(p, "", target, [], value)
+}
+SET_AGAIN := "set again"
+# the places each name is given a value in modules' code, function bodies, blocks and calls' arguments included
+places_set(codes: list<Node>): map<text, list<Node>> := {
+	places: map<text, list<Node>> = {}
+	for n in codes.flat_map(nodes_within) {
+		match n {
+			Call(called, arguments) => if text(called) == ASSIGNMENT and #arguments == 2 {
+				name = declared_name(arguments#1)
+				places[text(name)] = (places.get(text(name)) ?? []) + [name]
+			}
+			_ => ø
+		}
+	}
+	places
+}
+# a node and every node inside it, a call's head and arguments too
+nodes_within(n: Node): list<Node> := [n] + (match n { Call(called, arguments) => [called] + arguments; _ => direct_parts(n) }).flat_map(nodes_within)
 
 # a question's answer printed, where the door says them (the run door's output is the program alone)
 answered(p: Theory, answer: text) := if p.answering { print answer }
@@ -99,7 +132,8 @@ definition_elaborated(p: Theory, word: text, head: Node, written_parameters: lis
 	diverged = no
 	x.lifting = not (word in PROVED_WORDS)
 	read = if value is ø or assumed or by_laws is not ø then ø else try { body_read(x, result, wanted => elaborated(x, given!.body, wanted)) } catch e {
-		if not may_not_end(e) { raise e.message }
+		# (a recursion whose end nothing shows makes the function one that may not end instead)
+		refusal_only(e, [ENDING])
 		back_to(x.el, kept)
 		diverged = yes
 		diverging(x, word, name, result, given!.body, e)
@@ -155,7 +189,7 @@ run_body_kept(p: Theory, written: text, d: Declaration, parameters: list<Node>, 
 	if not diverged { unfolding_proved(p, d, run) }
 	p.run_terms[d.name] = run
 } catch e {
-	if not e.message.starts_with(REFUSED) { raise e.message }
+	refusal_only(e)
 	p.run_refusals[d.name] = e.message
 }
 # that a function equals its body as written at every argument, proved and declared as `<function>.unfolds`

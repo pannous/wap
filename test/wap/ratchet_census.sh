@@ -13,12 +13,12 @@ FILES_TYPED_WHOLE=62
 FUNCTIONS_UNTYPED=0
 # wap's size, the nodes its reader makes of its source (scripts/wap-size.warp), may not rise above the ceiling: only a
 # real simplification lowers it
-SIZE_NODES=142934
+SIZE_NODES=142941
 # the theory's elaborator (notes/coc-plan.md S1, scripts/theory-census.wap) over the compiler's source, lib/ and the
 # test programs: the statements it accepts may not drop below the floor, and its wall time stays under the ratio times
 # the typing census's, measured in the same run. It runs only with --theory (the landings touching wap/extensions/theory
 # or wap/extensions/prove, and the hourly full run): about 4 min more
-THEORY_ACCEPTED=1464
+THEORY_ACCEPTED=2168
 THEORY_TIME_RATIO=3
 
 source "$(dirname "$0")/compile.sh"
