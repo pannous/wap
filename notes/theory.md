@@ -330,9 +330,10 @@ No two terms are made one (interning) yet: `same` stays the one place that would
 What a program runs is not always what the theory proves of it. Each such pair is a claim nobody checks:
 - **The language's words the prelude has too.** A types-module declaration with the signature of a prelude
   declaration is that declaration (elaborate/declare.wap overloaded): proofs read the prelude's definition, and the
-  program runs the types module's body. The pairs the tests rely on are int's `+`, `-` (both arities), `*`, `==`,
-  `<`, `>`, `>=`.
+  program runs the types module's function for it, by its name. The pairs the tests rely on are int's `+`, `-` (both
+  arities), `*`, `==`, `<`, `<=`, `>`, `>=`. Every other function of the types module runs its own body, as the
+  theory read it.
 - **The host's operations.** A function whose body is `prim …` is a constant of its written type, never unfolded; it
-  runs as the host's operation. One at a proposition is refused, and one with neither a written type nor a limit
-  after its body (`! IO`) too, since nothing says what it does.
+  runs as the host's operation. One giving a proposition, or a type that may be one (a letter's), is refused, and one
+  with neither a written type nor a limit after its body (`! IO`) too, since nothing says what it does.
 - **The prelude's own host spellings** (run/hosts.wap HOST_FUNCTIONS): a number runs as a machine int.
