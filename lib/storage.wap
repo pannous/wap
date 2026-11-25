@@ -1,0 +1,68 @@
+# The standard module storage: `use storage`, values kept under names. `storage["score"] = 42` keeps a value in the
+# program's database, <program>.database.sqlite beside the program (the run option program), else in memory, and
+# `storage["score"]` reads it back in a later run; `database` and `local` are other names of storage. `session["k"]`
+# keeps a value while the run lasts. `keys(store)` lists the names, `delete(store, name)` forgets one,
+# `stored_value(name, default)` gives the kept value or keeps the default the first time, and `transaction { … }` lands
+# every database write of its block or, when the block fails, none.
+use os
+use sqlite3
+
+PROGRAM_SUFFIX := ".wap"
+DATABASE_SUFFIX := ".database.sqlite"
+IN_MEMORY := ":memory:"
+# the table of the values kept under names
+VALUES_TABLE := "stored_values"
+
+# values kept under names: in the program's database (kept), or in the run's memory
+class Store { kept: bool, values: map<text, any> }
+storage := Store(yes, {})
+database := storage
+local := storage
+session = Store(no, {})
+
+# the program's database with its table of values, opened at its first use
+opened: int = 0
+values_database(): int := {
+	global opened
+	if opened == 0 {
+		program = run_option("program")
+		opened = sqlite3_open(if program == ø then IN_MEMORY else program!.replace(PROGRAM_SUFFIX, "") + DATABASE_SUFFIX)
+		run(opened, "create table if not exists ${VALUES_TABLE} (name TEXT PRIMARY KEY, value)")
+	}
+	opened
+}
+
+# the value kept under the name, ø for none
+#(store: Store, name: text): any? := {
+	if not store.kept { return store.values.get(name) }
+	found = rows(values_database(), "select value from ${VALUES_TABLE} where name = ?", [name])
+	if found is empty then ø else found[0][0]
+}
+# the value kept under the name
+set(to: any, of: Store, name: text) := {
+	if of.kept { run(values_database(), "insert or replace into ${VALUES_TABLE} (name, value) values (?, ?)", [name, to]) }
+	else { of.values[name] = to }
+}
+keys(store: Store): list<text> := if store.kept then rows(values_database(), "select name from ${VALUES_TABLE}").map(row => text(row[0])) else keys(store.values)
+# the value under the name forgotten
+delete(store: Store, name: text) := {
+	if store.kept { run(values_database(), "delete from ${VALUES_TABLE} where name = ?", [name]) }
+	else { store.values.remove(name) }
+}
+# the value kept under the name, the default the first time, which is kept then
+stored_value(name: text, default: any): any := {
+	found = storage[name]
+	if found != ø { return found! }
+	storage[name] = default
+	default
+}
+
+# every database write of the block lands, or, when it fails, none: its failure is raised again
+transaction(body: block) := {
+	run(values_database(), "begin")
+	try { body() } catch failure {
+		run(values_database(), "rollback")
+		raise failure.message
+	}
+	run(values_database(), "commit")
+}
