@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-// A field of a C struct a program holds as a handle, by its offset (lib/c.warp: SDL_Event's union, FreeType's glyph
+// A field of a C struct a program holds as a handle, by its offset (lib/c.wap: SDL_Event's union, FreeType's glyph
 // slot): its bytes as the C type is, a signed integer widened, a float as a double, a pointer as a handle; set_field_*
 // writes one (an AudioStreamBasicDescription, an AudioBufferList pointing at memory of the program's)
 #define FIELD_READER(name, type, result) result name(const uint8_t* address, int64_t offset) { type value; memcpy(&value, address + offset, sizeof value); return (result)value; }

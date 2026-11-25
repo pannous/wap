@@ -57,6 +57,9 @@ check "wap build makes a program a native executable named as it" "$(cd "$tree" 
 # an argument that names no program file is code, run as a program is (core/native/warp.warp is_warp_file)
 check "wap runs code given in place of a file" "$("$native_wap" '1+1' 2>&1)" "2"
 # code given runs without a TMPDIR too, as under cron: its files go to the user's temporary folder
+# no window under --no-window: a program calling a C function annotated `@Device` (wiki/c.md) stops at the call
+check "wap --no-window refuses a program that opens a window" "$(cd "$stage" && printf '%s\n' "@Device InitWindow(width: i64, height: i64, title: text): ø from 'no_such_library'" 'InitWindow(8, 8, "shown")' >window.wap && "$native_wap" --no-window window.wap 2>&1; echo $?)" "wap: InitWindow from no_such_library opens a window or a sound device: refused under --no-window
+1"
 check "wap runs code given in place of a file without a TMPDIR" "$(env -u TMPDIR "$native_wap" '1+1' 2>&1)" "2"
 check "a program file stays after its run" "$(cd "$stage" && "$native_wap" hello.wap >/dev/null && ls hello.wap)" "hello.wap"
 # `wap` alone, the console: each line a module of its own, linked to the earlier lines' kept instances, so a definition
