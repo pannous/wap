@@ -33,8 +33,25 @@ language_loaded(language: Language, wap_folder: text, types_file: text = TYPES_F
 	types_declared(language, wap_folder, types_file)
 }
 # each file read with the rules of the files before it loaded
-rules_files_loaded(language: Language, wap_folder: text) := { for file in files_named(operated_file(language, in_folder(wap_folder, RULES_FILE)), USE_WORD) { rules_loaded(language, operated_file(language, file)) } }
-types_declared(language: Language, wap_folder: text, types_file: text = TYPES_FILE) as Module := module_declared(declared_operated(language, program_operated(language, in_folder(wap_folder, types_file))))
+rules_files_loaded(language: Language, wap_folder: text) := { for file in used_files(notation(source_of(language, in_folder(wap_folder, RULES_FILE)), in_folder(wap_folder, RULES_FILE))) { based(language, file) } }
+# a rules file's grammar joined to the one every file starts from, which it is read in from then on, as a module too
+based(language: Language, file: text) := {
+	joined(language.base, grammar_of(language, file))
+	language.grammars[file] = language.base
+	# its patterns taken in again there once it is used as a module, their shapes read in the whole base
+	language.operated[file].rest = ø
+}
+# the types module declared, its grammar the base: every file is read in it
+types_declared(language: Language, wap_folder: text, types_file: text = TYPES_FILE) as Module := {
+	program_operated(language, in_folder(wap_folder, types_file))
+	types = module_declared(declared_file(language, in_folder(wap_folder, types_file)))
+	grammar = language.grammars[types.file]
+	based(language, types.file)
+	# the base holds what the types module's grammar holds, whose rules' termination its reading checked
+	checked_as(language.base, grammar)
+	language.grammar = language.base
+	types
+}
 # the names a program's file defines at its top, its own words: a rule head led by one of them is the program's own
 # definition, never a rule (rules/stages.wap programs_own); aliases no longer look at them
 words_known(language: Language, program: Node) := words_defined(program, language.grammar.words)
@@ -43,16 +60,18 @@ in_folder(folder: text, file: text) as text := normalized_path(folder + "/" + fi
 # a file's notation, its source read by the reader the language has for its ending (compiler.wap hands them in: a
 # compiled module's), else as text
 read_notation(language: Language, file: text) as Node := readable(notation_of(language, file))
-# a file's notation, the files its `use` lines name operated first: what follows the words of a raw or phrase
-# parameter it and they define is read unparsed
+# a file's notation, read in one scan, each line told the pipeline before it is read
 notation_of(language: Language, file: text) as Node := {
-	source = source_of(language, file)
-	uses = uses_written(source, file)
-	for used in uses { operated_file(language, used) }
-	unparsed = unparsed_written(source)
-	for used in uses.filter(used => language.unparsed.has(used)) { unparsed.update(language.unparsed[used]) }
-	language.unparsed[file] = unparsed
-	notation(source, file, unparsed)
+	language.unparsed[file] = {}
+	notation(source_of(language, file), file, line => line_told(language, file, line))
+}
+# a line of a file before it is read: the files a `use` line names operated, so their operators read below it, `use
+# math` before ‖x‖; the words of a raw or phrase parameter it and they define, read unparsed from there on
+line_told(language: Language, file: text, line: text) as map<text, text> := {
+	words = unparsed_written(line)
+	if line.starts_with(USE_WORD + " ") { for used in used_files(notation(line, file)) { operated_file(language, used); if language.unparsed.has(used) { words.update(language.unparsed[used]) } } }
+	language.unparsed[file].update(words)
+	words
 }
 source_of(language: Language, file: text) as text := {
 	ending = "." + file.split(".").last
@@ -76,6 +95,14 @@ readable(code: Node) as Node := match code {
 # read code with its operators read, its spellings rewritten by the shape rules, then declared
 declared_code(language: Language, code: Node) as Node := declared_operated(language, operated_program(language, code))
 declared_operated(language: Language, code: Node) as Node := declared_program(shaped_program(language, code))
+# a file's code declared once a compile, shaped in its grammar
+declared_file(language: Language, file: text) as Node := {
+	grammar_of(language, file)
+	operated = language.operated[file]
+	if operated.rest == ø { rules_taken(language, file) }
+	if operated.declared == ø { operated.declared = read_in(language, file, () => declared_program(shaped_rest(language, operated.code, operated.rest!))) }
+	operated.declared!
+}
 # a file's code with its operators read, each `include "file"` in it replaced by that file's statements, as they are
 # (wiki/use.md); a program's file has the names it defines at its top known before its operators are read
 operated_file(language: Language, file: text) as Node := operated_once(language, file, no)
@@ -86,21 +113,45 @@ operated_once(language: Language, file: text, program: bool) as Node := {
 		# a use back while it is read finds it taken
 		language.operated[file] = Operated(Empty, [])
 		notation = read_notation(language, file)
-		words = words_named(notation)
-		if program { words_listed(language, words) }
 		# the files it uses first, so their operators read in it too, `use math` before ‖x‖; a use back finds it read
-		language.operated[file] = Operated(notation, words)
-		uses = used_files(notation)
-		for used in uses { operated_file(language, used) }
-		language.grammar.reading = handed(language.aliases_of, uses)
-		language.operated[file] = Operated(operated_notation(language, file, notation), words)
-		language.aliases_of[file] = language.grammar.reading
-	} else if program { words_listed(language, language.operated[file].words) }
+		language.operated[file] = Operated(notation, words_named(notation))
+		read_in_own(language, file, used_files(notation), () => operated_notation(language, file, notation))
+	}
+	if program { for word in language.operated[file].words { grammar_of(language, file).words[word] = yes } }
 	language.operated[file].code
 }
+# the grammar a file is read in: the base's, then those of the files it uses; a file brought in operated already
+# (extensions/warm.wap) gets its own when first asked
+grammar_of(language: Language, file: text) as Grammar := {
+	code = operated_file(language, file)
+	if not language.grammars.has(file) { read_in_own(language, file, used_files(code), () => code) }
+	language.grammars[file]
+}
+# a file's code made in a grammar of its own, its rules then taken in
+read_in_own(language: Language, file: text, uses: list<text>, reading: () -> Node) := {
+	grammar = Grammar([], [])
+	grammar.file = file
+	# a use back while it is read finds this one, still growing
+	language.grammars[file] = grammar
+	joined(grammar, language.base)
+	checked_as(grammar, language.base)
+	declaring = uses.map(used => grammar_of(language, used)).filter(used => used.declares)
+	for used in declaring { joined(grammar, used) }
+	grammar.declares = declaring is not empty
+	language.operated[file].code = read_in(language, file, () => { related_groups(language); reading() })
+	rules_taken(language, file)
+}
+# a file's rules and patterns taken into its grammar, what is left of its code kept for its shaping
+rules_taken(language: Language, file: text) := { language.operated[file].rest = read_in(language, file, () => rules_loaded(language, language.operated[file].code)) }
+# work done in a file's grammar, or in the one at hand for code of a file read no grammar
+read_in(language: Language, file: text, work: () -> T) as T := {
+	held = language.grammar
+	language.grammar = language.grammars.get(file) ?? held
+	done = work()
+	language.grammar = held
+	done
+}
 # the files the `use` lines of a source name, read on their own
-uses_written(source: text, file: text) as list := used_files(notation(source.split("\n").filter(line => line.starts_with(USE_WORD + " ")).join("\n"), file))
-words_listed(language: Language, words: list<text>) := { for word in words { language.grammar.words[word] = yes } }
 # a file's notation with its operators read and its includes in
 operated_notation(language: Language, file: text, notation: Node) as Node := {
 	code = operated_program(language, notation)
@@ -112,6 +163,8 @@ operated_notation(language: Language, file: text, notation: Node) as Node := {
 # a line of a file, or the lines of the file it includes
 included(language: Language, file: text, line: Node) as list<Node> := {
 	path = phrase_text(line, INCLUDE_WORD) ?? return [line]
+	# what the included file declares is the including file's from here on (wiki/use.md)
+	joined(language.grammar, grammar_of(language, beside(file, path)))
 	match operated_file(language, beside(file, path)) {
 		List(lines, Bracket.None, Separator.Newline) => lines
 		code => [code]
@@ -120,7 +173,7 @@ included(language: Language, file: text, line: Node) as list<Node> := {
 # a file with the modules it uses, theirs first, each declared after the modules it uses, so their rules shape it
 declared_modules(language: Language, file: text) as list<Module> := {
 	code = program_operated(language, file)
-	used_modules(language, code) + [declared_module(language, code)]
+	used_modules(language, code) + [module_declared(declared_file(language, file))]
 }
 # the modules operated code uses, theirs first, each declared
 used_modules(language: Language, code: Node) as list<Module> := modules_used(code, file => if language.modules.has(module_key(file)) then language.modules[module_key(file)].code else operated_file(language, file)).map(module => used_module(language, module))
@@ -128,7 +181,7 @@ used_modules(language: Language, code: Node) as list<Module> := modules_used(cod
 used_module(language: Language, code: Node) as Module := {
 	key = module_key(file_of(code) ?? return declared_module(language, code))
 	if language.modules.has(key) { return language.modules[key] }
-	module = declared_module(language, code)
+	module = module_declared(declared_file(language, file_of(code)!))
 	language.modules[key] = module
 	module
 }
@@ -143,7 +196,7 @@ prepared(language: Language, module: Module, modules: list<Module>, types: Modul
 lowered_module(language: Language, module: Module, modules: list<Module>, types: Module) as Block := {
 	if language.lowered.has(module_key(module.file)) { return language.lowered[module_key(module.file)] }
 	uses = modules_of_uses(module, modules)
-	lowered_program(language, declared_rewritten(language, module, library_around(module, types) + uses.flat_map(used => used.signatures)))
+	read_in(language, module.file, () => lowered_program(language, declared_rewritten(language, module, library_around(module, types) + uses.flat_map(used => used.signatures))))
 }
 # the modules a declared module uses, of a standard module it names without its `use` only the words it names
 modules_of_uses(module: Module, modules: list<Module>) as list<Module> := module.uses.map(file => narrowed(module_of(file, modules), module.named.filter(name => standard_file(name) == file).map(name => text(name))))
@@ -208,5 +261,5 @@ typed_modules(language: Language, modules: list<Module>, types: Module, program:
 	named = standard_named(whole)
 	if named is not empty { return typed_modules(language, standard_brought(language, modules, named), types, program) }
 	library_code = if own then Library(Block([]), scope_around([], [])) else library_code_of(language, types)
-	typed_by_rules(language, whole, if own then [] else types.signatures, library_code, program_modules.flat_map(module => module.signatures), modules.last.signatures)
+	read_in(language, modules.last.file, () => typed_by_rules(language, whole, if own then [] else types.signatures, library_code, program_modules.flat_map(module => module.signatures), modules.last.signatures))
 }
