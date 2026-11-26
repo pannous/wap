@@ -23,6 +23,8 @@
 #include <sys/wait.h>
 // the process's environment, which a child posix_spawnp starts gets (glibc declares it only under _GNU_SOURCE)
 extern char** environ;
+// the program's arguments as POSIX writes them: as given
+static char** posix_arguments(int count, char** words) { (void)count; return words; }
 #endif
 // the process's environment, for the children it starts (lib/process.wap start): a call, as glibc has no function for it
 char** process_environment(void) { return environ; }

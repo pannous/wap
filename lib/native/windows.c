@@ -86,6 +86,13 @@ static void posix_path(char* path) {
 		path[0] = '/';
 	}
 }
+// the program's arguments as POSIX writes them: Git Bash gives a program not its own a path as Windows writes it,
+// "/d/a" as "D:/a", which each drive path is again ("D:\\a" too); other arguments as given
+static char** posix_arguments(int count, char** words) {
+	for (int i = 1; i < count; i++)
+		if (isalpha((unsigned char)words[i][0]) && words[i][1] == ':' && (words[i][2] == '/' || words[i][2] == '\\')) posix_path(words[i]);
+	return words;
+}
 static int is_drive_path(const char* path) { return path[0] == '/' && isalpha((unsigned char)path[1]) && (path[2] == '/' || !path[2]); }
 // the path as Windows takes it, in the buffer when it changes: "/d/a/b" is "D:/a/b", "/d" "D:/"
 static const char* windows_path(const char* path, char buffer[MAX_PATH]) {
