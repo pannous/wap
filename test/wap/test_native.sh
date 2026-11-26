@@ -369,4 +369,8 @@ else { print 3 }
 printf '%s\n' 'f(x: int) as int := x + 1' 'g(x: int): int := x * 2' >"$stage/result_type.wap"
 check "wap format writes a result type after a colon" "$(cd "$stage" && "$native_wap" format result_type.wap 2>&1)" "f(x: int): int := x + 1
 g(x: int): int := x * 2"
+# a program compiled by a compiler named by a path from the current folder runs from any folder: its library is named
+# from the root (the user's rule 2026-11-26: a compiler's modules are found through its own folder)
+printf '%s\n' 'print "relative"' >"$stage/relative.wap"
+check "a program compiled by a compiler named by a relative path runs from any folder" "$(cd "$(dirname "$(dirname "$compiler")")" && "$native_wap" "$(basename "$(dirname "$compiler")")/$(basename "$compiler")" "$stage/relative.wap" "$stage/relative.wasm" && cd / && "$native_wap" "$stage/relative.wasm" 2>&1)" "relative"
 exit $((failures > 0))
