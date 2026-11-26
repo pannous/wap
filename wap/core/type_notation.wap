@@ -24,6 +24,9 @@ BLOCK_WORD = "block"
 FUNCTION_ARROW = "->"
 PARAMETERS_WORD = "and"
 NO_PARAMETERS_WORD = "none"
+# A subtype by condition, `int where it > 0` (wiki/subtype.md), as sugar/data.wap writes it: where(int, it => it > 0),
+# the values of its parent that meet the condition, the function of `it`
+WHERE_WORD = "where"
 # An optional type, `int?`, as the reader reads it: the type glued to `?`; it holds a value of the type or ø
 OPTIONAL_MARK = "?"
 # the dynamic type, which holds any value, ø too: an any? is an any
@@ -96,10 +99,11 @@ TYPE_WORDS = ATOM_TYPES + [BOOL_TYPE, ANY_TYPE, LIST_TYPE, MAP_TYPE, ENUM_TYPE]
 # The table of the types a compile met: the terms by place, the places by hash, the environment declaring their words
 # by key, the declaration a record's own word names (two records of one name are two words, the first word of each
 # name kept and the words sharing one marked, so their texts tell them apart), the type a shape's word narrows
-# (core/analyze/shapes.wap) and the key of the function a function value's word calls. It is the compile's own, as a
+# (core/analyze/shapes.wap), the condition a subtype's word holds and the key of the function a function value's word
+# calls. It is the compile's own, as a
 # symbol table is: every stage reads a type fact through it, so it is one value for the whole run, not handed down
 # every call
-class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; shared: map<int, bool> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {} }
+class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; shared: map<int, bool> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {}; conditions: map<int, Node> = {} }
 TYPES: TypeTerms = TypeTerms()
 core_environment() as Environment := {
 	e = Environment()
@@ -141,6 +145,21 @@ narrowing(word: Term, type: Term) as Term := {
 	TYPES.narrows[word_id(word)] = type
 	word
 }
+# a subtype by condition: a word narrowing its parent, named by the condition as written, the function of `it` it holds
+subset_term(parent: Term, condition: Node) as Term := {
+	written = "${type_text(parent)} ${WHERE_WORD} ${text(condition_of(condition))}"
+	word = word_keyed(written, written)
+	TYPES.conditions[word_id(word)] = condition
+	narrowing(word, parent)
+}
+# what a condition's function gives, as written or lowered: `it > 0` of `it => it > 0`
+condition_of(condition: Node) as Node := match condition {
+	Fn(parameters, body) => body
+	Call(arrow, parts) => parts.last
+	_ => condition
+}
+# the condition a subtype holds, the function of `it`; ø for any other type
+subset_condition(type: Term?) as Node? := if is_word(type) then TYPES.conditions.get(word_id(type!)) else ø
 # the type a shape's word narrows, `Node` of Define, ø for any other type
 narrowed_type(type: Term?) as Term? := if is_word(type) then TYPES.narrows.get(word_id(type!)) else ø
 # the place of a type in the table, entered the first time it is met
@@ -264,6 +283,8 @@ refused_type(type: Term, why: text) as never := raise("${why}: ${type_text(type)
 type_term(n: Node) as Term := {
 	known = fact_type(fact_of(n, TYPE))
 	if known != ø { return known! }
+	subset = subset_written(n)
+	if subset != ø { return subset_term(type_term(subset#1), subset#2) }
 	parts = written_parts(n)
 	if parts != ø { return type_built(word_term(text(parts#1)), parts.drop(1).map(part => type_term(part))) }
 	match n {
@@ -271,6 +292,13 @@ type_term(n: Node) as Term := {
 		Empty => EMPTY_TERM
 		_ => word_named(n)
 	}
+}
+# a subtype as written, `where(T, it => p)`, as notation or lowered: its parent and its condition's function; ø for
+# other code
+subset_written(n: Node) as list<Node>? := match n {
+	Key(name, Op.None, List(items, Bracket.Round, separator)) => if text(name) == WHERE_WORD and #items == 2 then items else ø
+	Call(called, items) => if text(called) == WHERE_WORD and #items == 2 then items else ø
+	_ => ø
 }
 # A written type with parts read as its word and then the parts, as type_parts reads a term: `list<int>` as list and
 # int, `int?` as ? and int, `(int, text) -> bool` as ->, int, text and bool, in round brackets or not; ø for a word
