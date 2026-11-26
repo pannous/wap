@@ -10,12 +10,14 @@ use "../language.wap"
 # a phrase led by the word of a rule taking a block takes what follows its colon as that block: `for n in xs: print n`,
 # `if c: f()` (wiki/for.md)
 rule_led(language: Language, items: list) as bool := #items > 1 and leads_block(language, spelling_written(items#1))
-leads_block(language: Language, word: text) as bool := language.phrase_words.leading.has(word) and language.phrase_words.leading[word]
+leads_block(language: Language, word: text) as bool := language.grammar.phrase_words.leading.has(word) and language.grammar.phrase_words.leading[word]
 colon_read(language: Language, left: Node, right: Node) as Node := {
 	read = chosen(operated(language, left), operated(language, right))
-	if read is Key and rule_led(language, phrase_items(left)) then operated(language, with_block(phrase_items(left), right)) else read
+	if read is Key and rule_led(language, phrase_items(left)) and not ends_in_block(language, right) then operated(language, with_block(phrase_items(left), right)) else read
 }
-colon_block(language: Language, items: list) as Node? := match items.last { Key(last, Op.Colon, body) => if rule_led(language, items) and not is_hole_word(last) then operated(language, with_block(items[.. #items - 1] + [last], body)) else ø; _ => ø }
+colon_block(language: Language, items: list, led: bool) as Node? := match items.last { Key(last, Op.Colon, body) => if led and not is_hole_word(last) and not ends_in_block(language, body) then operated(language, with_block(items[.. #items - 1] + [last], body)) else ø; _ => ø }
+# a colon before a phrase that ends in its own block types what stands before it (`enum nat: Type { zero }`), unless a block word leads that phrase (`for n in xs: if n > 1 { print n }`)
+ends_in_block(language: Language, n: Node) as bool := #phrase_items(n) > 1 and is_block(phrase_items(n).last) and not rule_led(language, phrase_items(n))
 with_block(items: list, body: Node) as Node := List(items + [if is_block(body) then body else List([body], Bracket.Curly, Separator.None)], Bracket.None, Separator.Space)
 
 # `c ? a : b`: the reader keys `c ? a` with b; the colon closes the choice left open at the key's end, (Call ? c a b),
@@ -35,14 +37,15 @@ key_read(language: Language, n: Node, left: Node, spelling: text, right: Node) a
 }
 
 # An infix operator applied: (Call + a b). A compound assignment of the table, `x += 1`, is the assignment it means,
-# x = x + 1, (Call = x (Call + x 1)); its written spelling stays a fact, so `wap format` prints `x += 1` again
+# x = x + 1, (Call = x (Call + x 1)), both calls written_as `+=`: `wap format` prints it again, a type's own += is found
 infix_call(language: Language, spelling: text, left: Node, right: Node) as Node := {
 	if is_assignment(language, spelling) and arrow_parts(language, left) != ø { return arrow_assigned(language, spelling, left, right) }
 	phrase = if is_assignment(language, spelling) then rule_phrase(language, left) else ø
 	if phrase != ø { return phrase_assigned(language, spelling, phrase, right) }
 	if compound_assignment(language, spelling) != spelling { return Call(symbol(spelling), [left, right]) }
-	with_fact(Call(symbol(ASSIGNMENT), [left, Call(symbol(spelling[.. #spelling - 1]), [left, right])]), COMPOUND, symbol(spelling))
+	written_as(Call(symbol(ASSIGNMENT), [left, written_as(Call(symbol(spelling[.. #spelling - 1]), [left, right]), spelling)]), spelling)
 }
+written_as(call: Node, spelling: text) as Node := with_fact(call, COMPOUND, symbol(spelling))
 
 is_assignment(language: Language, spelling: text) as bool := spelling == ASSIGNMENT or compound_assignment(language, spelling) == spelling
 
@@ -52,7 +55,7 @@ is_assignment(language: Language, spelling: text) as bool := spelling == ASSIGNM
 phrase_assigned(language: Language, spelling: text, words: list, value: Node) as Node := {
 	after = phrase_items(value)
 	cut = 0
-	while cut < #after and not continuation_item(language, after#(cut + 1), words) { cut = cut + 1 }
+	while cut < #after and not continuation_item(language, after#(cut + 1), words) { cut += 1 }
 	given = if cut == 1 then after#1 else List(after[.. cut], Bracket.None, Separator.Space)
 	List(words[.. #words - 1] + [assigned_last(language, spelling, words.last, given)] + after[cut ..], Bracket.None, Separator.Space)
 }
@@ -60,7 +63,7 @@ phrase_assigned(language: Language, spelling: text, words: list, value: Node) as
 assigned_last(language: Language, spelling: text, place: Node, value: Node) as Node := match place { List(items, Bracket.Curly, separator) => List(items[.. #items - 1] + [assigned_last(language, spelling, items.last, value)], Bracket.Curly, separator); _ => infix_call(language, spelling, place, value) }
 # the words of a phrase that holds a word of a rule's phrase, `if`, `else`, ø for any other code
 rule_phrase(language: Language, n: Node) as list? := match n {
-	List(items, Bracket.None, Separator.Space) => if items.filter(item => rule_word(language, item)) is not empty then items else ø
+	List(items, Bracket.None, Separator.Space) => if items.any(item => rule_word(language, item)) then items else ø
 	_ => ø
 }
 

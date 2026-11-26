@@ -21,6 +21,7 @@ use "../stage.wap"
 use "../bindings.wap"
 use "definers.wap"
 use "../../kernel/forms.wap"
+use "../../kernel/surface.wap"
 use "../parse/cascade.wap"
 
 use "../paths.wap"
@@ -90,14 +91,14 @@ module_named(name: text, statement: Node, file: text) as text := {
 	# the library's own modules first, its folders only for a name it has none of (wiki/use.md "Library folders")
 	at_root = sources_named(name, library)
 	if at_root is not empty { return at_root#1 }
-	folders = (try { list_files(library) } else []).filter(entry => not entry.contains(".")).map(entry => library + "/" + entry)
+	folders = listed_in(library).filter(entry => not entry.contains(".")).map(entry => library + "/" + entry)
 	found = folders.flat_map(folder => sources_named(name, folder))
 	if #found != 1 { refused(statement, if found is empty then "no module ${name}: neither ${name}.wap nor ${name}.warp beside the program or in ${library} and its folders" else "two modules ${name}: ${found.join(" and ")}; use one by its path") }
 	found#1
 }
 # the source files of that name in a folder, the first ending first
 sources_named(name: text, folder: text) as list<text> := {
-	listed = try { list_files(folder) } else []
+	listed = listed_in(folder)
 	SOURCE_ENDINGS.filter(ending => listed.contains(name + ending)).map(ending => normalized_path(folder + "/" + name + ending)).take(1)
 }
 
@@ -126,23 +127,32 @@ modules_used(program: Node, read_file: function) as list<Node> := {
 modules_reached(code: Node, read_file: function, reached: Reached) := {
 	for file in used_files(code) {
 		if not reached.files.contains(file) {
-			reached.files = reached.files + [file]
+			reached.files += [file]
 			module = read_file(file)
 			modules_reached(module, read_file, reached)
-			reached.codes = reached.codes + [module]
+			reached.codes += [module]
 		}
 	}
 }
-# A declared module: its file, its code, the files its `use` lines name and the records of what it declares
-class Module { file: text; code: Node; uses: list<text>; signatures: list<Signature> = [] }
+# A declared module: its file, its code, the files its `use` lines name and the records of what it declares; the words
+# of standard modules it names without their `use`, which alone it sees of them (core/pipeline.wap standard_brought)
+class Module { file: text; code: Node; uses: list<text>; signatures: list<Signature> = []; named: list<Node> = [] }
 # a declared program as a module
 module_declared(code: Node) as Module := Module(file_of(code) ?? "", code, uses_of(code), signatures_of(code))
 
 # the record of what a top-level statement declares: a function `f(a, b) := …`, a value `x = 1`, a class or an enum
 signature_declared(declaration: Node) as Signature := match declaration {
-	Record(name, fields, variants) => Signature(text(name), place_key(name), DefinitionKind.Record, name, module: file_of(name) ?? "", record: declaration)
+	Record(name, fields, variants) => Signature(text(name), place_key(name), DefinitionKind.Record, name, module: file_of(name) ?? "", record: fields_once(declaration))
 	Key(name, Op.Colon, parts) => if declares_function(declaration) then signature_from(name, declared_parameters(declaration), declared_result(declaration)) else Signature(text(name), place_key(name), DefinitionKind.Global, name, module: file_of(name) ?? "")
 	_ => refused(declaration, NO_DECLARATION)
+}
+# a record names each field once, wherever its fields come from: `class B extends A { x: text }` where A has x
+fields_once(record: Node) as Node := {
+	for field in fields_of(record) {
+		twins = fields_of(record).filter(other => same_name(other, field))
+		if #twins > 1 { refused(twins#2, "${record_declared(record)} has the field ${declared_name(field)} twice, ${twins.map(twin => "`${twin}`").join(" and ")}: rename or drop one") }
+	}
+	record
 }
 # the records of what a declared program's top level declares, in the order written
 signatures_of(program: Node) as list<Signature> := top_level_statements(program).map(statement => declaration_of(statement)).filter(declaration => declaration != ø).map(declaration => signature_declared(declaration!))
@@ -165,7 +175,7 @@ module_of(file: text, modules: list<Module>) as Module := modules.find(module =>
 # name: signature of a definition, ø of any other statement: `f(a, b) := …`, `n := 1`, `x = 1` as operated code reads
 # them, (Call := f(a, b) …), (Call = x 1); a class or an enum declares itself, its cases as lowering writes them
 declaration_of(statement: Node) as Node? := match statement {
-	Record(name, fields, variants) => Record(name, fields, cases_lowered(variants))
+	Record(name, fields, variants) => with_facts_of(Record(name, fields, cases_lowered(variants)), statement)
 	Call(called, arguments) => if text(called) == ":=" then signature_of(arguments#1) else if text(called) == "=" then value_named(arguments#1) else ø
 	_ => ø
 }
@@ -197,6 +207,7 @@ value_named(place: Node) as Node? := match place {
 	Symbol(name) => Key(place, Op.Colon, Empty)
 	List(items, Bracket.None, Separator.Space) => if #items == 2 then value_named(items#2) else ø
 	Key(name, Op.Colon, type) => value_named(name)
+	Variable(name, kind) => value_named(name)
 	_ => ø
 }
 

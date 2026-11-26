@@ -1,123 +1,255 @@
-# Types as the program writes them, the notation every stage reads and builds (core/stage.wap holds the facts that
-# carry them): a word with parts in angle brackets `list<int>`, an optional `int?`, a function type `(int) -> text`,
-# a function value's own `fn<…>`; each built from its parts and taken back apart, ø for a type of another kind.
-# Input and output: type Nodes.
+# Types as kernel terms (notes/coc-t3.md "Where a type lives"), and the notation programs write them in. A type is its
+# word applied to its parts: `list<int>` the constant list applied to int, `int?` the constant ? applied to int,
+# `(int, text) -> bool` the constant -> applied to int, text and bool, a function value's own `fn<"f.wap:3:5 λ", int>`
+# the constant fn applied to its key quoted and its captures' types. The words are constants by name: the words core
+# builds types of have fixed ids, the others an id the compile's table gives the first time it meets them, until the
+# kernel's environment declares them (T3e).
+#
+# A compile keeps one table of the types it met, each entered once, so a fact names its type by its place there and
+# two facts of one type are equal. A type a program writes is notation, code like any other: type_term reads it into
+# its term, type_text writes a term back as a program writes it, for messages and `format` only.
 
 use "stage.wap"
 use "../kernel/forms.wap"
-# A type with parts, as the reader reads `list<int>` or `map<text, int>`: its word glued to the parts' types in angle
-# brackets; parts_of_type gives the parts back, ø for a type of another word
-generic_type(word: text, parts: list) as Node := Key(symbol(word), Op.None, List(parts, Bracket.Less, if #parts > 1 then Separator.Comma else Separator.None))
-# TODO  if #parts > 1 then Separator.Comma else Separator.None  This can be cleaned up globally by the convention that a list with one item does not print its last comma 
-parts_of_type(word: text, type: Node?) as list? := match type {
-	Key(name, Op.None, List(items, Bracket.Less, separator)) => if name == symbol(word) then items else ø
-	_ => ø
-}
-# any type's word and parts, `list` and `int` of `list<int>`; ø for a type without parts
-type_parts(type: Node?) as list? := {
-	base = base_of_optional(type)
-	if base != ø { return [symbol(OPTIONAL_MARK), base] }
-	function = function_parts(type)
-	if function != ø { return [symbol(FUNCTION_ARROW)] + function.parameters + [function.result] }
-	match type {
-		Key(name, Op.None, List(items, Bracket.Less, separator)) => [name] + items
-		_ => ø
-	}
-}
-# a type built back from its word and parts, as type_parts gives them
-type_built(word: text, parts: list) as Node := if word == OPTIONAL_MARK then optional_type(parts#1) else if word == FUNCTION_ARROW then function_type_of(parts.take(#parts - 1), parts.last) else generic_type(word, parts)
+use "../kernel/primitives.wap"
+use "../kernel/terms.wap"
+
 # a written `block`: code run by its call, a function of no parameters (wiki/block.md)
 BLOCK_WORD = "block"
-# A function type, `(int, text) -> bool`: the parameters' types in round brackets, an arrow, the result's type; its
-# list as the reader reads it, separated by commas only when it holds several
+# A function type, `(int, text) -> bool`: the parameters' types in round brackets, an arrow, the result's type
 FUNCTION_ARROW = "->"
-function_type_of(parameters: list<Node>, result: Node) as Node := Call(symbol(FUNCTION_ARROW), [List(parameters, Bracket.Round, if #parameters > 1 then Separator.Comma else Separator.None), result])
-# A function's signature, its parameter types and its result type, as a function type writes them, in round brackets or
-# not; ø for any other type
-class FunctionType { parameters: list<Node>, result: Node }
-function_parts(type: Node?) as FunctionType? := match type {
-	Call(called, items) => if text(called) == FUNCTION_ARROW and #items == 2 then FunctionType(items_or_one(items#1), items#2) else ø
-	List(items, Bracket.Round, separator) => if #items == 1 then function_parts(items#1) else ø
-	_ => ø
-}
-# what a rest or repetition took; none taken is Empty, as the host gives an empty list
-items_or_one(n: Node) as list := match n { List(items, bracket, separator) => items; Empty => []; _ => [n] }
 # An optional type, `int?`, as the reader reads it: the type glued to `?`; it holds a value of the type or ø
 OPTIONAL_MARK = "?"
 # the dynamic type, which holds any value, ø too: an any? is an any
 ANY_TYPE = "any"
-ANY_SYMBOL = symbol(ANY_TYPE)
 # the type of ø alone, as a result or a name writes it
 EMPTY_TYPE = "ø"
-EMPTY_SYMBOL = symbol(EMPTY_TYPE)
+# the type of code that never finishes, as a return, a break or `raise(message: text): never`: its calls jump, of no
+# type, and it fits wherever a value of any type is wanted
+NEVER_TYPE = "never"
 # the type of code as data, the types module's enum Node; a case of it or a declared pattern names a shape of it
 NODE_TYPE = "Node"
-NODE_SYMBOL = symbol(NODE_TYPE)
 # the fact of a shape's type, `Record`, naming the type it narrows (core/analyze/shapes.wap): its values are of that
 # type, laid out as it is
 NARROWS = "narrows"
-# an optional's value type, any other type itself: int of int? and of int; ø of none
-base_of(type: Node) as Node := base_of_optional(type) ?? type
-base_or_self(type: Node?) as Node? := if type == ø then ø else base_of(type)
-optional_type(base: Node) as Node := if base_of_optional(base) != ø or base == ANY_SYMBOL then base else List([base, symbol(OPTIONAL_MARK)], Bracket.None, Separator.None)
-base_of_optional(type: Node?) as Node? := match type {
-	List(items, Bracket.None, separator) => if #items == 2 and text(items#2) == OPTIONAL_MARK then items#1 else ø
-	_ => ø
-}
-# a type as a message writes it, as a program writes it: `int?`, `list<(int) -> int>`
-type_text(type: Node?) as text := {
-	if type == ø { return "no type" }
-	base = base_of_optional(type)
-	if base != ø { return type_text(base) + OPTIONAL_MARK }
-	function = function_parts(type)
-	if function != ø { return "(${types_text(function.parameters)}) ${FUNCTION_ARROW} ${type_text(function.result)}" }
-	match type {
-		Key(name, Op.None, List(items, Bracket.Less, separator)) => "${name}<${types_text(items)}>"
-		_ => "${type}"
-	}
-}
-types_text(types: list) as text := types.map(type_text).join(", ")
-# a list's TYPE, `list<int>`, and its item type, ø for any other type
 LIST_TYPE = "list"
-LIST_SYMBOL = symbol(LIST_TYPE)
 RANGE_TYPE = "Range"
-RANGE_SYMBOL = symbol(RANGE_TYPE)
 # the types of the literals, as a program writes them
 INT_TYPE = "int"
-INT_SYMBOL = symbol(INT_TYPE)
 FLOAT_TYPE = "float"
-FLOAT_SYMBOL = symbol(FLOAT_TYPE)
 TEXT_TYPE = "text"
-TEXT_SYMBOL = symbol(TEXT_TYPE)
 CHAR_TYPE = "char"
-CHAR_SYMBOL = symbol(CHAR_TYPE)
+# number holds an int or a float, as any (core/stage.wap) holds every value, each boxed as a T? holds its value
+# (core/emit/values.wap)
 NUMBER_TYPE = "number"
-NUMBER_SYMBOL = symbol(NUMBER_TYPE)
-# a value of a type read as another where that one is wanted: a char as its text, a range as its list
-READS = [[CHAR_SYMBOL, TEXT_SYMBOL], [RANGE_SYMBOL, list_type(INT_SYMBOL)]]
-read_of(given: Node?) as Node? := (READS.find(pair => pair#1 == given) ?? return ø)#2
-# the types whose values pass an any's test for a type: its own and those read as it, a char for a text; a number has
-# no box of its own, its values are ints and floats
-passing_types(type: Node) as list<Node> := if type == NUMBER_SYMBOL then [INT_SYMBOL, FLOAT_SYMBOL] else [type] + READS.filter(pair => type_text(pair#2) == type_text(type)).map(pair => pair#1)
-list_type(item: Node) as Node := generic_type(LIST_TYPE, [item])
-# the word a type is named by, `list` of list<int>, `text` of text
-type_word(type: Node) as text := text((type_parts(type) ?? [type])#1)
-item_type(type: Node?) as Node? := only(parts_of_type(LIST_TYPE, type))
-# a map's TYPE, `map<text, int>`, and its keys' and values' types, ø for any other type
+BOOL_TYPE = "bool"
 MAP_TYPE = "map"
-map_type(key: Node, value: Node) as Node := generic_type(MAP_TYPE, [key, value])
-key_type(type: Node?) as Node? := map_part(type, 1)
-held_type(type: Node?) as Node? := map_part(type, 2)
-map_part(type: Node?, at: int) as Node? := {
-	parts = parts_of_type(MAP_TYPE, type)
-	if parts == ø then ø else parts#at
-}
 # the bare type of an enum's values, which every enum fits
 ENUM_TYPE = "enum"
-ENUM_SYMBOL = symbol(ENUM_TYPE)
-# A function value's TYPE, its own for each `x => …` the program writes: the word fn glued to the key of the function
-# it calls and the types of what it captures, `fn<"f.wap:3:5 λ", int>` (core/analyze/types.wap); its parts, the key and
-# then the captures' types
+# A function value's type, its own for each `x => …` the program writes: fn applied to the key of the function it
+# calls and the types of what it captures (core/analyze/types.wap)
 FUNCTION_VALUE_TYPE = "fn"
-function_value_type(key: text, captures: list) as Node := generic_type(FUNCTION_VALUE_TYPE, [Text(key)] + captures)
-function_value_parts(type: Node?) as list? := parts_of_type(FUNCTION_VALUE_TYPE, type)
+# the bare word of a function type, which every function value fits; a function value's own type is shown as it
+FUNCTION_WORD = "function"
+# the item type of an array of n items, `40⋅byte` a number times a type (wiki/number.md)
+ARRAY_TIMES = "*"
+# the words core builds types of, each its fixed id: its place, negative, so it never meets an id the table gives
+CORE_WORDS = [ANY_TYPE, EMPTY_TYPE, NEVER_TYPE, NODE_TYPE, LIST_TYPE, RANGE_TYPE, INT_TYPE, FLOAT_TYPE, TEXT_TYPE, CHAR_TYPE, NUMBER_TYPE, BOOL_TYPE, MAP_TYPE, ENUM_TYPE, FUNCTION_VALUE_TYPE, FUNCTION_WORD, BLOCK_WORD, OPTIONAL_MARK, FUNCTION_ARROW]
+core_word(word: text) as Term := constant(-((1 to #CORE_WORDS).find(at => CORE_WORDS#at == word) ?? raise("${word} is no word core builds types of")), word, [])
+ANY_TERM = core_word(ANY_TYPE)
+EMPTY_TERM = core_word(EMPTY_TYPE)
+NODE_TERM = core_word(NODE_TYPE)
+LIST_TERM = core_word(LIST_TYPE)
+RANGE_TERM = core_word(RANGE_TYPE)
+INT_TERM = core_word(INT_TYPE)
+FLOAT_TERM = core_word(FLOAT_TYPE)
+TEXT_TERM = core_word(TEXT_TYPE)
+CHAR_TERM = core_word(CHAR_TYPE)
+NUMBER_TERM = core_word(NUMBER_TYPE)
+BOOL_TERM = core_word(BOOL_TYPE)
+ENUM_TERM = core_word(ENUM_TYPE)
+MAP_TERM = core_word(MAP_TYPE)
+FUNCTION_TERM = core_word(FUNCTION_WORD)
+NEVER_TERM = core_word(NEVER_TYPE)
+# the types of the values a Node holds as its cases, read as a Node where one is wanted: `n: Node = 'a'` is Char('a')
+ATOM_TYPES = [CHAR_TYPE, INT_TYPE, FLOAT_TYPE, NUMBER_TYPE, TEXT_TYPE]
+# the type words a type test may name besides records and letters
+TYPE_WORDS = ATOM_TYPES + [BOOL_TYPE, ANY_TYPE, LIST_TYPE, MAP_TYPE, ENUM_TYPE]
+
+# The table of the types a compile met: the terms by place, the places by hash, and of the words core does not build
+# their ids by name, the declaration a record's own word names (two records of one name are two words) and the type a
+# shape's word narrows (core/analyze/shapes.wap). It is the compile's own, as a symbol table is: every stage reads a
+# type fact through it, so it is one value for the whole run, not handed down every call
+class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; words: map<text, int> = {}; keys: map<int, text> = {}; declared: map<int, Node> = {}; narrows: map<int, Term> = {} }
+TYPES: TypeTerms = TypeTerms()
+# a type word's term: core's own by its fixed id, any other by the id the table gives it the first time
+word_term(word: text) as Term := word_keyed(word, word)
+word_keyed(word: text, key: text) as Term := {
+	if CORE_WORDS.contains(key) { return core_word(key) }
+	id = TYPES.words.get(key)
+	if id == ø {
+		id = #TYPES.words + 1
+		TYPES.words[key] = id!
+		TYPES.keys[id!] = key
+	}
+	constant(id!, word, [])
+}
+# a written word's term: a record's own by its declaration, a shape's with the type it narrows known
+word_named(n: Node) as Term := {
+	declared = fact_of(n, DECLARED_BY)
+	word = if declared == ø then word_term(text(n)) else declared_word(text(n), declared!)
+	narrows = fact_of(n, NARROWS)
+	if narrows == ø then word else narrowing(word, type_term(narrows!))
+}
+# a record's word: its own, named by its declaration's place, so it means that record wherever the name is declared
+# again; a core word's is the core word. A bare word, written without a declaration, has none: the typing state
+# finds the record it means (core/stage.wap record_named)
+declared_word(name: text, declared: Node) as Term := {
+	if CORE_WORDS.contains(name) { return word_term(name) }
+	own = word_keyed(name, "${name} ${declaration_place(declared)}")
+	TYPES.declared[word_id(own)] = declared
+	own
+}
+word_id(word: Term) as int := match word.shape { Constant(name, levels, id) => id; _ => 0 }
+# the declaration of the record a record's own word names, ø for any other type
+declared_by(type: Term?) as Node? := if is_word(type) then TYPES.declared.get(word_id(type!)) else ø
+# a shape's word, known from here on to narrow this type
+narrowing(word: Term, type: Term) as Term := {
+	TYPES.narrows[word_id(word)] = type
+	word
+}
+# the type a shape's word narrows, `Node` of Define, ø for any other type
+narrowed_type(type: Term?) as Term? := if is_word(type) then TYPES.narrows.get(word_id(type!)) else ø
+# the place of a type in the table, entered the first time it is met
+type_place(type: Term) as int := {
+	places = TYPES.places.get(type.hash) ?? []
+	found = places.find(place => same(TYPES.terms#place, type))
+	if found != ø { return found! }
+	TYPES.terms.add(type)
+	TYPES.places[type.hash] = places + [#TYPES.terms]
+	#TYPES.terms
+}
+# a type as a fact holds it, its place, and the type a fact holds
+type_fact(type: Term) as Node := Number(type_place(type))
+fact_type(fact: Node?) as Term? := match fact { Number(place) => TYPES.terms#place; _ => ø }
+
+# a type's word and parts, the word first, as the spine of its applications gives them
+spine(type: Term) as list<Term> := match type.shape {
+	Apply(function, argument) => spine(function) + [argument]
+	_ => [type]
+}
+# a word applied to its parts; an optional's built as optional_type builds it, an int?? is an int?
+type_built(word: Term, parts: list<Term>) as Term := if word_of(word) == OPTIONAL_MARK and #parts == 1 then optional_type(parts#1) else applied(word, parts)
+applied(word: Term, parts: list<Term>) as Term := parts.fold(word, (applied, part) => apply(applied, part))
+generic_type(word: text, parts: list<Term>) as Term := type_built(core_word(word), parts)
+# the name a type's word has, `list` of list<int>, `text` of text; ø for a type headed by no word
+word_of(type: Term?) as text? := if type == ø then ø else match head_of(type!).shape {
+	Constant(name, levels, id) => name
+	_ => ø
+}
+# the word a type is applied from, found without taking its parts apart
+head_of(type: Term) as Term := match type.shape { Apply(function, argument) => head_of(function); _ => type }
+# whether a type is a word alone, `int`, `T`, `Triple`, with no parts
+is_word(type: Term?) as bool := type != ø and match type!.shape { Constant(name, levels, id) => yes; _ => no }
+# the parts a type of this word has, `int` of list<int`; ø for a type of another word
+parts_of_type(word: text, type: Term?) as list<Term>? := if not is_word(type) and word_of(type) == word then parts_of(type!) else ø
+parts_of(type: Term) as list<Term> := spine(type).drop(1)
+# any type's word and parts, `list` and `int` of `list<int>`; ø for a word alone
+type_parts(type: Term?) as list<Term>? := if type == ø then ø else match type!.shape { Apply(function, argument) => spine(type!); _ => ø }
+# A function's signature, its parameter types and its result type, as a function type writes them; ø for any other type
+class FunctionType { parameters: list<Term>, result: Term }
+function_type_of(parameters: list<Term>, result: Term) as Term := generic_type(FUNCTION_ARROW, parameters + [result])
+function_parts(type: Term?) as FunctionType? := {
+	parts = parts_of_type(FUNCTION_ARROW, type) ?? return ø
+	FunctionType(parts.take(#parts - 1), parts.last)
+}
+# what a rest or repetition took; none taken is Empty, as the host gives an empty list
+items_or_one(n: Node) as list := match n { List(items, bracket, separator) => items; Empty => []; _ => [n] }
+# an optional's value type, any other type itself: int of int? and of int
+base_of(type: Term) as Term := base_of_optional(type) ?? type
+base_or_self(type: Term?) as Term? := if type == ø then ø else base_of(type!)
+optional_type(base: Term) as Term := if base_of_optional(base) != ø or same(base, ANY_TERM) then base else applied(core_word(OPTIONAL_MARK), [base])
+base_of_optional(type: Term?) as Term? := only_term(parts_of_type(OPTIONAL_MARK, type))
+only_term(parts: list<Term>?) as Term? := if parts != ø and #parts == 1 then parts#1 else ø
+# a function as the kernel's runtime words name it, `write(text, int, bool)`, when it is one of them
+# (kernel/primitives.wap RUNTIME_WORDS), its types spelled only for a name among theirs
+runtime_word(name: text, types: list<Term?>) as text? := if runtime_named(name) then RUNTIME_WORDS.find(word => word == "${name}(${types.map(type => type_text(type)).join(", ")})") else ø
+runtime_named(name: text) as bool := RUNTIME_WORDS.any(word => word.starts_with(name + "("))
+# a type as a message writes it, as a program writes it: `int?`, `list<(int) -> int>`; whole, a function value's own
+# type spelled with its key and captures, `fn<"f.wap:3:5 λ", int>`, and a record's word sharing its name with
+# another by its declaration, as a key tells instances apart by them
+type_text(type: Term?, whole: bool = no) as text := {
+	if type == ø { return "no type" }
+	if is_word(type) { return if whole then TYPES.keys.get(word_id(type!)) ?? word_of(type)! else word_of(type)! }
+	base = base_of_optional(type)
+	if base != ø { return type_text(base, whole) + OPTIONAL_MARK }
+	function = function_parts(type)
+	if function != ø { return "(${types_text(function.parameters, whole)}) ${FUNCTION_ARROW} ${type_text(function.result, whole)}" }
+	if function_value_parts(type) != ø and not whole { return FUNCTION_WORD }
+	match type!.shape {
+		Quoted(value) => "\"${value}\""
+		Numeral(value) => "${value}"
+		_ => "${word_of(type) ?? "?"}<${types_text(parts_of(type!), whole)}>"
+	}
+}
+types_text(types: list<Term>, whole: bool = no) as text := types.map(type => type_text(type, whole)).join(", ")
+# a value of a type read as another where that one is wanted: a char as its text, a range as its list
+READS = [[CHAR_TERM, TEXT_TERM], [RANGE_TERM, list_type(INT_TERM)]]
+read_of(given: Term?) as Term? := if given == ø then ø else (READS.find(pair => same(pair#1, given!)) ?? return ø)#2
+# the types whose values pass an any's test for a type: its own and those read as it, a char for a text; a number has
+# no box of its own, its values are ints and floats
+passing_types(type: Term) as list<Term> := if same(type, NUMBER_TERM) then [INT_TERM, FLOAT_TERM] else [type] + READS.filter(pair => same(pair#2, type)).map(pair => pair#1)
+list_type(item: Term) as Term := generic_type(LIST_TYPE, [item])
+# the word a type is named by, `list` of list<int>, `text` of text
+type_word(type: Term) as text := word_of(type) ?? type_text(type)
+item_type(type: Term?) as Term? := only_term(parts_of_type(LIST_TYPE, type))
+# a map's type, `map<text, int>`, and its keys' and values' types, ø for any other type
+map_type(key: Term, value: Term) as Term := generic_type(MAP_TYPE, [key, value])
+key_type(type: Term?) as Term? := map_part(type, 1)
+held_type(type: Term?) as Term? := map_part(type, 2)
+map_part(type: Term?, at: int) as Term? := {
+	parts = parts_of_type(MAP_TYPE, type) ?? return ø
+	if #parts == 2 then parts#at else ø
+}
+function_value_type(key: text, captures: list<Term>) as Term := generic_type(FUNCTION_VALUE_TYPE, [quoted(key)] + captures)
+function_value_parts(type: Term?) as list<Term>? := parts_of_type(FUNCTION_VALUE_TYPE, type)
+# the key of the function a function value calls, the first of its parts
+function_value_key(parts: list<Term>) as text := match (parts#1).shape { Quoted(value) => value; _ => raise("a function value's type begins with its key") }
+
+# a type as the program wrote it, read into its term; ø where none is written
+written_type(written: Node?) as Term? := if written == ø then ø else type_term(written!)
+# a type the compiler writes into code it makes, as its notation carrying its term
+written_of(type: Term) as Node := with_fact(symbol(type_text(type)), TYPE, type_fact(type))
+# a type refused as code is, where it has no place of its own
+refused_type(type: Term, why: text) as never := raise("${why}: ${type_text(type)}")
+# The door: a type as a program writes it read into its term. `list<int>`, `int?`, `(int) -> text`, `40⋅byte` (a
+# list of bytes), a function value's `fn<"key", int>`; a name alone is its word
+type_term(n: Node) as Term := {
+	known = fact_type(fact_of(n, TYPE))
+	if known != ø { return known! }
+	parts = written_parts(n)
+	if parts != ø { return type_built(word_term(text(parts#1)), parts.drop(1).map(part => type_term(part))) }
+	match n {
+		Call(times, items) => if text(times) == ARRAY_TIMES and #items == 2 and items#1 is number then list_type(type_term(items#2)) else raise("${n} is no type")
+		Text(value) => quoted(value)
+		Empty => EMPTY_TERM
+		_ => word_named(n)
+	}
+}
+# A written type with parts read as its word and then the parts, as type_parts reads a term: `list<int>` as list and
+# int, `int?` as ? and int, `(int, text) -> bool` as ->, int, text and bool, in round brackets or not; ø for a word
+# alone and any other code
+written_parts(n: Node) as list<Node>? := match n {
+	Key(name, Op.None, List(items, Bracket.Less, separator)) => [name] + items
+	List(items, Bracket.None, separator) => if #items == 2 and text(items#2) == OPTIONAL_MARK then [items#2, items#1] else ø
+	Call(called, items) => if text(called) == FUNCTION_ARROW and #items == 2 then [called] + items_or_one(items#1) + [items#2] else ø
+	List(items, Bracket.Round, separator) => if #items == 1 then written_parts(items#1) else ø
+	_ => ø
+}
+# the parts a written type of this word has, `int` of `int?`; ø for code of another word
+written_parts_of(word: text, n: Node) as list<Node>? := {
+	parts = written_parts(n) ?? return ø
+	if text(parts#1) == word then parts.drop(1) else ø
+}
+# two types are one where their terms are the same
+==(a: Term, b: Term) as bool := same(a, b)

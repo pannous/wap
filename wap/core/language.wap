@@ -6,6 +6,7 @@ use "../types/operators.wap"
 use "rules/patterns.wap"
 use "parse/operator_table.wap"
 use "stage.wap"
+use "errors.wap"
 use "emit/memory.wap"
 use "analyze/declarations.wap"
 
@@ -14,33 +15,89 @@ use "analyze/declarations.wap"
 # stage reads them.
 class PhraseWords { leading: map<text, bool>, inner: map<text, list<text>> }
 # an inner word told it continues the phrases of these leading words too
-continued(inner: map<text, list<T>>, word: text, more: list<T>) := { inner[word] = (if inner.has(word) then inner[word] else []) + more }
+continued(inner: map<text, list<T>>, word: text, more: list<T>) := { inner[word] = (inner.get(word) ?? []) + more }
 
 # fact: a fact the matched code must carry, `rule … where script`, none when ""
-class Rule { head: text, matcher: Matcher, template: Node, fresh: list<text>, parameters: list<text>, written: Node, specificity: int, fact: text = "" }
+class Rule { head: text, matcher: Matcher, template: Node, fresh: list<text>, parameters: list<text>, written: Node, specificity: int, fact: text = "", key: text = "" }
 # the rules of one stage, by head: stage 1 asks only shapes, stage 2 the declarations, stage 3 the types of typed code
 # (a hole of a value type); checked: whether their termination is checked since the last rule came
-class Rules { by_head: map<text, list<Rule>>, checked: bool = no }
+# keys: the rules held, by their written text and the annotations they ask for
+class Rules { by_head: map<text, list<Rule>>, checked: bool = no, keys: map<text, bool> = {} }
 
+# The grammar a module is read in: what its declarations and those of the modules it uses add to the types module's.
 # group_names and operator_names index groups and operators by name, so a spelling is looked up, not searched for;
 # circumfix: each declared opening glyph → its closing one, `‖` → `‖`, `⌊` → `⌋`;
 # looser_than: group name → every group it binds tighter than, the order of the groups' relations, derived from
-# `groups` whenever they change (core/parse/operator_table.wap related_groups); modules: each used file declared once
-# per compile, by its normalized path, though the types module and the program both use it
-# memory: how a build keeping values in the memory lays them out (core/stage.wap MemoryLayout)
-class Language { groups: list<Group>, operators: list<Operator>, phrase_words: PhraseWords, shape_rules: Rules, typed_rules: Rules, patterns: map<text, Declared>, declared_rules: Rules = Rules({}), declarations: Declarations = Declarations({}), looser_than: map<text, list<text>> = {}, group_names: NameIndex = NameIndex(), operator_names: NameIndex = NameIndex(), defined_words: map<text, bool> = {}, modules: map<text, Module> = {}, readers: map<text, (text) -> text> = {}, operated: map<text, Operated> = {}, circumfix: map<text, text> = {}, memory: MemoryLayout? = ø, raw_words: map<text, list<text>> = {} }
-# a file's code operated once a compile, and the names a program's file defines at its top
-class Operated { code: Node, words: list<text> }
+# `groups` whenever they change (core/parse/operator_table.wap related_groups); reading: the alias rows the file being
+# read names its words by, its own alias lines' and its used files'; words: the names a program's file defines at its
+# top; declares: whether the file or a file it uses declares anything beyond the base, which a grammar joins; file: the module it is read for;
+# placed_by: each operator its declarations placed → the module declaring it
+class Grammar { groups: list<Group>, operators: list<Operator>, phrase_words: PhraseWords = PhraseWords({}, {}), shape_rules: Rules = Rules({}), typed_rules: Rules = Rules({}), patterns: map<text, Declared> = {}, declared_rules: Rules = Rules({}), looser_than: map<text, list<text>> = {}, group_names: NameIndex = NameIndex(), operator_names: NameIndex = NameIndex(), circumfix: map<text, text> = {}, reading: list<Alias> = [], words: map<text, bool> = {}, declares: bool = no, file: text = "", placed_by: map<text, text> = {} }
+# What the build hands the compile: readers, by file ending, for files that are no wap source (a compiled module's);
+# memory: how a build keeping values in the memory lays them out (core/emit/memory.wap MemoryLayout); standard: the
+# words of the standard library's modules, each with the modules defining it (extensions/warm.wap); use_free_modules:
+# the standard modules whose words need no use and print no hint
+class Build { readers: map<text, (text) -> text> = {}, memory: MemoryLayout? = ø, standard: map<text, list<text>> = {}, use_free_modules: list<text> = [] }
+# One compile: the grammar of what is being read; base: the grammar every file starts from, the types module's and
+# its rules'; grammars: each file's, by its path; declarations: those of the module being lowered, which every rule's
+# matcher reads (core/rules/declared.wap); modules: each used file declared once per compile, by its normalized
+# path, though the types module and the program both use it; operated: each file's code operated once; lowered: the
+# library's modules lowered already, by their key, brought in by the warm state (extensions/warm.wap); unparsed: each
+# file's raw and phrase words
+class Language { grammar: Grammar, base: Grammar, grammars: map<text, Grammar> = {}, declarations: Declarations = Declarations({}), build: Build = Build(), modules: map<text, Module> = {}, operated: map<text, Operated> = {}, lowered: map<text, Block> = {}, unparsed: map<text, map<text, text>> = {} }
+# a file's code operated once a compile, the names a program's file defines at its top, its code once its rules and
+# patterns are taken in (core/rules/stages.wap rules_loaded), and once it is declared
+class Operated { code: Node, words: list<text>, rest: Node? = ø, declared: Node? = ø }
 
 # the rules of a stage: 1 shapes, 2 declarations, 3 types
-rules_of_stage(language: Language, stage: int) as Rules := if stage == SHAPE_STAGE then language.shape_rules else if stage == DECLARED_STAGE then language.declared_rules else language.typed_rules
+rules_of_stage(language: Language, stage: int) as Rules := rules_of(language.grammar, stage)
+rules_of(grammar: Grammar, stage: int) as Rules := if stage == SHAPE_STAGE then grammar.shape_rules else if stage == DECLARED_STAGE then grammar.declared_rules else grammar.typed_rules
 
 # the language every program starts from: the types module's operator table, copied row by row so that what a program
 # declares joins its own copy, no rules or patterns yet
 base_language() as Language := {
-	language = Language(precedence_groups.map(row => copy(row)), operators.map(row => copy(row)), PhraseWords({}, {}), Rules({}), Rules({}), {})
+	grammar = Grammar(precedence_groups.map(row => copy(row)), operators.map(row => copy(row)))
+	language = Language(grammar, grammar)
 	related_groups(language)
 	language
 }
 copy(row: Group) as Group := Group(row.name, row.tighter_than.map(name => name), row.grouping)
 copy(row: Operator) as Operator := Operator(row.spelling, row.name, row.infix, row.prefix, row.postfix)
+
+# A file's own grammar is the base's joined, then each used file's, in the order written, so what it declares joins
+# its own tables alone (wiki/use.md: a module's operators, rules and aliases reach the files that use it, and theirs).
+# Rows of one name join: a group's relations, an operator's fixities
+joined(into: Grammar, from: Grammar) := {
+	rows_joined(into.groups, from.groups.map(row => copy(row)), group => group.name, (a, b) => group_joined(into, from, a, b))
+	rows_joined(into.operators, from.operators.map(row => copy(row)), operator => operator.spelling, (a, b) => Operator(a.spelling, a.name, fixity_joined(into, from, a, a.infix, b.infix), fixity_joined(into, from, a, a.prefix, b.prefix), fixity_joined(into, from, a, a.postfix, b.postfix)))
+	into.phrase_words.leading.update(from.phrase_words.leading)
+	into.phrase_words.inner.update(from.phrase_words.inner)
+	for stage in RULE_STAGES { joined(rules_of(into, stage), rules_of(from, stage)) }
+	into.patterns.update(from.patterns)
+	into.circumfix.update(from.circumfix)
+	into.reading = (into.reading + from.reading).unique
+	into.words.update(from.words)
+	for spelling in from.placed_by.keys { if not into.placed_by.has(spelling) { into.placed_by[spelling] = from.placed_by[spelling] } }
+}
+rows_joined(into: list<T>, from: list<T>, name_of: (T) -> text, both: (T, T) -> T) := { for row in from { at = into.index_where(other => name_of(other) == name_of(row)); if at == 0 { into.add(row) } else { into[at - 1] = both(into[at - 1], row) } } }
+# an operator's group in one fixity as two used grammars have it: both the same, the one that has it, else the one a
+# module placed it in over the types module's
+fixity_joined(into: Grammar, from: Grammar, row: Operator, group: text, other: text) as text := if group == other or other == "" then group else if group == "" or not into.placed_by.has(row.spelling) then other else if not from.placed_by.has(row.spelling) then group else placed_twice(into, from, row.spelling)
+# a group two used grammars hold, its relations joined, unless two modules placed it
+group_joined(into: Grammar, from: Grammar, a: Group, b: Group) as Group := if placer(into, a.name) == placer(from, a.name) then Group(a.name, (a.tighter_than + b.tighter_than).unique, a.grouping) else placed_twice(into, from, a.name)
+placed_twice(into: Grammar, from: Grammar, spelling: text) := refused(symbol(spelling), "${spelling} is placed by ${placer(into, spelling)} and by ${placer(from, spelling)}: declare it in one module, used by both")
+# the module whose declaration placed an operator in a grammar, the types module for a row of its table
+placer(grammar: Grammar, spelling: text) as text := grammar.placed_by.get(spelling) ?? "the types module"
+# the rules a grammar lacks joined, its termination to be checked again once one came
+joined(into: Rules, from: Rules) := { for head in from.by_head.keys { for rule in from.by_head[head] { rule_added(into, rule) } } }
+# whether a rule is new to these rules, then added: one loaded again, its file read twice or its module used by two, is the rule already there; one asking for other annotations is another
+rule_added(rules: Rules, rule: Rule) as bool := {
+	if rules.keys.has(rule.key) { return no }
+	rules.keys[rule.key] = yes
+	if not rules.by_head.has(rule.head) { rules.by_head[rule.head] = [] }
+	rules.by_head[rule.head].add(rule)
+	rules.checked = no
+	yes
+}
+# a grammar's rules checked for termination as far as another's holding the same
+checked_as(into: Grammar, from: Grammar) := { for stage in RULE_STAGES { rules_of(into, stage).checked = rules_of(from, stage).checked } }

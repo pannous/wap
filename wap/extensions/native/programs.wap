@@ -2,6 +2,7 @@
 # program-<hash>.cwasm by the hash of the compiler, the program's source and each file it uses or includes by a quoted
 # path, so a program run again unchanged runs at once, never compiled; a library module the compiler finds by its name
 # changes only with an install, which removes every machine code (scripts/refresh-seed.sh)
+use foreign
 use "c.wap"
 use "run.wap"
 use "linking.wap"
@@ -11,39 +12,57 @@ USE_MARK := "use \""
 INCLUDE_MARK := "include \""
 QUOTE := 34
 PROGRAM_CACHE := "program"
-# how deep files using files are followed (a cycle of uses is hashed that many times over, the same each run)
-USE_DEPTH := 8
+# the real paths of the files hashed so far, each on a line of its own
+# DEBT: one text, not a list<text>, as commands.wap's Usage.words: a native build makes a list of texts a GC type
+hashed_files: text = ""
+LINE_END := "\n"
 
 # the program's module, its machine code read from beside the compiler, else compiled by it (wap.wasm of this hash) to
 # the run's module file and its machine code kept; 0 where it was not, said
-program_module(program: text, compiler_hash: int): int := {
+program_module(program: text, compiler_hash: int, code: text = ""): int := {
 	global module_file
-	cache = cache_named(folder_part(compiler_path) + PROGRAM_CACHE, sources_hashed(compiler_hash, program_path(program), 0))
+	cache = cache_named(seed_part(PROGRAM_CACHE), program_hashed(compiler_hash, program, code))
 	cached = deserialized(cache)
 	if cached != 0 { return cached }
-	if not compiled(module_loaded(compiler_path), program, module_file) { return 0 }
+	if not compiled(module_loaded(compiler_path), program, module_file, code) { return 0 }
 	module = module_compiled(module_file)
 	if module != 0 then cache_written(module, cache) else 0
 	module
 }
-# the hash gone on over the bytes of the file at the path and over each file they name after a use or an include
-sources_hashed(hash: int, path: text, depth: int): int := {
+# the hash gone on over the program's source, the code given or its file's, and the files it uses
+program_hashed(hash: int, program: text, code: text): int := {
+	global hashed_files
+	hashed_files = LINE_END
+	if code is empty then sources_hashed(hash, program_path(program)) else bytes_hashed(hash, STANDARD_INPUT_PATH, host_of(c_text(code)), byte_count(code))
+}
+# the hash gone on over the bytes of the file at the path and over each file they name after a use or an include, each
+# file once by its real path: files using each other are hashed once, however many paths reach them
+sources_hashed(hash: int, path: text): int := {
+	global hashed_files
+	file = realpath(path, 0)
+	if file is empty or hashed_files.contains(LINE_END + file + LINE_END) { return hash }
+	hashed_files += file + LINE_END
 	size_at = host_block(8)
-	bytes = file_read(path, size_at)
-	if bytes == 0 or depth > USE_DEPTH { return hash }
-	size = long_at(size_at)
-	used = named_hashed(hash_of(hash, bytes, size), path, bytes, size, USE_MARK, depth)
-	named_hashed(used, path, bytes, size, INCLUDE_MARK, depth)
+	bytes = file_read(file, size_at)
+	if bytes == 0 { return hash }
+	gone_on = bytes_hashed(hash, file, bytes, long_at(size_at))
+	free(bytes)
+	gone_on
+}
+# the hash gone on over source bytes read from the path and over each file they name after a use or an include
+bytes_hashed(hash: int, path: text, bytes: int, size: int): int := {
+	used = named_hashed(hash_of(hash, bytes, size), path, bytes, size, USE_MARK)
+	named_hashed(used, path, bytes, size, INCLUDE_MARK)
 }
 # the hash gone on over each file the bytes name in quotes after the mark, its path beside the file's
-named_hashed(hash: int, path: text, bytes: int, size: int, mark: text, depth: int): int := {
+named_hashed(hash: int, path: text, bytes: int, size: int, mark: text): int := {
 	gone_on = hash
 	found = memmem(bytes, size, c_text(mark), byte_count(mark))
 	while found != 0 {
 		name = found + byte_count(mark)
 		quote = memchr(name, QUOTE, bytes + size - name)
 		if quote == 0 { return gone_on }
-		gone_on = sources_hashed(gone_on, beside(path, c_copied(name, quote - name)), depth + 1)
+		gone_on = sources_hashed(gone_on, beside(path, c_copied(name, quote - name)))
 		found = memmem(quote, bytes + size - quote, c_text(mark), byte_count(mark))
 	}
 	gone_on

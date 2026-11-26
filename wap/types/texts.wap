@@ -29,6 +29,51 @@ REGIONAL_INDICATORS := [0x1F1E6, 0x1F1FF]
 CARRIAGE_RETURN := 13
 LINE_FEED := 10
 
+# texts: equal when their bytes are (at once when they are one text), joined by +; a new text of the bytes from `start` up to `stop`
+==(a: text, b: text): bool := {
+	if one_text(a, b) { return yes }
+	if byte_count(a) != byte_count(b) { return no }
+	for at in 0 upto byte_count(a) { if byte_at(a, at) != byte_at(b, at) { return no } }
+	yes
+}
++(a: text, b: text): text := {
+	# a side with no bytes adds none: the other side is the text joined
+	if byte_count(b) == 0 { return a }
+	if byte_count(a) == 0 { return b }
+	joined = text_made(byte_count(a) + byte_count(b))
+	bytes_copied(a, 0, byte_count(a), joined, 0)
+	bytes_copied(b, 0, byte_count(b), joined, byte_count(a))
+	joined
+}
+bytes_between(t: text, start: int, stop: int): text := {
+	part = text_made(stop - start)
+	bytes_copied(t, start, stop, part, 0)
+	part
+}
+# a text's bytes placed in the memory from BYTES_AT (host.wap), the memory grown to hold them
+place(t: text) := {
+	memory_holding(byte_count(t))
+	memory_placed(BYTES_AT, t)
+}
+# a text written to a file, a line end after it when `line` says so: again from where a write stopped until every byte
+# is taken; a write that fails or takes none stops the program
+# DEBT: A failed write stops without naming itself: a write that fails or takes none (closed stdout, `| head`) stops
+#   with wasm's bare "unreachable", not a raise, as a raise would write through this word again
+write(t: text, file: int, line: bool) := {
+	at = bytes_placed(t)
+	done = 0
+	while done < byte_count(t) {
+		set_memory_word(IOVEC_AT, at + done)
+		set_memory_word(IOVEC_AT + 4, byte_count(t) - done)
+		if fd_write(file, IOVEC_AT, 1, MOVED_AT) != 0 or memory_word(MOVED_AT) == 0 { trapped() }
+		done += memory_word(MOVED_AT)
+	}
+	if line { write("\n", file, no) }
+}
+# WASI's write of the bytes the iovecs at an address name, the count written put at `moved_at`
+fd_write(file: int, iovecs_at: int, count: int, moved_at: int): int := prim fd_write(file, iovecs_at, count, moved_at)
+# the program stopped where it cannot go on
+trapped() := prim unreachable()
 # a text of one byte
 byte_text(b: int): text := {
 	t = text_made(1)
@@ -43,7 +88,10 @@ bytes_text(bytes: list<int>): text := {
 }
 # a code's UTF-8 bytes: the fewest that hold it, from `count` bytes up, scale the part of the code below the lead byte's
 # bits; the lead byte marked by its count, then the continuation bytes
-encoded(code: int, count: int, scale: int): text := if code < LEAD_BITS#count * scale or count == #LEAD_BITS then byte_text(256 - 2 * LEAD_BITS#count + code ÷ scale) + continuation_bytes(code, scale ÷ CONTINUATION_BITS) else encoded(code, count + 1, scale * CONTINUATION_BITS)
+encoded(code: int, count: int, scale: int): text := {
+	leads = LEAD_BITS
+	if code < leads#count * scale or count == #leads then byte_text(256 - 2 * leads#count + code ÷ scale) + continuation_bytes(code, scale ÷ CONTINUATION_BITS) else encoded(code, count + 1, scale * CONTINUATION_BITS)
+}
 # the continuation bytes of a code from the one holding `scale`'s six bits down to the last
 continuation_bytes(code: int, scale: int): text := if scale == 0 then "" else byte_text(CONTINUATION_FROM + (code ÷ scale) rem CONTINUATION_BITS) + continuation_bytes(code, scale ÷ CONTINUATION_BITS)
 
@@ -70,7 +118,7 @@ slice(t: text, r: Range): text := bytes_between(t, character_offset(t, r.from + 
 # a text repeated: `"ab" * 3` is "ababab", none for 0 times
 *(t: text, times: int): text := {
 	out = ""
-	for at in 1 to times { out = out + t }
+	for at in 1 to times { out += t }
 	out
 }
 # what counting a text counts (wiki/char.md): `count bytes of: "aβc"` is 4, `count chars of: "aβc"` is 3
@@ -242,9 +290,6 @@ replace(t: text, part: text, other: text): text := split(t, part).join(other)
 
 # texts in byte order, which is code point order: `"a" < "b"`
 <(a: text, b: text): bool := compared(a, b) < 0
-<=(a: text, b: text): bool := compared(a, b) <= 0
->(a: text, b: text): bool := compared(a, b) > 0
->=(a: text, b: text): bool := compared(a, b) >= 0
 # below 0 when a comes first, 0 when equal, above 0 when b does
 compared(a: text, b: text): int := {
 	at = 0
@@ -256,12 +301,12 @@ compared(a: text, b: text): int := {
 }
 
 
-# a text in warp notation, in its quotes, its quote and backslash escaped: `show("a\"b")` is "a\"b"; a character in
-# single quotes, as written (as old warp shows them)
+# a text in warp notation, in its quotes, its quote, backslash, line breaks and tabs escaped: `show("a\"b")` is
+# "a\"b"; a character shows as its one-character text
 show(t: text): text := "\"" + escaped(t) + "\""
 show(c: char): text := show(text(c))
-# t with a backslash before each quote and backslash
-escaped(t: text): text := t.replace("\\", "\\\\").replace("\"", "\\\"")
+# t with a backslash before each quote and backslash, its line breaks, tabs and carriage returns as \n, \t and \r
+escaped(t: text): text := t.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
 # t's lines from its first written one to its last, without the indentation the written ones share: a raw block as
 # a word taking one reads it, `shader { … }` (wiki/dsl.md)
 dedented(t: text): text := {

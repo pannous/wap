@@ -1,6 +1,6 @@
 // Where a C function a program imports lies: the process (libc, libm, the executable's), else the library of the name
 // it is imported from (`sqlite3`), loaded now. Shared by foreign.c and the native wap (wap/extensions/native/main.c)
-#include <dlfcn.h>
+#include "system.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

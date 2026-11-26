@@ -14,21 +14,25 @@ use "../../kernel/forms.wap"
 # type, `x is int`, is of that type in the then-arm; `a and b` finds what both find, `a or b` what neither does. Where one arm never finishes,
 # what the other finds holds after the If too, `if x == ø { return }` leaving x present for the statements after it;
 # a loop's body, a match's arm and a try's parts keep such findings to themselves, as an If's arm does.
-if_typed(n: Node, condition: Node, then_part: Node, else_part: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
+if_typed(n: Node, condition: Node, then_part: Node, else_part: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
 	tested = condition_typed(condition, s, f)
+	# a test known while typing, `x is T` of an x of a type, chooses its arm here: the other is never typed
+	known = known_arm(tested)
+	if known != ø { live = typed_form([then_part, else_part]#known, s, f, expected); return with_type_of(refitted(Block([tested, live]), n), value_type(live)) }
 	findings = found(condition, tested, s, f)
 	typed = (1 to 2).map(at => present_typed([then_part, else_part]#at, findings.filter(finding => finding.arm == at), s, f, expected))
 	# a character beside a text is its text: `if c then 'a' else ""` is a text
 	chosen = parts_fitted((1 to 2).map(at => as_wanted(typed#at, value_type(typed#(3 - at)), s)), s, expected)
 	finishing = (1 to 2).filter(at => not jumps(chosen#at))
-	if #finishing == 1 { f.present = f.present + findings.filter(finding => finding.arm == finishing#1) }
+	if #finishing == 1 { f.present += findings.filter(finding => finding.arm == finishing#1) }
 	joined_of(refitted(If(tested, chosen#1, chosen#2), n), chosen, s, expected)
 }
+known_arm(tested: Node) as int? := match tested { Block(items) => if items.last is True then 1 else if items.last is False then 2 else ø; _ => ø }
 # an arm typed with what is known of its variables in it, each read there as its finding's type
-present_typed(part: Node, known: list<Finding>, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
+present_typed(part: Node, known: list<Finding>, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
 	before = f.present
 	# a new list: `+=` would change the one `before` holds too, and the narrowing would outlive its arm
-	f.present = f.present + known
+	f.present = before + known
 	typed = typed_form(part, s, f, expected)
 	f.present = before
 	typed
@@ -58,27 +62,27 @@ present_tested(condition: Node, tested: Node, s: TypingState, f: TypeFrame) as F
 	_ => ø
 }
 # a path found present in that arm, of the value an optional of this type holds; ø for a path of no optional's type
-found_present(path: Node, arm: int, type: Node?) as Finding? := {
+found_present(path: Node, arm: int, type: Term?) as Finding? := {
 	key = path_key(path) ?? return ø
 	held = base_of_optional(type) ?? return ø
 	if has_unknowns(held) { return ø }
 	Finding(key, arm, held)
 }
 # the type of a typed call's first argument, `m.pattern` of `m.pattern != ø`
-first_argument_type(tested: Node) as Node? := match tested {
+first_argument_type(tested: Node) as Term? := match tested {
 	Call(called, arguments) => if arguments is empty then ø else value_type(arguments#1)
 	_ => ø
 }
 # the variable a typed condition finds of a type, in the then-arm: `x is int` of a number x, a shape's test of a Node
 # (core/analyze/shapes.wap shape_test)
 type_tested(tested: Node) as Finding? := match tested {
-	Prim(operation, arguments) => if text(operation) == BOXED_TEST then found_of_type(arguments#1, fact_of(tested, TESTED)) else ø
-	Case(subject, arms) => found_of_type(subject, fact_of(tested, TESTED))
+	Prim(operation, arguments) => if text(operation) == BOXED_TEST then found_of_type(arguments#1, fact_type(fact_of(tested, TESTED))) else ø
+	Case(subject, arms) => found_of_type(subject, fact_type(fact_of(tested, TESTED)))
 	_ => ø
 }
 # a path found of the type a test names, in the then-arm; ø for none, and for a bare list or map, whose any's calls
 # reach the definitions for the type it holds when the program runs
-found_of_type(path: Node, type: Node?) as Finding? := {
+found_of_type(path: Node, type: Term?) as Finding? := {
 	key = path_key(path) ?? return ø
 	if names_bare_kind(type) { return ø }
 	Finding(key, 1, type ?? return ø)
@@ -90,7 +94,7 @@ NOT_WORD = "not"
 flipped(finding: Finding?) as Finding? := if finding == ø then ø else Finding(finding.key, 3 - finding.arm, finding.type)
 first_argument(tested: Node) as Node := match tested { Call(called, arguments) => arguments#1; _ => tested }
 condition_typed(condition: Node, s: TypingState, f: TypeFrame) as Node := {
-	tested = truth_of(typed_form(condition, s, f, BOOL_SYMBOL), s)
+	tested = truth_of(typed_form(condition, s, f, BOOL_TERM), s)
 	if not typed_bool(tested) { refused(condition, "a condition is yes or no") }
 	tested
 }
@@ -101,7 +105,7 @@ TRUTHY = "truthy"
 # whether a typed value is a bool; a call's result is named, as conditions find only paths
 typed_bool(n: Node) as bool := {
 	type = value_type(n)
-	type != ø and same_type(type, BOOL_SYMBOL)
+	type != ø and type == BOOL_TERM
 }
 truth_of(given: Node, s: TypingState) as Node := {
 	typed = unboxed(given)
@@ -118,19 +122,21 @@ type_test_typed(n: Node, arguments: list, s: TypingState, f: TypeFrame) as Node 
 	subject = arguments#1
 	tested = arguments#2
 	# a shape, `n is Record`, by its pattern (core/analyze/shapes.wap)
-	if narrowed_type(shaped(tested, s)) != ø { return typed_form(shape_test(subject, shaped(tested, s), n, s), s, f, ø) }
+	written = shaped(type_term(tested), s)
+	if narrowed_type(written) != ø { return typed_form(shape_test(subject, written, n, s), s, f, ø) }
 	if is_bound(tested, DefinitionKind.Case) { return typed_form(placed_like(Case(subject, [Arm(tested, True), Arm(symbol(WILDCARD), False)]), n), s, f, ø) }
-	typed = typed_form(subject, s, f, ø)
+	typed = typed_form(subject, s, f, result_chosen(subject, written, s))
 	type = value_of(typed, "to test")
 	# a Node kind's word, `n is symbol`, tests the kind (core/analyze/shapes.wap kind_named)
 	kind = kind_named(tested, type, s)
 	if kind != ø { return typed_form(shape_test(subject, kind, n, s), s, f, ø) }
 	if not names_type(tested, s) { refused(tested, "is: ${tested} names no type and no test: define a type ${tested}, or ${tested}(x): bool") }
-	if boxed_fit(tested, type) and not same_type(type, tested) { return boxed_tested(typed, tested, n) }
-	typed_form(placed_like(Block([subject, if conversion(type, tested, s) in [Conversion.Same, Conversion.Read] then True else False]), n), s, f, ø)
+	if boxed_fit(written, type) and type != written { return boxed_tested(typed, written, n) }
+	known = typed_form(if conversion(type, written, s) in [Conversion.Same, Conversion.Read] then True else False, s, f, ø)
+	with_type_of(placed_like(Block([typed, known]), n), value_type(known))
 }
 # the test, when the program runs, of a value an any holds for a type
-boxed_tested(held: Node, type: Node, at: Node) as Node := with_fact(with_type(placed_like(Prim(symbol(BOXED_TEST), [held]), at), BOOL_TYPE), TESTED, type)
+boxed_tested(held: Node, type: Term, at: Node) as Node := with_fact(with_type(placed_like(Prim(symbol(BOXED_TEST), [held]), at), BOOL_TYPE), TESTED, type_fact(type))
 # whether a type test's word names a type: a built-in one, a record's or a generic letter; a written compound type,
 # `list<int>`, is one
-names_type(tested: Node, s: TypingState) as bool := if not tested is symbol then type_parts(tested) != ø else TYPE_WORDS.contains(text(tested)) or record_named(s.records, tested) != ø or is_letter(tested, s.records)
+names_type(tested: Node, s: TypingState) as bool := if not tested is symbol then written_parts(tested) != ø else TYPE_WORDS.contains(text(tested)) or record_named(s.records, type_term(tested)) != ø or is_letter(type_term(tested), s.records)

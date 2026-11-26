@@ -1,0 +1,232 @@
+# The second checker's binding statements (notes/theory.md "The declarations that bind names"): numbers, the
+# shortcuts that compute on two numbers at once, the quotients and the products, with what each computes by.
+use magnitude
+use "expressions.wap"
+use "read.wap"
+use "judge.wap"
+use "blocks.wap"
+
+NUMBERS_WORD := "numbers"
+SHORTCUT_WORD := "shortcut"
+QUOTIENTS_WORD := "quotients"
+# the products bind nothing this checker computes by: the values below a value come as definitions
+PRODUCTS_WORD := "products"
+TEXTS_WORD := "texts"
+# the shortcuts a statement names; a divide statement binds the remainder too
+SHORTCUT_WORDS := ["add", "subtract", "multiply", "equal", "at_most", "divide"]
+COMPARISONS := ["equal", "at_most"]
+REMAINDER := "remainder"
+TYPE := Sort(Next(Zero))
+
+QUOTIENT := "quotient"
+QUOTIENT_OF := "quotient.of"
+QUOTIENT_LIFT := "quotient.lift"
+QUOTIENT_INDUCT := "quotient.induct"
+QUOTIENT_LEVELS := ["u", "v"]
+# the place of a way out's function among its arguments
+QUOTIENT_FUNCTION := 4
+LIFT_MAJOR := 6
+INDUCT_MAJOR := 5
+
+bound(e: Environment, word: text, names: list<text>) := {
+	if word == NUMBERS_WORD {
+		if #names != 3 { raise "numbers takes the number type, the yes case and equality, and is given ${#names} names" }
+		numbers_bound(e, names#1, names#2, names#3)
+	}
+	else if word == SHORTCUT_WORD { shortcut_bound(e, names#1, names.drop(1)) }
+	else if word == QUOTIENTS_WORD { quotients_bound(e, names#1) }
+	else if word == TEXTS_WORD {
+		if #names != 3 or e.numbers is ø { raise "texts takes a function and a list's two cases, after the numbers" }
+		e.texts = names
+	}
+	else if word == PRODUCTS_WORD { }
+	else { raise "${word} binds nothing" }
+}
+
+# --- numbers
+
+# the block a family of one type belongs to
+block_named(e: Environment, name: text): Block := {
+	if not e.known.has(name) { raise "nothing is named ${name}" }
+	family_block(e, name) ?? raise("${name} is no family of a block")
+}
+# a block of one family with these counts of levels and parameters, this type and these case types, as written
+shaped(block: Block, levels: int, parameters: int, type: Expr, cases: list<Expr>): bool := {
+	written = block.families#1.cases.map(c => c.type)
+	#block.families == 1 and #block.levels == levels and block.parameters == parameters and alike(block.families#1.type, type) and #written == #cases and (1 .. #cases + 1).all(at => alike(written#at, cases#at))
+}
+# equality has the shape of `enum Equal(T: Sort(u), a: T): T -> Prop { refl: Equal(T, a, a) }`
+equality_shaped(e: Environment, equality: text) := {
+	block = block_named(e, equality)
+	u = Named(block.levels#1 ?? "")
+	type = Pi(Sort(u), Pi(Var(0), Pi(Var(1), PROPOSITIONS)))
+	reflexive = Pi(Sort(u), Pi(Var(0), apply_all(Const(equality, [u]), [Var(1), Var(0), Var(0)])))
+	if not shaped(block, 1, 2, type, [reflexive]) { raise "${equality} is no block like `enum Equal(T: Sort(u), a: T): T -> Prop { refl: Equal(T, a, a) }`" }
+}
+numbers_bound(e: Environment, number: text, yes_case: text, equality: text) := {
+	if e.numbers is not ø { raise "the numbers are bound already" }
+	natural = block_named(e, number)
+	nat = Const(number, [])
+	if not shaped(natural, 0, 0, TYPE, [nat, Pi(nat, nat)]) { raise "${number} is no block like `enum nat { zero; successor(n: nat) }`" }
+	truth = match (e.known.get(yes_case) ?? raise("nothing is named ${yes_case}")).role {
+		CaseOf(family, minor, fields) => family
+		_ => raise "${yes_case} is no case of a block"
+	}
+	truths = block_named(e, truth)
+	if not shaped(truths, 0, 0, TYPE, [Const(truth, []), Const(truth, [])]) { raise "${truth} is no block like `enum bool { no; yes }`" }
+	equality_shaped(e, equality)
+	cases = natural.families#1.cases.map(c => c.name)
+	answers = truths.families#1.cases.map(c => c.name)
+	e.numbers = Numbers(number, cases#1, cases#2, truth, yes_case, if answers#1 == yes_case then answers#2 else answers#1, equality)
+}
+
+# --- shortcuts
+
+# `shortcut(word, functions…, theorems…)`: each function has the shortcut's type, the theorems fix it on every number,
+# and neither rests on an axiom
+shortcut_bound(e: Environment, word: text, names: list<text>) := {
+	n = e.numbers ?? raise("no numbers are bound")
+	if not SHORTCUT_WORDS.contains(word) { raise "${word} is no shortcut; the shortcuts are ${SHORTCUT_WORDS}" }
+	words = if word == "divide" then [word, REMAINDER] else [word]
+	functions = names.take(#words)
+	j = Judge(e, [])
+	for at in 1 to #words {
+		if bound_function(e, words#at) is not ø { raise "${words#at} is bound already" }
+		k = known(j, functions#at)
+		axiom_free(e, functions#at)
+		wanted = Pi(Const(n.number, []), Pi(Const(n.number, []), Const(if COMPARISONS.contains(words#at) then n.truth else n.number, [])))
+		if k.levels is not empty or not convertible(j, k.type, wanted) { raise "${functions#at} has no type of ${words#at}" }
+	}
+	statements = shortcut_statements(j, n, word, functions.map(name => Const(name, [])))
+	theorems = names.drop(#words)
+	if #theorems != #statements { raise "${word} is fixed by ${#statements} theorems, and is given ${#theorems}" }
+	for at in 1 to #statements {
+		k = known(j, theorems#at)
+		match k.role {
+			Stated(kind) => if kind != "thm" { raise "${theorems#at} is no theorem" }
+			_ => raise "${theorems#at} is no theorem"
+		}
+		axiom_free(e, theorems#at)
+		if k.levels is not empty or not convertible(j, k.type, statements#at) { raise "${theorems#at} states no ${word} theorem ${at}" }
+	}
+	for at in 1 to #words { e.shortcuts[functions#at] = words#at }
+}
+axiom_free(e: Environment, name: text) := {
+	resting = e.axioms.get(name) ?? []
+	if resting is not empty { raise "${name} rests on the axiom ${resting#1}" }
+}
+# the function bound to a shortcut, ø while none is
+bound_function(e: Environment, word: text): Expr? := {
+	for name in e.shortcuts.keys() { if e.shortcuts[name] == word { return Const(name, []) } }
+	ø
+}
+needed(e: Environment, word: text, by: text): Expr := bound_function(e, word) ?? raise("${by} needs ${word} bound first")
+
+# The statements that fix a shortcut's functions on every number, in the order of the table in notes/theory.md
+shortcut_statements(j: Judge, n: Numbers, word: text, functions: list<Expr>): list<Expr> := {
+	m = fresh(j, Const(n.number, []))
+	k = fresh(j, Const(n.number, []))
+	z = Const(n.zero, [])
+	f = functions#1
+	call = (g: Expr, a: Expr, b: Expr) => apply_all(g, [a, b])
+	next = (t: Expr) => App(Const(n.successor, []), t)
+	numbers = (left: Expr, right: Expr) => for_all(j, n, [m, k], equation(n, n.number, left, right))
+	truths = (left: Expr, right: Expr) => for_all(j, n, [m, k], equation(n, n.truth, left, right))
+	yes_ = Const(n.yes_case, [])
+	no_ = Const(n.no_case, [])
+	if word == "add" then [numbers(call(f, m, z), m), numbers(call(f, m, next(k)), next(call(f, m, k)))]
+	else if word == "subtract" then [numbers(call(f, m, z), m), numbers(call(f, z, k), z), numbers(call(f, next(m), next(k)), call(f, m, k))]
+	else if word == "multiply" then [numbers(call(f, m, z), z), numbers(call(f, m, next(k)), call(needed(j.environment, "add", word), call(f, m, k), m))]
+	else if word == "equal" then [truths(call(f, z, z), yes_), truths(call(f, next(m), z), no_), truths(call(f, z, next(k)), no_), truths(call(f, next(m), next(k)), call(f, m, k))]
+	else if word == "at_most" then [truths(call(f, z, k), yes_), truths(call(f, next(m), z), no_), truths(call(f, next(m), next(k)), call(f, m, k))]
+	else [
+		numbers(call(needed(j.environment, "add", word), call(needed(j.environment, "multiply", word), call(f, m, k), k), call(functions#2, m, k)), m),
+		numbers(call(f, m, z), z),
+		truths(call(needed(j.environment, "at_most", word), call(functions#2, m, next(k)), k), yes_)
+	]
+}
+# `left == right` at a type in Type
+equation(n: Numbers, type: text, left: Expr, right: Expr): Expr := apply_all(Const(n.equality, [Next(Zero)]), [Const(type, []), left, right])
+# a statement for every one of these number locals it names, the first outermost
+for_all(j: Judge, n: Numbers, locals: list<Expr>, statement: Expr): Expr := pis(j, locals.filter(v => not alike(abstract(statement, local_id(v)), statement)), statement)
+
+# --- computing
+
+# a number as the case of the number type it stands for; ø for another term or without numbers
+number_case(j: Judge, t: Expr): Expr? := {
+	n = j.environment.numbers ?? return ø
+	match t {
+		Number(value) => if is_zero(value) then Const(n.zero, []) else App(Const(n.successor, []), Number(difference(value, ONE)))
+		_ => ø
+	}
+}
+# a number equals a term that is no number when it opened into its case does
+number_opened(j: Judge, number: Expr, other: Expr): bool := match other {
+	Number(value) => no
+	_ => { opened = number_case(j, number) ?? return no; convertible(j, opened, other) }
+}
+# a bound function applied to two terms that compute to numbers: the number or truth value it gives
+shortcut_step(j: Judge, name: text, xs: list<Expr>): Expr? := {
+	word = j.environment.shortcuts.get(name) ?? return ø
+	if #xs != 2 { return ø }
+	a = number_in(whnf(j, xs#1)) ?? return ø
+	b = number_in(whnf(j, xs#2)) ?? return ø
+	n = j.environment.numbers!
+	answer = (holds: bool) => Const(if holds then n.yes_case else n.no_case, [])
+	if word == "add" then Number(sum(a, b))
+	else if word == "subtract" then Number(if compared(a, b) <= 0 then ZERO else difference(a, b))
+	else if word == "multiply" then Number(product(a, b))
+	else if word == "divide" then Number(if is_zero(b) then ZERO else divided(a, b).quotient)
+	else if word == REMAINDER then Number(if is_zero(b) then a else divided(a, b).rest)
+	else if word == "equal" then answer(compared(a, b) == 0)
+	else answer(compared(a, b) <= 0)
+}
+number_in(t: Expr): Magnitude? := match t {
+	Number(value) => value
+	_ => ø
+}
+# what a constant computes by beyond unfolding: a recursor on a case, a quotient's way out on a made value
+role_step(j: Judge, name: text, us: list<Universe>, xs: list<Expr>): Expr? := match (j.environment.known.get(name) ?? return ø).role {
+	RecursorOf(block, family) => recursor_step(j, j.environment.blocks#block, family, us, xs)
+	QuotientOf(major) => {
+		if major == 0 or #xs < major { return ø }
+		made = whnf(j, xs#major)
+		if head_name(made) != QUOTIENT_OF or #arguments_of(made) != 3 { return ø }
+		apply_all(App(xs#QUOTIENT_FUNCTION, arguments_of(made)#3), xs.drop(major))
+	}
+	_ => ø
+}
+
+# --- quotients
+
+# `quotients(equality)`: the quotient of a type by a relation, the maker of its values, and the two ways out, lift and
+# induct, each typed and added; they rest on nothing
+quotients_bound(e: Environment, equality: text) := {
+	if e.known.has(QUOTIENT) { raise "the quotients are bound already" }
+	equality_shaped(e, equality)
+	j = Judge(e, QUOTIENT_LEVELS)
+	u = Named(QUOTIENT_LEVELS#1)
+	v = Named(QUOTIENT_LEVELS#2)
+	t = fresh(j, Sort(u))
+	r = fresh(j, Pi(t, Pi(t, PROPOSITIONS)))
+	shared = [t, r]
+	quotiented = apply_all(Const(QUOTIENT, [u]), shared)
+	a = fresh(j, t)
+	b = fresh(j, t)
+	q = fresh(j, quotiented)
+	into = fresh(j, Sort(v))
+	f = fresh(j, Pi(t, into))
+	joined = fresh(j, apply_all(r, [a, b]))
+	respects = fresh(j, pis(j, [a, b, joined], apply_all(Const(equality, [v]), [into, App(f, a), App(f, b)])))
+	motive = fresh(j, Pi(quotiented, PROPOSITIONS))
+	h = fresh(j, pis(j, [a], App(motive, apply_all(Const(QUOTIENT_OF, [u]), shared + [a]))))
+	part(e, QUOTIENT, 1, pis(j, shared, Sort(u)), 0)
+	part(e, QUOTIENT_OF, 1, pis(j, shared + [a], quotiented), 0)
+	part(e, QUOTIENT_LIFT, 2, pis(j, shared + [into, f, respects, q], into), LIFT_MAJOR)
+	part(e, QUOTIENT_INDUCT, 1, pis(j, shared + [motive, h, q], App(motive, q)), INDUCT_MAJOR)
+}
+part(e: Environment, name: text, levels: int, type: Expr, major: int) := {
+	names = QUOTIENT_LEVELS.take(levels)
+	sort_of(Judge(e, names), type)
+	added(e, name, names, type, ø, QuotientOf(major))
+}

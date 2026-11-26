@@ -14,8 +14,11 @@ set -u -o pipefail
 STAGES="A B C"
 REPOSITORY=pannous/wap
 LOCK=wap-seed.lock
-# how much more a stage may cost than the seed's own stage A, in percent, before the new seed is refused as slower
+# how much more the new compiler may cost than the seed compiling wap's source, in percent, before the new seed is
+# refused as slower; each is timed this many times in turns and counted by its best, so a busy machine, which slows a
+# run by up to twice as much an hour later, slows both alike
 SLOWER_PERCENT=150
+TIMING_ROUNDS=2
 check=
 [ "${1-}" = --check ] && { check=1; shift; }
 tree=$(cd "${1:-$(git rev-parse --show-toplevel)}" && pwd) || exit 2
@@ -31,40 +34,62 @@ source "$(dirname "$0")/lib/wap-host.sh"
 wap_beside_copied "$tree" "$scratch" || exit 2
 
 echo 'print "Hello"' >"$scratch/hello.wap"
-# stage <compiler> <output>: the compiler compiling wap's source; its cost in user + system CPU seconds, timed warm: a
-# first hello lets the host compile a new module's machine code before the clock starts, else a new stage pays for it
-# A stage built from the tree reads the tree's sources (its own warm state is the stage's before) and first writes the
-# library and the warm state the compiler it builds holds; the seed's stage holds no library, as the seed may write an
-# older one
-stage() {
-	local start=$SECONDS cost sources=()
+# prepared <compiler>: what a compiler built from the tree reads beside it, written first: the library and the warm
+# state the compiler it builds holds (its own warm state is the stage's before); the seed's holds no library, as the
+# seed may write an older one
+prepared() {
 	[ -f "$tree/$WAP_WARM" ] || : >"$tree/$WAP_WARM"
 	: >"$tree/$WAP_LIBRARY_MODULE"
-	if [ "$1" != "$seed" ]; then
-		sources=(--sources)
-		wap_ran "$1" --sources "$scratch/types/types.wap" "$scratch/types.wasm" >"$scratch/stage.log" 2>&1 && cp "$scratch/types.wasm" "$tree/$WAP_LIBRARY_MODULE" || { echo "refresh-seed: no library: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
-		wap_ran "$1" --sources warm "$tree/$WAP_WARM" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: no warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
-	fi
+	[ "$1" != "$seed" ] || return 0
+	wap_ran "$1" --sources "$scratch/types/types.wap" "$scratch/types.wasm" >"$scratch/stage.log" 2>&1 && cp "$scratch/types.wasm" "$tree/$WAP_LIBRARY_MODULE" || { echo "refresh-seed: no library: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
+	wap_ran "$1" --sources warm "$tree/$WAP_WARM" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: no warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
+}
+# timed <compiler> <output>: the prepared compiler compiling wap's source, a compiler built from the tree reading the
+# tree's sources; its cost in user + system CPU seconds in $cost, timed warm: a first hello lets the host compile a new
+# module's machine code before the clock starts, else a new compiler pays for it
+timed() {
+	local sources=()
+	[ "$1" = "$seed" ] || sources=(--sources)
 	wap_ran "$1" "$scratch/hello.wap" "$scratch/warm.wasm" >/dev/null 2>&1
 	cost=$( { TIMEFORMAT="%U %S"; time wap_ran "$1" ${sources[@]+"${sources[@]}"} "$tree/wap/compiler.wap" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
 	[ -f "$2" ] || { echo "refresh-seed: $(basename "$2" .wasm) FAILED: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
-	stage_cost=$cost
+}
+# stage <compiler> <output>: the compiler compiling wap's source, prepared and timed
+stage() {
+	local start=$SECONDS
+	prepared "$1"
+	timed "$1" "$2"
 	echo "refresh-seed: $(basename "$2" .wasm) $(wc -c <"$2" | tr -d ' ') B in $((SECONDS - start)) s, $cost s CPU, sha256 $(shasum -a 256 "$2" | cut -c1-16)"
 }
+# the lesser of two costs, the first when the second is empty
+least() { awk -v a="$1" -v b="${2:-$1}" 'BEGIN { printf "%.1f", (a < b ? a : b) }'; }
+runner=$seed
 previous=$seed
-old_cost=
 for name in $STAGES; do
 	stage "$previous" "$scratch/$name.wasm"
-	[ -n "$old_cost" ] || old_cost=$stage_cost
 	if [ "$previous" != "$seed" ] && cmp -s "$previous" "$scratch/$name.wasm"; then echo "refresh-seed: $name is the same bytes as the stage before: a fixpoint"; fi
+	runner=$previous
 	previous=$scratch/$name.wasm
 done
 chosen=$previous
 
+# the seed and the compiler that built the last stage, timed in turns, each by its best round
+old_cost=
+new_cost=
+for round in $(seq "$TIMING_ROUNDS"); do
+	prepared "$seed"
+	timed "$seed" "$scratch/timed.wasm"
+	old_cost=$(least "$cost" "$old_cost")
+	prepared "$runner"
+	timed "$runner" "$scratch/timed.wasm"
+	new_cost=$(least "$cost" "$new_cost")
+	echo "refresh-seed: timing round $round: the seed $old_cost s CPU at best, the new compiler $new_cost s"
+done
+
 hello=$(wap_ran "$chosen" "$scratch/hello.wap" "$scratch/hello.wasm" 2>&1 && wap_ran "$scratch/hello.wasm" 2>&1)
 echo "$hello" | grep -q Hello || { echo "refresh-seed: $(basename "$chosen" .wasm) runs no hello ($(echo "$hello" | tail -1 | cut -c1-200)); the seed stays" >&2; exit 1; }
-echo "refresh-seed: wap's source took $stage_cost s CPU with the new compiler, $old_cost s with the seed it replaces"
-awk -v new="$stage_cost" -v old="$old_cost" -v most="$SLOWER_PERCENT" 'BEGIN { exit !(new * 100 <= old * most) }' || { echo "refresh-seed: the new compiler is over ${SLOWER_PERCENT}% of the seed's time; the seed stays" >&2; exit 1; }
+echo "refresh-seed: wap's source took $new_cost s CPU with the new compiler, $old_cost s with the seed it replaces"
+awk -v new="$new_cost" -v old="$old_cost" -v most="$SLOWER_PERCENT" 'BEGIN { exit !(new * 100 <= old * most) }' || { echo "refresh-seed: the new compiler is over ${SLOWER_PERCENT}% of the seed's time; the seed stays" >&2; exit 1; }
 if [ -n "$check" ]; then
 	cmp -s "$chosen" "$seed" && echo "refresh-seed: the seed is that stage" || echo "refresh-seed: the seed differs from that stage (--check: kept)"
 	exit 0
@@ -89,19 +114,19 @@ PY
 }
 source_commit=$(git -C "$tree" rev-parse HEAD)
 # the seed and what it reads beside it, installed and published
-cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && echo "refresh-seed: replaced $seed"
+cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && wap_tools_built "$tree" "$seed" && echo "refresh-seed: replaced $seed"
 # (the old compiler's machine code goes with it, and every program's it compiled: the native wap writes the new
 # compiler's at its first run, below)
 rm -f "$(dirname "$seed")"/*.cwasm
 # the native wap, the command that runs the seed (wap/extensions/native/driver.wap), built by it
 native=$(dirname "$(dirname "$seed")")
-"$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" \
-	-L"$native/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib && echo "refresh-seed: installed $native/wap" ||
+wap_linked "$native"
+"$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" "${WAP_LINKED[@]}" && echo "refresh-seed: installed $native/wap" ||
 	echo "refresh-seed: the native wap was not built; $native/wap stays" >&2
 # its first run, so the first one anyone makes finds the compiler's machine code written
 "$native/wap" '1+1' >/dev/null || echo "refresh-seed: the installed $native/wap fails to run 1+1" >&2
 beside=$scratch/wap-seed-beside.tar.gz
-tar -czf "$beside" -C "$tree/wap" "${WAP_BESIDE[@]}" -C "$tree" "$WAP_LIBRARY" || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
+COPYFILE_DISABLE=1 tar -czf "$beside" -C "$tree/wap" "${WAP_BESIDE[@]}" -C "$tree" "$WAP_LIBRARY" -C "$(dirname "$seed")" "${WAP_TOOLS[@]%%:*}" || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
 release=wap-seed-$(date +%Y-%m-%d)-$(shasum -a 256 "$seed" | cut -c1-8)
 gh release create "$release" "$seed" "$beside" --repo "$REPOSITORY" --prerelease --title "$release" --target "$source_commit" \
 	--notes "wap's seed compiler: wap/compiler.wap of ${source_commit:0:10}, compiled by the stages A B C." &&

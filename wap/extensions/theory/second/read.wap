@@ -1,0 +1,109 @@
+# The export read (its format: ../export.wap): names, levels and terms by their numbers, and the statements in order.
+# A record numbered out of order, or of a kind the format does not have, is refused.
+use json
+use magnitude
+use "expressions.wap"
+
+# what each numbered table's records start with; a table's next record has its count as number (name 0 is the
+# anonymous one, level 0 is zero, terms count from 0)
+ANONYMOUS := 0
+NAME_RECORD := "in"
+LEVEL_RECORD := "il"
+TERM_RECORD := "ie"
+# the statement records a declaration is written as
+DECLARATION_KINDS := ["axiom", "def", "thm", "opaque"]
+BLOCK_RECORD := "inductive"
+BINDING_RECORD := "binds"
+META_RECORD := "meta"
+
+class Declared { kind: text; name: text; levels: list<text>; type: Expr; value: Expr? }
+class Case { name: text; type: Expr }
+class Family { name: text; type: Expr; cases: list<Case> }
+# a block made plain (second/nested.wap) keeps the container each added family stands for, a function of its parameters
+class Block { levels: list<text>; parameters: int; families: list<Family>; nested: list<Expr> = [] }
+enum Statement {
+	Declares(d: Declared)
+	DeclaresBlock(block: Block)
+	Binds(word: text, names: list<text>)
+}
+
+class Reader {
+	names: list<text> = [""]
+	levels: list<Universe> = [Zero]
+	terms: list<Expr> = []
+	statements: list<Statement> = []
+}
+
+# the statements of an export's text
+statements_read(export: text): list<Statement> := {
+	r = Reader()
+	for line in export.split("\n") {
+		if line.trim() != "" { record_read(r, parse_json(line)) }
+	}
+	r.statements
+}
+
+field(record: any, key: text): any := (record as map<text, any>)[key]
+whole_number(value: any): int := value as int
+whole_numbers(value: any): list<int> := (value as list<any>).map(whole_number)
+
+record_read(r: Reader, record: any) := {
+	kinds = (record as map<text, any>).keys()
+	kind = kinds#1
+	if kind == NAME_RECORD { in_order(record, kind, #r.names); r.names += [name_read(r, field(record, kinds#2))] }
+	else if kind == LEVEL_RECORD { in_order(record, kind, #r.levels); r.levels += [level_read(r, kinds#2, field(record, kinds#2))] }
+	else if kind == TERM_RECORD { in_order(record, kind, #r.terms); r.terms += [term_read(r, kinds#2, field(record, kinds#2))] }
+	else if DECLARATION_KINDS.contains(kind) { r.statements += [Declares(declared_read(r, kind, field(record, kind)))] }
+	else if kind == BLOCK_RECORD { r.statements += [DeclaresBlock(block_read(r, field(record, kind)))] }
+	else if kind == BINDING_RECORD { r.statements += [Binds(field(field(record, kind), "word") as text, whole_numbers(field(field(record, kind), "names")).map(n => name_at(r, n)))] }
+	else if kind != META_RECORD { raise "the export has a record of no known kind: ${kind}" }
+}
+# a numbered record is the next of its table
+in_order(record: any, kind: text, expected: int) := {
+	if whole_number(field(record, kind)) != expected { raise "the export's ${kind} record ${whole_number(field(record, kind))} stands where ${expected} belongs" }
+}
+
+# a name something is declared or used by: never the anonymous one
+name_at(r: Reader, n: int): text := if n == ANONYMOUS then raise("the export names something by the anonymous name") else written_name(r, n)
+written_name(r: Reader, n: int): text := if n < #r.names then r.names#(n + 1) else raise("the export names name ${n} before writing it")
+level_at(r: Reader, n: int): Universe := if n < #r.levels then r.levels#(n + 1) else raise("the export names level ${n} before writing it")
+term_at(r: Reader, n: int): Expr := if n < #r.terms then r.terms#(n + 1) else raise("the export names term ${n} before writing it")
+
+name_read(r: Reader, written: any): text := {
+	pre = whole_number(field(written, "pre"))
+	part = field(written, "str") as text
+	if part == "" { raise "the export writes a name with an empty part" }
+	if pre == ANONYMOUS then part else "${written_name(r, pre)}.${part}"
+}
+level_read(r: Reader, kind: text, written: any): Universe := {
+	if kind == "succ" then Next(level_at(r, whole_number(written)))
+	else if kind == "max" then Most(level_at(r, whole_numbers(written)#1), level_at(r, whole_numbers(written)#2))
+	else if kind == "imax" then MostUnlessZero(level_at(r, whole_numbers(written)#1), level_at(r, whole_numbers(written)#2))
+	else if kind == "param" then Named(name_at(r, whole_number(written)))
+	else raise "the export has a level of no known kind: ${kind}"
+}
+term_read(r: Reader, kind: text, written: any): Expr := {
+	part = (key: text) => term_at(r, whole_number(field(written, key)))
+	if kind == "bvar" then Var(whole_number(written))
+	else if kind == "sort" then Sort(level_at(r, whole_number(written)))
+	else if kind == "const" then Const(name_at(r, whole_number(field(written, "name"))), whole_numbers(field(written, "us")).map(n => level_at(r, n)))
+	else if kind == "app" then App(part("fn"), part("arg"))
+	else if kind == "lam" then Lam(part("type"), part("body"))
+	else if kind == "forallE" then Pi(part("type"), part("body"))
+	else if kind == "letE" then Let(part("type"), part("value"), part("body"))
+	else if kind == "natVal" then Number(magnitude_of_digits(written as text))
+	else if kind == "strVal" then Text(written as text)
+	else if kind == "proj" then Field(name_at(r, whole_number(field(written, "typeName"))), whole_number(field(written, "idx")), part("struct"))
+	else raise "the export has a term of no known kind: ${kind}"
+}
+level_names_read(r: Reader, written: any): list<text> := whole_numbers(written).map(n => name_at(r, n))
+declared_read(r: Reader, kind: text, written: any): Declared := {
+	held = (written as map<text, any>).has("value")
+	Declared(kind, name_at(r, whole_number(field(written, "name"))), level_names_read(r, field(written, "levelParams")), term_at(r, whole_number(field(written, "type"))), if held then term_at(r, whole_number(field(written, "value"))) else ø)
+}
+block_read(r: Reader, written: any): Block := {
+	families = (field(written, "types") as list<any>).map(family => Family(name_at(r, whole_number(field(family, "name"))), term_at(r, whole_number(field(family, "type"))), (field(family, "ctors") as list<any>).map(case => Case(name_at(r, whole_number(field(case, "name"))), term_at(r, whole_number(field(case, "type")))))))
+	parameters = whole_number(field(written, "numParams"))
+	if parameters < 0 { raise "the export gives a block ${parameters} parameters" }
+	Block(level_names_read(r, field(written, "levelParams")), parameters, families)
+}

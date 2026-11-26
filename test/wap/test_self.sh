@@ -19,7 +19,7 @@ loaded() {
 # machine code (wap/extensions/native)
 NOT_ALONE=(wap/compiler.wap wap/nodes.wap)
 MET_OR_NATIVE=(-e '^wap/types/' -e '^wap/extensions/native/')
-files=($(cd "$root" && git ls-files 'wap/*.wap' | grep -v -x -F "${NOT_ALONE[@]/#/-e}" | grep -v "${MET_OR_NATIVE[@]}"))
+files=($(cd "$root" && compiler_sources | grep -v -x -F "${NOT_ALONE[@]/#/-e}" | grep -v "${MET_OR_NATIVE[@]}"))
 for file in "${files[@]}"; do
 	check "wap compiles $file and the result loads" "$(loaded "$file")" "loads"
 done

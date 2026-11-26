@@ -24,10 +24,12 @@ HOLE_OPENERS = [«${», "\\("]
 HOLE_CLOSERS = ["}", ")"]
 # the function a hole's value is given to, its text joining the text's pieces
 TEXT_WORD = "text"
-# operator glyphs beyond ASCII that no range below holds; `∞` and `∅` are name characters
-OTHER_GLYPHS = "¬±×÷·‖…′″"
-# operator glyph ranges beyond ASCII: superscripts and subscripts, arrows, math operators, technical, math brackets
-GLYPH_RANGES = [['⁰', '₟'], ['←', '⇿'], ['∀', '∃'], ['∆', '∝'], ['∟', '⌙'], ['⟀', '⟯'], ['¹', '¹'], ['²', '³']]
+# operator glyphs beyond ASCII: the symbol blocks, punctuation to arrows, math, technical, shapes and dingbats, and
+# Latin-1's symbols; the letterlike block in between (ℕ ℝ ⅈ) and `∞` `∅` `€` are name characters
+SYMBOL_BLOCKS = ['\u{2000}', '\u{2bff}']
+LETTERLIKE_BLOCK = ['\u{2100}', '\u{214f}']
+LATIN_SYMBOLS = "¬±×÷·¹²³"
+SYMBOL_NAMES = "∞∅€"
 # the largest int, whose digits an int's never pass
 LARGEST_INT = "9223372036854775807"
 # what ends a URL: a blank, a bracket, a separator or a quote
@@ -42,9 +44,9 @@ name_read(r: Reader) := {
 	after = slice_of(r, end, min(end + 3, r.n))
 	if after == "://" { return url_read(r, end + 3) }
 	if r.code[r.at] == '$' and after == REST_MARK { end += 3 }
-	takes_raw = r.raw_words.contains(slice_of(r, r.at, end))
+	taking = r.unparsed.get(slice_of(r, r.at, end))
 	symbol_token(r, end)
-	if takes_raw { raw_block(r) }
+	if taking == RAW_TYPE { raw_block(r) } else if taking != ø { phrase_text(r, taking == WORD_TYPE) }
 }
 
 # the symbol from the reader's place up to `end`, as one token
@@ -104,8 +106,10 @@ number_read(r: Reader) := {
 	}
 	unsigned = written.replace("_", "")
 	value = number_written((if sign == "-" then sign else "") + unsigned, is_float)
-	atom_token(r, if sign == "" then value else with_fact(value, SIGNED, List([symbol(sign), number_written(unsigned, is_float)], Bracket.None, Separator.None)), end)
+	number_token(r, if sign == "" then value else with_fact(value, SIGNED, List([symbol(sign), number_written(unsigned, is_float)], Bracket.None, Separator.None)), end)
 }
+# a number's token, the spelling the program wrote kept where its value prints another, `0xFF`, `1_000` (format.wap)
+number_token(r: Reader, value: Node, end: int) := atom_token(r, if slice_of(r, r.at, end) == "${value}" then value else with_fact(value, WRITTEN, Text(slice_of(r, r.at, end))), end)
 number_written(written: text, is_float: bool) as Node := Number(if is_float then float(written) else whole(written))
 
 # after the digits from `at` on, `_` between two digits included
@@ -118,7 +122,7 @@ hex_read(r: Reader, sign: text, from: int) := {
 	end = from
 	while end < r.n and (is_hex_digit(r.code[end]) or r.code[end] == '_') { end += 1 }
 	value = hex_number(slice_of(r, from, end).replace("_", ""))
-	atom_token(r, Number(if sign == "-" then 0 - value else value), end)
+	number_token(r, Number(if sign == "-" then 0 - value else value), end)
 }
 
 # an int as written, a float beyond the range of an int: past the largest int's digits, compared as texts of one length
@@ -237,9 +241,10 @@ hex_number(digits: text) as int := {
 # ASCII punctuation but brackets, quotes, separators and the name characters `_` `$`, and the glyphs beyond ASCII
 is_glyph(c: text) as bool := {
 	if c <= '~' { return c > ' ' and not is_alpha(c) and not is_digit(c) and not «_$()[]{}"'`,;».contains(c) }
-	if OTHER_GLYPHS.contains(c) { return yes }
-	GLYPH_RANGES.any(range => c >= range#1 and c <= range#2)
+	LATIN_SYMBOLS.contains(c) or in_block(c, SYMBOL_BLOCKS) and not in_block(c, LETTERLIKE_BLOCK) and not SYMBOL_NAMES.contains(c)
 }
+
+in_block(c: text, block: list<text>) as bool := c >= block#1 and c <= block#2
 
 # letters, digits, `_`, `$`, and every character beyond ASCII that is no glyph, quote or blank
 is_name_char(c: text) as bool := {

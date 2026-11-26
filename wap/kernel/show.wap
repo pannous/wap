@@ -1,0 +1,98 @@
+# A term shown in wap notation (this folder's files: notes/theory.md), in the explicit spellings explicit.wap reads,
+# so reading the text gives the same term again: `(a: Prop) -> a -> And(a, a)`, `identity[1](bool)`, `Type(u)`.
+#
+# A binder whose variable the rest does not use is shown without its name (`a -> b`); arrows nest to the right
+# without brackets, and a function type or function standing as a domain or as the function applied is bracketed.
+# A binder named like one around it gets a number, so each variable is shown by the binder it refers to. A free
+# variable, one the checker went into, is shown by its binder's name where a checker is at hand (`shown_for`).
+use "terms.wap"
+use "levels.wap"
+use "environment.wap"
+
+# the dot between a name's parts, `nat.zero`
+DOT := "."
+# a binder written without a name, shown where its variable is used
+UNNAMED := "x"
+# the mark of a declaration the elaborator made under a name no program writes: one that hides the prelude's of the
+# same name (elaborate/read.wap), `nat'`, and the plain type and the bool of a type whose conditions are lifted
+# (elaborate/lifted.wap), `Quad'plain`, `Quad'valid`; each part of a name is shown without the mark and the word after
+# it, as the program wrote it
+HIDING_MARK := "'"
+written_name(name: text): text := name.split(DOT).map(part => part.split(HIDING_MARK)#1).join(DOT)
+
+# a closed term shown
+shown(t: Term): text := shown_in(t, [], no_free_names())
+# a term shown with its free variables named by their binders, numbered where two share a name
+shown_for(c: Checker, t: Term): text := {
+	free = no_free_names()
+	for id in free_variables(t) { free[id] = fresh(hypothesis_of(c, id).binder, values(free)) }
+	shown_in(t, [], free)
+}
+no_free_names(): map<int, text> := {}
+
+# t shown inside binders of these names, the innermost last, its free variables by these names
+shown_in(t: Term, names: list<text>, free: map<int, text>): text := match t.shape {
+	Bound(index) => if index < #names then names#(#names - index) else "#${index}"
+	Free(id) => free.get(id) ?? "_${id}"
+	Sort(level) => sort_shown(level)
+	Constant(name, levels, _) => if levels is empty then written_name(name) else "${written_name(name)}[${levels.map(level => level_shown(level)).join(", ")}]"
+	Apply(function, argument) => "${operand_shown(head(t), names, free)}(${arguments(t).map(a => shown_in(a, names, free)).join(", ")})"
+	Lambda(binder, domain, body) => { name = fresh(binder, names + values(free)); "(${name}: ${shown_in(domain, names, free)}) => ${shown_in(body, names + [name], free)}" }
+	Pi(binder, domain, body) => if mentions(body, 0) then { name = fresh(binder, names + values(free)); "(${name}: ${shown_in(domain, names, free)}) -> ${shown_in(body, names + [name], free)}" } else "${operand_shown(domain, names, free)} -> ${shown_in(body, names + [UNNAMED], free)}"
+	LetIn(binder, type, value, body) => { name = fresh(binder, names + values(free)); "{ ${name}: ${shown_in(type, names, free)} = ${shown_in(value, names, free)}; ${shown_in(body, names + [name], free)} }" }
+	Numeral(value) => "${value}"
+	Quoted(value) => show(value)
+	Projection(structure, field, of) => "projection(${constant_name(structure)}, ${field}, ${shown_in(of, names, free)})"
+}
+# a term standing where an arrow would take it apart: a function type or a function, bracketed
+operand_shown(t: Term, names: list<text>, free: map<int, text>): text := match t.shape {
+	Pi(binder, domain, body) => "(${shown_in(t, names, free)})"
+	Lambda(binder, domain, body) => "(${shown_in(t, names, free)})"
+	_ => shown_in(t, names, free)
+}
+# a binder's name, numbered when a binder around it has it already
+fresh(binder: text, names: list<text>): text := {
+	base = if binder == "" then UNNAMED else binder
+	name = base
+	count = 1
+	while names.contains(name) {
+		count += 1
+		name = "${base}${count}"
+	}
+	name
+}
+# whether t uses the variable bound `index` binders out
+mentions(t: Term, index: int): bool := if t.loose <= index then no else match t.shape {
+	Bound(at) => at == index
+	Lambda(binder, domain, body) => mentions(domain, index) or mentions(body, index + 1)
+	Pi(binder, domain, body) => mentions(domain, index) or mentions(body, index + 1)
+	LetIn(binder, type, value, body) => mentions(type, index) or mentions(value, index) or mentions(body, index + 1)
+	_ => parts(t).any(part => mentions(part, index))
+}
+
+# Prop, Type, Type(u) for the universe above u, Sort(u) for one that may be Prop
+sort_shown(level: Level): text := {
+	number = level_number(level)
+	if number is not ø { return if number == 0 then "Prop" else if number == 1 then "Type" else "Type(${number! - 1})" }
+	match level {
+		Successor(of) => "Type(${level_shown(of)})"
+		_ => "Sort(${level_shown(level)})"
+	}
+}
+# a level as written: 2, u, u + 1, max(u, v), imax(u, v)
+level_shown(level: Level): text := {
+	number = level_number(level)
+	if number is not ø { return "${number}" }
+	match level {
+		Successor(of) => level_above_shown(of, 1)
+		Max(left, right) => "max(${level_shown(left)}, ${level_shown(right)})"
+		Imax(left, right) => "imax(${level_shown(left)}, ${level_shown(right)})"
+		Parameter(name) => name
+		_ => "0"
+	}
+}
+# a level so many steps above another: u + 2
+level_above_shown(level: Level, steps: int): text := match level {
+	Successor(of) => level_above_shown(of, steps + 1)
+	_ => "${level_shown(level)} + ${steps}"
+}

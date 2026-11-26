@@ -1,0 +1,273 @@
+# An inductive block checked and declared (notes/coc-plan.md 7, checks 1 to 5; this folder's files: notes/theory.md):
+# its header, its cases' parameters and results, the universes of their fields, strict positivity, and how far its
+# values may be taken apart. A type of the block nested inside another inductive type is refused by strict
+# positivity; nested types are made a plain block before they get here (7, "Nested types").
+
+use "terms.wap"
+use "levels.wap"
+use "environment.wap"
+use "compute.wap"
+use "equal.wap"
+use "recursors.wap"
+use "typing.wap"
+use "show.wap"
+use "nested.wap"
+
+# The block being checked: the checker it is checked in, which holds a variable for each of its types; the free
+# variables of its parameters, which every type and case is entered with; the universe its types lie in; and each
+# type's count of indices
+class BlockCheck {
+	block: InductiveBlock
+	c: Checker
+	parameters: list<Term>
+	# the variable standing for each type of the block, in its order
+	types: list<Term>
+	level: Level = Zero
+	indices: list<int> = []
+}
+# what the check of one case found: its count of fields, the places of those that hold a type of the block, and
+# whether each field is a proof or an index of its result, which lets a proposition be taken apart into any universe
+class CaseFacts { fields: int; recursive: list<int>; small: bool }
+
+# The block checked, then its types and their cases declared, each case naming the types by their constants and
+# resting on the axioms its type names; the recursors are made from the facts. Where a recursor is refused, the block
+# is too
+inductive_declared(e: Environment, written: InductiveBlock): InductiveFacts := kept_if_given(e, () => {
+	names = written.types.flat_map(type => [type.name] + type.cases.map(case => case.name))
+	declared = declared_together(e, names, ids => block_declarations(e, written, ids), d => rested(e, d))
+	facts = match declared#1.kind {
+		Inductive(facts) => facts
+		_ => raise "a block's first declaration is its first type"
+	}
+	e.accepted += [AcceptedBlock(facts.block)]
+	recursor_names = facts.plain.types.map(type => recursor_name(type.name))
+	declared_together(e, recursor_names, ids => recursors_made(e, facts, ids), d => rested(e, d))
+	facts
+})!
+# the block's types and their cases, given the ids they take: checked, each case naming the types by their constants
+block_declarations(e: Environment, written: InductiveBlock, ids: list<int>): list<Declaration> := {
+	firsts = (1 to #written.types).list().map(at => 1 + written.types.take(at - 1).map(type => 1 + #type.cases).sum())
+	constants = (1 to #written.types).list().map(at => constant(ids#(firsts#at), written.types#at.name, written.levels.map(level => Parameter(level))))
+	facts = inductive_checked(e, written, constants)
+	block = facts.block
+	(1 to #block.types).list().flat_map(at => {
+		type = block.types#at
+		[Declaration(type.name, block.levels, type.type, Inductive(facts))] + (1 to #type.cases).list().map(place => Declaration(type.cases#place.name, block.levels, type.cases#place.type, Constructor(constants#at, place, facts.fields#at#place)))
+	})
+}
+# A block as it is written: each case's type over the block's types, `(Tree: Type) -> …`, as they are not declared
+# yet. Given terms for them, a variable for each while it is checked, its constant once it is accepted
+types_given(block: InductiveBlock, given: list<Term>): InductiveBlock := cases_mapped(block, t => instantiated_all(body_under(t, #given), given))
+cases_mapped(block: InductiveBlock, mapped: (Term) -> Term): InductiveBlock := InductiveBlock(block.levels, block.parameters, block.types.map(type => BlockType(type.name, type.type, type.cases.map(case => WrittenCase(case.name, mapped(case.type))))))
+# a term over a block's types, each standing as one of these variables, written as a case is: `(Tree: Type) -> …`
+over_types(c: Checker, t: Term, variables: list<Term>, block: InductiveBlock): Term := closed_typed(c, t, variables, no, variable => block.types#(place_among(variable, variables)).type)
+# a term with each of these variables replaced by the term standing in its place
+instead_of(t: Term, variables: list<Term>, standing: list<Term>): Term := (1 to #variables).list().fold(t, (inner, at) => replaced_by(inner, variable_id(variables#at), standing#at))
+# a declaration of a block or a binding statement resting on the axioms its type names
+rested(e: Environment, d: Declaration) := rests_on(e, size(e), [d.type], no)
+
+# Checks 1 to 5 on a block made plain (nested.wap), each of its types a variable of the checker; the facts name them
+# by their constants
+inductive_checked(e: Environment, written: InductiveBlock, constants: list<Term>): InductiveFacts := {
+	levels_distinct(written.levels)
+	for type in written.types {
+		closed(type.type, type.name)
+		for case in type.cases { closed(case.type, case.name) }
+	}
+	c = checker(e, written.levels)
+	types = written.types.map(type => hypothesis(c, type.name, type.type))
+	block = types_given(written, types)
+	parameters = parameters_entered(c, block)
+	plain = unnested(c, block, parameters, types)
+	b = BlockCheck(plain.block, c, parameters, plain.types)
+	headers_checked(b)
+	cases = plain.block.types.map(type => type.cases.map(case => case_checked(b, case, type.name)))
+	# a case is checked plain and typed as written, its containers and their arguments too
+	for type in block.types { for case in type.cases { level_of(c, case.type) } }
+	one = #plain.block.types == 1
+	only_case = one and #plain.block.types#1.cases == 1
+	InductiveFacts(
+		types_given(written, constants), constants, cases_mapped(plain.block, t => over_types(c, t, plain.types, plain.block)),
+		plain.nested.map(t => instead_of(t, plain.types.take(#written.types), constants)), b.level, b.indices,
+		cases.map(facts => facts.map(case => case.fields)),
+		cases.map(facts => facts.map(case => case.recursive)),
+		never_zero(b.level) or (one and (#cases#1 == 0 or (only_case and cases#1#1.small))),
+		only_case and b.indices#1 == 0 and cases#1#1.recursive is empty,
+		only_case and is_zero(b.level) and cases#1#1.fields == 0
+	)
+}
+
+# --- check 1: the header
+
+# the block's parameters, entered from the first type's header: every type and case is entered with these variables
+parameters_entered(c: Checker, block: InductiveBlock): list<Term> := {
+	first = block.types#1
+	level_of(c, first.type)
+	entered: list<Term> = []
+	rest = first.type
+	for at in 1 to block.parameters {
+		inside = binder_entered(c, rest) ?? refused(ENUM_HEADER, "${first.name} has fewer than ${block.parameters} parameters: ${shown(first.type)}")
+		entered += [inside.variable]
+		rest = inside.body
+	}
+	entered
+}
+
+# Every type's header: the block's parameters, then its indices, then the universe all the block's types lie in
+headers_checked(b: BlockCheck) := {
+	for type in b.block.types {
+		level_of(b.c, type.type)
+		if holds(type.type, b.types) { refused(ENUM_HEADER, "the block's type ${shown(type.type)} holds a type of the block") }
+		indices = binders_entered(b.c, parameters_passed(b, type.type, type.name, ENUM_HEADER))
+		level = match computed(b.c, indices.rest).shape {
+			Sort(level) => level
+			_ => refused(ENUM_HEADER, "${type.name} ends in ${shown(indices.rest)}, which is no universe")
+		}
+		if #b.indices == 0 { b.level = level }
+		else if not levels_equal(level, b.level) { refused(ENUM_HEADER, "${type.name} lies in ${shown(universe(level))}, the block's first type in ${shown(universe(b.level))}") }
+		b.indices += [#indices.entered]
+	}
+}
+
+# A function type entered over the block's parameters, each of its first binders taking the type of the parameter
+# at its place; what is left after them
+parameters_passed(b: BlockCheck, t: Term, name: text, rule: text): Term := {
+	rest = t
+	for parameter in b.parameters {
+		domain = binder_domain(b.c, rest) ?? refused(rule, "${name} has fewer than ${#b.parameters} parameters: ${shown(t)}")
+		if not equal(b.c, domain, type_of(b.c, parameter)) { refused(rule, "${name} takes ${shown(domain)} where the block's parameter is a ${shown(type_of(b.c, parameter))}") }
+		rest = instantiated(binder_body(b.c, rest), parameter)
+	}
+	rest
+}
+
+# --- check 2 to 4: a case
+
+# One case: its type, after the block's parameters its fields, each in a universe the block's allows (check 3) and
+# holding the block's types only where strict positivity allows (check 4), and at the end its own type applied to
+# the parameters and its indices (check 2)
+case_checked(b: BlockCheck, case: WrittenCase, of: text): CaseFacts := {
+	level_of(b.c, case.type)
+	fields = binders_entered(b.c, parameters_passed(b, case.type, case.name, CASE_TYPE))
+	proofs: list<bool> = []
+	recursive: list<int> = []
+	for at in 1 to #fields.entered {
+		field = fields.entered#at.domain
+		level = level_of(b.c, field)
+		if not is_zero(b.level) and not level_at_most(level, b.level) { refused(FIELD_UNIVERSE, "${case.name} has a field of ${shown(field)}, which lies in ${shown(universe(level))}, above the block's ${shown(universe(b.level))}") }
+		if positive(b, field, case.name) { recursive += [at] }
+		proofs += [is_zero(level)]
+	}
+	result = computed(b.c, fields.rest)
+	if occurrence(b, result, case.name) != type_names(b.block).index_of(of) { refused(CASE_RESULT, "${case.name} makes ${shown(result)}, no ${of}") }
+	indices = arguments(result).drop(#b.parameters)
+	small = (1 to #fields.entered).all(at => proofs#at or indices.any(index => same(index, fields.entered#at.variable)))
+	CaseFacts(#fields.entered, recursive, small)
+}
+
+# Strict positivity (check 4): a field's type, computed, holds the block's types only as the result of its function
+# type, never in a domain of it; whether it holds one at all
+positive(b: BlockCheck, field: Term, name: text): bool := {
+	type = computed(b.c, field)
+	if not holds(type, b.types) { return no }
+	match type.shape {
+		Pi(binder, domain, body) => {
+			if holds(domain, b.types) { refused(STRICT_POSITIVITY, "${name} has a field of ${shown(field)}, which takes a type of its block") }
+			positive(b, instantiated(body, hypothesis(b.c, binder, domain)), name)
+		}
+		_ => {
+			if occurrence(b, type, name) == 0 { refused(STRICT_POSITIVITY, "${name} has a field of ${shown(field)}, which holds a type of its block inside another") }
+			yes
+		}
+	}
+}
+
+# Which type of the block a term applies, by its place: to the block's parameters, the same variables in their order
+# (the rule parameters), then as many indices as its header has, which hold no type of the block; 0 for a term whose
+# head is no type of the block
+occurrence(b: BlockCheck, t: Term, name: text): int := {
+	at = place_among(head(t), b.types)
+	if at == 0 { return 0 }
+	given = arguments(t)
+	if #given < #b.parameters or not (1 to #b.parameters).all(place => same(given#place, b.parameters#place)) { refused(PARAMETERS, "${name} uses ${shown(t)}, not at the block's parameters") }
+	if #given != #b.parameters + b.indices#at or given.drop(#b.parameters).any(index => holds(index, b.types)) { return 0 }
+	at
+}
+
+# --- terms
+
+# whether a term names one of these constants
+mentions(t: Term, names: list<text>): bool := match t.shape {
+	Constant(name, levels, _) => name in names
+	_ => parts(t).any(part => mentions(part, names))
+}
+# whether a term holds one of these free variables
+holds(t: Term, variables: list<Term>): bool := t.holds_free and free_variables(t).any(id => place_among(free(id), variables) > 0)
+# the place of a term among others, from 1; 0 where it is none of them
+place_among(t: Term, terms: list<Term>): int := (1 to #terms).list().find(at => same(terms#at, t)) ?? 0
+
+# A function type's first binder gone into, as it is written: its domain, the free variable that stands for it, and
+# the body with that variable put in; ø for a type written as no function type. The binders are the written ones, so
+# the recursors walk the same ones and a case's count of fields is a fact of its term
+class Entered { domain: Term; variable: Term; body: Term }
+binder_entered(c: Checker, t: Term): Entered? := match t.shape {
+	Pi(binder, domain, body) => { variable = hypothesis(c, binder, domain); Entered(domain, variable, instantiated(body, variable)) }
+	_ => ø
+}
+# all of a function type's binders gone into, outermost first, and what is left inside them
+class Binders { entered: list<Entered>; rest: Term }
+binders_entered(c: Checker, t: Term): Binders := {
+	inside = binder_entered(c, t) ?? return Binders([], t)
+	inner = binders_entered(c, inside.body)
+	Binders([inside] + inner.entered, inner.rest)
+}
+binder_domain(c: Checker, t: Term): Term? := match t.shape {
+	Pi(binder, domain, body) => domain
+	_ => ø
+}
+binder_body(c: Checker, t: Term): Term := match t.shape {
+	Pi(binder, domain, body) => body
+	_ => t
+}
+
+# --- the shapes the statements that bind names ask for (notes/theory.md "The declarations that bind names")
+
+# the facts of the block a constant names, refused by this rule for a constant of no type of a block
+block_of(e: Environment, type: Term, rule: text): InductiveFacts := match declaration_of(e, type).kind {
+	Inductive(facts) => facts
+	_ => refused(rule, "${constant_name(type)} is no block")
+}
+# whether a block is one type with these counts of level parameters and parameters, this type and these case types
+block_shaped(facts: InductiveFacts, levels: int, parameters: int, type: Term, cases: list<Term>): bool := {
+	block = facts.block
+	one = block.types#1
+	#block.types == 1 and #block.levels == levels and block.parameters == parameters and same(one.type, type) and pairwise(one.cases.map(case => case.type), cases, same)
+}
+# Equality is a block of one type with one level parameter u, the parameters `T: Sort(u)` and `a: T`, one index of
+# type T, in Prop, and one case without fields whose result is `Equal(T, a, a)`; refused by this rule otherwise
+equality_checked(e: Environment, equality: Term, rule: text) := {
+	equal_block = block_of(e, equality, rule)
+	if #equal_block.block.levels != 1 { refused(rule, "${constant_name(equality)} has ${#equal_block.block.levels} level parameters, and equality has one") }
+	level = Parameter(equal_block.block.levels#1)
+	type = pi("T", universe(level), pi("a", bound(0), pi("b", bound(1), PROP)))
+	reflexive = pi("T", universe(level), pi("a", bound(0), apply_all(at_levels(equality, [level]), [bound(1), bound(0), bound(0)])))
+	if not block_shaped(equal_block, 1, 2, type, [reflexive]) { refused(rule, "${constant_name(equality)} is no block like `enum Equal(T: Sort(u), a: T): T -> Prop { refl: Equal(T, a, a) }`") }
+}
+# an equation `Equal(T, left, right)` taken apart: the equality applied, its levels, the type and the two sides
+class Equation { equality: Term; levels: list<Level>; type: Term; left: Term; right: Term }
+# a statement computed to an equation of a type like the prelude's Equal; ø for any other
+equation_of(c: Checker, statement: Term): Equation? := {
+	t = computed(c, statement)
+	sides = arguments(t)
+	match head(t).shape {
+		Constant(name, levels, _) => if #sides == 3 and is_equality(c, head(t)) then Equation(head(t), levels, sides#1, sides#2, sides#3) else ø
+		_ => ø
+	}
+}
+# whether a constant names a type like the prelude's Equal (equality_checked)
+is_equality(c: Checker, constant: Term): bool := try { equality_checked(c.environment, constant, ""); yes } catch shape { no }
+# the one case of an equality, `refl`, at the equality's levels
+reflexive_case(e: Environment, equality: Term): Term := match declaration_of(e, equality).kind {
+	Inductive(facts) => block_case(facts, equality, 1)
+	_ => raise "${constant_name(equality)} is no equality"
+}

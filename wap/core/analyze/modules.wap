@@ -3,7 +3,9 @@
 
 use "../errors.wap"
 use "../stage.wap"
+use "../type_notation.wap"
 use "../bindings.wap"
+use "../parse/operator_table.wap"
 use "../../kernel/forms.wap"
 use folder
 
@@ -11,7 +13,10 @@ use folder
 # that module's, one word
 modules_scope(modules: list<Module>) as list<Definition> := (1 to #modules).flat_map(at => [Definition(module_name(modules#at.code), DefinitionKind.Module, modules#at.code, MODULE_DEPTH)] + modules#at.signatures.filter(signature => not modules.take(at - 1).any(earlier => defines_identically(earlier, modules#at, signature))).flat_map(signature => library_words(signature, MODULE_DEPTH)))
 # a module's name, its file's without the folder and the extension
-module_name(module: Node) as text := (file_of(module) ?? "").split("/").last.split(".")#1
+module_name(module: Node) as text := file_module_name(file_of(module) ?? "")
+file_module_name(file: text) as text := file.split("/").last.split(".")#1
+# a standard module's file as a program writes it, `lib/math.wap`
+library_path(file: text) as text := LIBRARY_FOLDER + "/" + ("/" + file).split("/" + LIBRARY_FOLDER + "/").last
 # the names a module declares itself: its functions, variables and types, not their fields or cases
 module_names(module: Node) as list := signatures_of(module).map(signature => signature.definer)
 # Two used modules defining one word alike, refused naming both, even where nothing calls it: the same name taking the
@@ -26,15 +31,15 @@ clashes_refused(modules: list<Module>) := for later in 2 to #modules {
 }
 # whether an earlier module defines a module's word identically: alike, and its code read alike
 defines_identically(earlier: Module, module: Module, signature: Signature) as bool := earlier.signatures.any(other => alike(other, signature) and definition_text(earlier.code, other) == definition_text(module.code, signature))
-# a module's definition of a word as code reads, without its places: two identical ones read alike
-definition_text(module: Node, signature: Signature) as text := text(defining_statement(module, signature) ?? signature.definer)
+# a module's definition of a word as code reads, without its places, each name a rule made fresh as the rule wrote it:
+# two identical ones read alike, the expansions of one rule too
+definition_text(module: Node, signature: Signature) as text := text(as_written(defining_statement(module, signature) ?? signature.definer))
+as_written(n: Node) as Node := fact_of(n, FRESH) ?? with_parts(unwrapped(n), as_written)
 # whether two modules may not both define these words: one name, both functions taking the same parameter types, or
 # neither a function
-alike(one: Signature, other: Signature) as bool := one.name == other.name and is_function(one) == is_function(other) and (not is_function(one) or same_types(parameter_types(one), parameter_types(other)))
-# a function's parameter types, an untyped one Empty
-parameter_types(signature: Signature) as list<Node> := signature.parameters.map(type => type ?? Empty)
+alike(one: Signature, other: Signature) as bool := one.name == other.name and is_function(one) == is_function(other) and (not is_function(one) or #one.parameters == #other.parameters and (1 to #one.parameters).all(at => one.parameters#at == other.parameters#at))
 # a word as two modules may not both write it: `twice(int)`, a type's or a variable's bare name
-described(signature: Signature) as text := if is_function(signature) then "${signature.name}(${signature.parameters.map(type => text(type ?? "")).join(", ")})" else signature.name
+described(signature: Signature) as text := if is_function(signature) then "${signature.name}(${signature.parameters.map(type => (if type == ø then "" else type_text(type!))).join(", ")})" else signature.name
 # A used module's word named by the module, `a.twice(3)`, read as twice(a, 3) is: the definitions of
 # that name the module declares, bound as the bare name would be were they the only ones; ø where the subject names no
 # module, or names something nearer, a variable `a`
@@ -55,4 +60,18 @@ module_call(n: Node, called: Node, arguments: list, scope: Scope, depth: int) as
 	if not called is symbol or arguments is empty { return ø }
 	word = module_word(called, arguments#1, text(called), scope) ?? return ø
 	refitted(Call(word, all_bound(arguments.drop(1), scope, depth)), n)
+}
+
+# a word nothing but standard modules the code does not use define, bound to those modules' files: the pipeline brings
+# them in (pipeline.wap standard_brought), where their definitions are one word's overloads; a word none defines refused
+standard_word_bound(name: Node, scope: Scope) as Node := {
+	modules = scope.standard.get(text(name)) ?? []
+	if modules is empty { refused(name, "nothing defines this name, neither the program nor the library") }
+	with_fact(with_binding(name, DefinitionKind.Standard), DEFINED_AT, data_list(modules.map(module => Text(module))))
+}
+# whether a call of this name is one of a field's value: nothing defines the name, or only a standard module the code
+# does not use, as a word only such a module defines ranks below the program's own names, a record's field among them
+field_meant(name: text, scope: Scope) as bool := {
+	word = word_aliased(name)
+	definitions_meant(word, scope) is empty and (not scope.standard.has(word) or every_definition(scope).any(definition => definition.kind == DefinitionKind.Record and field_named(definition.definer, symbol(name)) != ø))
 }

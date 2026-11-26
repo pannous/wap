@@ -1,0 +1,181 @@
+# Unification (notes/elaborate.md "Holes"): whether two terms can be made equal, answering holes on the way.
+#
+# Two terms without a hole are the kernel's to compare (equal.wap). With holes the walk is the same, rule for rule,
+# and adds what a hole allows: a hole applied to variables of binders, no two the same, is answered by the function
+# of those variables that gives the other side, when that function names neither the hole itself nor any other
+# binder; the answer's type is unified with the hole's type, which is what finds a letter's level from its value.
+# A hole applied to anything else waits as a problem put off, tried again whenever a hole is answered. A reading
+# that fails leaves no answer behind.
+#
+# Nothing here is trusted. An answer that should not have been given makes a term the kernel refuses.
+
+use "../../kernel/terms.wap"
+use "../../kernel/levels.wap"
+use "../../kernel/environment.wap"
+use "../../kernel/compute.wap"
+use "../../kernel/equal.wap"
+use "../../kernel/typing.wap"
+use "holes.wap"
+
+# Whether a and b can be made equal; answers found on a failed try are dropped
+unified(el: Elaboration, a: Term, b: Term): bool := {
+	left = filled(el, a)
+	right = filled(el, b)
+	if same(left, right) { return yes }
+	# two closed terms are the kernel's to judge; an ill-typed one, as an overload tried may give, is no match
+	if not open(el, left) and not open(el, right) { return try { equal(el.c, left, right) } catch e { mismatch(e) } }
+	kept = found_so_far(el)
+	if made_equal(el, left, right) { return yes }
+	back_to(el, kept)
+	no
+}
+
+# whether a filled term holds a hole or a level hole without an answer
+open(el: Elaboration, t: Term): bool := #holes_in(el, t) > 0 or #term_level_holes(t) > 0
+
+made_equal(el: Elaboration, a: Term, b: Term): bool := {
+	left = computed_folded(el.c, a)
+	right = computed_folded(el.c, b)
+	if same(left, right) { return yes }
+	if is_hole(el, head(left)) or is_hole(el, head(right)) { return hole_made_equal(el, left, right) }
+	kept = found_so_far(el)
+	if alike_made(el, left, right) { return yes }
+	back_to(el, kept)
+	if eta_made(el, left, right) or eta_made(el, right, left) { return yes }
+	# two unlike heads: the later-declared one unfolds, as in the kernel's equality
+	left_place = unfolding_place(el.c, left)
+	right_place = unfolding_place(el.c, right)
+	if left_place == 0 and right_place == 0 { return no }
+	next_left = if left_place >= right_place then unfolded(el.c, left) ?? left else left
+	next_right = if right_place >= left_place then unfolded(el.c, right) ?? right else right
+	made_equal(el, next_left, next_right)
+}
+
+# Two computed terms, one at least with a hole as its head: the left hole is answered by the right side, else the
+# right one by the left. What neither answers is a mismatch when the side a hole could not take holds no hole, and
+# waits otherwise: an answer found later may solve it
+hole_made_equal(el: Elaboration, left: Term, right: Term): bool := {
+	kept = found_so_far(el)
+	if function_answered(el, left, right) { return yes }
+	back_to(el, kept)
+	if function_answered(el, right, left) { return yes }
+	back_to(el, kept)
+	if (is_pattern(el, left) and not open(el, right)) or (is_pattern(el, right) and not open(el, left)) { return no }
+	el.problems += [Problem(left, right)]
+	yes
+}
+# whether a term is a hole applied to variables of binders, no two the same: what an answer can be found for
+is_pattern(el: Elaboration, t: Term): bool := {
+	given = arguments(t)
+	is_hole(el, head(t)) and given.all(each => is_binder_variable(el, each)) and #given.map(variable_id).unique() == #given
+}
+# a hole applied to its variables answered by the function of them that gives the other side
+function_answered(el: Elaboration, applied: Term, other: Term): bool := {
+	if not is_pattern(el, applied) { return no }
+	h = unanswered(el, head(applied)) ?? return no
+	answered(el, h, closed_filled(el, other, arguments(applied), yes))
+}
+# eta: a function against a term that is none, both applied to one fresh variable
+eta_made(el: Elaboration, function: Term, other: Term): bool := match function.shape {
+	Lambda(binder, domain, body) => {
+		if is_function(other) { return no }
+		variable = hypothesis(el.c, binder, filled(el, domain))
+		unified(el, instantiated(body, variable), apply(other, variable))
+	}
+	_ => no
+}
+
+# two terms of one shape whose parts can be made equal
+alike_made(el: Elaboration, a: Term, b: Term): bool := match a.shape {
+	Sort(level) => match b.shape {
+		Sort(other) => levels_unified(el, level, other)
+		_ => no
+	}
+	Numeral(value) => match b.shape {
+		Numeral(other) => value == other
+		_ => no
+	}
+	Quoted(value) => match b.shape {
+		Quoted(other) => value == other
+		_ => no
+	}
+	Free(id) => match b.shape {
+		Free(other) => id == other
+		_ => no
+	}
+	Constant(name, levels, _) => match b.shape {
+		Constant(other, other_levels, _) => name == other and #levels == #other_levels and (1 .. #levels + 1).all(at => levels_unified(el, levels#at, other_levels#at))
+		_ => no
+	}
+	Lambda(binder, domain, body) => match b.shape {
+		Lambda(other_binder, other_domain, other_body) => bodies_unified(el, binder, domain, body, other_domain, other_body)
+		_ => no
+	}
+	Pi(binder, domain, body) => match b.shape {
+		Pi(other_binder, other_domain, other_body) => bodies_unified(el, binder, domain, body, other_domain, other_body)
+		_ => no
+	}
+	Projection(structure, field, of) => match b.shape {
+		Projection(other_structure, other_field, other_of) => field == other_field and unified(el, of, other_of)
+		_ => no
+	}
+	Apply(function, argument) => match b.shape {
+		Apply(other_function, other_argument) => {
+			given = arguments(a)
+			others = arguments(b)
+			alike_made(el, head(a), head(b)) and #given == #others and (1 .. #given + 1).all(at => unified(el, given#at, others#at))
+		}
+		_ => no
+	}
+	_ => no
+}
+# two binders: domains made equal, then bodies under one fresh variable
+bodies_unified(el: Elaboration, binder: text, domain: Term, body: Term, other_domain: Term, other_body: Term): bool := {
+	if not unified(el, domain, other_domain) { return no }
+	variable = hypothesis(el.c, binder, filled(el, domain))
+	unified(el, instantiated(body, variable), instantiated(other_body, variable))
+}
+
+# A hole answered by a term: the term names neither the hole nor a binder, and its type can be made the hole's
+# type. Then the problems put off are tried again
+answered(el: Elaboration, h: Hole, t: Term): bool := {
+	value = filled(el, t)
+	if holes_in(el, value).contains(h.id) or names_binder(el, value) { return no }
+	el.answers[h.id] = value
+	typed = try { unified(el, hypothesis_of(el.c, h.id).type, type_of(el.c, value)) } catch e { mismatch(e) }
+	typed and problems_retried(el)
+}
+# whether the problems put off hold now, each tried again
+problems_retried(el: Elaboration): bool := {
+	waiting = el.problems
+	el.problems = []
+	waiting.all(problem => unified(el, problem.left, problem.right))
+}
+
+# Whether two levels can be made equal: a level hole standing alone is answered by the other side, two successors
+# by what they are above; levels that are equal whatever their holes are hold already; anything else is put off to
+# the end of the declaration
+levels_unified(el: Elaboration, a: Level, b: Level): bool := {
+	left = level_filled(el, a)
+	right = level_filled(el, b)
+	if #level_holes_in(left) == 0 and #level_holes_in(right) == 0 { return levels_equal(left, right) }
+	if level_answered(el, left, right) or level_answered(el, right, left) or levels_equal(left, right) { return yes }
+	below_left = below(left)
+	below_right = below(right)
+	if below_left is not ø and below_right is not ø { return levels_unified(el, below_left, below_right) }
+	el.level_problems += [LevelProblem(left, right)]
+	yes
+}
+level_answered(el: Elaboration, hole: Level, value: Level): bool := match hole {
+	Parameter(name) => {
+		if not is_level_hole(name) or level_parameters(value).contains(name) { return no }
+		el.level_answers[name] = value
+		yes
+	}
+	_ => no
+}
+# the level a successor is above, ø for any other level
+below(level: Level): Level? := match level {
+	Successor(of) => of
+	_ => ø
+}

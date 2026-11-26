@@ -15,6 +15,7 @@
 
 use "errors.wap"
 use "../kernel/forms.wap"
+use "type_notation.wap"
 
 # n replaced by what a stage built from it, every node built placed where n was written; the
 # result stands for n, so it also takes the facts earlier stages learned about n (a definition's declaration survives
@@ -72,9 +73,21 @@ direct_parts(n: Node) as list<Node> := match n {
 	List(items, bracket, separator) => items
 	_ => []
 }
+# a node and every node within it
+nodes_in(n: Node) as list<Node> := [n] + direct_parts(n).flat_map(nodes_in)
 
+# the fact of the `@annotations` written before a node, `@protocol Record(…)`: their phrase
+ANNOTATIONS = "meta"
+# the annotation naming the class a class extends
+EXTENDS_ANNOTATION = "extends"
+# the annotations written before a node, each one: `@final @protocol` two
+annotations_of(n: Node) as list<Node> := match fact_of(n, ANNOTATIONS) ?? Empty { Empty => []; List(items, Bracket.None, Separator.Space) => items; said => [said] }
+# the annotation of one word written before a node, `@protocol` or `@extends(A)`, ø without it
+annotation(n: Node, word: text) as Node? := annotations_of(n).find(said => match said { Key(Symbol(name), Op.None, arguments) => name == word; _ => text(said) == word })
 # the fact naming the rule that built a node: the rule's head, where it was written
 RULE = "rule"
+# the fact of a name a rule's template made fresh, m·1 (core/rules/templates.wap): the name as the template wrote it
+FRESH = "fresh"
 
 # Facts a stage learns about a node (notes/backbone.md "Stage languages"): a name's binding, a type, the overload a
 # call chose. Each is a named entry in the node's metadata, never a hole of its shape, so a form keeps the same holes
@@ -107,6 +120,8 @@ SOURCE_FILE = "file"
 # the spelling a program wrote for code the reader gave another shape, which `wap format` prints back: the text
 # `"a ${x} b"` read as ("a " + text(x) + " b")
 WRITTEN = "written"
+# a compound assignment's written spelling, `+=`, on the assignment and its operator's call (core/parse/keys.wap)
+COMPOUND = "compound"
 # a `{…}` the reader built from a block indented below its line, not one written there: `if c⏎\tbody`, not `Point{x: 1}`
 INDENTED = "indented"
 # what a declared pattern's builder carries on its name, so that binding finds the pattern through scope: its holes
@@ -134,9 +149,12 @@ file_of(n: Node) as text? := match fact_of(n, SOURCE_FILE) {
 # it. The type is the program's, never a fact a stage learned: declared_name is the name, declared_type the type or ø.
 declared_name(n: Node) as Node := match n {
 	Key(name, Op.Colon, type) => declared_name(name)
+	Call(called, arguments) => if is_default_given(n) then declared_name(arguments#1) else n
 	Set(place, value) => declared_name(place)
 	_ => n
 }
+# whether two written names, bare or typed, name the same thing: a field and an instance's item, two parameters
+same_name(a: Node, b: Node) as bool := text(declared_name(a)) == text(declared_name(b))
 declared_type(n: Node) as Node? := match n {
 	Key(name, Op.Colon, type) => type
 	Call(called, arguments) => if is_default_given(n) then declared_type(arguments#1) else ø
@@ -177,8 +195,13 @@ identified(definer: Node, ids: Definers) as Node := {
 # A definition's key: its definer's id (the same in each typed version), the name, and the signature of a typed
 # function, which tells its typed versions apart
 place_key(definer: Node) as text := "${definer_id(definer)} ${text(definer)}${signature_key(definer)}"
+# a declaration's place in the source, one however often its module is read and identified; its key where it has none
+declaration_place(n: Node) as text := {
+	at = position_of(n) ?? return place_key(n)
+	"${file_of(n) ?? ""} ${at.line}:${at.column}"
+}
 definer_id(definer: Node) as text := text(fact_of(definer, DEFINER) ?? refused(definer, "a definition is named by a word, and this name reads as a value (null, yes, a number …): rename it"))
-signature_key(definer: Node) as text := if fact_of(definer, SIGNATURE) == ø then "" else " ${fact_of(definer, SIGNATURE)}"
+signature_key(definer: Node) as text := if fact_of(definer, SIGNATURE) == ø then "" else " ${type_text(fact_type(fact_of(definer, SIGNATURE)), yes)}"
 
 # DEFINED_AT on a bound name: the name that defined it, positioned (core/analyze/scope.wap learns it; its other
 # facts are in core/bindings.wap)
@@ -191,8 +214,8 @@ SELF_WORD = "self"
 RECEIVER = "receiver"
 # the fact of a part read where a call was written, `f(x, 2)` read `x.f(2)`: the call a refusal names
 WRITTEN_CALL = "written_call"
-# on a Define a rule wrote for every class, as its show: typed only when something calls it, so a class whose field
-# has no show of its own is not refused for a show nothing uses
+# on a Define of a used module that nothing exports: typed, and so emitted, only once something calls it
+# (pipeline.wap called_only)
 TYPED_WHEN_CALLED = "typed_when_called"
 # on a parameter, the value a call that leaves it out gives it: `f(x: int, y: int = 2)`, f(1) is f(1, 2)
 DEFAULT = "default"
@@ -246,10 +269,10 @@ class NameIndex { places: map<text, list<int>> = {}, count: int = 0 }
 items_named(index: NameIndex, items: list<T>, name: text, name_of: (T) -> text) as list<T> := {
 	while index.count < #items {
 		key = name_of(items[index.count])
-		index.places[key] = (if index.places.has(key) then index.places[key] else []) + [index.count]
+		index.places[key] = (index.places.get(key) ?? []) + [index.count]
 		index.count += 1
 	}
-	places = if index.places.has(name) then index.places[name] else []
+	places = index.places.get(name) ?? []
 	places.map(place => if place >= #items then refused(symbol(name), "the list indexed for ${name} shrank: it may only grow or change in place") else if name_of(items[place]) == name then items[place] else refused(symbol(name), "an item indexed under ${name} bears another name now: the list it is indexed in changed other than in place"))
 }
 # The Records a program declares, in the order written, found by name through their index; added_records is their
@@ -258,19 +281,23 @@ class Records { items: list<Node> = [], names: NameIndex = NameIndex() }
 added_records(records: Records, added: list<Node>) as Records := Records(records.items + added.filter(statement => statement is Record), records.names)
 # A record's TYPE is its name, `Point`; these find a record among the Records a program declares, and its fields,
 # each a typed name `x: int` (declared_name, declared_type)
-record_named(records: Records, type: Node?) as Node? := {
-	if type == ø or not type is symbol { return ø }
-	named = items_named(records.names, records.items, text(type), record => record_name(record))
+record_named(records: Records, type: Term?) as Node? := {
+	if not is_word(type) { return ø }
+	named = items_named(records.names, records.items, word_of(type)!, record => record_name(record))
 	# the one its code sees, else the one declared last: a program's own class, or a used module's, shadows the types
 	# module's
-	declared = fact_of(type, DECLARED_BY)
+	declared = declared_by(type)
 	if declared == ø { return if named is empty then ø else named.last }
-	named.find(record => place_key(record_declared(record)) == place_key(declared)) ?? refused(type, "this type names a record its scope declared at ${place_key(declared)}, but the program's records hold no record from that place")
+	named.find(record => declaration_place(record_declared(record)) == declaration_place(declared!)) ?? refused(declared!, "this type names a record its scope declared at ${declaration_place(declared!)}, but the program's records hold no record from that place")
 }
 record_name(record: Record) as text := text(record_declared(record))
 record_declared(record: Record) as Node := match record { Record(name, fields, variants) => name }
+# the class a class extends, `@extends(A)` on its name (wap/sugar/records.wap), ø for one extending none
+class_extended(record: Node) as Node? := match annotation(record_declared(record), EXTENDS_ANNOTATION) { Key(name, op, List(items, bracket, separator)) => items#1; _ => ø }
 # a record as a type, its name bound to it, so it means this record wherever another of its name is declared too
 record_type(record: Record) as Node := with_fact(symbol(record_name(record)), DECLARED_BY, record_declared(record))
+# its term (core/type_notation.wap)
+record_term(record: Record) as Term := type_term(record_type(record))
 fields_of(record: Record) as list := match record { Record(name, fields, variants) => items_of(fields) }
 # An enum's cases, as its Record's variants hold them: a bare name, `Dot`, or a name with its fields, `Circle(r: float)`
 cases_of(record: Record) as list<Node> := match record { Record(name, fields, variants) => items_of(variants) }
@@ -290,7 +317,7 @@ declaring(records: Records, name: Node) as list := {
 	refused(name, "no enum the program declares has this case")
 }
 # a record's field of this name, ø when it has none
-field_named(record: Node, key: Node) as Node? := fields_of(record).find(field => text(declared_name(field)) == text(key))
+field_named(record: Node, key: Node) as Node? := fields_of(record).find(field => same_name(field, key))
 # the one item of a list, ø for none, several or no list
 only(items: list<Node>?) as Node? := if items != ø and #items == 1 then items#1 else ø
 # on a program, the files it USES (`use "path"`), each a Text of the path resolved against the program's own folder

@@ -7,7 +7,9 @@
 #include <direct.h>
 #include <io.h>
 #include <psapi.h>
+#include <errno.h>
 #include <sys/stat.h>
+#include <sys/utime.h>
 
 // ## the calls lib/native/*.c make itself
 
@@ -17,6 +19,15 @@
 // the trap signal Windows has no number for: signal() refuses it, the crash lines go without it
 #define SIGTRAP 5
 
+// WASI's random_get: the system's random numbers (the C runtime's rand_s), four bytes at a time
+errno_t __cdecl rand_s(unsigned int* number);
+static void arc4random_buf(void* buffer, size_t length) {
+	for (size_t at = 0; at < length; at += sizeof(unsigned int)) {
+		unsigned int number;
+		rand_s(&number);
+		memcpy((char*)buffer + at, &number, length - at < sizeof number ? length - at : sizeof number);
+	}
+}
 // strndup by a name of its own: some mingw headers declare it, some don't
 #define strndup posix_strndup
 static char* posix_strndup(const char* text, size_t most) {
@@ -75,6 +86,20 @@ static void posix_path(char* path) {
 		path[0] = '/';
 	}
 }
+// a drive path as POSIX writes it: Git Bash gives a program not its own the paths in its arguments and environment
+// as Windows writes them, "/d/a" as "D:/a" (HOME too), and "D:\\a" is one as well; any other text as given
+static void drive_path_posix(char* text) {
+	if (isalpha((unsigned char)text[0]) && text[1] == ':' && (text[2] == '/' || text[2] == '\\') && !strchr(text, ';')) posix_path(text);
+}
+// the program's arguments, and its environment's values, as POSIX writes them
+static char** posix_arguments(int count, char** words) {
+	for (int i = 1; i < count; i++) drive_path_posix(words[i]);
+	for (char** variable = _environ; *variable; variable++) {
+		char* value = strchr(*variable, '=');
+		if (value) drive_path_posix(value + 1);
+	}
+	return words;
+}
 static int is_drive_path(const char* path) { return path[0] == '/' && isalpha((unsigned char)path[1]) && (path[2] == '/' || !path[2]); }
 // the path as Windows takes it, in the buffer when it changes: "/d/a/b" is "D:/a/b", "/d" "D:/"
 static const char* windows_path(const char* path, char buffer[MAX_PATH]) {
@@ -100,6 +125,67 @@ static int posix_rename(const char* from, const char* to) {
 }
 // lib/native/wasi.c's own open
 #define open posix_open_path
+
+// ## the calls programs make by name that only POSIX has
+
+// mkstemps's and mkdtemp's template: the X's before its suffix replaced by random letters until making the file or
+// folder (made, answering -1 when it is there) succeeds
+static const char TEMPLATE_LETTERS[] = "abcdefghijklmnopqrstuvwxyz0123456789";
+enum { TEMPLATE_TRIES = 100 };
+static int template_made(char* template, int suffix_length, int (*made)(const char* path)) {
+	char* end = template + strlen(template) - suffix_length;
+	char* start = end;
+	while (start > template && start[-1] == 'X') start--;
+	for (int try = 0; try < TEMPLATE_TRIES; try++) {
+		for (char* c = start; c < end; c++) {
+			unsigned int number;
+			rand_s(&number);
+			*c = TEMPLATE_LETTERS[number % (sizeof TEMPLATE_LETTERS - 1)];
+		}
+		int result = made(template);
+		if (result >= 0 || errno != EEXIST) return result;
+	}
+	return -1;
+}
+static int file_made(const char* path) { return posix_open_path(path, _O_RDWR | _O_CREAT | _O_EXCL, _S_IREAD | _S_IWRITE); }
+static int folder_made(const char* path) { return posix_mkdir(path, 0); }
+static int posix_mkstemps(char* template, int suffix_length) { return template_made(template, suffix_length, file_made); }
+static char* posix_mkdtemp(char* template) { return template_made(template, 0, folder_made) < 0 ? NULL : template; }
+static void* posix_memmem(const void* bytes, size_t size, const void* wanted, size_t wanted_size) {
+	if (!wanted_size) return (void*)bytes;
+	for (const char* at = bytes; size >= wanted_size; at++, size--)
+		if (!memcmp(at, wanted, wanted_size)) return (void*)at;
+	return NULL;
+}
+// fmemopen: the bytes in a temporary file, read from its start
+static FILE* posix_fmemopen(void* bytes, size_t size, const char* mode) {
+	(void)mode;
+	FILE* stream = tmpfile();
+	if (!stream) return NULL;
+	fwrite(bytes, 1, size, stream);
+	rewind(stream);
+	return stream;
+}
+// confstr's one name a program asks (wap/extensions/native/run.wap temporary_folder): the user's temporary folder
+static size_t posix_confstr(int name, char* buffer, size_t size) {
+	(void)name;
+	DWORD length = GetTempPathA((DWORD)size, buffer);
+	if (!length || length >= size) return 0;
+	if (buffer[length - 1] == '\\') buffer[--length] = 0;
+	posix_path(buffer);
+	return length + 1;
+}
+// utimes(path, 0), touch's: the file's times now
+static int posix_utimes(const char* path, const void* times) {
+	(void)times;
+	char buffer[MAX_PATH];
+	return _utime(windows_path(path, buffer), NULL);
+}
+// a child's attributes: a Windows process starts whole, in no process group, so there is nothing to set
+static int posix_spawnattr_init(void* attributes) { (void)attributes; return 0; }
+static int posix_spawnattr_destroy(void* attributes) { (void)attributes; return 0; }
+static int posix_spawnattr_setflags(void* attributes, short flags) { (void)attributes; (void)flags; return 0; }
+static int posix_spawnattr_setpgroup(void* attributes, int group) { (void)attributes; (void)group; return 0; }
 // the one link a Windows program can read: Linux's /proc/self/exe, this executable
 static const char SELF_LINK[] = "/proc/self/exe";
 // a path with its links and junctions followed (scoop's apps/<app>/current is one, which WASI does not follow), as
@@ -117,6 +203,8 @@ static int final_path(const char* path, char* resolved, size_t size) {
 	posix_path(resolved);
 	return 1;
 }
+// BSD's copy, its source first
+static void posix_bcopy(const void* source, void* destination, size_t count) { memmove(destination, source, count); }
 static ssize_t posix_readlink(const char* path, char* buffer, size_t size) {
 	if (strcmp(path, SELF_LINK)) {
 		errno = EINVAL;
@@ -130,8 +218,18 @@ static ssize_t posix_readlink(const char* path, char* buffer, size_t size) {
 	}
 	return (ssize_t)strlen(buffer);
 }
+// the native wap's own readlink (main.c wap_path_readlink)
+#define readlink posix_readlink
 // a path made absolute, NULL for one that names nothing; resolved NULL: a copy the caller frees
 static char* posix_realpath(const char* path, char* resolved) {
+	// Linux's link to this executable, followed as on Linux
+	char self[MAX_PATH];
+	if (!strcmp(path, SELF_LINK)) {
+		ssize_t length = posix_readlink(path, self, sizeof self - 1);
+		if (length < 0) return NULL;
+		self[length] = 0;
+		path = self;
+	}
 	char buffer[MAX_PATH];
 	path = windows_path(path, buffer);
 	char* full = resolved ? resolved : malloc(MAX_PATH);
@@ -379,12 +477,29 @@ static int posix_kill(int id, int signal_number) {
 // macOS and Linux run /bin/sh; none there, NULL (warp says "cannot run sh for …")
 enum { MOST_STREAMS = 16 };
 static struct { FILE* stream; int child; } streams[MOST_STREAMS];
+// the shell a line runs in, POSIX's sh as Git for Windows brings it: 0 when it is not on the PATH
+static int sh_found(char sh[MAX_PATH]) {
+	if (SearchPathA(NULL, "sh.exe", NULL, MAX_PATH, sh, NULL)) return 1;
+	errno = ENOENT;
+	return 0;
+}
+// a line run by sh, as POSIX runs it (not cmd, Windows's own system's); its status as waitpid gives it
+static int posix_system(const char* line) {
+	char sh[MAX_PATH];
+	if (!sh_found(sh)) return -1;
+	char* words[] = {sh, "-c", (char*)line, NULL};
+	int child, status;
+	struct spawn_actions actions = {0};
+	int failed = posix_spawnp(&child, sh, &actions, NULL, words, NULL);
+	if (failed) {
+		errno = failed;
+		return -1;
+	}
+	return posix_waitpid(child, &status, 0) < 0 ? -1 : status;
+}
 static FILE* posix_popen(const char* line, const char* mode) {
 	char sh[MAX_PATH];
-	if (!SearchPathA(NULL, "sh.exe", NULL, MAX_PATH, sh, NULL)) {
-		errno = ENOENT;
-		return NULL;
-	}
+	if (!sh_found(sh)) return NULL;
 	int ends[2];
 	if (posix_pipe(ends)) return NULL;
 	int reading = mode[0] == 'r';
@@ -456,15 +571,18 @@ static void* wasmtime_module_deserialize_file(void* engine, const char* path, vo
 // (POSIX's own posix_ calls, under their names)
 #define POSIX_NAMED(name) {#name, (void*)name}
 static const struct { const char* name; void* function; } POSIX_CALLS[] = {
-	POSIX_CALL(readlink), POSIX_CALL(realpath), POSIX_CALL(getcwd), POSIX_CALL(uname), POSIX_CALL(setenv),
+	POSIX_CALL(bcopy), POSIX_CALL(readlink), POSIX_CALL(realpath), POSIX_CALL(getcwd), POSIX_CALL(uname), POSIX_CALL(setenv),
 	POSIX_CALL(unsetenv), POSIX_CALL(srand48), POSIX_CALL(drand48), POSIX_CALL(getline), POSIX_CALL(clock_gettime),
 	POSIX_CALL(nanosleep), POSIX_CALL(usleep), POSIX_CALL(localtime_r), POSIX_CALL(getloadavg), POSIX_CALL(flock),
 	POSIX_CALL(pipe), POSIX_NAMED(posix_spawn_file_actions_init), POSIX_NAMED(posix_spawn_file_actions_destroy),
 	POSIX_NAMED(posix_spawn_file_actions_adddup2), POSIX_NAMED(posix_spawn_file_actions_addclose), POSIX_NAMED(posix_spawnp),
-	POSIX_CALL(waitpid), POSIX_CALL(popen), POSIX_CALL(pclose), POSIX_CALL(access), POSIX_CALL(chdir), POSIX_CALL(creat),
+	POSIX_CALL(waitpid), POSIX_CALL(popen), POSIX_CALL(pclose), POSIX_CALL(system), POSIX_CALL(access), POSIX_CALL(chdir), POSIX_CALL(creat),
 	POSIX_CALL(fopen), POSIX_CALL(mkdir), POSIX_CALL(rmdir), POSIX_CALL(unlink), POSIX_CALL(rename),
 	POSIX_NAMED(wasi_config_preopen_dir), POSIX_NAMED(wasi_config_set_stdout_file), POSIX_NAMED(wasi_config_set_stderr_file),
 	POSIX_NAMED(wasmtime_config_cache_config_load), POSIX_NAMED(wasmtime_module_deserialize_file), POSIX_NAMED(posix_spawn_file_actions_addchdir_np), POSIX_CALL(kill),
+	POSIX_CALL(mkstemps), POSIX_CALL(mkdtemp), POSIX_CALL(memmem), POSIX_CALL(fmemopen), POSIX_CALL(confstr), POSIX_CALL(utimes),
+	POSIX_CALL(strndup), POSIX_NAMED(posix_spawnattr_init), POSIX_NAMED(posix_spawnattr_destroy),
+	POSIX_NAMED(posix_spawnattr_setflags), POSIX_NAMED(posix_spawnattr_setpgroup),
 };
 
 // ## dlopen and dlsym, which find them
