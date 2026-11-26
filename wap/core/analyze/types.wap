@@ -107,8 +107,9 @@ class TypingState {
 instances_of(key: text, s: TypingState) as list<TypedFunction> := s.instances.get(key) ?? []
 instance_added(typed: TypedFunction, s: TypingState) := {
 	s.functions += [typed]
-	s.instances[typed.function.key] = instances_of(typed.function.key, s) + [typed]
+	instance_indexed(typed, s)
 }
+instance_indexed(typed: TypedFunction, s: TypingState) := s.instances[typed.function.key] = instances_of(typed.function.key, s) + [typed]
 # A name typing writes for a definer, with that definer's id: a λ its Fn's, a dispatcher its first candidate's, a
 # dispatcher's parameters its own; the name tells it from the definer and its siblings
 name_for(word: text, definer: Node, at: Node? = ø) as Node := with_fact(placed_like(symbol(word), at ?? definer), DEFINER, fact_of(definer, DEFINER) ?? refused(definer, "a definer without an id"))
@@ -197,6 +198,8 @@ typed_among(program: Block, library: list, rules: KindRules, library_scope: Scop
 	if s.unknowns > 0 { all_settled(s) }
 	if dispatches_completed(s) { return typed_among(program, library, rules, library_scope, signatures, s) }
 	s.functions = distinct_instances(s.functions, s)
+	s.instances = {}
+	for instance in s.functions { instance_indexed(instance, s) }
 	written = defines + s.lambdas + s.dispatchers
 	# the records stand first, shaped: the program's own leave the statements
 	placed = statements_in(instances_placed(refitted(Block(statements), typed), s)).filter(statement => not statement is Record)
@@ -208,8 +211,8 @@ runtime_typed(library: list, s: TypingState) := for definition in library.filter
 # the values a compiled library takes from its module, each `c_outs: int = prim foreign(…)`: typed before the program
 # and its first statements, so the program imports each as it imports a used module's, and they hold before it reads one
 library_values(library: list) as list := library.filter(statement => match statement { Set(place, value) => value is Prim and declared_type(place) != ø; _ => no })
-# every function wap refuses, then what else stopped the program, said together
-refused_all(s: TypingState, more: list) := raise (s.refusals.map(each => each.message) + more).join("\n")
+# the names that came to hold any, then every function wap refuses and what else stopped the program, said together
+refused_all(s: TypingState, more: list) := raise (s.retypings + s.refusals.map(each => each.message) + more).join("\n")
 # whether a typed form gives a value: not none, not a jump that never comes back
 gives_value(n: Node) as bool := fact_of(n, TYPE) != ø and not jumps(n) and valued(value_type(n))
 # whether a type is one of a value: not none, not ø alone
@@ -334,11 +337,8 @@ instances_placed(n: Node, s: TypingState) as Node := match n {
 	Block(statements) => refitted(Block(statements.flat_map(statement => if statement is Define then functions_typed_from([statement], s).map(define => instances_placed(define, s)) else [instances_placed(statement, s)])), n)
 	_ => refitted(with_parts(n, part => instances_placed(part, s)), n)
 }
-# the Defines each of these definitions became, in the order typed
-functions_typed_from(definitions: list, s: TypingState) as list := {
-	keys = definitions.map(function_key)
-	s.functions.filter(typed => typed.function.key in keys).map(typed => typed.define)
-}
+# the Defines each of these definitions became, each definition's in the order typed
+functions_typed_from(definitions: list, s: TypingState) as list := definitions.flat_map(definition => instances_of(function_key(definition), s).map(typed => typed.define))
 
 # a Try typed: its body, and its handler in place, in the function around it, its parameter the caught Error, a Node;
 # its value the two joined
@@ -396,7 +396,7 @@ name_set_typed(n: Node, place: Node, value: Node, s: TypingState, f: TypeFrame, 
 	type = value_of(given, "to set")
 	# a name given only ø so far holds an optional of a type its uses settle; one written `any` holds any, which holds ø
 	if type == EMPTY_SYMBOL and wanted == ø { type = if written == ø then optional_type(unknown_type(s)) else ANY_SYMBOL }
-	if wanted != ø { given = try converted(given, wanted, s, n, NAME_HOLDS) catch e { converted(given, retyped(n, key, wanted, type, e.message, s), s, n, NAME_HOLDS) } }
+	if wanted != ø { given = try converted(given, wanted, s, n, NAME_HOLDS) catch e { converted(given, retyped(n, defined_at(name), wanted, type, e.message, s), s, n, NAME_HOLDS) } }
 	if changes_capture(name, s) { refused(n, "a function value made before reads ${name}, which this changes") }
 	# the name keeps the type it holds, `found: Node? = ø` a Node? whatever it is given
 	held = type_keyed(key, s.retyped) ?? wanted ?? type
@@ -417,11 +417,12 @@ opened(type: Node?, s: TypingState) as Node? := if type == symbol(LIST_TYPE) the
 # said with a warning, an int that becomes a float said nothing; a let, a written type or a name made so already keeps
 # its type, refused as conversion refuses it
 NAME_HOLDS = "the name holds"
-retyped(n: Node, key: text, held: Node, given: Node, refusal: text, s: TypingState) as Node := {
+retyped(n: Node, first: Node, held: Node, given: Node, refusal: text, s: TypingState) as Node := {
+	key = place_key(first)
 	if key in s.fixed or type_keyed(key, s.retyped) != ø { raise refusal }
 	both = joined_type(held, given, s) ?? ANY_SYMBOL
 	s.retyped.add(Binding(key, both))
-	if both == ANY_SYMBOL { s.retypings.add(place_of(n) + "this name held ${type_text(held)} and now ${type_text(given)}, so it holds any from here on: write `let` for a name that keeps its type") }
+	if both == ANY_SYMBOL { s.retypings.add(place_of(n) + "this name held ${type_text(held)} from line ${line_of(first)} and now ${type_text(given)}, so it holds any from here on: write `let` for a name that keeps its type") }
 	both
 }
 # a list's item or a record's field given a value of its type; the Set itself gives none

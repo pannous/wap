@@ -1,0 +1,1142 @@
+# The standard module sound (wiki/sound.md): `use sound`, also `use music` and `use audio`. Notes, chords and scales
+# as values, the synth's settings, waves and their envelope, effects and buses, melodies and Tidal's mini-notation,
+# sounds played and saved, samples, MIDI and a spectrum. Frequencies and durations are numbers (Hz, seconds) or
+# quantities (440Hz, 0.5s, 250ms). Under tests and --mute nothing sounds.
+use bits
+use file
+use math
+use os
+use process
+use random
+use tasks
+use units
+use "host/native_host/platform.wap"
+use "host/native_host/sound.wap"
+
+# the semitones of an octave, MIDI's key of A4 and the cents of a semitone
+SEMITONES := 12
+A4_KEY := 69
+CENTS_PER_SEMITONE := 100
+CENTS_PER_OCTAVE := 1200
+# a note letter's semitone above C is its place here, from 0
+SCALE_LETTERS := "C.D.EF.G.A.B"
+# the names of the notes of an octave, with sharps
+NOTE_NAMES := ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+SHARPS := ["#", "♯"]
+FLATS := ["b", "♭"]
+SECONDS_PER_MINUTE := 60.0
+# frequencies as tables write them, to a hundredth of a Hz (C4 = 261.63)
+HERTZ_DIGITS := 100.0
+
+# the settings, plain assignments that hold for the sounds after them
+global sample_rate = 22050
+# the share of the loudest sample: chords and melodies stay below it
+global loudness = 0.3
+# sine, square, triangle, sawtooth or noise
+global wave_shape = "sine"
+global note_seconds = 0.5
+# beats per minute: `play(C4, beat(1/4))`, `sleep bar 1`
+global tempo = 120.0
+global beats_per_bar = 4
+# the frequency of A4 every note is tuned to
+global tuning = 440.0
+# the envelope of every note (ADSR): it rises for attack seconds, falls for decay seconds to the sustain share and fades
+# out in its last release seconds; the short default fades keep the speaker from clicking
+global attack = 0.005
+global decay = 0.0
+global sustain = 1.0
+global release = 0.005
+
+# the words of music: `beats 2`, `bar 1` are seconds at the tempo, `dB -6` the gain factor of decibels
+beat(beats: float): float := beats * SECONDS_PER_MINUTE / tempo
+beats(n: float): float := beat(n)
+bar(bars: float): float := beat(bars * float(beats_per_bar))
+bars(n: float): float := bar(n)
+decibels(level: float): float := 10.0 ^ (level / 20.0)
+dB(level: float): float := decibels(level)
+
+# A note is a key of MIDI (C4 is 60), off it by cents, held length times the play's duration (C4 ~ 2 twice as long).
+# It prints as its name (A4+20c), plays as its frequency at the tuning, and C4 + E4 is a Chord.
+class Note { key: int, cents: int = 0, length: float = 1.0 }
+# notes sounding together, C4 + E4 + G4, shown as written
+class Chord { notes: list<Note>, length: float = 1.0 }
+# a letter of the notes: F#4 is its sharp note in octave 4
+class PitchClass { key: int }
+# a silent step of a melody, tied longer as a note is: [C4, rest, E4, rest ~ 2]
+class Rest { length: float = 1.0 }
+
+# the frequency of MIDI note n at the tuning, equal-tempered
+midi_hertz(n: int): float := round(tuning * 2.0 ^ (float(n - A4_KEY) / float(SEMITONES)) * HERTZ_DIGITS) / HERTZ_DIGITS
+key_of(octave: int, semitone: int): int := SEMITONES * (octave + 1) + semitone
+natural(letter: PitchClass, octave: int): Note := Note(key_of(octave, letter.key))
+#(letter: PitchClass, octave: int): Note := Note(key_of(octave, letter.key + 1))
+
+C := PitchClass(0)
+D := PitchClass(2)
+E := PitchClass(4)
+F := PitchClass(5)
+G := PitchClass(7)
+A := PitchClass(9)
+B := PitchClass(11)
+# the natural notes by name, octaves 0 to 8; sharps are F#4, flats their sharp below
+C0 := natural(C, 0); D0 := natural(D, 0); E0 := natural(E, 0); F0 := natural(F, 0); G0 := natural(G, 0); A0 := natural(A, 0); B0 := natural(B, 0)
+C1 := natural(C, 1); D1 := natural(D, 1); E1 := natural(E, 1); F1 := natural(F, 1); G1 := natural(G, 1); A1 := natural(A, 1); B1 := natural(B, 1)
+C2 := natural(C, 2); D2 := natural(D, 2); E2 := natural(E, 2); F2 := natural(F, 2); G2 := natural(G, 2); A2 := natural(A, 2); B2 := natural(B, 2)
+C3 := natural(C, 3); D3 := natural(D, 3); E3 := natural(E, 3); F3 := natural(F, 3); G3 := natural(G, 3); A3 := natural(A, 3); B3 := natural(B, 3)
+C4 := natural(C, 4); D4 := natural(D, 4); E4 := natural(E, 4); F4 := natural(F, 4); G4 := natural(G, 4); A4 := natural(A, 4); B4 := natural(B, 4)
+C5 := natural(C, 5); D5 := natural(D, 5); E5 := natural(E, 5); F5 := natural(F, 5); G5 := natural(G, 5); A5 := natural(A, 5); B5 := natural(B, 5)
+C6 := natural(C, 6); D6 := natural(D, 6); E6 := natural(E, 6); F6 := natural(F, 6); G6 := natural(G, 6); A6 := natural(A, 6); B6 := natural(B, 6)
+C7 := natural(C, 7); D7 := natural(D, 7); E7 := natural(E, 7); F7 := natural(F, 7); G7 := natural(G, 7); A7 := natural(A, 7); B7 := natural(B, 7)
+C8 := natural(C, 8); D8 := natural(D, 8); E8 := natural(E, 8); F8 := natural(F, 8); G8 := natural(G, 8); A8 := natural(A, 8); B8 := natural(B, 8)
+
+# a pitch's frequency in Hz: a note's at the tuning, a quantity's, a number as it is, a note's name ("C#4")
+hertz(n: Note): float := midi_hertz(n.key) * 2.0 ^ (float(n.cents) / float(CENTS_PER_OCTAVE))
+hertz(q: Quantity): float := q.si
+hertz(frequency: float): float := frequency
+hertz(name: text): float := note_hertz(name)
+float(n: Note): float := hertz(n)
+# the MIDI note nearest a pitch: midi(C4) is 60, midi(440Hz) 69
+midi(n: Note): int := n.key
+midi(frequency: float): int := round(float(A4_KEY) + float(SEMITONES) * binary_log(frequency / tuning))
+midi(q: Quantity): int := midi(q.si)
+octave(n: Note): int := n.key ÷ SEMITONES - 1
+name(n: Note): text := NOTE_NAMES[n.key % SEMITONES]
+key_name(key: int): text := NOTE_NAMES[key % SEMITONES] + "${key ÷ SEMITONES - 1}"
+cents_text(cents: int): text := if cents == 0 then "" else if cents > 0 then "+${cents}c" else "${cents}c"
+length_text(length: float): text := if length == 1.0 then "" else "~${length}"
+text(n: Note): text := key_name(n.key) + cents_text(n.cents) + length_text(n.length)
+text(c: Chord): text := {
+	written = c.notes.map(n => text(n)).join("+")
+	if c.length == 1.0 then written else "(${written})" + length_text(c.length)
+}
+text(r: Rest): text := "rest" + length_text(r.length)
+# the name of the note nearest a pitch, with sharps: note_name(Eb4) is "D#4"
+note_name(n: Note): text := key_name(n.key)
+note_name(frequency: float): text := key_name(midi(frequency))
+note_name(q: Quantity): text := key_name(midi(q))
+
+# a letter, maybe a sharp or flat, and an octave: "C4", "F#3", "Eb5"
+is_note_name(name: text): bool := #name >= 2 and #name <= 3 and SCALE_LETTERS.contains(name#1) and name#1 != "." and is_digits(name#(#name)) and (#name == 2 or name#2 in SHARPS + FLATS)
+# the frequency of a note's name: note_hertz("A4") is 440, "C#4" a semitone above C4, "Eb5" one below E5
+note_hertz(name: text): float := {
+	if not is_note_name(name) { raise "no note is named ${name}: a letter A to G, maybe # or b, and an octave, C#4" }
+	accidental = if #name == 2 then 0 else if name#2 in SHARPS then 1 else -1
+	midi_hertz(key_of(int(name#(#name)), find(SCALE_LETTERS, name#1) - 1 + accidental))
+}
+# a note as a value: note(C4), note("C#4"), note(445Hz) is the nearest key and its cents off it
+note(n: Note): Note := n
+note(frequency: float): Note := {
+	key = midi(frequency)
+	Note(key, round(float(CENTS_PER_OCTAVE) * binary_log(frequency / midi_hertz(key))))
+}
+note(q: Quantity): Note := note(q.si)
+note(name: text): Note := note(note_hertz(name))
+# the semitones between two pitches: interval(C4, G4) is 7
+interval(low: Note, high: Note): int := high.key - low.key
+
+# a note added sounds with it, C4 + E4 is a Chord; a whole number moves it up that many semitones, a part of one the
+# cents: C4 + 4 is E4, C4 + 2.25 is D4+25c
++(a: Note, b: Note): Chord := Chord([a, b])
++(n: Note, c: Chord): Chord := Chord([n] + c.notes)
++(c: Chord, n: Note): Chord := Chord(c.notes + [n])
++(a: Chord, b: Chord): Chord := Chord(a.notes + b.notes)
++(n: Note, semitones: int): Note := Note(n.key + semitones, n.cents, n.length)
++(n: Note, semitones: float): Note := note(hertz(n) * 2.0 ^ (semitones / float(SEMITONES)))
++(c: Chord, semitones: int): Chord := Chord(c.notes.map(n => n + semitones), c.length)
+-(n: Note, semitones: int): Note := n + (0 - semitones)
+# times a number is its frequency times it: C4 * 2 is about 523.26 Hz
+*(n: Note, factor: float): float := hertz(n) * factor
+# the tie: C4 ~ 2 holds twice as long
+~(n: Note, factor: float): Note := Note(n.key, n.cents, n.length * factor)
+~(c: Chord, factor: float): Chord := Chord(c.notes, c.length * factor)
+~(r: Rest, factor: float): Rest := Rest(r.length * factor)
+# a Note equals another of the same key, cents and length, its name's text (note("C#4") == "C#4") and its frequency
+==(a: Note, b: Note): bool := a.key == b.key and a.cents == b.cents and a.length == b.length
+==(n: Note, written: text): bool := text(n) == written
+==(n: Note, frequency: float): bool := hertz(n) == frequency
+==(a: Chord, b: Chord): bool := a.notes == b.notes and a.length == b.length
+
+# a pitch (or list of them) semitones higher, lower when negative: a note stays a note (transpose(C4, 12) == C5), any
+# other frequency is multiplied (transpose(300Hz, 12) is 600)
+transpose(n: Note, semitones: int): Note := n + semitones
+transpose(c: Chord, semitones: int): Chord := c + semitones
+transpose(frequency: float, semitones: int): float := frequency * 2.0 ^ (float(semitones) / float(SEMITONES))
+transpose(q: Quantity, semitones: int): float := transpose(q.si, semitones)
+transpose(notes: list<Note>, semitones: int): list<Note> := notes.map(n => n + semitones)
+
+# the semitones of a chord's notes above its root, and of a scale's up to its octave: chord(C4, major7), scale(D4, dorian)
+enum ChordKind { major, minor, diminished, augmented, sus2, sus4, seventh, major7, minor7, diminished7 }
+enum Scale { major, minor, ionian, dorian, phrygian, lydian, mixolydian, aeolian, locrian, pentatonic, minor_pentatonic, blues, chromatic }
+CHORD_STEPS := {major: [0, 4, 7], minor: [0, 3, 7], diminished: [0, 3, 6], augmented: [0, 4, 8], sus2: [0, 2, 7], sus4: [0, 5, 7],
+	seventh: [0, 4, 7, 10], major7: [0, 4, 7, 11], minor7: [0, 3, 7, 10], diminished7: [0, 3, 6, 9]}
+SCALE_STEPS := {major: [0, 2, 4, 5, 7, 9, 11, 12], minor: [0, 2, 3, 5, 7, 8, 10, 12], ionian: [0, 2, 4, 5, 7, 9, 11, 12],
+	dorian: [0, 2, 3, 5, 7, 9, 10, 12], phrygian: [0, 1, 3, 5, 7, 8, 10, 12], lydian: [0, 2, 4, 6, 7, 9, 11, 12],
+	mixolydian: [0, 2, 4, 5, 7, 9, 10, 12], aeolian: [0, 2, 3, 5, 7, 8, 10, 12], locrian: [0, 1, 3, 5, 6, 8, 10, 12],
+	pentatonic: [0, 2, 4, 7, 9, 12], minor_pentatonic: [0, 3, 5, 7, 10, 12], blues: [0, 3, 5, 6, 7, 10, 12],
+	chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]}
+steps_up(root: Note, steps: list<int>): list<Note> := steps.map(s => root + s)
+chord(root: Note, kind: ChordKind): Chord := Chord(steps_up(root, CHORD_STEPS[kind as text]))
+chord(notes: list<Note>): Chord := Chord(notes)
+scale(root: Note, kind: Scale): list<Note> := steps_up(root, SCALE_STEPS[kind as text])
+
+# the synth's settings: filter_kind "lowpass", "highpass" or "bandpass" at cutoff Hz, its resonance the Q (0.707: no peak at
+# the cutoff); the pitch swings vibrato semitones vibrato_rate times a second; the gain dips by the share tremolo
+# tremolo_rate times a second; each pitch sounds as unison voices spread over detune semitones
+global filter_kind = "none"
+global cutoff = 1000.0
+global resonance = 0.707
+global vibrato = 0.0
+global vibrato_rate = 5.0
+global tremolo = 0.0
+global tremolo_rate = 4.0
+global unison = 1
+global detune = 0.1
+# the effects between the voices and the speaker, in this order, each off at 0: distortion the drive of a soft clipper;
+# delay_time seconds of echoes repeating at delay_feedback of the level before, delay_mix their share; reverb_mix the
+# share of a small room's tail
+global distortion = 0.0
+global delay_time = 0.0
+global delay_feedback = 0.4
+global delay_mix = 0.5
+global reverb_mix = 0.0
+
+# samples cross to the host as whole numbers ≥ 0, amplitude + 32768, a stereo sound's left and right interleaved
+SAMPLE_OFFSET := 32768
+LOUDEST_SAMPLE := 32767
+# sine reads a table: a sin each sample made a 2 s chord take seconds
+SINE_TABLE := 2048
+sine_table := (0 upto SINE_TABLE).map(i => sin(2.0 * pi * float(i) / float(SINE_TABLE)))
+# a room's reverb: four combs of these gaps, each echo 0.75 of the one before
+REVERB_DELAYS := [0.0297, 0.0371, 0.0411, 0.0437]
+REVERB_FEEDBACK := 0.75
+# an echo's output below this (-60 dB) for TAIL_SECONDS beyond its longest gap has rung out; it ends on a hundredth of
+# a second
+SILENT := 0.001
+TAIL_SECONDS := 0.05
+TAIL_BLOCKS_PER_SECOND := 100
+BUTTERWORTH_Q := 0.707
+LEAST_Q := 0.001
+LEAST_SECONDS := 0.00001
+QUIETEST := 0.000000001
+DISTORTION_DRIVE := 10.0
+
+# one wave at phase p (0 to 1) of its period, from -1 to 1, a sample advancing the phase by dt; the jumps of square and
+# sawtooth are band-limited, sharp without dt
+wave(shape: text, p: float, dt: float = 0.0): float := {
+	if shape == "square" { return (if p < 0.5 then 1.0 else -1.0) + step_smoothing(p, dt) - step_smoothing(fract(p + 0.5), dt) }
+	if shape == "triangle" { return 1.0 - 4.0 * abs(p - 0.5) }
+	if shape == "sawtooth" { return 2.0 * p - 1.0 - step_smoothing(p, dt) }
+	if shape == "noise" { return 2.0 * random() - 1.0 }
+	sine_table[trunc(p * float(SINE_TABLE)) % SINE_TABLE]
+}
+# the correction of a wave's upward jump of 2 at phase 0 within a sample of it (PolyBLEP): a sharp jump has harmonics
+# above half the sample rate, which fold back as an inharmonic buzz
+step_smoothing(p: float, dt: float): float := {
+	if p < dt { return (p / dt) * (2.0 - p / dt) - 1.0 }
+	if p > 1.0 - dt { return ((p - 1.0) / dt) * ((p - 1.0) / dt + 2.0) + 1.0 }
+	0.0
+}
+# the seconds at sample i
+sample_time(i: int): float := float(i) / float(sample_rate)
+samples_in(seconds: float): float := seconds * float(sample_rate)
+# how far a ramp of that many samples has come after steps: 0 to 1
+ramp(steps: float, samples: float): float := if samples <= 0.0 then 1.0 else clamp(steps / samples, 0.0, 1.0)
+# the level of sample i of n (ADSR): 0 at both ends
+envelope(i: int, n: int): float := {
+	held = if float(i) < samples_in(attack) then 1.0 else 1.0 - (1.0 - sustain) * ramp(float(i) - samples_in(attack), samples_in(decay))
+	ramp(float(i), samples_in(attack)) * held * ramp(float(n - 1 - i), samples_in(release))
+}
+# the cycles a wave of frequency f has run at sample i, its vibrato included: the integral of f · (1 + c·sin(2π r t))
+phase(f: float, i: int): float := {
+	t = sample_time(i)
+	depth = 2.0 ^ (vibrato / float(SEMITONES)) - 1.0
+	f * t + f * depth * (1.0 - cos(2.0 * pi * vibrato_rate * t)) / (2.0 * pi * vibrato_rate)
+}
+# the gain of the tremolo at sample i: 1 at the start, 1 - tremolo at its lowest
+tremolo_gain(i: int): float := 1.0 - tremolo * (0.5 - 0.5 * cos(2.0 * pi * tremolo_rate * sample_time(i)))
+# each pitch as its unison voices, spread over detune semitones
+voices_of(pitches: list<float>): list<float> :=
+	if unison <= 1 then pitches else pitches.flat_map(f => (0 upto unison).map(k => f * 2.0 ^ (detune * (float(k) / float(unison - 1) - 0.5) / float(SEMITONES))))
+# the amplitudes of frequencies sounding together for that many seconds
+chord_amplitudes(pitches: list<float>, seconds: float, shape: text): list<float> := {
+	n = round(samples_in(seconds))
+	voices = voices_of(pitches)
+	sounding = spread(0.0, n)
+	for frequency in voices {
+		step = frequency / float(sample_rate)
+		for i in 0 upto n { sounding[i] = sounding[i] + wave(shape, fract(phase(frequency, i)), step) }
+	}
+	share = loudness * float(LOUDEST_SAMPLE) / float(#voices)
+	(0 upto n).map(i => share * envelope(i, n) * tremolo_gain(i) * sounding[i])
+}
+# amplitudes as samples kept inside the 16 bits
+clamped_samples(amplitudes: list<float>): list<int> := amplitudes.map(a => SAMPLE_OFFSET + clamp(round(a), -LOUDEST_SAMPLE, LOUDEST_SAMPLE))
+# the samples of frequencies sounding together, through the filter
+chord_samples(pitches: list<float>, seconds: float, shape: text): list<int> := clamped_samples(filtered(chord_amplitudes(pitches, seconds, shape)))
+
+# An effect turns amplitudes into amplitudes, given the full scale: the level its quiet tail is measured against, and
+# the 1 of distort and compress. Named, so a bus's chain takes a new one in place of its own of that name, an EQ band
+# in place of the one at its band's frequency. A biquad filter's coefficients come from the Audio EQ Cookbook.
+class Effect { name: text, through: (list<float>, float) -> list<float>, band: float = 0.0 }
+# the coefficients of a biquad filter, normalized by a0
+class Biquad { b0: float, b1: float, b2: float, a1: float, a2: float }
+# a filter's angle and width at its frequency, and its gain for peak and shelves
+class FilterShape { c: float, alpha: float, a: float }
+filter_shape(frequency: float, q: float, gain_db: float): FilterShape := {
+	w = 2.0 * pi * frequency / float(sample_rate)
+	FilterShape(cos(w), sin(w) / (2.0 * max(q, LEAST_Q)), 10.0 ^ (gain_db / 40.0))
+}
+biquad(b0: float, b1: float, b2: float, a0: float, a1: float, a2: float): Biquad := Biquad(b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0)
+lowpass_biquad(f: FilterShape): Biquad := biquad((1.0 - f.c) / 2.0, 1.0 - f.c, (1.0 - f.c) / 2.0, 1.0 + f.alpha, -2.0 * f.c, 1.0 - f.alpha)
+highpass_biquad(f: FilterShape): Biquad := biquad((1.0 + f.c) / 2.0, -(1.0 + f.c), (1.0 + f.c) / 2.0, 1.0 + f.alpha, -2.0 * f.c, 1.0 - f.alpha)
+bandpass_biquad(f: FilterShape): Biquad := biquad(f.alpha, 0.0, -f.alpha, 1.0 + f.alpha, -2.0 * f.c, 1.0 - f.alpha)
+peak_biquad(f: FilterShape): Biquad :=
+	biquad(1.0 + f.alpha * f.a, -2.0 * f.c, 1.0 - f.alpha * f.a, 1.0 + f.alpha / f.a, -2.0 * f.c, 1.0 - f.alpha / f.a)
+# a shelf raises (sign 1, low) or lowers (sign -1, high) the frequencies past its corner
+shelf_biquad(f: FilterShape, sign: float): Biquad := {
+	slope = 2.0 * sqrt(f.a) * f.alpha
+	up = f.a + 1.0
+	down = f.a - 1.0
+	biquad(f.a * (up - sign * down * f.c + slope), sign * 2.0 * f.a * (down - sign * up * f.c), f.a * (up - sign * down * f.c - slope),
+		up + sign * down * f.c + slope, -sign * 2.0 * (down + sign * up * f.c), up + sign * down * f.c - slope)
+}
+low_shelf_biquad(f: FilterShape): Biquad := shelf_biquad(f, 1.0)
+high_shelf_biquad(f: FilterShape): Biquad := shelf_biquad(f, -1.0)
+biquad_filtered(x: list<float>, k: Biquad): list<float> := {
+	y = spread(0.0, #x)
+	x1 = 0.0
+	x2 = 0.0
+	y1 = 0.0
+	y2 = 0.0
+	for i in 0 upto #x {
+		y[i] = k.b0 * x[i] + k.b1 * x1 + k.b2 * x2 - k.a1 * y1 - k.a2 * y2
+		x2 = x1
+		x1 = x[i]
+		y2 = y1
+		y1 = y[i]
+	}
+	y
+}
+filter_effect(name: text, made: (FilterShape) -> Biquad, frequency: float, q: float, gain_db: float = 0.0): Effect :=
+	Effect(name, (x, scale) => biquad_filtered(x, made(filter_shape(frequency, q, gain_db))), frequency)
+lowpass_effect(frequency: float, q: float): Effect := filter_effect("lowpass", lowpass_biquad, frequency, q)
+highpass_effect(frequency: float, q: float): Effect := filter_effect("highpass", highpass_biquad, frequency, q)
+bandpass_effect(frequency: float, q: float): Effect := filter_effect("bandpass", bandpass_biquad, frequency, q)
+# feedback combs side by side, y[i] = x[i] + feedback · y[i - gap], their mean mixed in, until the tail rings out: one
+# comb is a delay, four a room's reverb
+echoed(x: list<float>, delays: list<float>, feedback: float, mix: float, silent: float): list<float> := {
+	gaps = delays.map(d => max(round(samples_in(d)), 1))
+	combs = gaps.map(g => spread(0.0, g))
+	at = spread(0, #gaps)
+	tail = gaps.max() + trunc(samples_in(TAIL_SECONDS))
+	block = sample_rate ÷ TAIL_BLOCKS_PER_SECOND
+	quiet = tail
+	out: list<float> = []
+	i = 0
+	while i < #x or quiet < tail or (i - #x) % block != 0 {
+		input = if i < #x then x[i] else 0.0
+		wet = 0.0
+		for k in 0 upto #gaps {
+			echo = input + feedback * combs[k][at[k]]
+			combs[k][at[k]] = echo
+			at[k] = (at[k] + 1) % gaps[k]
+			wet += echo
+		}
+		sample = input + mix * (wet / float(#gaps) - input)
+		out.add(sample)
+		quiet = if abs(sample) < silent then quiet + 1 else 0
+		i += 1
+	}
+	out
+}
+# x through a compressor: an envelope rising in `attack` seconds and falling in `release` turns down what goes over the
+# threshold (dB) by the ratio
+compressed(x: list<float>, threshold: float, ratio: float, rising: float, falling: float): list<float> := {
+	kept_rising = exp(-1.0 / samples_in(max(rising, LEAST_SECONDS)))
+	kept_falling = exp(-1.0 / samples_in(max(falling, LEAST_SECONDS)))
+	slope = 1.0 - 1.0 / max(ratio, 1.0)
+	level_at = 0.0
+	y = spread(0.0, #x)
+	for i in 0 upto #x {
+		level = abs(x[i])
+		level_at = level + (if level > level_at then kept_rising else kept_falling) * (level_at - level)
+		over = 20.0 * decimal_log(max(level_at, QUIETEST)) - threshold
+		y[i] = if over > 0.0 then x[i] * 10.0 ^ (-over * slope / 20.0) else x[i]
+	}
+	y
+}
+gain_effect(share: float): Effect := Effect("gain", (x, scale) => x .* share)
+echo_effect(name: text, delays: list<float>, feedback: float, mix: float): Effect :=
+	Effect(name, (x, scale) => echoed(x, delays, feedback, mix, SILENT * scale))
+delay_effect(seconds: float, feedback: float, mix: float): Effect := echo_effect("delay", [seconds], feedback, mix)
+reverb_effect(mix: float): Effect := echo_effect("reverb", REVERB_DELAYS, REVERB_FEEDBACK, mix)
+# the shaping effects work on amplitudes of full scale 1
+scaled(x: list<float>, scale: float, shaped: (list<float>) -> list<float>): list<float> := shaped(x ./ scale) .* scale
+distortion_effect(drive: float): Effect := Effect("distort", (x, scale) => scaled(x, scale, unit => unit.map(v => tanh(v * (1.0 + DISTORTION_DRIVE * drive)))))
+compressor(threshold: float, ratio: float, rising: float, falling: float): Effect :=
+	Effect("compress", (x, scale) => scaled(x, scale, unit => compressed(unit, threshold, ratio, rising, falling)))
+# a signal's full scale: the loudest a voice gets
+full_scale(): float := max(loudness * float(LOUDEST_SAMPLE), 1.0)
+effected(x: list<float>, effect: Effect): list<float> := effect.through(x, full_scale())
+
+# the amplitudes through the synth's filter setting
+filtered(amplitudes: list<float>): list<float> := {
+	if filter_kind == "lowpass" { return effected(amplitudes, lowpass_effect(cutoff, resonance)) }
+	if filter_kind == "highpass" { return effected(amplitudes, highpass_effect(cutoff, resonance)) }
+	if filter_kind == "bandpass" { return effected(amplitudes, bandpass_effect(cutoff, resonance)) }
+	amplitudes
+}
+# the samples through the effect settings: distortion, delay, reverb
+through_effects(samples: list<int>): list<int> := {
+	chain: list<Effect> = []
+	if distortion > 0.0 { chain.add(distortion_effect(distortion)) }
+	if delay_time > 0.0 { chain.add(delay_effect(delay_time, delay_feedback, delay_mix)) }
+	if reverb_mix > 0.0 { chain.add(reverb_effect(reverb_mix)) }
+	if chain is empty { return samples }
+	clamped_samples(chain.fold(samples.map(s => float(s - SAMPLE_OFFSET)), (x, effect) => effected(x, effect)))
+}
+
+# A melody is a list of steps: notes, chords, rests, each tied longer or shorter with ~. euclid(C5, 3, 8) spreads three
+# C5 over eight steps, alternate([G4, A4]) takes one of them each time the melody plays, in turn, maybe(C5, 0.3) sounds
+# in about 30 % of the plays, chosen by melody_seed, the same each run; swing (0 to 1) delays every second step.
+class Alternate { options: list<any> }
+class Maybe { step: any, share: float }
+global swing = 0.0
+global melody_seed = 0
+# the melodies this voice played, by their text: an alternation takes turns by how often its melody played before
+global melodies_played: list<text> = []
+# a step's chance: a hash of the seed, the play and the place, squared a few rounds, modulo a prime
+CHANCE_PRIMES := [7919, 104729, 1299709]
+CHANCE_START := 12345
+CHANCE_STEP := 48271
+CHANCE_MODULUS := 2147483647
+CHANCE_ROUNDS := 3
+
+rest(): Rest := Rest()
+pause(): Rest := Rest()
+euclid(step: any, hits: int, steps: int): list<any> := (0 upto steps).map(i => if (i * hits) % steps < hits then step else Rest())
+alternate(options: list<any>): Alternate := Alternate(options)
+maybe(step: any, share: float = 0.5): Maybe := Maybe(step, share)
+text(a: Alternate): text := "alternate(${a.options})"
+text(m: Maybe): text := "maybe(${m.step}, ${m.share})"
+~(a: Alternate, factor: float): Alternate := Alternate(a.options.map(option => tied(option, factor)))
+~(m: Maybe, factor: float): Maybe := Maybe(tied(m.step, factor), m.share)
+tied(step: any, factor: float): any := step ~ factor
+# how many times the play's duration a step holds, 1 for a plain pitch
+held_length(n: Note): float := n.length
+held_length(c: Chord): float := c.length
+held_length(r: Rest): float := r.length
+held_length(step: any): float := 1.0
+# the frequencies a pitch sounds
+pitches_of(n: Note): list<float> := [hertz(n)]
+pitches_of(c: Chord): list<float> := c.notes.map(n => hertz(n))
+pitches_of(q: Quantity): list<float> := [q.si]
+pitches_of(frequency: float): list<float> := [frequency]
+pitches_of(pitches: list<any>): list<float> := pitches.flat_map(p => pitches_of(p))
+
+# the steps as this play of the melody sounds them: an alternation's option for this turn, a maybe's step or a rest as
+# long
+melody_steps(notes: list<any>, cycle: int): list<any> := (0 upto #notes).map(k => melody_step(notes[k], cycle, k))
+melody_step(a: Alternate, cycle: int, place: int): any := melody_step(a.options[cycle % #a.options], cycle ÷ #a.options, place)
+melody_step(m: Maybe, cycle: int, place: int): any :=
+	if melody_chance(cycle, place) < m.share then melody_step(m.step, cycle, place) else Rest(held_length(m.step))
+melody_step(step: any, cycle: int, place: int): any := step
+# 0 to 1, the same for the same seed, play and place in the melody
+melody_chance(cycle: int, place: int): float := {
+	h = ([melody_seed, cycle, place] .* CHANCE_PRIMES).sum() + CHANCE_START
+	for round in 0 upto CHANCE_ROUNDS { h = (h % CHANCE_MODULUS) ^ 2 + CHANCE_STEP }
+	float(h % CHANCE_MODULUS) / float(CHANCE_MODULUS)
+}
+# how often this voice played the melody before, counting this play
+melody_cycle(written: text): int := {
+	cycle = melodies_played.filter(seen => seen == written).count()
+	melodies_played.add(written)
+	cycle
+}
+melody_text(steps: list<any>): text := steps.map(step => text(step)).join(" ")
+silent_samples(n: int): list<int> := spread(SAMPLE_OFFSET, n)
+# the samples of a melody, each step its seconds times the length it is tied to
+melody_samples(notes: list<any>, seconds: float, shape: text): list<int> := {
+	steps = melody_steps(notes, melody_cycle(melody_text(notes)))
+	samples: list<int> = []
+	elapsed = 0.0
+	done = 0
+	for k in 0 upto #steps {
+		length = seconds * held_length(steps[k])
+		swung = if k % 2 == 1 then -1.0 else if k + 1 < #steps then 1.0 else 0.0
+		elapsed += length + swing * length / 3.0 * swung
+		target = round(samples_in(elapsed))
+		if target > done { samples += step_samples(steps[k], target - done, shape) }
+		done = target
+	}
+	samples
+}
+step_samples(r: Rest, n: int, shape: text): list<int> := silent_samples(n)
+step_samples(pitch: any, n: int, shape: text): list<int> := chord_samples(pitches_of(pitch), float(n) / float(sample_rate), shape)
+
+# A melody written as text in Tidal's mini-notation: `c4 e4 g4` three steps, `~` a rest, `[g4 b4]` a group sharing one
+# step, `c4*2` twice in its step, `c4,e4,g4` a chord, `c4(3,8)` euclid, `<c4 e4>` alternate, `c4?` (`c4?0.3`) maybe,
+# `c4 _ e4` or `c4@2 e4` c4 held two steps. Each item read is a group, a sound of frequencies (none: a rest) or a
+# choice, held weight steps, sounding in chance of the plays.
+enum ItemKind { Group, Sound, Choice }
+class WrittenItem { kind: ItemKind, items: list<WrittenItem> = [], sounds: list<float> = [], weight: int = 1, chance: float = 1.0 }
+STEP_STOPS := " []<>*(?@_"
+STEP_MARKS := "*(?@"
+GROUP_OPEN := "["
+CHOICE_OPEN := "<"
+CLOSINGS := "]>"
+REST_WORD := "~"
+HOLD_WORD := "_"
+CHORD_SEPARATOR := ","
+MAYBE_SHARE := 0.5
+# the marks between a melody's words, which tell nothing of whether they are notes
+WORD_MARKS := ["[", "]", "<", ">", ","]
+# the items read, and the place after their closing bracket or the end
+class ItemsRead { items: list<WrittenItem>, after: int }
+
+silence(): WrittenItem := WrittenItem(Sound)
+# a word's sound: ~ a rest, else its notes, c4 or c4,e4,g4, a note's letter in either case
+word_item(word: text): WrittenItem :=
+	if word == REST_WORD then silence() else WrittenItem(Sound, sounds: word.split(CHORD_SEPARATOR).map(name => note_hertz(capitalized(name))))
+capitalized(name: text): text := upper(name[0:1]) + name[1 ..]
+euclid_item(item: WrittenItem, hits: int, steps: int): WrittenItem :=
+	WrittenItem(Group, (0 upto steps).map(i => if (i * hits) % steps < hits then item else silence()))
+# where the word from `from` ends: the first of the stops, else the end
+step_end(written: text, from: int, stops: text): int := {
+	i = from
+	while i < #written and not stops.contains(written[i:i + 1]) { i += 1 }
+	i
+}
+written_items(written: text, from: int): ItemsRead := {
+	items: list<WrittenItem> = []
+	i = from
+	while i < #written {
+		c = written[i:i + 1]
+		if c == " " {
+			i += 1
+		} else if CLOSINGS.contains(c) {
+			return ItemsRead(items, i + 1)
+		} else if c == HOLD_WORD {
+			if items is not empty { items.last.weight += 1 }
+			i += 1
+		} else {
+			item = silence()
+			if c == GROUP_OPEN or c == CHOICE_OPEN {
+				inner = written_items(written, i + 1)
+				item = WrittenItem(if c == GROUP_OPEN then Group else Choice, inner.items)
+				i = inner.after
+			} else {
+				stop = step_end(written, i, STEP_STOPS)
+				item = word_item(written[i:stop])
+				i = stop
+			}
+			while i < #written and STEP_MARKS.contains(written[i:i + 1]) {
+				mark = written[i:i + 1]
+				stop = step_end(written, i + 1, if mark == "(" then ")" else STEP_STOPS)
+				argument = written[i + 1:stop]
+				if mark == "*" {
+					item = WrittenItem(Group, spread(item, int(argument)))
+				} else if mark == "(" {
+					numbers = argument.split(",")
+					item = euclid_item(item, int(numbers[0]), int(numbers[1]))
+					stop += 1
+				} else if mark == "@" {
+					item.weight = int(argument)
+				} else {
+					item.chance = if argument == "" then MAYBE_SHARE else float(argument)
+				}
+				i = stop
+			}
+			items.add(item)
+		}
+	}
+	ItemsRead(items, i)
+}
+# the steps a text writes, each tied to its share of one step: "c4 [e4 g4]" is [C4, E4 ~ ½, G4 ~ ½]
+notes_written(written: text): list<any> := melody_of(written_items(written, 0).items, 1.0)
+melody_of(items: list<WrittenItem>, length: float): list<any> := items.flat_map(item => item_steps(item, length * float(item.weight)))
+item_steps(item: WrittenItem, length: float): list<any> := {
+	steps = kind_steps(item, length)
+	if item.chance < 1.0 then steps.map(step => maybe(step, item.chance)) else steps
+}
+kind_steps(item: WrittenItem, length: float): list<any> := {
+	if item.kind == Group { return melody_of(item.items, length / float(item.items.map(inner => inner.weight).sum())) }
+	if item.kind == Choice { return [alternate(item.items.map(option => single_step(option, length)))] }
+	[tied(sounded_step(item.sounds), length)]
+}
+single_step(item: WrittenItem, length: float): any := {
+	steps = item_steps(item, length)
+	if #steps == 1 then steps[0] else alternate(steps)
+}
+sounded_step(frequencies: list<float>): any :=
+	if frequencies is empty then Rest() else if #frequencies == 1 then note(frequencies[0]) else Chord(frequencies.map(f => note(f)))
+# whether a text reads as steps (each word a note's name or ~): it plays as a melody; any other text names a sound file
+written_steps(written: text): bool := {
+	words = WORD_MARKS.fold(written, (spaced, mark) => spaced.replace(mark, " ")).split(" ").filter(word => word != "" and word != HOLD_WORD)
+	words is not empty and words.all(word => word == REST_WORD or note_word(word[0:step_end(word, 0, STEP_MARKS)]))
+}
+note_word(word: text): bool := word != "" and is_note_name(capitalized(word))
+
+# A WAV file: RIFF, its fmt chunk and its data chunk of 16-bit little-endian samples
+PCM_FORMAT := 1
+BITS_PER_SAMPLE := 16
+SAMPLE_BYTES := 2
+WAV_HEADER_BYTES := 36
+SAMPLE_RANGE := 65536
+QUIETEST_SAMPLE := -32768
+wav_bytes(speakers: list<int>, rate: int, channels: int): list<int> := {
+	data = pcm_bytes(speakers)
+	block = SAMPLE_BYTES * channels
+	format = [[PCM_FORMAT, 2], [channels, 2], [rate, 4], [rate * block, 4], [block, 2], [BITS_PER_SAMPLE, 2]].flat_map(field => little_endian(field[0], field[1]))
+	"RIFF".bytes + little_endian(WAV_HEADER_BYTES + #data, 4) + "WAVEfmt ".bytes + little_endian(#format, 4) + format + "data".bytes + little_endian(#data, 4) + data
+}
+pcm_bytes(speakers: list<int>): list<int> := speakers.flat_map(sample => little_endian(pcm_sample(sample), SAMPLE_BYTES))
+# a sample crossing as amplitude + 32768, as the 16 bits of the signed amplitude
+pcm_sample(sample: int): int := (clamp(sample - SAMPLE_OFFSET, QUIETEST_SAMPLE, LOUDEST_SAMPLE) + SAMPLE_RANGE) % SAMPLE_RANGE
+
+# A Standard MIDI File of notes [start, pitch, length, velocity], start and length in seconds: written and read here,
+# the same on every host: format 0, one track, 480 ticks a quarter note at 120 beats a minute
+class MidiFile { notes: list<list<any>> }
+MIDI_TICKS_PER_QUARTER := 480
+MIDI_MICROSECONDS_PER_QUARTER := 500000
+MICROSECONDS := 1000000.0
+MIDI_NOTE_ON := 144
+MIDI_NOTE_OFF := 128
+MIDI_META := 255
+MIDI_TEMPO := 81
+MIDI_TRACK_END := 47
+MIDI_SYSTEM_EXCLUSIVE := [240, 247]
+# the kinds of message with one data byte, not two: program change and channel pressure
+MIDI_ONE_BYTE_KINDS := [192, 208]
+MIDI_KEYS := 128
+MIDI_CHANNELS := 16
+MIDI_SEVEN_BITS := 128
+MIDI_HEADER_BYTES := 14
+# no MIDI file is timed in SMPTE frames, only in ticks a quarter note
+MIDI_SMPTE := 32768
+# a note's start or end at a tick, its message's bytes; an end goes before a start at the same tick
+class MidiEvent { tick: int, starts: bool, bytes: list<int> }
+# a note's message read: its tick, whether it starts the note, its channel, key and velocity
+class MidiMessage { tick: int, starts: bool, channel: int, key: int, velocity: int }
+class MidiTempo { tick: int, microseconds: int }
+# a note read, in milliseconds
+class MidiHeld { start: int, key: int, length: int, velocity: int }
+# a delay or a length as MIDI writes it, its value and the byte after it
+class MidiLength { value: int, after: int }
+
+save(tune: MidiFile, path: text) := write_bytes(path, midi_bytes(tune.notes))
+midi_file(path: text): MidiFile := MidiFile(midi_notes(read_bytes(path)))
+midi_ticks(seconds: float): int := round(max(0.0, seconds) * float(MIDI_TICKS_PER_QUARTER) * MICROSECONDS / float(MIDI_MICROSECONDS_PER_QUARTER))
+seconds_of(time: float): float := time
+seconds_of(q: Quantity): float := q.si
+# a delay as MIDI writes it: seven bits a byte, all but the last marked by their high bit
+midi_variable_length(n: int): list<int> := {
+	groups = [n % MIDI_SEVEN_BITS]
+	rest = n ÷ MIDI_SEVEN_BITS
+	while rest > 0 {
+		groups = [rest % MIDI_SEVEN_BITS + MIDI_SEVEN_BITS] + groups
+		rest = rest ÷ MIDI_SEVEN_BITS
+	}
+	groups
+}
+midi_chunk(kind: text, body: list<int>): list<int> := kind.bytes + big_endian(#body, 4) + body
+midi_events(note: list<any>): list<MidiEvent> := {
+	key = midi(note[1])
+	if key < 0 or key >= MIDI_KEYS { raise "MIDI keys are 0 to 127, got ${key}" }
+	on = midi_ticks(seconds_of(note[0]))
+	off = max(on, midi_ticks(seconds_of(note[0]) + seconds_of(note[2])))
+	[MidiEvent(on, yes, [MIDI_NOTE_ON, key, clamp(int(note[3]), 1, MIDI_KEYS - 1)]), MidiEvent(off, no, [MIDI_NOTE_OFF, key, 0])]
+}
+# the bytes of a Standard MIDI File of the notes
+midi_bytes(notes: list<list<any>>): list<int> := {
+	events = notes.flat_map(note => midi_events(note)).sorted(by: event => event.tick * 2 + (if event.starts then 1 else 0))
+	track = [0, MIDI_META, MIDI_TEMPO, 3] + big_endian(MIDI_MICROSECONDS_PER_QUARTER, 3)
+	now = 0
+	for event in events {
+		track += midi_variable_length(event.tick - now) + event.bytes
+		now = event.tick
+	}
+	track += [0, MIDI_META, MIDI_TRACK_END, 0]
+	midi_chunk("MThd", big_endian(0, 2) + big_endian(1, 2) + big_endian(MIDI_TICKS_PER_QUARTER, 2)) + midi_chunk("MTrk", track)
+}
+midi_length_at(bytes: list<int>, at: int): MidiLength := {
+	value = 0
+	next = at
+	while bytes[next] >= MIDI_SEVEN_BITS {
+		value = value * MIDI_SEVEN_BITS + bytes[next] % MIDI_SEVEN_BITS
+		next += 1
+	}
+	MidiLength(value * MIDI_SEVEN_BITS + bytes[next], next + 1)
+}
+# the notes of a Standard MIDI File's bytes, [start, frequency, length, velocity] in seconds to the millisecond, by their
+# start and then their key; every track's, timed by the file's tempo changes
+midi_notes(bytes: list<int>): list<list<any>> := {
+	if #bytes < MIDI_HEADER_BYTES or bytes[0:4] != "MThd".bytes { raise "not a MIDI file (it does not start with MThd)" }
+	division = from_big_endian(bytes[12:14])
+	if division >= MIDI_SMPTE { raise "MIDI files timed in SMPTE frames are not supported, only ticks per quarter note" }
+	tempi = [MidiTempo(0, MIDI_MICROSECONDS_PER_QUARTER)]
+	messages: list<MidiMessage> = []
+	at = 8 + from_big_endian(bytes[4:8])
+	for track in 0 upto from_big_endian(bytes[10:12]) {
+		end = at + 8 + from_big_endian(bytes[at + 4:at + 8])
+		at = if bytes[at:at + 4] == "MTrk".bytes then at + 8 else end
+		tick = 0
+		status = 0
+		while at < end {
+			delay = midi_length_at(bytes, at)
+			tick += delay.value
+			at = delay.after
+			if bytes[at] >= MIDI_SEVEN_BITS {
+				status = bytes[at]
+				at += 1
+			}
+			if status == MIDI_META {
+				size = midi_length_at(bytes, at + 1)
+				if bytes[at] == MIDI_TEMPO and size.value == 3 { tempi.add(MidiTempo(tick, from_big_endian(bytes[size.after:size.after + 3]))) }
+				at = size.after + size.value
+			} else if status in MIDI_SYSTEM_EXCLUSIVE {
+				size = midi_length_at(bytes, at)
+				at = size.after + size.value
+			} else {
+				kind = status - status % MIDI_CHANNELS
+				one_byte = kind in MIDI_ONE_BYTE_KINDS
+				velocity = if one_byte then 0 else bytes[at + 1]
+				if kind == MIDI_NOTE_ON or kind == MIDI_NOTE_OFF { messages.add(MidiMessage(tick, kind == MIDI_NOTE_ON and velocity > 0, status % MIDI_CHANNELS, bytes[at], velocity)) }
+				at += if one_byte then 1 else 2
+			}
+		}
+		at = end
+	}
+	sounding: list<MidiMessage> = []
+	held: list<MidiHeld> = []
+	for message in messages {
+		if message.starts {
+			sounding.add(message)
+		} else {
+			started = sounding.filter(m => m.channel == message.channel and m.key == message.key)
+			if started is not empty {
+				first = started[0]
+				sounding = sounding.filter(m => m != first)
+				start = midi_milliseconds(first.tick, tempi, division)
+				held.add(MidiHeld(start, first.key, midi_milliseconds(message.tick, tempi, division) - start, first.velocity))
+			}
+		}
+	}
+	held.sorted(by: note => note.start * MIDI_KEYS + note.key).map(note => written_note(note))
+}
+written_note(note: MidiHeld): list<any> := {
+	row: list<any> = [float(note.start) / 1000.0, midi_hertz(note.key), float(note.length) / 1000.0, note.velocity]
+	row
+}
+# the milliseconds at a tick of a file whose tempo changes at the tempi's ticks
+midi_milliseconds(tick: int, tempi: list<MidiTempo>, division: int): int := {
+	seconds = 0.0
+	from = 0
+	tempo = MIDI_MICROSECONDS_PER_QUARTER
+	for change in tempi {
+		if change.tick >= tick { break }
+		seconds += float((change.tick - from) * tempo) / MICROSECONDS / float(division)
+		from = change.tick
+		tempo = change.microseconds
+	}
+	round((seconds + float((tick - from) * tempo) / MICROSECONDS / float(division)) * 1000.0)
+}
+
+# How loud each frequency band sounds at a moment of the samples: the bands spaced evenly in pitch from band_low to
+# band_high Hz, each level from 0 to 1 (a full-scale sine is 1); the window Hann-weighted, each band measured by
+# Goertzel's recurrence
+global band_low = 60.0
+global band_high = 5000.0
+# the samples a spectrum looks at: 512 at 22050 Hz are 23 ms, bands 43 Hz apart are still told apart
+SPECTRUM_WINDOW := 512
+# the band whose middle frequency is nearest in pitch
+nearest_band(frequency: float, bands: int): int := round(log(frequency / band_low) / log(band_high / band_low) * float(bands - 1))
+spectrum(samples: list<int>, seconds: float, bands: int): list<float> :=
+	band_levels(spectrum_window(samples, seconds).map(sample => float(sample - SAMPLE_OFFSET)), bands)
+# the samples at that moment a spectrum looks at
+spectrum_window(samples: list<int>, seconds: float): list<int> := {
+	start = clamp(round(samples_in(seconds)), 0, #samples)
+	samples[start:clamp(start + SPECTRUM_WINDOW, 0, #samples)]
+}
+# the levels of the bands in amplitudes around 0, all 0 for fewer than 2; Hann-weighted, so a tone between two bands
+# does not leak into the far ones
+band_levels(amplitudes: list<float>, bands: int): list<float> := {
+	if #amplitudes < 2 { return spread(0.0, bands) }
+	last = float(#amplitudes - 1)
+	weighted = (0 upto #amplitudes).map(at => amplitudes[at] * (0.5 - 0.5 * cos(2.0 * pi * float(at) / last)))
+	(0 upto bands).map(band => band_level(weighted, band_frequency(band, bands)))
+}
+band_frequency(band: int, bands: int): float := band_low * (band_high / band_low) ^ (float(band) / float(max(bands, 2) - 1))
+# how loud the frequency sounds: one term of the discrete Fourier transform by Goertzel's recurrence
+band_level(weighted: list<float>, frequency: float): float := {
+	coefficient = 2.0 * cos(2.0 * pi * frequency / float(sample_rate))
+	recent = 0.0
+	before = 0.0
+	for x in weighted {
+		next = x + coefficient * recent - before
+		before = recent
+		recent = next
+	}
+	power = max(recent * recent + before * before - coefficient * recent * before, 0.0)
+	4.0 * sqrt(power) / float(#weighted) / float(LOUDEST_SAMPLE)
+}
+
+# Signals as lists of amplitudes, and nodes as functions of them: osc(C4, 1s) |> lowpass(800) |> delay(0.25) |> out
+# plays it; mix(a, b) sums signals as a bus does
+seconds_of(n: int): float := float(n)
+osc(pitch: any, duration: any, shape: text): list<float> := chord_amplitudes(pitches_of(pitch), seconds_of(duration), shape)
+osc(pitch: any, duration: any): list<float> := osc(pitch, duration, wave_shape)
+osc(pitch: any): list<float> := osc(pitch, note_seconds, wave_shape)
+lowpass(signal: list<float>, frequency: float, q: float = BUTTERWORTH_Q): list<float> := effected(signal, lowpass_effect(frequency, q))
+highpass(signal: list<float>, frequency: float, q: float = BUTTERWORTH_Q): list<float> := effected(signal, highpass_effect(frequency, q))
+bandpass(signal: list<float>, frequency: float, q: float = BUTTERWORTH_Q): list<float> := effected(signal, bandpass_effect(frequency, q))
+delay(signal: list<float>, seconds: float, feedback: float = 0.4, mix: float = 0.5): list<float> := effected(signal, delay_effect(seconds, feedback, mix))
+reverb(signal: list<float>, mix: float = 0.3): list<float> := effected(signal, reverb_effect(mix))
+distort(signal: list<float>, drive: float = 0.5): list<float> := effected(signal, distortion_effect(drive))
+gain(signal: list<float>, share: float): list<float> := signal .* share
+# signals summed sample by sample, to the longest
+mix(a: list<float>, b: list<float>): list<float> := (0 upto max(#a, #b)).map(i => (if i < #a then a[i] else 0.0) + (if i < #b then b[i] else 0.0))
+mix(a: list<float>, b: list<float>, c: list<float>): list<float> := mix(mix(a, b), c)
+mix(a: list<float>, b: list<float>, c: list<float>, d: list<float>): list<float> := mix(mix(a, b), mix(c, d))
+
+# A bus holds one effect chain that every sound sent to it goes through: room = bus() |> reverb(0.4) |> delay(0.25),
+# then out(osc(C4, 1s), room) or play(C4, 1s, bus: room). Each bus's chain by its number, 0 the speakers' own (none);
+# the sounds go to sent_bus.
+class Bus { id: int, chain: list<Effect> }
+global bus_chains: list<list<Effect>> = [[]]
+global sent_bus = 0
+EQ_BANDS := ["peak", "low_shelf", "high_shelf"]
+bus(): Bus := {
+	bus_chains.add([])
+	Bus(#bus_chains - 1, [])
+}
+# the bus with the effect at the end of its chain, or in place of its effect of that name (an EQ band of that frequency)
+with_effect(b: Bus, effect: Effect): Bus := {
+	same = (e: Effect) => e.name == effect.name and (not (effect.name in EQ_BANDS) or e.band == effect.band)
+	chain = if b.chain.any(same) then b.chain.map(e => if same(e) then effect else e) else b.chain + [effect]
+	bus_chains[b.id] = chain
+	Bus(b.id, chain)
+}
+lowpass(b: Bus, frequency: float, q: float = BUTTERWORTH_Q): Bus := with_effect(b, lowpass_effect(frequency, q))
+highpass(b: Bus, frequency: float, q: float = BUTTERWORTH_Q): Bus := with_effect(b, highpass_effect(frequency, q))
+bandpass(b: Bus, frequency: float, q: float = BUTTERWORTH_Q): Bus := with_effect(b, bandpass_effect(frequency, q))
+delay(b: Bus, seconds: float, feedback: float = 0.4, mix: float = 0.5): Bus := with_effect(b, delay_effect(seconds, feedback, mix))
+reverb(b: Bus, mix: float = 0.3): Bus := with_effect(b, reverb_effect(mix))
+distort(b: Bus, drive: float = 0.5): Bus := with_effect(b, distortion_effect(drive))
+gain(b: Bus, share: float): Bus := with_effect(b, gain_effect(share))
+# an EQ band: the frequencies around `frequency` (peak) or below or above it (the shelves) raised or lowered by the dB
+peak(b: Bus, frequency: float, db: float, q: float = 1.0): Bus := with_effect(b, filter_effect("peak", peak_biquad, frequency, q, db))
+low_shelf(b: Bus, frequency: float, db: float, q: float = BUTTERWORTH_Q): Bus := with_effect(b, filter_effect("low_shelf", low_shelf_biquad, frequency, q, db))
+high_shelf(b: Bus, frequency: float, db: float, q: float = BUTTERWORTH_Q): Bus := with_effect(b, filter_effect("high_shelf", high_shelf_biquad, frequency, q, db))
+# a compressor: a level over the threshold (dB, 0 is full scale) comes out ratio times closer to it, following a rise in
+# attack seconds and a fall in release
+compress(b: Bus, threshold: float = -18.0, ratio: float = 4.0, rising: float = 0.01, falling: float = 0.1): Bus :=
+	with_effect(b, compressor(threshold, ratio, rising, falling))
+# what the bus makes of the sounds sent to it while `making` runs
+sent_through(b: Bus, making: () -> Sound): Sound := {
+	before = sent_bus
+	global sent_bus = b.id
+	made = making()
+	global sent_bus = before
+	made
+}
+out(signal: list<float>): Sound := sound(clamped_samples(signal))
+out(signal: list<float>, b: Bus): Sound := sent_through(b, () => out(signal))
+call(b: Bus, signal: list<float>): Sound := out(signal, b)
+# the samples through the chain of the bus the sounds are sent to
+bused(samples: list<int>): list<int> := {
+	chain = bus_chains[sent_bus]
+	if chain is empty { return samples }
+	clamped_samples(chain.fold(samples.map(s => float(s - SAMPLE_OFFSET)), (x, effect) => effect.through(x, float(LOUDEST_SAMPLE))))
+}
+
+# where the notes sound between the left (-1) and the right speaker (1), 0 in the middle
+global pan = 0.0
+# the samples for the speakers: mono in the middle, else interleaved left, right, the far side quieter by the pan
+panned(samples: list<int>): list<int> := if pan == 0.0 then samples else
+	samples.flat_map(sample => [1.0 - pan, 1.0 + pan].map(side => SAMPLE_OFFSET + round(float(sample - SAMPLE_OFFSET) * clamp(side, 0.0, 1.0))))
+sound(samples: list<int>): Sound := sounded(panned(bused(through_effects(samples))), sample_rate, if pan == 0.0 then 1 else 2)
+
+# What play gives: the sound's number in the run and its length, for stop(h) and fade(h, …); shows as ♪ 0.5 s
+class Sound { number: int, seconds: float }
+text(s: Sound): text := "♪ ${round(s.seconds, 2)} s"
+# the sounds made so far: `wait(sound)`, `save sound as: ./song.wav`, `stop(sound)`, `fade(sound, 0, 500ms)`
+class Recording { at: int = 0 }
+sound(): Recording := Recording()
+# a sound made, at its place on the voice's clock, kept till the next save
+class Take { place: float, rate: int, channels: int, speakers: list<int>, number: int }
+# a fade of one sound (0: all of them) from its place, to its gain over its seconds
+class Fade { number: int, place: float, gain: float, seconds: float }
+global sounds_made = 0
+global takes: list<Take> = []
+global fades: list<Fade> = []
+global rendered_until = 0.0
+# A heard sound queues at most half a second ahead of the speaker; a sound goes from memory straight to the audio
+# device, else (no device, or a program naming its player, `sound_player = "mpv"`) as a WAV file to that player or the
+# first of the system's that starts, its line on stderr: `sound 0.55 s: <file>`. A quiet run sounds nothing.
+global sound_player = ""
+SYSTEM_PLAYERS := ["afplay", "paplay", "aplay"]
+PLAY_AHEAD_MS := 500
+MS_PER_SECOND := 1000.0
+global sound_folder = ""
+sounded(speakers: list<int>, rate: int, channels: int): Sound := {
+	global sounds_made = sounds_made + 1
+	seconds = float(#speakers) / float(channels) / float(rate)
+	at = scheduled(seconds)
+	takes.add(Take(at.place, rate, channels, speakers, sounds_made))
+	waited_till(at.end - round(seconds * MS_PER_SECOND))
+	if sound_player != "" or not sound_played(pcm_bytes(speakers), rate, channels) { played(sound_file(speakers, rate, channels, seconds)) }
+	Sound(sounds_made, seconds)
+}
+sound_file(speakers: list<int>, rate: int, channels: int, seconds: float): text := {
+	if sound_folder == "" { global sound_folder = temp_dir() }
+	file = "${sound_folder}/sound-${sounds_made}.wav"
+	write_bytes(file, wav_bytes(speakers, rate, channels))
+	eprint("sound ${round(seconds, 2)} s: ${file}")
+	file
+}
+# the program waits till its sound is due half a second ahead of the speaker
+waited_till(start: int) := {
+	ahead = start - PLAY_AHEAD_MS - wall_clock_ms()
+	if not muted() and ahead > 0 { sleep_ms(ahead) }
+}
+sound_players(): list<text> := if sound_player != "" then [sound_player] else if muted() then [] else SYSTEM_PLAYERS
+# a file played by the host, else by the first player that starts
+played(file: text) := {
+	if sound_player == "" and sound_file_played(file) { return }
+	for player in sound_players() {
+		if try { start([player, file], captured: no); yes } catch e { no } { return }
+	}
+	if sound_players() is not empty { eprint("no sound player started: name one in the program, sound_player = \"mpv\"") }
+}
+
+# The voice's clock: where its queued sounds end in real time (wall clock milliseconds) and its place, the seconds of
+# sound since its first, which save sound mixes by; `at` moves both for its block
+global voice_end = 0
+global voice_place = 0.0
+global voice_origin = 0
+class VoiceAt { end: int, place: float }
+global before_at: list<VoiceAt> = []
+# the seconds added behind the voice's queued sounds: where they end in real time, and their place
+scheduled(seconds: float): VoiceAt := {
+	start = max(voice_end, wall_clock_ms())
+	place = voice_place
+	if voice_origin == 0 { global voice_origin = start - round(place * MS_PER_SECOND) }
+	global voice_end = start + round(seconds * MS_PER_SECOND)
+	global voice_place = place + seconds
+	VoiceAt(voice_end, place)
+}
+clock_at(seconds: float) := {
+	before_at.add(VoiceAt(voice_end, voice_place))
+	if voice_origin == 0 { global voice_origin = wall_clock_ms() }
+	global voice_end = voice_origin + round(seconds * MS_PER_SECOND)
+	global voice_place = seconds
+}
+clock_at_end() := {
+	if before_at is empty { return }
+	global voice_end = before_at.last.end
+	global voice_place = before_at.last.place
+	global before_at = before_at.take(#before_at - 1)
+}
+# `at 2 beats play C4`, `at bar(1) { … }`: the block's sounds start that many seconds after the voice's first sound;
+# the voice goes on where it stood
+at(time: any, actions: block) := {
+	clock_at(seconds_of(time))
+	actions()
+	clock_at_end()
+}
+# a rest of that length on the voice's clock: the next sound or MIDI message follows
+rest(seconds: float) := scheduled(seconds)
+rest(q: Quantity) := scheduled(q.si)
+# how many seconds the voice still sounds
+sound_queued(): float := float(max(0, voice_end - wall_clock_ms())) / MS_PER_SECOND
+wait(made: Recording) := if sound_players() is not empty and voice_end > wall_clock_ms() { sleep_ms(voice_end - wall_clock_ms()) }
+seconds(made: Recording): float := voice_place - rendered_until
+
+# The sounds since the last save, each at its place, mixed into one WAV at the highest rate and the most channels of
+# them (a mono sound on both speakers alike), their fades applied; its seconds
+save(made: Recording, path: text): float := {
+	if takes is empty { return 0.0 }
+	rate = takes.map(take => take.rate).max()
+	channels = takes.map(take => take.channels).max()
+	first = takes.map(take => take.place).fold(rendered_until, (least, place) => if place < least then place else least)
+	mixed: list<int> = []
+	for take in takes {
+		start = round((take.place - first) * float(rate)) * channels
+		frames = #take.speakers ÷ take.channels
+		length = round(float(frames * rate) / float(take.rate))
+		needed = start + length * channels
+		if #mixed < needed { mixed += spread(0, needed - #mixed) }
+		own = fades.filter(fade => fade.number == 0 or fade.number == take.number)
+		for frame in 0 upto length {
+			from = clamp(frame * take.rate ÷ rate, 0, frames - 1) * take.channels
+			level = if own is empty then 1.0 else faded_gain(own, take.place + float(frame) / float(rate))
+			for channel in 0 upto channels {
+				at = start + frame * channels + channel
+				mixed[at] = mixed[at] + round(float(take.speakers[from + clamp(channel, 0, take.channels - 1)] - SAMPLE_OFFSET) * level)
+			}
+		}
+	}
+	write_bytes(path, wav_bytes(mixed.map(level => clamp(level, QUIETEST_SAMPLE, LOUDEST_SAMPLE) + SAMPLE_OFFSET), rate, channels))
+	seconds = float(#mixed ÷ channels) / float(rate)
+	global rendered_until = first + seconds
+	global takes = []
+	global fades = []
+	seconds
+}
+# the gain at a place after the fades, each ramping linearly from the gain it finds there to its own
+faded_gain(made: list<Fade>, place: float): float := {
+	current = Fade(0, 0.0, 1.0, 0.0)
+	level = 1.0
+	for fade in made {
+		if fade.place <= place {
+			level = ramped_gain(current, level, fade.place)
+			current = fade
+		}
+	}
+	ramped_gain(current, level, place)
+}
+ramped_gain(fade: Fade, from: float, at: float): float :=
+	from + (fade.gain - from) * (if fade.seconds > 0.0 then clamp((at - fade.place) / fade.seconds, 0.0, 1.0) else 1.0)
+# h = play(C4, 4s); fade(h, 0, 2) fades it out over 2 seconds, fade(sound, 0, 2) every sound made; stop(h) at once.
+# save sound writes the fades too.
+fade(one: Sound, level: float, seconds: any = 0.05) := faded(one.number, level, seconds_of(seconds))
+fade(made: Recording, level: float, seconds: any = 0.05) := faded(0, level, seconds_of(seconds))
+stop(one: Sound) := faded(one.number, 0.0, 0.0)
+stop(made: Recording) := faded(0, 0.0, 0.0)
+faded(number: int, level: float, seconds: float) := {
+	if number > sounds_made { raise "fade(${number}): no sound ${number} in this run, which played ${sounds_made}" }
+	if level < 0.0 or level > 1.0 or seconds < 0.0 { raise "fade(${number}, ${level}, ${seconds}): the gain is 0…1 and the seconds not negative" }
+	fades.add(Fade(number, voice_place - sound_queued(), level, seconds))
+}
+
+# One word plays every sound, in a wave shape: a note, a frequency or a note's name one tone `duration` long,
+# play(440Hz, 0.5s, "square"); a Chord together, play(C4+E4+G4, 1s); a list one item after another, each `duration`
+# long, play([C4+E4, G4], 250ms); a text of steps (mini-notation) over a bar, any other text a sound file's path; a
+# Sample the clip; a signal, a function of the time, or a pair of them [left, right]. tone and melody say the same.
+play(music: any): Sound := play(music, default_seconds(music))
+play(music: any, duration: any): Sound := music_played(music, seconds_of(duration), wave_shape)
+play(music: any, duration: any, shape: text): Sound := music_played(music, seconds_of(duration), shape)
+play(music: any, duration: any, bus: Bus): Sound := sent_through(bus, () => play(music, duration))
+default_seconds(music: any): float := note_seconds
+default_seconds(written: text): float := if written_steps(written) then bar(1.0) else note_seconds
+tone(pitch: any, duration: any, shape: text = "sine"): Sound := play(pitch, duration, shape)
+melody(notes: list<any>, each: any): Sound := play(notes, each)
+beep(): Sound := play(880, 0.15, "square")
+music_played(notes: list<any>, seconds: float, shape: text): Sound := sound(melody_samples(notes, seconds, shape))
+music_played(written: text, seconds: float, shape: text): Sound := {
+	if is_note_name(written) { return sound(chord_samples([note_hertz(written)], seconds, shape)) }
+	if not written_steps(written) { return file_played(written) }
+	steps = notes_written(written)
+	sound(melody_samples(steps, seconds / steps.map(step => held_length(step)).sum(), shape))
+}
+music_played(r: Rest, seconds: float, shape: text): Sound := music_played([r], seconds, shape)
+music_played(clip: Sample, seconds: float, shape: text): Sound := play(clip, 1.0)
+music_played(pitch: any, seconds: float, shape: text): Sound := sound(chord_samples(pitches_of(pitch), seconds, shape))
+pitches_of(frequency: int): list<float> := [float(frequency)]
+# a music file in the background (wav, mp3, ogg, flac, aiff, m4a), its line on stderr `sound file: song.mp3`
+file_played(path: text): Sound := {
+	if not exists(path) { raise "no sound file ${path}" }
+	eprint("sound file: ${path}")
+	played(path)
+	Sound(0, 0.0)
+}
+
+# A signal is a function of the time: play(siren, 4s) calls it for every sample, t its time in seconds, its values -1
+# to 1; play([left, right], 2s) a pair in stereo. A function that fills a whole block of 512 is faster:
+# hum(block, t), or chord(left, right, t) in stereo, t the time of the block's first sample.
+BLOCK_SIZE := 512
+play(signal: (float) -> float, duration: any): Sound := signal_sound(sample_times(seconds_of(duration)).map(t => signal(t)), 1)
+play(sides: list<(float) -> float>, duration: any): Sound :=
+	signal_sound(sample_times(seconds_of(duration)).flat_map(t => sides.map(side => side(t))), #sides)
+play(fill: (list<float>, float) -> any, duration: any): Sound := {
+	block = spread(0.0, BLOCK_SIZE)
+	played_blocks(t => fill(block, t), [block], seconds_of(duration))
+}
+play(fill: (list<float>, list<float>, float) -> any, duration: any): Sound := {
+	left = spread(0.0, BLOCK_SIZE)
+	right = spread(0.0, BLOCK_SIZE)
+	played_blocks(t => fill(left, right, t), [left, right], seconds_of(duration))
+}
+# fill(t) writes the speakers' blocks once a block, interleaved in stereo
+played_blocks(fill: (float) -> any, speakers: list<list<float>>, seconds: float): Sound := {
+	wanted = round(samples_in(seconds))
+	amplitudes: list<float> = []
+	first = 0
+	while first < wanted {
+		fill(sample_time(first))
+		amplitudes += (0 upto min_count(BLOCK_SIZE, wanted - first)).flat_map(i => speakers.map(side => side[i]))
+		first += BLOCK_SIZE
+	}
+	signal_sound(amplitudes, #speakers)
+}
+min_count(a: int, b: int): int := if a < b then a else b
+sample_times(seconds: float): list<float> := (0 upto round(samples_in(seconds))).map(i => sample_time(i))
+# amplitudes of a signal, 1 the loudest, as a sound of the channels
+signal_sound(amplitudes: list<float>, channels: int): Sound := sounded(clamped_samples(amplitudes .* float(LOUDEST_SAMPLE)), sample_rate, channels)
+
+# `live_loop(4, drums)` repeats a block four cycles as a voice of its own, one to await; without a count until the
+# program is stopped
+live_loop(cycles: int, cycle: () -> any): Task := go(() => { for counted in 0 upto cycles { cycle() } })
+live_loop(cycle: () -> any): Task := go(() => { while yes { cycle() } })
+
+# An audio file's samples to play: kick = sample(./kick.wav), play(kick); play(kick, 2) twice as fast and an octave up;
+# sample_slice(kick, 0.1s, 0.3s) the part between, sample_slices(kick, 4) four equal parts, sample_looped(kick, 4s,
+# 0.5s, 1s) four seconds: up to 1 s, then from 0.5 s to 1 s again and again. Its frames as sounded takes them, the
+# channels interleaved; not through the effects: a sample sounds as recorded
+class Sample { rate: int, channels: int, frames: list<int> }
+# each audio file decoded once a run at a rate and channel count (0: the file's own)
+global decoded_sounds: map<text, Decoded> = {}
+decoded_sound(path: text, rate: int, channels: int): Decoded := {
+	if not exists(path) { raise "${path}: no such sound file" }
+	key = "${path}\t${rate}\t${channels}"
+	if not decoded_sounds.has(key) { decoded_sounds[key] = sound_file_decoded(path, rate, channels) }
+	decoded_sounds[key]
+}
+sample(path: text): Sample := {
+	decoded = decoded_sound(path, 0, 0)
+	Sample(decoded.rate, decoded.channels, decoded.values.map(value => value + SAMPLE_OFFSET))
+}
+sample_seconds(clip: Sample): float := float(#clip.frames ÷ clip.channels) / float(clip.rate)
+# where the frame at that many seconds starts among the interleaved values, at most the end
+sample_frame(clip: Sample, seconds: float): int := clamp(round(seconds * float(clip.rate)), 0, #clip.frames ÷ clip.channels) * clip.channels
+sample_between(clip: Sample, from: float, to: float): Sample := Sample(clip.rate, clip.channels, clip.frames[sample_frame(clip, from):sample_frame(clip, to)])
+sample_slice(clip: Sample, from: any, to: any): Sample := sample_between(clip, seconds_of(from), seconds_of(to))
+sample_slices(clip: Sample, parts: int): list<Sample> :=
+	(0 upto parts).map(i => sample_between(clip, float(i) * sample_seconds(clip) / float(parts), float(i + 1) * sample_seconds(clip) / float(parts)))
+sample_looped(clip: Sample, duration: any, from: any, to: any): Sample := {
+	end = round(seconds_of(duration) * float(clip.rate)) * clip.channels
+	frames = clip.frames[0:sample_frame(clip, seconds_of(to))]
+	repeated = clip.frames[sample_frame(clip, seconds_of(from)):sample_frame(clip, seconds_of(to))]
+	if repeated is empty { return Sample(clip.rate, clip.channels, frames) }
+	while #frames < end { frames += repeated }
+	Sample(clip.rate, clip.channels, frames[0:end])
+}
+play(clip: Sample): Sound := play(clip, 1.0)
+play(clip: Sample, rate: float): Sound := sounded(clip.frames, round(float(clip.rate) * rate), clip.channels)
+# how many seconds an audio file sounds, and its spectrum at a moment
+sound_seconds(path: text): float := float(#decoded_sound(path, sample_rate, 1).values) / float(sample_rate)
+spectrum(path: text, seconds: float, bands: int): list<float> :=
+	spectrum(decoded_sound(path, sample_rate, 1).values.map(value => value + SAMPLE_OFFSET), seconds, bands)
+
+# MIDI played live: midi_on C4, midi_off C4, midi_send(144, 60, 100) to the first output device; channels count from 1,
+# velocity 1 to 127; midi_note(C4, 1/2 beat) sends its note when the sounds before it have played
+MIDI_NOT_BUILT_IN := "MIDI is not built into this wap yet (macOS has it)"
+MIDI_KEY_OFF := 127
+midi_send(status: int, first: int, second: int = 0, port: text = "") := {
+	waited_till(voice_end)
+	answer = midi_sent(port, [status, first, second])
+	if answer == NoOutput { raise "no MIDI output${if port == "" then "" else " named " + port}" }
+	if answer == Unsupported { raise MIDI_NOT_BUILT_IN }
+	if answer == Failed { raise "the MIDI message did not go out" }
+}
+midi_on(pitch: any, velocity: int = 100, channel: int = 1) := midi_send(MIDI_NOTE_ON - 1 + channel, midi(hertz(pitch)), velocity)
+midi_off(pitch: any, channel: int = 1) := midi_send(MIDI_KEY_OFF + channel, midi(hertz(pitch)), 0)
+midi_note(pitch: any, duration: any, velocity: int = 100, channel: int = 1) := {
+	midi_on(pitch, velocity, channel)
+	rest(seconds_of(duration))
+	midi_off(pitch, channel)
+}
+midi_devices(names: text?): list<text> := (names ?? raise(MIDI_NOT_BUILT_IN)).split("\n").filter(name => name != "")
+midi_outputs(): list<text> := midi_devices(midi_ports(0))
+midi_inputs(): list<text> := midi_devices(midi_ports(1))
