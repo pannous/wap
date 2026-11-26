@@ -7,6 +7,7 @@
 # commands and options are one table, commands.wap, which `wap help` lists
 use foreign
 use "c.wap"
+use "../../types/host.wap"
 use "run.wap"
 use "linking.wap"
 use "compiler.wap"
@@ -18,8 +19,9 @@ use "commands.wap"
 # a C function a module the command runs imports, called through wasmtime (host_words.wap); exported here, as only
 # the program's own functions are exports
 host_word(word: int, caller: int, given: int, count: int, results: int, results_count: int) := host_word_answered(word, caller, given, count, results, results_count)
-# C calling back a function the module handed it (lib/native/callbacks.h's trampolines call this export)
-c_callback_answered(slot: int, a: int, b: int, c: int, d: int, e: int, f: int): int := callback_answered(slot, a, b, c, d, e, f)
+# C calling back a function the module handed it (lib/native/callbacks.h's trampolines call this export, which a
+# program built natively answers itself, lib/callbacks.wap)
+c_callback_fired(slot: int, a: int, b: int, c: int, d: int, e: int, f: int): int := callback_answered(slot, a, b, c, d, e, f)
 # the module a program compiles to, a temporary file of this template, its suffix kept
 MODULE_TEMPLATE := "/wap-XXXXXX.wasm"
 # `wap test [<area>…]`: wap's tests in the current folder, test/wap/run.sh, all of them or those of each area
@@ -37,14 +39,12 @@ STATUS_UNIT := 256
 
 # the command line by WASI: the command, the program, its arguments, read into new memory of their own (system.wap's
 # arguments() reads them from BYTES_AT, into the words run.wap keeps past it, and maps, which a native build takes not)
-args_sizes_get(count_at: int, bytes_at: int): int := prim args_sizes_get(count_at, bytes_at)
-args_get(addresses_at: int, bytes_at: int): int := prim args_get(addresses_at, bytes_at)
 command_line(): list<text> := {
 	args_sizes_get(ARGUMENT_COUNT_AT, ARGUMENT_BYTES_COUNT_AT)
-	addresses = text_address(text_made(4 * word_at(ARGUMENT_COUNT_AT)))
-	args_get(addresses, text_address(text_made(word_at(ARGUMENT_BYTES_COUNT_AT))))
+	addresses = text_address(text_made(4 * memory_word(ARGUMENT_COUNT_AT)))
+	args_get(addresses, text_address(text_made(memory_word(ARGUMENT_BYTES_COUNT_AT))))
 	words: list<text> = []
-	for i in 0 upto word_at(ARGUMENT_COUNT_AT) { words.add(c_text_from(host_of(pointer_at(word_at(addresses + 4 * i))))) }
+	for i in 0 upto memory_word(ARGUMENT_COUNT_AT) { words.add(c_text_from(host_of(pointer_at(memory_word(addresses + 4 * i))))) }
 	words
 }
 # the text, then the list's items from item `from` (from 1) on
@@ -71,6 +71,9 @@ code_of(argument: text): text := if argument == STANDARD_INPUT_PATH then input_r
 tested(words: list<text>) := script_ran(followed(TESTS_RUN, words, 2))
 # the program's laws verified, by this wap running the verify program on it
 verified(words: list<text>) := script_ran([executable_path, seed_part(VERIFY_PART), SEED_OPTION, seed_part(""), words#2])
+# `wap format <program.wap>`: the program in canonical spelling, by the compiler's own format command
+FORMAT_COMMAND := "format"
+formatted(words: list<text>) := module_file_ran([words#1, compiler_path, FORMAT_COMMAND, words#2])
 # the program built by the compiler this wap runs
 built(words: list<text>) := {
 	program = words#2
@@ -80,17 +83,32 @@ built(words: list<text>) := {
 # the command run; its exit status is this run's
 script_ran(command: list<text>) := exit(system(command.join(" ")) ÷ STATUS_UNIT)
 
-# the command line with the run's caps taken off it, each an option before the program: `--memory-gb <n>`,
-# `--seconds <n>` (run.wap memory_cap_gb, time_cap_seconds)
-capped(given: list<text>): list<text> := {
+# the command line with the run's options taken off it, each before the program: its caps, `--memory-gb <n>`,
+# `--seconds <n>` (run.wap memory_cap_gb, time_cap_seconds); the options told to the programs it runs, `--no-window`
+# as a line `no-window=yes` (main.c run_options), which also stops a window or sound device opened (run.wap windowless)
+options_taken(given: list<text>): list<text> := {
 	global memory_cap_gb
 	global time_cap_seconds
+	global windowless
 	words = given
-	while #words > 2 and is_cap_option(words#2) {
-		if words#2 == MEMORY_OPTION { memory_cap_gb = atol(words#3) } else { time_cap_seconds = atol(words#3) }
-		words = followed(words#1, words, 4)
+	told = ""
+	while (#words > 1 and is_told_option(words#2)) or (#words > 2 and is_cap_option(words#2)) {
+		option = words#2
+		if option == MEMORY_OPTION { memory_cap_gb = cap_given(words) }
+		else if option == SECONDS_OPTION { time_cap_seconds = cap_given(words) }
+		else {
+			told = told + bytes_between(option, 2, byte_count(option)) + "=yes\n"
+			windowless = windowless or option == NO_WINDOW_OPTION
+		}
+		words = followed(words#1, words, if is_told_option(option) then 3 else 4)
 	}
+	wap_run_options_set(told)
 	words
+}
+# the whole number a cap option is given, a value of any other form refused: `--seconds 1x` stops the run
+cap_given(words: list<text>): int := {
+	if not is_digits(words#3) { eprint("wap: ${words#2} takes a whole number, not ${words#3}"); exit(2) }
+	atol(words#3)
 }
 
 # what the command's action does with the command line, which holds the command's word no more (`wap run f.wap` is
@@ -102,6 +120,7 @@ ran(action: Action, words: list<text>) := match action {
 	Action.Build => built(words)
 	Action.Test => tested(words)
 	Action.Verify => verified(words)
+	Action.Format => formatted(words)
 	Action.Module => module_file_ran(words)
 	Action.Program => program_ran(words)
 }
@@ -113,7 +132,7 @@ console_started(words: list<text>) := {
 # a compiled module, `wap m.wasm [arguments…]`: run as it is, its arguments from its file on
 module_file_ran(words: list<text>) := {
 	global run_input = words#2
-	if not module_ran(module_loaded(words#2), followed(words#2, words, 3), words#2) { ended(word_at(STATUS_AT)) }
+	if not module_ran(module_loaded(words#2), followed(words#2, words, 3), words#2) { ended(memory_word(STATUS_AT)) }
 }
 # the program's module, compiled or kept from an earlier run; then run: the module, the program's arguments after its
 # name (source_named), which is its first
@@ -122,14 +141,14 @@ program_ran(words: list<text>) := {
 	global module_file = temporary_made(MODULE_TEMPLATE, MODULE_SUFFIX)
 	code = code_of(words#2)
 	module = program_module(words#2, compiler_hash(), code)
-	if module == 0 { ended(word_at(STATUS_AT)) }
+	if module == 0 { ended(memory_word(STATUS_AT)) }
 	named = source_named(words#2, code)
-	if not module_ran(module, followed(named, words, 3), named) { ended(word_at(STATUS_AT)) }
+	if not module_ran(module, followed(named, words, 3), named) { ended(memory_word(STATUS_AT)) }
 }
 
 # the library beside the compiler, told to the programs this run runs
 wap_library_folder_set(seed_part(LIBRARY_PART))
-words = capped(command_line())
+words = options_taken(command_line())
 # `wap` alone is the console
 command = if #words < 2 then row_doing(Action.Console) else command_of(words#2)
 ran(command.action, if command.words == "" then words else followed(words#1, words, 3))

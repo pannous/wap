@@ -1,7 +1,8 @@
 // The C entry of a native wap program (wap/extensions/native/build.sh): wasm2c's module of the program, named program,
 // run by lib/native/wasi.c, which answers its WASI calls over libc and holds main(); the glue build.sh writes with
-// glue.awk calls the C functions the program imports. A program of no GC value (no text, list or raise), as wasm2c
-// takes no GC type
+// glue.awk calls the C functions the program imports. wasm2c takes no GC type, so the program keeps its texts, lists,
+// enums and class instances in the memory (wap/extensions/native/memory.wap); maps, `any`, enums whose cases have
+// fields and try/catch stay GC values a native program cannot use
 #include <limits.h>
 #include <string.h>
 #include "program.h"
@@ -78,6 +79,11 @@ static void* epoch_ticking(void* engine) {
 static const char* library_folder = NULL;
 void wap_library_folder_set(const char* folder) { library_folder = strdup(folder); }
 const char* wap_library_folder(void) { return library_folder; }
+// the options of the run the native wap tells the programs it runs, a `name=value` line each (driver.wap options_taken),
+// which they read (lib/os.wap run_option); NULL till it is told
+static const char* run_options = NULL;
+void wap_run_options_set(const char* options) { run_options = strdup(options); }
+const char* wap_run_options(void) { return run_options; }
 // wap's seed folder built into this executable, a tar archive (build.sh --standalone: WAP_SEED its path, WAP_SEED_NAME
 // its name), which linking.wap unpacks once into the cache folder; a build without one names none, its seed folder
 // beside it

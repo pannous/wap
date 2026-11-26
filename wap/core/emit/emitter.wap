@@ -24,11 +24,13 @@
 #   emitter reads each form's `type` fact.
 
 use folder
+use "../../kernel/opcodes.wap"
 use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
 use "../type_notation.wap"
 use "../../kernel/forms.wap"
+use "../../kernel/primitives.wap"
 
 # the layout of never (core/type_notation.wap NEVER_TYPE), a byte no wasm value type has, so a layout list holds it
 # as it holds the others
@@ -58,7 +60,7 @@ emitted(program: Block, file: text, exports: list<text> = [], memory: MemoryLayo
 	m.tag_module = tag_module
 	p = Program(m, file)
 	statements = statements_in(program)
-	for name in host_calls(program) { p.host[name] = imported(m, WASI, name, HOST_FUNCTIONS[name]#1, HOST_FUNCTIONS[name]#2) }
+	for name in host_calls(program) { p.host[name] = imported(m, WASI, name, PRIMITIVES[name].takes, PRIMITIVES[name].gives) }
 	p.records = added_records(Records(), statements)
 	for call in foreign_calls(program) { foreign_imported(call, p) }
 	foreign_values_imported(statements, p)
@@ -75,12 +77,14 @@ emitted(program: Block, file: text, exports: list<text> = [], memory: MemoryLayo
 	functions_exported(statements, exports, p)
 	values_exported(program, exports, p)
 	exported(m, MEMORY_EXPORT, MEMORY_KIND, 0)
+	exported(m, TABLE_EXPORT, TABLE_KIND, 0)
+	slots_taken(m)
 	if m.tags { exported(m, RAISED_EXPORT, TAG_KIND, RAISED_TAG) }
 	m
 }
 
 # the host functions the primitives of a program call, each once, in the order met
-host_calls(program: Node) as list<text> := (RAISING_CALLS + primitives_in(program).filter(operation => HOST_FUNCTIONS.has(operation))).unique
+host_calls(program: Node) as list<text> := (RAISING_CALLS + primitives_in(program).filter(operation => PRIMITIVES.has(operation) and is_imported(PRIMITIVES[operation]))).unique
 primitives_in(n: Node) as list<text> := match n {
 	Prim(operation, arguments) => [text(operation)] + arguments.flat_map(primitives_in)
 	_ => direct_parts(n).flat_map(primitives_in)
@@ -108,7 +112,7 @@ class Program {
 	records: Records = Records()
 }
 # the layout of a type the program lays out, refused where it has none
-known_layout(type: Node, p: Program, at: Node? = ø) as list<int> := known_layout(type, p.m, p.records, at)
+known_layout(type: Term, p: Program, at: Node? = ø) as list<int> := known_layout(type, p.m, p.records, at)
 # a constant value read from the global it starts, one global for equal instructions
 constant_global(value: Code, p: Program) as Code := {
 	key = "${value.instructions}"
@@ -153,6 +157,7 @@ code(form: Node, p: Program, f: Frame) as Code := {
 		Try(body, handler) => try_code(form, body, handler, p, f)
 		If(condition, then_part, else_part) => if_code(form, code(condition, p, f), arm_code(form, then_part, p, f, last), arm_code(form, else_part, p, f, last), p)
 		While(condition, body) => while_code(form, condition, body, p, f)
+		For(place, count, body) => for_code(form, place, count, body, p, f)
 		Case(subject, arms) => case_code(form, code(subject, p, f), arms, p, f)
 		Return(value) => return_code(form, value, p, f)
 		Break() => Code(NEVER, instruction(BRANCH, [jump(form, f, Exit)]))
@@ -164,7 +169,7 @@ code(form: Node, p: Program, f: Frame) as Code := {
 		}
 		Get(subject, key) => read_code(layout(form, p), place_of(subject, key, p, f))
 		Record(name, fields, variants) => Code([], [])
-		Key(head, Op.None, List(items, Bracket.Curly, separator)) => instance_code(form, record_named(p.records, head) ?? refused(head, "an instance of a type the program declares no record for"), items, p, f)
+		Key(head, Op.None, List(items, Bracket.Curly, separator)) => instance_code(form, record_named(p.records, type_term(head)) ?? refused(head, "an instance of a type the program declares no record for"), items, p, f)
 		Prim(operation, arguments) => if text(operation) == FOREIGN then foreign_code(form, p, f) else if text(operation) == DATA_ADDRESS_PRIM then data_code(form, p) else primitive_code(form, operation, arguments.map(argument => code(argument, p, f)), p)
 		Fn(parameters, body) => function_value_code(form, p, f)
 		Symbol(name) => name_code(form, p, f)
@@ -195,7 +200,7 @@ if_code(form: Node, condition: Code, then_part: Code, else_part: Code, p: Progra
 try_code(form: Node, body: Node, handler: Node, p: Program, f: Frame) as Code := match handler {
 	Fn(parameters, handling) => {
 		tried = choice_fitted(form, labelled(f, [Other, Other, Caught], () => code(body, p, f)), body, p)
-		error = slotted(f, place_key(declared_name(items_of(parameters)#1)), known_layout(NODE_SYMBOL, p))
+		error = slotted(f, place_key(declared_name(items_of(parameters)#1)), known_layout(NODE_TERM, p))
 		instead = arm_code(form, handling, p, f)
 		type = typed_layout(form, p)
 		caught = BLOCK + text_layout(p.m) + try_table(block_type(type), raised_tag(p), 0, kept(tried, type)) + instruction(BRANCH, [1]) + END
@@ -232,6 +237,15 @@ while_code(form: Node, condition: Node, body: Node, p: Program, f: Frame) as Cod
 		Code([], test.instructions + I32_EQZ + instruction(BRANCH_IF, [jump(form, f, Exit)]) + dropped(code(body, p, f)) + instruction(BRANCH, [jump(form, f, Next)]))
 	})
 	Code([], looped(inner.instructions))
+}
+
+# A counted loop: the count held in the frame, the place counted up before the body, so `continue` moves on; it has no
+# value
+for_code(form: Node, place: Node, count: Node, body: Node, p: Program, f: Frame) as Code := {
+	last = slotted(f, "${place_of_code(form)} count", I64)
+	at = variable_of(place, p, f) ?? added_variable(place, I64, p, f)
+	inner = labelled(f, [Exit, Next], () => Code([], fetched(at) + local_get(last.index) + I64_GE_S + instruction(BRANCH_IF, [jump(form, f, Exit)]) + fetched(at) + i64_const(1) + I64_ADD + kept(at) + DROP + dropped(code(body, p, f)) + instruction(BRANCH, [jump(form, f, Next)])))
+	Code([], code(count, p, f).instructions + local_set(last.index) + i64_const(0) + kept(at) + DROP + looped(inner.instructions))
 }
 
 # The function left with a value, or with none for a bare return of a function that gives nothing (`return ø` of a
@@ -275,7 +289,7 @@ checked_cast(p: Program, wanted: list<int>, name: text, form: Node) as int := {
 cast_called(wanted: list<int>, name: text, form: Node, p: Program) as list<int> := text_literal(place_of_code(form), p.m).instructions + helper_call(p, "cast to ${wanted} ${name}", q => checked_cast(q, wanted, name, form))
 # where code was written, file:line:column
 place_of_code(form: Node) as text := "${file_of(form)}:${line_of(form)}:${column_of(form)}"
-items_fitted(type: Node, items: list<Node>, p: Program, f: Frame) as list<Code> := items.map(item => fitted(code(item, p, f), layout_of(type, p.m, p.records) ?? refused(item, "the emitter has no value layout for this type yet"), item, p))
+items_fitted(type: Term, items: list<Node>, p: Program, f: Frame) as list<Code> := items.map(item => fitted(code(item, p, f), layout_of(type, p.m, p.records) ?? refused(item, "the emitter has no value layout for this type yet"), item, p))
 # a function's value made to fit its signed result, a frame without one leaving it as it is
 signed_fit(given: Code, form: Node, f: Frame, p: Program) as Code := if valued(f.signed) then fitted(given, f.signed, form, p) else given
 # code emitted inside wasm's structured instructions, which open these labels

@@ -2,14 +2,17 @@
 # helper function of the module, built here from WASI's calls on the module's memory; primitives.wap names them.
 
 use folder
+use "../../kernel/opcodes.wap"
+use "../../kernel/primitives.wap"
 use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
 use "../type_notation.wap"
 use "../../kernel/forms.wap"
 
-# text_written writes through WASI's fd_write(fd, iovecs, count, written), which the native warp and the browser both
-# answer. Its memory: the iovec [address, length] at 0, the count written at 8, the text's bytes from 16.
+# A text is written through WASI's fd_write(fd, iovecs, count, written), which the native warp and the browser both
+# answer (types/host.wap write). Its memory: the iovec [address, length] at 0, the count written at 8, the text's bytes
+# from 16.
 STDERR = 2
 # the status a program that raised exits with
 RAISED_STATUS = 1
@@ -25,20 +28,13 @@ NEWLINE = 10
 IOVEC_ADDRESS = 0
 WRITTEN_ADDRESS = 8
 BYTES_ADDRESS = 16
+# the bytes of the widest value in the memory, an int's or a float's, which every address taken is a multiple of
+WIDEST_BYTES = 8
 
 # The host's functions (WASI) a module imports, before any function of its own: fd_write and proc_exit, which print
 # and every helper that raises call, into every module, first; the others only for the primitives that call them, a
-# primitive of a host function's own name (wap/types/host.wap)
+# primitive of a host function's own name (wap/types/host.wap), its types by its row (kernel/primitives.wap)
 RAISING_CALLS = ["fd_write", "proc_exit"]
-# each host function's parameter and result types
-HOST_FUNCTIONS = {
-	"fd_write": [[I32, I32, I32, I32], [I32]], "proc_exit": [[I32], []], "fd_read": [[I32, I32, I32, I32], [I32]],
-	"fd_seek": [[I32, I64, I32, I32], [I32]], "fd_close": [[I32], [I32]],
-	"args_sizes_get": [[I32, I32], [I32]], "args_get": [[I32, I32], [I32]],
-	"environ_sizes_get": [[I32, I32], [I32]], "environ_get": [[I32, I32], [I32]],
-	"path_open": [[I32, I32, I32, I32, I32, I64, I64, I32, I32], [I32]], "clock_time_get": [[I32, I64, I32], [I32]],
-	"fd_readdir": [[I32, I32, I32, I64, I32], [I32]], "random_get": [[I32, I32], [I32]], "poll_oneoff": [[I32, I32, I32, I32], [I32]]
-}
 # A function of another module, wasm's import, `strlen(s: int32): int := prim foreign("c", "strlen", s)`:
 # Prim(foreign, [module, name, arguments…]), its module and name texts the emitter reads, never code; its types those
 # of its arguments and value. Imported before any function of the module's own, as the host functions are
@@ -89,46 +85,26 @@ host(p: Program, name: text) as int := p.host[name] ?? refused(Text(name), "the 
 # its text and a line end written to stderr and the program ended
 raising_function(p: Program) as int := added_function(p.m, [text_layout(p.m)], [], [], if p.m.memory != ø then (p.m.memory!.raised)(host(p, "fd_write"), host(p, "proc_exit")) else local_get(0) + instruction(THROW, [raised_tag(p)]))
 # a raise no Try caught, its text on the stack: written to stderr and a line end, the program ended
-uncaught(p: Program) as list<int> := i64_const(STDERR) + i32_const(1) + helper_call(p, "text_written", writing_function) + i32_const(RAISED_STATUS) + instruction(CALL, [host(p, "proc_exit")])
+uncaught(p: Program) as list<int> := i64_const(STDERR) + i32_const(1) + runtime_call(p, TEXT_WRITING) + i32_const(RAISED_STATUS) + instruction(CALL, [host(p, "proc_exit")])
 # a raise of the text on the stack from inside a helper
 raise_called(p: Program) as list<int> := helper_call(p, "raise_text", raising_function) + UNREACHABLE
 # a raise of a message from inside a helper
 raised(message: text, p: Program) as list<int> := text_literal(message, p.m).instructions + raise_called(p)
 # a raise of a message and the text the code `ending` gives, joined
-raised_with(message: text, ending: list<int>, p: Program) as list<int> := text_literal(message, p.m).instructions + ending + helper_call(p, "text_joined", joining_function) + raise_called(p)
-# The helper of text_placed: a text's bytes copied into the memory from BYTES_ADDRESS, the memory grown to hold them
-# and a line end. Its locals: 0 the text, 1 its length, 2 a count.
-placing_function(p: Program) as int := {
-	text_type_index = text_type(p.m)
-	the_text = local_get(0)
-	length = local_get(1)
-	count = local_get(2)
-	measured = the_text + ARRAY_LEN + local_set(1)
-	copied = counted(2, length, i32_const(BYTES_ADDRESS) + count + I32_ADD + the_text + count + instruction(ARRAY_GET_U, [text_type_index]) + instruction(I32_STORE8, [0, 0]))
-	added_function(p.m, [nullable(text_type_index)], [], [I32, I32], measured + memory_grown(length, 2) + copied)
-}
-# The helper of text_written, what print, eprint, an uncaught raise and the file words write with: a text placed, a
-# line end after it when asked, written to a file through fd_write's one iovec, again from where it stopped until every
-# byte is taken; a write that fails or takes none traps. Its locals: 0 the text, 1 the file, 2 whether a line end
-# follows, 3 the count of bytes to write, 4 the count written.
-# DEBT: A failed write traps without naming itself: a write that fails or takes none (closed stdout, `| head`) stops
-#   with wasm's bare "unreachable", not a raise. A raise here pulls its text and the raise helper into every program
-#   (hello 432 -> 476 B); paid off when a raise from a helper costs a program nothing it does not use.
-writing_function(p: Program) as int := {
-	length = local_get(3)
-	done = local_get(4)
-	moved = i32_const(WRITTEN_ADDRESS) + instruction(I32_LOAD, [2, 0])
-	placed = local_get(0) + helper_call(p, "text_placed", placing_function) + local_get(0) + ARRAY_LEN + local_set(3)
-	line_end = local_get(2) + if_block(i32_const(BYTES_ADDRESS) + length + I32_ADD + i32_const(NEWLINE) + instruction(I32_STORE8, [0, 0]) + length + i32_const(1) + I32_ADD + local_set(3))
-	iovec = i32_const(IOVEC_ADDRESS) + i32_const(BYTES_ADDRESS) + done + I32_ADD + instruction(I32_STORE, [2, 0]) + i32_const(IOVEC_ADDRESS + 4) + length + done + I32_SUB + instruction(I32_STORE, [2, 0])
-	written = int_local(1) + i32_const(IOVEC_ADDRESS) + i32_const(1) + i32_const(WRITTEN_ADDRESS) + instruction(CALL, [host(p, "fd_write")])
-	failed = written + moved + I32_EQZ + I32_OR + if_block(UNREACHABLE)
-	rest = looped(done + length + I32_GE_U + instruction(BRANCH_IF, [1]) + iovec + failed + done + moved + I32_ADD + local_set(4) + instruction(BRANCH, [0]))
-	added_function(p.m, [text_layout(p.m), I64, I32], [], [I32, I32], placed + line_end + rest)
-}
+raised_with(message: text, ending: list<int>, p: Program) as list<int> := text_literal(message, p.m).instructions + ending + runtime_call(p, TEXT_JOINING) + raise_called(p)
 # The helper of memory_held: the memory grown to hold that many bytes from BYTES_ADDRESS. Its locals: 0 the count, 1
 # the pages short.
-memory_holding_function(p: Program) as int := added_function(p.m, [I64], [], [I32], memory_grown(int_local(0), 1))
-# the memory grown to hold that many bytes from BYTES_ADDRESS and a line end, the scratch local holding the pages
-# short: (bytes + length + line end + a page - 1) ÷ page - memory.size, grown when positive
-memory_grown(length: list<int>, scratch: int) as list<int> := i32_const(BYTES_ADDRESS + 1 + PAGE_BYTES - 1) + length + I32_ADD + i32_const(PAGE_BYTES) + I32_DIV_U + instruction(MEMORY_SIZE, [0]) + I32_SUB + instruction(LOCAL_TEE, [scratch]) + i32_const(0) + I32_GT_S + if_block(local_get(scratch) + instruction(MEMORY_GROW, [0]) + DROP)
+memory_holding_function(p: Program) as int := added_function(p.m, [I64], [], [I32], memory_grown(BYTES_ADDRESS + 1, int_local(0), 1))
+# The helper of memory_taken: the address of that many new zero bytes past the memory the module started with, which
+# grows; never freed. Each address is a multiple of the widest field's bytes, so C reads any struct there. Its global:
+# where the next bytes go, 0 till the first are taken; its locals: 0 the count, 1 the address, 2 the pages short.
+memory_taking_function(p: Program) as int := {
+	end = added_global(p.m, I32, MUTABLE, i32_const(0))
+	reached = instruction(GLOBAL_GET, [end])
+	started = reached + I32_EQZ + if_block(instruction(MEMORY_SIZE, [0]) + i32_const(PAGE_BYTES) + I32_MUL + instruction(GLOBAL_SET, [end]))
+	taken = reached + local_set(1) + reached + local_get(0) + I32_ADD + i32_const(WIDEST_BYTES - 1) + I32_ADD + i32_const(WIDEST_BYTES) + I32_DIV_U + i32_const(WIDEST_BYTES) + I32_MUL + instruction(GLOBAL_SET, [end])
+	added_function(p.m, [I32], [I32], [I32, I32], started + taken + memory_grown(0, reached, 2) + local_get(1))
+}
+# the memory grown to hold that many bytes from an address, the scratch local holding the pages short:
+# (address + length + a page - 1) ÷ page - memory.size, grown when positive
+memory_grown(from: int, length: list<int>, scratch: int) as list<int> := i32_const(from + PAGE_BYTES - 1) + length + I32_ADD + i32_const(PAGE_BYTES) + I32_DIV_U + instruction(MEMORY_SIZE, [0]) + I32_SUB + instruction(LOCAL_TEE, [scratch]) + i32_const(0) + I32_GT_S + if_block(local_get(scratch) + instruction(MEMORY_GROW, [0]) + DROP)

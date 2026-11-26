@@ -2,6 +2,7 @@
 # pattern taken out of the value, and a case's own value, its tag and fields.
 
 use folder
+use "../../kernel/opcodes.wap"
 use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
@@ -63,13 +64,13 @@ field_parts(pattern: Node, value: list<int>, p: Program) as list<Part> := match 
 	_ => []
 }
 # A list pattern's parts: its items by their places, the rest the items the others leave as a new list
-item_parts(items: list<Node>, value: list<int>, type: Node, p: Program) as list<Part> := {
+item_parts(items: list<Node>, value: list<int>, type: Term, p: Program) as list<Part> := {
 	fixed = #fixed_items(items)
 	rest_at = (1 to #items).find(at => rest_named(items#at) != ø) ?? #items + 1
 	(1 to #items).map(at => item_part(items#at, at, fixed, rest_at, #items, value, type, p))
 }
 # an item by its place, counted from the end after the rest; or the rest, the items between those before and after it
-item_part(item: Node, at: int, fixed: int, rest_at: int, count: int, value: list<int>, type: Node, p: Program) as Part := {
+item_part(item: Node, at: int, fixed: int, rest_at: int, count: int, value: list<int>, type: Term, p: Program) as Part := {
 	rest = rest_named(item)
 	place = if at < rest_at then i32_const(at - 1) else value + count_in(type, ø, p) + i32_const(count - at + 1) + I32_SUB
 	if rest == ø then Part(item, value + item_read(type, ø, place, p), item_layout(type, p)) else Part(rest, value + i64_const(rest_at - 1) + value + count_in(type, ø, p) + i32_const(fixed) + I32_SUB + I64_EXTEND_I32_U + typed_helper_called(LIST_SLICE, type, p), list_layout(type, p))
@@ -112,7 +113,7 @@ names_held(pattern: Node, value: list<int>, type: list<int>, p: Program, f: Fram
 class Seen { before: list<int>; value: list<int> }
 seen(pattern: Node, value: list<int>, p: Program, f: Frame) as Seen := {
 	if not is_case(case_name(pattern)) or text(case_name(pattern)) == META_CASE or record_name(enum_declaring(p.records, case_name(pattern))) != NODE_TYPE { return Seen([], value) }
-	slot = slotted(f, "node seen in slot ${#f.slots}", known_layout(NODE_SYMBOL, p)).index
+	slot = slotted(f, "node seen in slot ${#f.slots}", known_layout(NODE_TERM, p)).index
 	node = local_get(slot)
 	# the helper called only for a node in a Meta, most nodes being in none
 	unwrapped = BLOCK + VOID_BLOCK + meta_left(node, 0, p) + node + helper_call(p, "meta_unwrapped", meta_unwrapped_function) + local_set(slot) + END
@@ -124,7 +125,7 @@ meta_unwrapped_function(p: Program) as int := {
 	meta = case_struct_of(node, node_case(node, META_CASE), p.m, p.records)
 	not_meta = meta_left(local_get(0), 1, p)
 	inner = local_get(0) + case_field_read(meta, node, 1) + local_set(0)
-	layout = known_layout(NODE_SYMBOL, p)
+	layout = known_layout(NODE_TERM, p)
 	added_function(p.m, [layout], [layout], [], looped(not_meta + inner + instruction(BRANCH, [0])) + local_get(0))
 }
 # the branch out of the block `depth` levels up unless the node is in a Meta: ø or any other case leaves
@@ -145,7 +146,7 @@ case_value_code(form: Node, called: Node, arguments: list<Node>, p: Program, f: 
 }
 # a field's constant instructions, ø for a value that is no constant or needs fitting
 fixed_filled(field: Node, value: Node, p: Program) as list<int>? := {
-	given = constant(value) ?? fixed_text(value, p.m) ?? return ø
+	given = constant(value, p.m) ?? fixed_text(value, p.m) ?? return ø
 	if fitted(given, known_layout(field_declared(field), p), value, p).instructions == given.instructions then given.instructions else ø
 }
 # The helper turning a raise's text into the Node a Try's handler takes, Error(Text(text)), as case_value_code builds
@@ -154,10 +155,10 @@ error_node_function(p: Program) as int := {
 	node = node_record(p, "a Try's handler takes the raise as a Node")
 	tag = word => i32_const(declared_tag(node_case(node, word), p))
 	made = word => instruction(STRUCT_NEW, [case_struct_of(node, node_case(node, word), p.m, p.records)])
-	added_function(p.m, [text_layout(p.m)], [known_layout(NODE_SYMBOL, p)], [], tag(ERROR_CASE) + tag(TEXT_CASE) + local_get(0) + made(TEXT_CASE) + made(ERROR_CASE))
+	added_function(p.m, [text_layout(p.m)], [known_layout(NODE_TERM, p)], [], tag(ERROR_CASE) + tag(TEXT_CASE) + local_get(0) + made(TEXT_CASE) + made(ERROR_CASE))
 }
 # the program's Node record, which what `why` names needs
-node_record(p: Program, why: text) as Record := record_named(p.records, NODE_SYMBOL) ?? refused(Text(NODE_TYPE), why + ", and the program declares no Node")
+node_record(p: Program, why: text) as Record := record_named(p.records, NODE_TERM) ?? refused(Text(NODE_TYPE), why + ", and the program declares no Node")
 node_case(node: Record, word: text) as Node := {
 	named = cases_of(node).filter(case => text(case_name(case)) == word)
 	if named is empty then refused(Text(word), "the Node enum has no case of this name") else named#1

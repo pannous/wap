@@ -2,6 +2,8 @@
 # function values and their captures; calls.
 
 use folder
+use "../../kernel/opcodes.wap"
+use "../../kernel/primitives.wap"
 use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
@@ -33,6 +35,8 @@ function_placed(form: Define, p: Program) as Placed := match form { Define(name,
 	if placed_by_key(p.functions, place_key(declared_name(name))) != ø { refused(name, "the typing stage wrote two definitions of this function for one type") }
 	p.functions += [Placed(place_key(declared_name(name)), reserved_function(p.m, types, if valued(signed) then [signed] else []), signed, types)]
 	named_function(p.m, p.functions.last.index, header_line(form))
+	word = runtime_word(text(declared_name(name)), items_of(parameters).map(type_given))
+	if word != ø { p.helpers[word!] = p.functions.last.index }
 	p.functions.last
 } }
 # A function's body: its parameters the first slots of a new frame, its body's value its result
@@ -61,21 +65,21 @@ in_place_function(key: text, p: Program) as Placed? := {
 # The layout of a function's result as its signature, which the typing stage writes on its name, says: none for ø
 SIGNATURE_LESS = "this function reached the emitter without its signature"
 # a typed function's parameter and result types, as typing signed it
-signed_parts(name: Node) as FunctionType := function_parts(fact_of(name, SIGNATURE)) ?? refused(name, SIGNATURE_LESS)
+signed_parts(name: Node) as FunctionType := function_parts(fact_type(fact_of(name, SIGNATURE))) ?? refused(name, SIGNATURE_LESS)
 signed_result(name: Node, p: Program) as list<int> := result_layout(signed_parts(name).result, p, name)
 # A value of a type where any holds it: the GC type it is held as, a plain value's box or its own reference type, and
 # the instructions that take the value out once cast
 class Held { type_index: int, taken: list<int> }
 # at is the code that asks
-held_in_any(type: Node, at: Node, p: Program) as Held := {
-	if text(type) in BOXED_WORDS {
-		box = box_index(p.m, text(type))
+held_in_any(type: Term, at: Node, p: Program) as Held := {
+	if type_text(type) in BOXED_WORDS {
+		box = box_index(p.m, type_text(type))
 		return Held(box, instruction(STRUCT_GET, [box, 0]))
 	}
 	Held(referenced(layout_of(type, p.m, p.records) ?? []) ?? refused(at, "a value any holds is tested for references and plain values, not this type"), [])
 }
 # a value any holds, known of a type: cast to it, a plain one taken out of its box
-held_value(type: Node, at: Node, p: Program) as list<int> := {
+held_value(type: Term, at: Node, p: Program) as list<int> := {
 	held = held_in_any(type, at, p)
 	heap_instruction(REF_CAST, held.type_index) + held.taken
 }
@@ -96,7 +100,7 @@ parameter_type(parameter: Node, function: Node, p: Program) as list<int> := know
 # A call of a function the program or the types module defined, its arguments of its parameters' types
 call_code(form: Node, called: Node, arguments: list<Node>, p: Program, f: Frame, last: bool = no) as Code := {
 	if is_case(called) { return case_value_code(form, called, arguments, p, f) }
-	if (not called is symbol or not names_function(called)) and function_parts(fact_of(called, TYPE)) != ø { return value_call_code(form, called, arguments, p, f) }
+	if (not called is symbol or not names_function(called)) and function_parts(fact_type(fact_of(called, TYPE))) != ø { return value_call_code(form, called, arguments, p, f) }
 	kept = if names_function(called) and p.in_place.has(defining_key(called)) then in_place_body(p.in_place[defining_key(called)]) else ø
 	if kept is Prim { return in_place_code(kept, arguments, p, f) }
 	function = called_function(form, called, p)
@@ -120,11 +124,16 @@ in_place_code(kept: Prim, arguments: list<Node>, p: Program, f: Frame) as Code :
 # its primitive, typed as the function's signature says (a generic body's own type is its type variable)
 in_place_body(definition: Define) as Node := match definition { Define(name, parameters, body) => {
 	result = signed_parts(declared_name(name)).result
-	if text(result) == EMPTY_TYPE then body else with_fact(body, TYPE, result)
+	if result == EMPTY_TERM then body else with_fact(body, TYPE, type_fact(result))
 } }
 # whether a value of one wasm type may be passed where another is taken: the same type, code that never finishes, or a
 # list where any list is taken (a list<T> given to a `list` parameter, its type extending the list base)
-passes(given: list<int>, taken: list<int>, m: WasmModule) as bool := given == taken or given == NEVER or (taken == nullable(list_base(m)) and given#1 == NULLABLE_REFERENCE)
+passes(given: list<int>, taken: list<int>, m: WasmModule) as bool := given == taken or given == NEVER or (taken == nullable(list_base(m)) and given#1 == NULLABLE_REFERENCE) or supertype_passes(given, taken, m)
+# a reference to a struct passes where one to its supertype is taken, a class's instance where the class it extends is
+supertype_passes(given: list<int>, taken: list<int>, m: WasmModule) as bool := {
+	sub = m.supertypes.keys.find(at => given.drop(1) == signed(at)) ?? return no
+	passes([given#1] + signed(m.supertypes[sub]), taken, m)
+}
 called_function(form: Node, called: Node, p: Program) as Placed := {
 	if not names_function(called) { refused(form, "the emitter calls functions, not a ${binding_of(called)} yet") }
 	placed_for(p.functions, called) ?? refused(form, "this function was never placed")
@@ -170,5 +179,5 @@ value_header(name: Node) as text := "${name}: ${type_text(type_of(name))}"
 # the header line of a function's instance, with the types typing gave it
 header_line(definition: Define) as text := match definition { Define(name, parameters, body) => {
 	result = signed_parts(declared_name(name)).result
-	signature_text(declared_name(name), items_of(parameters), if text(result) == EMPTY_TYPE then ø else result, EXPORT_ARROW)
+	signature_text(declared_name(name), items_of(parameters), if result == EMPTY_TERM then ø else result, EXPORT_ARROW)
 } }

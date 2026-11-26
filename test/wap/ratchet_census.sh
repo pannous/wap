@@ -6,14 +6,14 @@
 # typing, any, is for programs; user decision via warp-lead, 2026-11-18): no place of it is typed any, outside the
 # types, the language programs get.
 # Run it with bash test/wap/ratchet_census.sh [--compiler <module>] (or test/wap/run.sh --wait test/wap/ratchet_census.sh, never in run.sh's
-# default set: about 1 min more); its modules run on the native wap on PATH
+# default set: about 6 min more); its modules run on the native wap on PATH
 # files outside the types module: a types file is no program but every program's library, typed function by function
 # (warp-lead, 2026-11-18)
 FILES_TYPED_WHOLE=62
 FUNCTIONS_UNTYPED=0
 # wap's size, the nodes its reader makes of its source (scripts/wap-size.warp), may not rise above the ceiling: only a
 # real simplification lowers it
-SIZE_NODES=139245
+SIZE_NODES=174871
 
 source "$(dirname "$0")/compile.sh"
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"

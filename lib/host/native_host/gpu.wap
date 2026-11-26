@@ -12,6 +12,7 @@ use foreign
 use c
 use bits
 use callbacks
+use color
 use "platform.wap"
 use "window.wap"
 
@@ -109,6 +110,8 @@ ERROR_FILTER_VALIDATION := 1
 STYPE_WGSL := 2
 STYPE_METAL_LAYER := 4
 STYPE_WINDOWS_HWND := 5
+STYPE_XLIB_WINDOW := 6
+STYPE_WAYLAND_SURFACE := 7
 FORMAT_RGBA8 := 22
 FORMAT_BGRA8 := 27
 BUFFER_MAP_READ := 1
@@ -161,8 +164,8 @@ COPY_TEXTURE := 32
 COPY_BUFFER := 24
 COPY_LAYOUT := 16
 EXTENT := 12
-METAL_SOURCE := 24
-WINDOWS_SOURCE := 32
+# every system's surface source: the chain, then two addresses (Metal's layer uses the first)
+SURFACE_SOURCE := 32
 SURFACE_DESCRIPTOR := 24
 SURFACE_CONFIGURATION := 64
 SURFACE_TEXTURE := 24
@@ -177,19 +180,19 @@ class Stride { element: text, bytes: int }
 FIELD_STRIDES := [Stride("f32", 4), Stride("i32", 4), Stride("u32", 4), Stride("atomic<", 4), Stride("vec2", 8), Stride("vec3", 16), Stride("vec4", 16)]
 FIELD_KEY := "field "
 
-# wgpu-native's functions, and C's copies: memcpy of a list's int32 cells, memmove of C memory
-# A callback info is 40 bytes given by value (`bytes<40>`), as C takes the struct.
+# wgpu-native's functions, and C's copies: a list's int32 cells written into C memory, C memory copied
+# A callback info is 40 bytes given by value (`40⋅byte`), as C takes the struct.
 wgpuCreateInstance(descriptor: handle): handle from 'wgpu_native'
-wgpuInstanceRequestAdapter(instance: handle, options: handle, info: bytes<40>): i64 from 'wgpu_native'
+wgpuInstanceRequestAdapter(instance: handle, options: handle, info: 40⋅byte): i64 from 'wgpu_native'
 wgpuInstanceProcessEvents(instance: handle): ø from 'wgpu_native'
 wgpuInstanceCreateSurface(instance: handle, descriptor: handle): handle from 'wgpu_native'
-wgpuAdapterRequestDevice(adapter: handle, descriptor: handle, info: bytes<40>): i64 from 'wgpu_native'
+wgpuAdapterRequestDevice(adapter: handle, descriptor: handle, info: 40⋅byte): i64 from 'wgpu_native'
 wgpuAdapterHasFeature(adapter: handle, feature: i32): i32 from 'wgpu_native'
 wgpuDeviceGetQueue(device: handle): handle from 'wgpu_native'
 # (its answer says whether the queue is empty, no status: polling only drives the callbacks and frees)
 wgpuDevicePoll(device: handle, wait: i32, index: handle): i32 from 'wgpu_native'
 wgpuDevicePushErrorScope(device: handle, filter: i32): ø from 'wgpu_native'
-wgpuDevicePopErrorScope(device: handle, info: bytes<40>): i64 from 'wgpu_native'
+wgpuDevicePopErrorScope(device: handle, info: 40⋅byte): i64 from 'wgpu_native'
 wgpuDeviceCreateShaderModule(device: handle, descriptor: handle): handle from 'wgpu_native'
 wgpuDeviceCreateRenderPipeline(device: handle, descriptor: handle): handle from 'wgpu_native'
 wgpuDeviceCreateComputePipeline(device: handle, descriptor: handle): handle from 'wgpu_native'
@@ -208,7 +211,7 @@ wgpuComputePipelineGetBindGroupLayout(pipeline: handle, group: i32): handle from
 wgpuBindGroupLayoutRelease(layout: handle): ø from 'wgpu_native'
 wgpuBindGroupRelease(group: handle): ø from 'wgpu_native'
 wgpuBufferRelease(buffer: handle): ø from 'wgpu_native'
-wgpuBufferMapAsync(buffer: handle, mode: i64, offset: i64, size: i64, info: bytes<40>): i64 from 'wgpu_native'
+wgpuBufferMapAsync(buffer: handle, mode: i64, offset: i64, size: i64, info: 40⋅byte): i64 from 'wgpu_native'
 wgpuBufferGetConstMappedRange(buffer: handle, offset: i64, size: i64): handle from 'wgpu_native'
 wgpuBufferUnmap(buffer: handle): ø from 'wgpu_native'
 wgpuQueueWriteBuffer(queue: handle, buffer: handle, offset: i64, data: handle, size: i64): ø from 'wgpu_native'
@@ -246,8 +249,8 @@ wgpuSurfacePresent(surface: handle): i32 from 'wgpu_native'
 wgpuSurfaceRelease(surface: handle): ø from 'wgpu_native'
 wgpuDeviceCreateSampler(device: handle, descriptor: handle): handle from 'wgpu_native'
 wgpuSamplerRelease(sampler: handle): ø from 'wgpu_native'
-memcpy(into: handle, source: cells<i32>, size: length): handle from 'c'
-memmove(into: handle, source: handle, size: i64): handle from 'c'
+set_field_bytes(struct: handle, offset: i64, data: list<int32>, size: length): ø from 'c'
+bcopy(source: handle, into: handle, size: i64): ø from 'c'
 fopen(path: text, mode: text): handle from 'c'
 fread(into: handle, size: i64, n: i64, file: handle): i64 from 'c'
 fclose(file: handle): i32 from 'c'
@@ -453,8 +456,7 @@ leading(t: text, allowed: text): text := {
 
 # --- pictures: an image among paint's values (anything with width, height and pixels, 0xAARRGGBB each, a pixel
 # without an alpha byte opaque) is a texture_2d<f32> the shader reads as `values.<name>`: textureSampleLevel(
-# values.channel0, bilinear_repeat, uv, 0.0), textureDimensions(values.channel0)
-class Picture { width: int, height: int, pixels: list<int> }
+# values.channel0, bilinear_repeat, uv, 0.0), textureDimensions(values.channel0); color's Picture
 # bgra8unorm: a 0xAARRGGBB word is its bytes B, G, R, A in memory, so the pixels go in as they are
 PICTURE_FORMAT := FORMAT_BGRA8
 ALPHA_FROM := 16777216
@@ -498,10 +500,10 @@ pixels_written(texture: int, pixels: int, width: int, height: int) := {
 	free(rows)
 }
 # a picture's pixels as C's bytes, each opaque that has no alpha byte
-picture_staged(pixels: list<int>): int := {
+picture_staged(pixels: list<Color>): int := {
 	staged = calloc(#pixels, PIXEL_BYTES)
 	for i in 0 .. #pixels {
-		pixel = pixels[i]
+		pixel = pixels[i].argb
 		set_field_i32(staged, i * PIXEL_BYTES, if pixel >= ALPHA_FROM then pixel else pixel + OPAQUE_ALPHA)
 	}
 	staged
@@ -796,7 +798,7 @@ cells_kept(name: text, cells: list<int>, usage: int): int := cells_written(kept_
 cells_written(buffer: int, cells: list<int>): int := {
 	size = #cells * 4
 	staged = calloc(1, size)
-	memcpy(staged, cells)
+	set_field_bytes(staged, 0, [int32(cell) for cell in cells])
 	wgpuQueueWriteBuffer(gpu.queue, buffer, 0, staged, size)
 	free(staged)
 	buffer
@@ -1397,7 +1399,7 @@ host_gpu_render(shader: text, width: int, height: int, values: any): list<int> :
 pixel_words(memory: int, width: int, height: int, stride: int): list<int> := [color_word(field_u32(memory, row * stride + col * PIXEL_BYTES)) for row in 0 .. height for col in 0 .. width]
 # a pixel's RGBA bytes read as one little-endian word, as a color word (alpha, red, green, blue from the highest byte):
 # red and blue change places
-color_word(rgba: int): int := both_bits(rgba, ALPHA_GREEN) + (both_bits(rgba, BYTE) << 16) + both_bits(shift_right(rgba, 16), BYTE)
+color_word(rgba: int): int := (rgba & ALPHA_GREEN) + ((rgba & BYTE) << 16) + ((rgba >>> 16) & BYTE)
 # a readback buffer and the address of its rows, mapped until the caller unmaps the buffer; the address 0 and
 # gpu.failure where they cannot be read
 class Readback { buffer: int, mapped: int }
@@ -1436,7 +1438,7 @@ shader_painted(shader: text, width: int, height: int, values: any, pixels: int):
 	mapped = read.mapped
 	if mapped != 0 {
 		stride = copy_stride(width)
-		for row in 0 .. height { memmove(pointer_moved(pixels, row * width * PIXEL_BYTES), pointer_moved(mapped, row * stride), width * PIXEL_BYTES) }
+		for row in 0 .. height { bcopy(pointer_moved(mapped, row * stride), pointer_moved(pixels, row * width * PIXEL_BYTES), width * PIXEL_BYTES) }
 		wgpuBufferUnmap(read.buffer)
 	}
 	drawing_released(drawing)
@@ -1449,13 +1451,19 @@ said_failed(what: text): int := {
 	-1
 }
 
-# what a surface is made for: the window's Metal layer on macOS; on Windows its HWND, with the program's module
+# what a surface is made for: the window's system and its two addresses there (window.wap window_addresses)
+source_type(system: WindowSystem): int := match system {
+	Metal => STYPE_METAL_LAYER
+	Win32 => STYPE_WINDOWS_HWND
+	Wayland => STYPE_WAYLAND_SURFACE
+	X11 => STYPE_XLIB_WINDOW
+}
 window_source(layer: int): int := {
-	windows = on_windows()
-	source = struct_of(if windows then WINDOWS_SOURCE else METAL_SOURCE)
-	set_field_i32(source, 8, if windows then STYPE_WINDOWS_HWND else STYPE_METAL_LAYER)
-	if windows { set_field_pointer(source, 16, GetModuleHandleA(0)) }
-	set_field_pointer(source, if windows then 24 else 16, layer)
+	source = struct_of(SURFACE_SOURCE)
+	set_field_i32(source, 8, source_type(window_system()))
+	addresses = window_addresses(layer)
+	set_field_i64(source, 16, addresses[0])
+	set_field_i64(source, 24, addresses[1])
 	source
 }
 # --- the window's surface (window.wap's Metal layer): what is shown there stays on the GPU. As big as the window's
@@ -1598,6 +1606,15 @@ host_pixels_shown(pixels: int, width: int, height: int): int := {
 	wgpuTextureRelease(picture)
 	if shown then 1 else said_failed(WINDOW_PAINT)
 }
+# a picture shown in the window: 1, 0 with no window open, -1 failed (why on standard error)
+SHOWN_PICTURE := "shown"
+picture_shown(picture: Picture): int := {
+	layer = painting_layer(picture.width, picture.height)
+	if layer == 0 { return 0 }
+	texture = picture_texture(SHOWN_PICTURE, picture)
+	if texture == 0 or not picture_presented(wgpuDeviceCreateCommandEncoder(gpu.device, 0), texture, layer, picture.width, picture.height) { return said_failed(WINDOW_PAINT) }
+	1
+}
 # the last painting shown again, at the window's size now, as the window comes into sight or changes size
 shown_again() := {
 	if gpu.shown_picture == 0 { return }
@@ -1686,7 +1703,7 @@ cell_read(cell: Cell, mapped: int, index: int): any := match cell {
 array_buffer(array: StorageArray): int := cells_kept(array.name, array_cells(array), BUFFER_STORAGE + BUFFER_COPY_SRC)
 array_cells(array: StorageArray): list<int> := {
 	cells = [cell_bits(array.cell, x) for x in array.given]
-	if array.cell == F16 then halves_paired(cells) else cells
+	if array.cell == Cell.F16 then halves_paired(cells) else cells
 }
 # two-byte cells two to a word, the first in the low half, as WGSL's array<f16> holds them
 halves_paired(halves: list<int>): list<int> := [halves[2 * w] + (if 2 * w + 1 < #halves then halves[2 * w + 1] << HALF_BITS else 0) for w in 0 .. (#halves + 1) /! 2]

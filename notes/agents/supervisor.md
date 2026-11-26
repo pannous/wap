@@ -40,7 +40,7 @@ the team, crash resume), notes/roles.md (what the other roles do).
 
 ## Team
 - Start of day: `tmux ls | grep warp-` and ListAgents; missing services: `notes/agents/start.sh` (integrator,
-  interviewer, fixer). At most TWO feature workers at once.
+  interviewer, fixer). At most three workers besides the integrator and the interviewer (user 2026-11-24, token cost); no session runs on Fable or a 1M window: Fable only as the advisor subagent. Sessions start lean (claude-remote.sh: no MCP, no plugins).
 - Context (user 2026-11-24): every session runs with the full auto-compact window (global settings, 400k); nobody
   lowers it for the project. A low window only for a one-off session, which is closed when its task is done. Instead
   of shrinking context, retire long-running workers regularly at a card boundary (state on the card) and respawn them.
@@ -72,9 +72,14 @@ the team, crash resume), notes/roles.md (what the other roles do).
 - Quick capability checks: `/Users/me/dev/bin/warp --no-window 'use math; dir(math)'`; never rebuild for it.
 - Any extensive investigation (more than a few lookups: reading sources, profiles, crates, history) goes to an
   agent, a background subagent or a worker session; I keep only the quick answer from what is known and its verdict.
+- Daily audit (user 2026-11-25): once a day `notes/agents/start.sh auditor` (notes/agents/auditor.md) starts a max-effort
+  session that writes notes/audit/<date>.md and stops; it counts against no worker limit. When it reports, kill its
+  tmux by exact name, turn the accepted items into cards (core and kernel rewrites go to wap-interviewer).
 - Never assign @copilot. Releases (version bump, tag, tap formula) need no approval; nothing waits for brew.
 
-- Focus (user 2026-11-22): only wap. Warp Vitals is off: nobody runs scripts/vitals.py or republishes its page.
+- Focus (user 2026-11-22): only wap. Warp Vitals is off, wap Vitals stays (user 11-23): every watch round and each wap
+  landing run `python3 scripts/vitals.py` (in warp) and republish only data/vitals/wap-vitals.html to
+  https://claude.ai/code/artifact/8b33d965-01c9-4a3b-9f75-d4597da4804e.
 - Everything is named wap (user 2026-11-22): sessions wap-<role>/wap-<card>, start.sh and the watch
   scripts (urgent-card-watch, integrator-watch) use those names, the role files live in the wap repo and sessions start
   there (card fleet-wap-names on the wap board).
@@ -89,7 +94,8 @@ the team, crash resume), notes/roles.md (what the other roles do).
   Everything else still goes to wap-interviewer with the old and new lines.
 - Core and extension changes (user 2026-11-22): no rubber
   stamps. Each one is discussed with the user (shape, core lines, why no hook or lib would do) before it lands; an
-  Interviewer OK alone does not land it.
+  Interviewer OK alone does not land it. A small overrun within an approved estimate's margin is decided by
+  wap-interviewer and logged on the card (user 2026-11-24); it does not go to the user again.
 
 ## Team handover (reboot, shutdown, "handover")
 1. Tell every running session (ListAgents; tmux warp-*) to push its branch, write its handover onto

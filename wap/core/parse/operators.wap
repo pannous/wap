@@ -21,22 +21,36 @@ use "../language.wap"
 # the word of a chain of comparisons
 CHAINED = "comparison_chain"
 
-# the fact keeping a compound assignment's written spelling
-COMPOUND = "compound"
 # the operator a colon closes: c ? a : b
 CHOICE = "?"
 # the word an operator read on one side of its operand writes on the other, `2 ..` is (Call .. 2 ø)
 OPEN_SIDE = "ø"
 
-# the program with its operator phrases read, after its own declarations joined the table (core/parse/operator_table.wap),
-# wherever they stand; its alias lines taken out, or kept for format to write back
-operated_program(language: Language, program: Node, aliases_kept: bool = no) as Node := {
+# the program with its operator phrases read statement by statement, each after the declarations above it and its own
+# joined the grammar (core/parse/operator_table.wap); its alias lines taken out, or kept for format to write back
+operated_program(language: Language, program: Node, aliases_kept: bool = no) as Node := match program {
+	List(lines, Bracket.None, Separator.Newline) => refitted(List((1 to #lines).flat_map(at => statement_operated(language, lines, at, aliases_kept)), Bracket.None, Separator.Newline), program)
+	_ => { declarations_read(language, program); operated(language, program) }
+}
+# a program's statement read with the operators and aliases declared above it and by itself; an operator it declares
+# that a statement above it already spells is refused there
+statement_operated(language: Language, lines: list<Node>, at: int, aliases_kept: bool) as list<Node> := {
+	known = #language.grammar.operators
+	declarations_read(language, lines#at)
+	for operator in language.grammar.operators[known ..] { declared_below(lines[.. at - 1], operator.spelling) }
+	alias_line_taken(language, lines#at, aliases_kept).map(taken => operated(language, taken))
+}
+declared_below(above: list<Node>, spelling: text) := {
+	used = above.flat_map(nodes_in).find(part => part == symbol(spelling)) ?? return
+	refused(used, "${spelling} is declared as an operator below: declare it above its first use")
+}
+# the operators code declares joined the grammar, then the ones it places
+declarations_read(language: Language, code: Node) := {
 	placements = []
-	operators_declared(language, program, placements)
+	operators_declared(language, code, placements)
 	for placement in placements { placed(language, placement) }
 	# only a placement relates groups anew; the table's own relations were read with the language
 	if placements is not empty { related_groups(language) }
-	operated(language, aliases_taken(language, program, aliases_kept))
 }
 
 # ---- reading a phrase
@@ -50,7 +64,7 @@ operated_form(language: Language, n: Node) as Node := match n {
 	List(items, Bracket.None, Separator.Space) => colon_block(language, items, rule_led(language, items)) ?? (if declaration_words(language, items) is empty then phrase_read(language, tokens_of(language, items)) else List(items.map(item => operated(language, item)), Bracket.None, Separator.Space))
 	List(items, bracket, Separator.Space) => in_brackets(phrase_read(language, tokens_of(language, items)), bracket)
 	# a row led by a block rule's word, `for key, value in m: print key`, gives its last item the colon block
-	List(items, Bracket.None, Separator.Comma) => List(items[.. #items - 1].map(item => operated(language, item)) + [colon_block(language, phrase_items(items.last), rule_led(language, phrase_items(items#1))) ?? operated(language, items.last)], Bracket.None, Separator.Comma)
+	List(items, Bracket.None, Separator.Comma) => definition_row(language, items[.. #items - 1].map(item => operated(language, item)) + [colon_block(language, phrase_items(items.last), rule_led(language, phrase_items(items#1))) ?? operated(language, items.last)])
 	List(items, bracket, separator) => List(items.map(item => operated(language, item)), bracket, separator)
 	Key(left, Op.Colon, right) => colon_read(language, left, right)
 	Key(left, Op.None, right) => Key(operated(language, left), Op.None, operated(language, right))
@@ -58,6 +72,32 @@ operated_form(language: Language, n: Node) as Node := match n {
 	Symbol(spelling) => word_read(language, n, spelling)
 	_ => n
 }
+
+# A row of definitions, `x := 1, 2`, `t := nat ! IO, FFI`, `… := by a, b`: the comma binds tighter than a definition
+# (the group of the assignments), so each definition opens a group, the bare items after it the last part of its value
+# (wiki/multi-value.md): `a = 1, b = 2, 3` is a = 1 and b = (2, 3). A row not led by a definition stays as it is:
+# `x, y = 1, 2` takes values apart, `Error, Warning = "warn", Hint` names cases
+definition_row(language: Language, items: list<Node>) as Node := {
+	if not defines(language, items#1) { return comma_row(items) }
+	groups: list<Node> = []
+	for item in items { groups = if groups is not empty and not defines(language, item) then groups[.. #groups - 1] + [joined(groups.last, item)] else groups + [item] }
+	if #groups == 1 then groups#1 else comma_row(groups)
+}
+defines(language: Language, n: Node) as bool := match n {
+	Call(called, parts) => #parts == 2 and group_of(language, text(called), Fixity.Infix) == compound_assignment_group
+	_ => no
+}
+# a definition with an item put into the last part of its value, the row there grown by it
+joined(definition: Node, item: Node) as Node := match definition {
+	Call(called, parts) => Call(called, [parts#1, last_joined(parts#2, item)])
+	_ => definition
+}
+last_joined(n: Node, item: Node) as Node := match n {
+	List(items, Bracket.None, Separator.Space) => List(items[.. #items - 1] + [last_joined(items.last, item)], Bracket.None, Separator.Space)
+	List(items, Bracket.None, Separator.Comma) => comma_row(items + [item])
+	_ => comma_row([n, item])
+}
+comma_row(items: list<Node>) as Node := List(items, Bracket.None, Separator.Comma)
 
 # a word standing alone, by its canonical spelling
 word_read(language: Language, n: Node, spelling: text) as Node := {
@@ -129,10 +169,12 @@ tokens_read(language: Language, tokens: list) as Node := {
 # phrase's start: `1 + count xs` is `1 + (count xs)`, `a ?? raise "none"` is `a ?? (raise "none")`, `a ?? if c {1}
 # else {2}` the whole if. A block stays the statement's (`if a == f x { … }`) unless the word's rules take one. A word
 # continuing a phrase opened before stays an operand (`if c then 0 - step else step`), and so does one an operator
-# follows, as any operand: `2 * no + 1` is `(2 * no) + 1`; a rule's hole is an operand too: `$from .. $end $body`.
+# follows, as any operand: `2 * no + 1` is `(2 * no) + 1`; a rule's hole is an operand too: `$from .. $end $body`,
+# and a word glued to the operator, the name of an access: `if b then bool.no else bool.yes`, and one before a word
+# whose rules take a block, which starts its own phrase: `[x * y for x in xs]`.
 called_after_infix(language: Language, token: Spaced, next: Spaced?, after: Spaced?, pending: list<Use>, before: list) as bool := {
 	operand = operand_after(language, next)
-	pending is not empty and pending.last.spelling != "" and pending.last.fixity == Fixity.Infix and token.item is symbol and not is_hole_word(token.item) and not token.glued_after and operand != ø and not is_block(operand.item) and operator_after_operand(language, operand, after) == ø and not continues_another(language, spelling_written(token.item), operand.item, before)
+	pending is not empty and pending.last.spelling != "" and pending.last.fixity == Fixity.Infix and token.item is symbol and not is_hole_word(token.item) and not token.glued_before and not token.glued_after and operand != ø and not is_block(operand.item) and not leads_block(language, spelling_written(operand.item)) and operator_after_operand(language, operand, after) == ø and not continues_another(language, spelling_written(token.item), operand.item, before)
 }
 # an operator binding tighter than juxtaposition right after the block that ends a rule's phrase would take the block
 # alone, `match p { A => 1; _ => 2 } + rest`: refused, the whole phrase is bracketed instead, `(match p {…}) + rest`
@@ -142,12 +184,12 @@ split_phrase_refused(language: Language, use: Use, before: list, pending: list<U
 # a word after the leading one that continues another word's phrase opened before it, `then` of `if x is list then …`:
 # the leading word is an operand then, not the start of its own phrase; a phrase not opened leaves it leading, so
 # `a ?? return text 0` returns `text 0` though `text` continues the c extension's `c_type text`
-continues_another(language: Language, leading: text, next: Node, before: list) as bool := continuation_item(language, next, before.map(token => token.item)) and not language.phrase_words.inner[spelling_written(next)].contains(leading)
+continues_another(language: Language, leading: text, next: Node, before: list) as bool := continuation_item(language, next, before.map(token => token.item)) and not language.grammar.phrase_words.inner[spelling_written(next)].contains(leading)
 # a word rules use only inside their phrases, of a phrase opened among these words: one of its phrases' leading words
 # stands among them; elsewhere the word is the program's own, a variable `out` beside a rule `c_kept out $parameter`
-continuation_item(language: Language, item: Node, words: list) as bool := item is symbol and continuation_word(language, spelling_written(item)) and words.any(word => word is symbol and language.phrase_words.inner[spelling_written(item)].contains(spelling_written(word)))
+continuation_item(language: Language, item: Node, words: list) as bool := item is symbol and continuation_word(language, spelling_written(item)) and words.any(word => word is symbol and language.grammar.phrase_words.inner[spelling_written(item)].contains(spelling_written(word)))
 # a word rules use only inside their phrases, which continues the code before it: `else`
-continuation_word(language: Language, word: text) as bool := language.phrase_words.inner.has(word) and not language.phrase_words.leading.has(word)
+continuation_word(language: Language, word: text) as bool := language.grammar.phrase_words.inner.has(word) and not language.grammar.phrase_words.leading.has(word)
 
 
 # after an operand, the token as an infix or postfix operator, by the minus rule (notes/backbone.md "Minus"): spaced
@@ -183,7 +225,7 @@ is_block(n: Node) as bool := match n { List(items, Bracket.Curly, separator) => 
 spelling_written(item: Node) as text := match item { Symbol(name) => name; _ => "" }
 # the words of a phrase, a single code its one word
 phrase_items(n: Node) as list := match n { List(items, Bracket.None, Separator.Space) => items; _ => [n] }
-rule_word(language: Language, n: Node) as bool := n is symbol and (language.phrase_words.leading.has(spelling_written(n)) or language.phrase_words.inner.has(spelling_written(n)))
+rule_word(language: Language, n: Node) as bool := n is symbol and (language.grammar.phrase_words.leading.has(spelling_written(n)) or language.grammar.phrase_words.inner.has(spelling_written(n)))
 
 # Before an incoming operator waits, every pending one that binds tighter is applied. Two of one group apply by its
 # grouping; two groups with no relation are refused, as is a chain of a group that refuses chaining.

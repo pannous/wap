@@ -10,9 +10,11 @@
 use "text_bytes.wap"
 
 HEADER_BYTES := 12
-# the most bytes an item takes, which a block reserves for each, and a record's field
+# the most bytes an item takes, which a block reserves for each
 ITEM_BYTES := 8
 ROOM_FIRST := 4
+# the GC heap's list_pop says the same (core/emit/lists.wap POPPED_EMPTY), which a library file cannot read
+POPPED_EMPTY := "pop of an empty list"
 
 # a list as the address it is, and back: a list<int> a literal retypes as the list it makes (core/analyze/data.wap
 # built_in_memory), as every list is one address here
@@ -55,9 +57,10 @@ extended(xs: list<T>, item: T): list<T> := {
 	add(xs, item)
 	xs
 }
-# the last item taken off a list
+# the last item taken off a list; an empty list raises, as a list of the GC heap does
 pop(xs: list<T>): T := {
 	count = #xs
+	if count == 0 { raise POPPED_EMPTY }
 	set_memory_word(list_address(xs), count - 1)
 	xs#count
 }
@@ -68,14 +71,21 @@ slice(xs: list<T>, r: Range): list<T> := {
 	out
 }
 
-# A record's instance in the memory (core/analyze/data.wap built_in_memory): the address of its fields, 8 bytes each
-# as a list's items are, in its record's order (core/emit/places.wap memory_place). One with room for `count` fields,
-# its type the record's that typing gives it, and one with the field at a place counting from 1, as a list's item does,
-# given its value
-record_reserved(count: int): list<int> := list_at(memory_taken(count * ITEM_BYTES))
-field_stored(made: T, at: int, value: U): T := {
-	field_placed(record_address(made) + (at - 1) * ITEM_BYTES, value)
-	made
+# A map in the memory: the address of its three lists, its keys, its values and its slots (maps.wap), one word each.
+# One with room for `count` entries, its type the map's that typing gives it, and one with an entry given its value:
+# each entry of a map literal in turn (core/analyze/data.wap built_in_memory)
+held_keys(m: map<K, V>): list<K> := prim item.load(map_address(m))
+held_values(m: map<K, V>): list<V> := prim item.load(map_address(m) + ITEM_BYTES)
+held_slots(m: map<K, V>): list<int> := prim item.load(map_address(m) + 2 * ITEM_BYTES)
+map_address(m: map<K, V>): int := prim i64.extend_i32_u(m)
+map_reserved(count: int): map<text, int> := {
+	at = memory_taken(3 * ITEM_BYTES)
+	set_memory_word(at, list_address(reserved(count)))
+	set_memory_word(at + ITEM_BYTES, list_address(reserved(count)))
+	set_memory_word(at + 2 * ITEM_BYTES, list_address(reserved(0)))
+	prim i32.wrap_i64(at)
 }
-record_address(made: T): int := prim i64.extend_i32_u(made)
-field_placed(at: int, value: T) := prim item.store(at, value)
+entered(m: map<K, V>, key: K, value: V): map<K, V> := {
+	m#key = value
+	m
+}

@@ -1,6 +1,7 @@
 # The theory's kernel: its files and what each gives the others
 
-The kernel of notes/coc-plan.md (sections 6 and 7) lies in `wap/extensions/theory/`, a module of its own beside the
+The kernel of notes/coc-plan.md (sections 6 and 7) lies in `wap/kernel/` (terms.wap to numbers.wap below); the door,
+the elaborator, the prelude and the rest of this table lie in `wap/extensions/theory/`, a module of its own beside the
 compiler. This note is the contract between its files: what each holds, the functions the others call, and the rules
 all of them keep. The plan says what the rules are; this note says where they live.
 
@@ -217,10 +218,16 @@ A level name in a declaration that nothing binds is a level parameter of it, in 
 name is looked up among the binders around it, innermost first, then among the declarations; anything else is the
 refusal "unknown name".
 
+Read by the elaborator's door, a prelude file's declaration of a name taken is an overload of it, by the key the
+elaborator gives its own (the name and its own binders' types after the found ones). The binders an elaborated program's call finds of an
+explicit declaration are its leading sorts that a later binder's type names (the letters of an elaborated header);
+a call giving every binder its header has, as an explicit program does, finds none, and a result that is itself a
+function type takes no part in that count.
+
 ## The declarations that bind names
 
 The kernel names no type of the prelude (plan 5.4). Four statements of the explicit corner bind the ones a
-mechanism needs (bindings.wap). Each is checked; `quotients` and `numbers` stand once, and a later `products`
+mechanism needs (bindings.wap), and `texts` a fifth. Each is checked; `quotients` and `numbers` stand once, and a later `products`
 stands instead of an earlier one, as a below already made keeps the pair it was made of.
 
 **`quotients(Equal)`** (K5, plan 6.6). `Equal` must have the shape of equality: a block of one type with one level
@@ -252,6 +259,14 @@ or level parameters, in `Type`, with a case without fields and then a case with 
 case of a block of one type with two cases without fields, in `Type`; `Equal` as above. From then on a number has
 the type `nat`, and where a rule asks for a case, 0 is the first case and n + 1 the second applied to the number n.
 
+**`texts(text_of, list.empty, list.item)`** (L3, plan 5.4, notes/coc-t2.md, from T2b). A text literal is the
+kernel's second literal. `list` must have the shape of prelude/data.wap's: one type with one level parameter `u` and
+one parameter `T: Sort(u)`, in `Sort(max(1, u))`, a case without fields, then a case of a `T` and a list of `T`;
+`text_of` must be `list[1](nat) -> X` without level parameters, after the numbers statement. From then on a text
+literal has the type `X`, and where a rule asks for a case it is `text_of` applied to the list of its code points,
+each a number. Until T2b the statement is `texts(text_of)`, and a literal is `text_of` of the number that spells it:
+a 1 and then its code points, base 0x110000.
+
 **`shortcut(kind, function, theorems…)`**, one per shortcut, in the order of this table. `N` is the number type, `Z`
 and `S` its cases, `yes` and `no` the truth values. The kernel builds each statement as written here, the `==`
 being `Equal[1]` at `N` or at the truth values' type. A statement binds only the variables it names, `m` before `n`,
@@ -280,6 +295,51 @@ axiom rested on, a function bound already or needed and not bound).
 when it is accepted. `type of e` prints the type. The first refusal is printed as its one line, `refused by <rule>:
 <what was found>`, and ends the run with a failing exit code. The output is the test: test/wap/test_theory.wap gives
 a program and compares what the door says. A line for a refusal compares the part before the colon only.
+
+## The run trust base
+
+What runs is believed where the kernel cannot see it (notes/coc-plan.md 9.7, 10.2): the kernel's own computation
+(from T2b its shortcuts on i64 with the overflow check, and a text literal opened into its code points), and
+the layouts of the prelude, each a `runs(…)` statement after the declaration it is about, which erase reads in place
+of the declaration's value (`elaborate/file.wap` layout_noted). Only the prelude writes them: every door refuses a
+program's own. Erase checks each before a program's terms run (`run/erase.wap` layouts_checked). A spelling that
+is a host operation, `prim i64.add(m, n)`, is checked against its row in the table of the host's operations
+(wap/kernel/primitives.wap): its operands, the parameters it names at the wasm types their values run as (`nat`'s as an
+int, an i64), numbers and the operations inside it, are exactly the wasm types the row takes, and the row gives the
+wasm type of the declaration's value. Any other spelling (a list's, until lists have their rows) is host code, which
+wap's own typer types as the value of a definition of the parameters it names, a case's test as a bool and its fields
+as their wap types, a type's spelling as a wap type. What is checked is only that a spelling fits; that it means what
+the theory's word means is believed, and tested by the laws run on values. The set is kept small:
+
+| what | runs as | believed |
+|---|---|---|
+| `nat`, `int` | a machine int: `nat.zero`, `nat.successor`, `int.of_nat`, `int.negative_successor` by their tests and fields | the tests split the ints as the cases split the numbers, and `i64.sub(it, 1)`, `i64.sub(-1, it)` undo the cases |
+| `bool` | wap's bool: `bool.no`, `bool.yes` | |
+| `add`, `multiply`, `equals` | the machine's `i64.add`, `i64.mul`, `i64.eq` on two nats | they compute what the recursions do, below the wrap |
+| `minus`, `sum`, `times`, `negative`, `equal_integers` | the machine's `i64.sub` from 0, `i64.add`, `i64.mul`, `i64.lt_s` with 0, `i64.eq` on ints | as above |
+| `negated` | `i32.eqz` | |
+| `list`, `count`, `item_at`, `drop`, `joined`, `mapped` | wap's list: `list.empty`, `list.item` by `#it == 0`, `#it > 0`, `it#1`, `drop(it, 1)`; `#xs`, `xs#i`, `drop(xs, n)`, `xs + ys`, `xs.map(f)` | wap's list functions count, index, drop, join and map as the recursions do |
+| `Subset` | its value: `Subset.intro` as the value, its proof gone | |
+| `Eff`, `pure`, `bind` | a computation as its value, `pure(x)` as x, `bind(c, next)` as `next(c)` | a computation's effects happen as it runs |
+
+A number runs as a machine int, so one past 2^63 wraps where the theory's does not.
+
+The types module adds two more, made by the declarations themselves (elaborate/declare.wap), never by a `runs(…)`:
+- **Its words the prelude has too.** A declaration with the signature of a prelude declaration is that declaration:
+  proofs read the prelude's definition, and the program runs the types module's function for it, by its name, where
+  the prelude lays out none. The signature is the name, the parameters' types and the result's. The pairs, every
+  declaration of the types module whose signature a prelude declaration has: int's `+`, `-` (both arities), `*`,
+  `==`, `<`, `<=`, `>`, `>=`, and text's `+` (types/texts.wap's `+(a: text, b: text)`). Every other function of the types module runs its own body, as
+  the theory read it. A name is laid out once: a second layout of it is refused, never a silent replacement.
+- **The host's operations.** A function of the types module whose body is `prim …` is a constant of its written
+  type, never unfolded; it runs as the host's operation. One giving a proposition, or a type that may be one (a
+  letter's), is refused as a hosted proposition (an opaque proof of an empty type would prove anything), and one with
+  neither a written type nor a limit after its body (`! IO`) too, since nothing says what it does. A program's own
+  `prim …` is refused: what it runs would be believed unproved, as a program's `runs(…)` would.
+
+The compiler adds one outside the theory: its warm state (extensions/warm.wap). The rules it brings in were checked
+to terminate when the state was written, and `rules_checked` marks them checked without checking them again, so the
+rules of a warm state are believed as built.
 
 ## A second opinion
 

@@ -12,7 +12,7 @@ use "../../kernel/forms.wap"
 # Case's type. When the arms fit every value of the subject's type, the Case has the results' joined type; a match on
 # an enum that misses a case is refused naming it (wiki/pattern-matching.md "Every case"), any other only where its
 # value is wanted.
-case_typed(n: Node, subject: Node, arms: list, s: TypingState, f: TypeFrame, expected: Node?) as Node := {
+case_typed(n: Node, subject: Node, arms: list, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
 	type = value_of(subject, "to match")
 	typed = arms.map(arm => arm_typed(arm, subject, type, s, f, expected))
 	witness = unmatched(arms.map(arm => [pattern_of(arm)]), [type], s)
@@ -23,14 +23,14 @@ case_typed(n: Node, subject: Node, arms: list, s: TypingState, f: TypeFrame, exp
 	if witness != ø and is_enum { refused(n, "match on ${type_text(type)} misses ${pattern_text(witness#1)}: add the missing arm or `_`${shape_offered(arms)}") }
 	# a statement no arm fits does nothing; where its value may be wanted, a value of any other type no arm fits raises
 	# at run time (wiki/pattern-matching.md "Every case")
-	if witness != ø and expected == EMPTY_SYMBOL { return refitted(Case(subject, typed), n) }
+	if witness != ø and expected == EMPTY_TERM { return refitted(Case(subject, typed), n) }
 	if witness != ø { typed += [raising_arm("no case for ${pattern_text(witness#1)}", n, subject, type, s, f, expected)] }
 	joined = parts_type(typed, s, expected)
 	fitted = typed.map(arm => arm_as(arm, joined, s))
 	joined_of(refitted(Case(subject, fitted), n), fitted, s, expected)
 }
 # the last arm, `_`, raising this message where no arm before it fits
-raising_arm(message: text, n: Node, subject: Node, type: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := arm_typed(placed_like(Arm(symbol(WILDCARD), raised(message, n, s)), n), subject, type, s, f, expected)
+raising_arm(message: text, n: Node, subject: Node, type: Term, s: TypingState, f: TypeFrame, expected: Term?) as Node := arm_typed(placed_like(Arm(symbol(WILDCARD), raised(message, n, s)), n), subject, type, s, f, expected)
 # where every arm names one declared pattern, `Record(…)`, the fix-it of taking that shape instead
 shape_offered(arms: list) as text := {
 	shapes = arms.map(arm => fact_of(pattern_of(arm), SHAPE_OF))
@@ -38,7 +38,7 @@ shape_offered(arms: list) as text := {
 }
 # an arm's result, its variable subject known of the shape a declared pattern's pattern names: `n` a Record in
 # `Record(name, fields, variants) => n`
-arm_typed(arm: Arm, subject: Node, type: Node, s: TypingState, f: TypeFrame, expected: Node?) as Node := match arm {
+arm_typed(arm: Arm, subject: Node, type: Term, s: TypingState, f: TypeFrame, expected: Term?) as Node := match arm {
 	Arm(pattern, result) => {
 		tested = pattern_typed(pattern, type, s, f)
 		shape = shape_named(pattern, s)
@@ -48,13 +48,13 @@ arm_typed(arm: Arm, subject: Node, type: Node, s: TypingState, f: TypeFrame, exp
 	}
 }
 # an arm whose result is as the match's type has it, `10` of `1 => 10; _ => ø` boxed as an int?
-arm_as(arm: Arm, type: Node?, s: TypingState) as Node := match arm { Arm(pattern, result) => {
+arm_as(arm: Arm, type: Term?, s: TypingState) as Node := match arm { Arm(pattern, result) => {
 	given = as_wanted(result, type, s)
 	typed_like(refitted(Arm(pattern, given), arm), given)
 } }
 # A pattern of a value of this type: a name holding the value, `_`, a case, `Dot`, a case with the patterns of its
 # fields, `Circle(r)`, `Two(Dot, 3)`, or a value it equals
-pattern_typed(pattern: Node, type: Node, s: TypingState, f: TypeFrame) as Node := {
+pattern_typed(pattern: Node, type: Term, s: TypingState, f: TypeFrame) as Node := {
 	if fits_any(pattern) and not names_subject_case(pattern, type, s) {
 		if pattern != symbol(WILDCARD) { remembered(pattern, type, s, f) }
 		return pattern
@@ -64,25 +64,25 @@ pattern_typed(pattern: Node, type: Node, s: TypingState, f: TypeFrame) as Node :
 	# holes hold their types too
 	named = shape_named(pattern, s)
 	narrows = narrowed_type(named)
-	if named != ø and narrows != ø and same_type(narrows, type) { holes_remembered(pattern, named, s, f) }
+	if named != ø and narrows != ø and narrows == type { holes_remembered(pattern, named, s, f) }
 	if list_pattern_items(pattern) != ø { return list_pattern_typed(pattern, type, s, f) }
 	# a case of an optional's value: `Text(name)` fits a Node? holding a text node, never ø
 	base = base_of_optional(type)
 	if base != ø and (pattern is Call or is_case_name(pattern)) { return pattern_typed(pattern, base, s, f) }
 	tested = if pattern is Call then case_pattern_typed(pattern, type, s, f) else if is_case_name(pattern) or names_subject_case(pattern, type, s) then case_in_enum_typed(case_bound(pattern, type, s), s) else typed_form(pattern, s, f, type)
-	if not same_type(value_type(tested) ?? type, type) { refused(pattern, "this pattern can never fit a value of type ${type_text(type)}") }
+	if (value_type(tested) ?? type) != type { refused(pattern, "this pattern can never fit a value of type ${type_text(type)}") }
 	tested
 }
 # A pattern of a shape's value, `Record(name, fields, variants)` of a Record, as one of the type the shape narrows; a
 # declared pattern's holes named in it hold their holes' types, `fields` a List
-shape_pattern_typed(pattern: Node, type: Node, s: TypingState, f: TypeFrame) as Node := {
+shape_pattern_typed(pattern: Node, type: Term, s: TypingState, f: TypeFrame) as Node := {
 	holes_remembered(pattern, type, s, f)
-	with_type_of(pattern_typed(pattern, shape_narrows(type), s, f), type)
+	with_type_of(pattern_typed(pattern, shape_narrows(type, s), s, f), type)
 }
 # the variables a declared pattern's arm names at its holes, of their holes' types, `fields` a List: known before the
 # pattern binds them as the narrowed type's parts, as a variable's first type is its type
-holes_remembered(pattern: Node, shape: Node, s: TypingState, f: TypeFrame) := {
-	form = form_named(shape, s)
+holes_remembered(pattern: Node, shape: Term, s: TypingState, f: TypeFrame) := {
+	form = form_named(type_text(shape), s)
 	if form == ø { return }
 	parts = form_parts(form_taken(form, s), pattern) ?? []
 	holes = hole_types(form, s)
@@ -90,20 +90,20 @@ holes_remembered(pattern: Node, shape: Node, s: TypingState, f: TypeFrame) := {
 }
 # A list pattern of a list's type: each item's pattern of its item type, a `...name` anywhere holding the items the
 # others leave, those before it counted from the start and those after it from the end: `[.., last]`, `[a, ...rest]`
-list_pattern_typed(pattern: Node, type: Node, s: TypingState, f: TypeFrame) as Node := {
+list_pattern_typed(pattern: Node, type: Term, s: TypingState, f: TypeFrame) as Node := {
 	items = list_pattern_items(pattern) ?? refused(pattern, "a list pattern is a list of patterns")
 	item = item_type(type) ?? refused(pattern, "a list pattern fits a list, not ${type_text(type)}")
 	typed = (1 to #items).map(at => if rest_named(items#at) == ø then pattern_typed(items#at, item, s, f) else rest_typed(items#at, type, s, f))
 	with_type_of(refitted(data_list(typed), pattern), type)
 }
-rest_typed(rest: Call, type: Node, s: TypingState, f: TypeFrame) as Node := match rest {
+rest_typed(rest: Call, type: Term, s: TypingState, f: TypeFrame) as Node := match rest {
 	Call(called, names) => if names#1 is symbol then refitted(Call(called, [pattern_typed(names#1, type, s, f)]), rest) else refused(rest, "a rest names the items it holds, `...rest`; ${names#1} before `...` is no pattern")
 }
 # The values no arm fits, as one pattern of them, a witness (`Dot`, `Two(Circle(_), _)`), or ø when the arms fit every
 # value: the classic usefulness check over rows of patterns, one for each of these types, the witness built on the way
 # back. Where a column holds a case, its enum's values are split by case, each case's fields joining the patterns; any
 # other column keeps only the rows whose pattern there fits any value.
-unmatched(rows: list<list<Node>>, types: list<Node>, s: TypingState) as list<Node>? := {
+unmatched(rows: list<list<Node>>, types: list<Term>, s: TypingState) as list<Node>? := {
 	if types is empty { return if rows is empty then [] else ø }
 	if narrowed_type(types#1) != ø { return shape_missing(rows, types, s) }
 	if item_type(types#1) != ø and rows.any(row => list_pattern_items(row#1) != ø) { return list_missing(rows, types, s) }
@@ -115,7 +115,7 @@ unmatched(rows: list<list<Node>>, types: list<Node>, s: TypingState) as list<Nod
 	cases_missing(rows, types, cases_of(record), s)
 }
 # the values of these cases no row fits, split by case, each case's fields joining the patterns
-cases_missing(rows: list<list<Node>>, types: list<Node>, cases: list<Node>, s: TypingState) as list<Node>? := {
+cases_missing(rows: list<list<Node>>, types: list<Term>, cases: list<Node>, s: TypingState) as list<Node>? := {
 	for case in cases {
 		fields = case_fields(case)
 		inner = unmatched(rows.filter(row => fits_any(row#1) or text(case_name(row#1)) == text(case_name(case))).map(row => case_opened(row, #fields)), fields.map(field_type) + types[1 ..], s)
@@ -125,25 +125,25 @@ cases_missing(rows: list<list<Node>>, types: list<Node>, cases: list<Node>, s: T
 }
 # The values of a shape no row fits: a case's, as its one case; a declared pattern's, by the patterns at its holes, of
 # its holes' types (a row of another shape is left out)
-shape_missing(rows: list<list<Node>>, types: list<Node>, s: TypingState) as list<Node>? := {
-	form = form_named(types#1, s)
-	if form == ø { return cases_missing(rows, types, cases_of(record_named(s.records, narrowed_type(types#1)) ?? refused(types#1, "a case's shape narrows its enum")).filter(case => text(case_name(case)) == text(types#1)), s) }
+shape_missing(rows: list<list<Node>>, types: list<Term>, s: TypingState) as list<Node>? := {
+	form = form_named(type_text(types#1), s)
+	if form == ø { return cases_missing(rows, types, cases_of(record_named(s.records, narrowed_type(types#1)) ?? refused_type(types#1, "a case's shape narrows its enum")).filter(case => text(case_name(case)) == type_text(types#1)), s) }
 	holes = hole_types(form, s)
 	taken = form_taken(form, s)
 	kept = rows.filter(row => fits_any(row#1) or form_parts(taken, row#1) != ø)
 	inner = unmatched(kept.map(row => (if fits_any(row#1) then wildcards(#holes) else form_parts(taken, row#1) ?? []) + row[1 ..]), holes + types[1 ..], s)
-	if inner == ø then ø else [Call(symbol(text(types#1)), inner[.. #holes])] + inner[#holes ..]
+	if inner == ø then ø else [Call(symbol(type_text(types#1)), inner[.. #holes])] + inner[#holes ..]
 }
 # a row with its first pattern opened into patterns of the case's fields: a name, `_` or a bare case fits each
 case_opened(row: list<Node>, count: int) as list<Node> := (if row#1 is symbol then wildcards(count) else case_fields(row#1)) + row[1 ..]
 wildcards(count: int) as list<Node> := spread(symbol(WILDCARD), count)
 # Where a column holds list patterns, its lists are split by count, each count up to the longest pattern's and then the
 # longer lists, their items joining the patterns
-list_missing(rows: list<list<Node>>, types: list<Node>, s: TypingState) as list<Node>? := {
+list_missing(rows: list<list<Node>>, types: list<Term>, s: TypingState) as list<Node>? := {
 	longest = rows.map(row => fixed_count(row#1)).max
 	for count in 0 to longest + 1 {
 		longer = count > longest
-		inner = unmatched(rows.filter(row => fits_count(row#1, count, longer)).map(row => items_opened(row, count)), spread(item_type(types#1) ?? refused(types#1, "a list pattern's value is a list"), count) + types[1 ..], s)
+		inner = unmatched(rows.filter(row => fits_count(row#1, count, longer)).map(row => items_opened(row, count)), spread(item_type(types#1) ?? refused_type(types#1, "a list pattern's value is a list"), count) + types[1 ..], s)
 		if inner != ø { return [data_list(inner[.. count] + (if longer then [Call(symbol(REST_MARK), [symbol(WILDCARD)])] else []))] + inner[count ..] }
 	}
 	ø
@@ -170,20 +170,20 @@ fits_any(pattern: Node) as bool := pattern is symbol and not is_bound(pattern, D
 # a case's bare name: as a pattern it fits the case whatever its fields hold
 is_case_name(pattern: Node) as bool := pattern is symbol and is_bound(pattern, DefinitionKind.Case)
 # the declared pattern an arm names by its shape, `Record(name, fields, variants)`; ø for any other pattern
-shape_named(pattern: Node, s: TypingState) as Node? := if fact_of(pattern, SHAPE_OF) == ø then ø else shaped(symbol(text(fact_of(pattern, SHAPE_OF))), s)
+shape_named(pattern: Node, s: TypingState) as Term? := if fact_of(pattern, SHAPE_OF) == ø then ø else shaped(word_term(text(fact_of(pattern, SHAPE_OF))), s)
 # a bare name of a case of the value's enum, `bytes` of a Unit: that case, also where a function or a variable has its
 # name (wiki/enum.md)
-names_subject_case(pattern: Node, type: Node, s: TypingState) as bool := pattern is symbol and case_named(type, pattern, s) != ø
+names_subject_case(pattern: Node, type: Term, s: TypingState) as bool := pattern is symbol and case_named(type, pattern, s) != ø
 pattern_of(arm: Arm) as Node := match arm { Arm(pattern, result) => pattern }
 
 # a case pattern's name, the case of that name in the subject's enum when it has one (two enums may share the name)
-in_enum(name: Node, type: Node, s: TypingState) as Node := with_fact(name, DEFINED_AT, case_name(case_named(type, name, s) ?? return name))
+in_enum(name: Node, type: Term, s: TypingState) as Node := with_fact(name, DEFINED_AT, case_name(case_named(type, name, s) ?? return name))
 # the case of a name in an enum, ø where the type is no enum or has no such case
-case_named(type: Node, name: Node, s: TypingState) as Node? := cases_of(record_named(s.records, type) ?? return ø).find(case => text(case_name(case)) == text(name))
+case_named(type: Term, name: Node, s: TypingState) as Node? := cases_of(record_named(s.records, type) ?? return ø).find(case => text(case_name(case)) == text(name))
 case_in_enum_typed(name: Node, s: TypingState) as Node := case_typed_as(name, name, [], s)
 field_names(fields: list) as text := fields.map(field => text(declared_name(field))).join(", ")
 # A case pattern, `Circle(r)`: a pattern for each of its fields, of the field's type
-case_pattern_typed(pattern: Call, type: Node, s: TypingState, f: TypeFrame) as Node := match pattern { Call(written, parts) => {
+case_pattern_typed(pattern: Call, type: Term, s: TypingState, f: TypeFrame) as Node := match pattern { Call(written, parts) => {
 	called = in_enum(written, type, s)
 	fields = case_fields(case_declaring(s.records, called))
 	if #parts != #fields { refused(pattern, "${called} names each of its fields: ${field_names(fields)}") }

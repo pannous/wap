@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 # A wap program built to a native executable: compiled by wap to a module, which wasm2c writes as C, which cc
 # builds with wasm2c's runtime, lib/native/wasi.c and the C glue of its imports (main.c, glue.awk beside this
-# script). The program uses no GC value: no list or raise; a text is in the module's memory, as the compiler writes one
-# that reads types/memory_texts.wap in the place of types/text_bytes.wap.
+# script). wasm2c takes no GC type, so its texts, lists, enums and class instances are in the module's memory
+# (memory.wap beside this script), as the compiler writes them for `native`, which reads types/memory_texts.wap and
+# types/memory_lists.wap in the place of types/text_bytes.wap and types/list_items.wap; an uncaught raise is written to
+# stderr. Maps, `any`, enums whose cases have fields and try/catch stay GC values it cannot use.
 #   wap/extensions/native/build.sh [--standalone] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]
 # --standalone: the parts of the compiler's seed folder (scripts/lib/wap-beside.sh WAP_PARTS) built into the executable,
 # which the native wap unpacks once into its cache folder (main.c wap_seed, linking.wap seed_folder_found) in place of
 # a wap-seed/ folder beside it; and each library -l<name> whose static library lib<name>.a is in a -L folder linked
 # whole into it (its functions are found by name, so no reference pulls them in): one file, needing only the system's
 # the arguments after the executable are the C compiler's, the libraries the program's C functions are in:
-# `-Llib -lwarp_wasmtime -Wl,-rpath,@executable_path/lib` for the native wap (driver.wap)
+# scripts/lib/wap-beside.sh wap_linked's for the native wap (driver.wap)
 # The compiler runs on the native wap on PATH, else on wasmtime (scripts/lib/wap-host.sh). The build's files go in
 # <executable>.build/
 set -euo pipefail
 C_COMPILER=cc
-# -std=c23: wasm2c writes C23 (static asserts without a message); -rdynamic: the executable's own C functions (main.c native_call, wap_host_callback) are found by name as libc's are
-C_FLAGS="-O2 -rdynamic -std=c23"
+# -std=gnu23: wasm2c writes C23 (static asserts without a message), and glibc shows POSIX (sigaction, sigaltstack) only
+# to a GNU dialect
+C_FLAGS="-O2 -std=gnu23"
 MODULE_NAME=program
 WASM2C_RUNTIME=share/wabt/wasm2c
 WABT_HEADERS=include
@@ -33,6 +36,15 @@ whole_archive() {
 	case $(uname -s) in
 		Darwin) echo "-Wl,-force_load,$1" ;;
 		*) echo "-Wl,--whole-archive,$1,--no-whole-archive" ;;
+	esac
+}
+# the linker's arguments each system spells its own way: the executable's own C functions (main.c native_call,
+# wap_host_callback) exported, found by name as libc's are; on Windows its threads (winpthreads, linked in, so no
+# DLL of the compiler's goes with it) and a main thread's stack as deep as the others give it (Windows gives 1 MB)
+system_linked() {
+	case $(uname -s) in
+		MINGW* | MSYS*) echo "-Wl,--export-all-symbols -Wl,-Bstatic -lpthread -Wl,-Bdynamic -Wl,--stack,0x10000000" ;;
+		*) echo "-rdynamic" ;;
 	esac
 }
 # the C compiler's arguments of a standalone build: each -l<name> with a lib<name>.a in a -L folder replaced by it whole
@@ -60,14 +72,10 @@ wasm2c=$(command -v wasm2c) || { echo "no wasm2c on the PATH (brew install wabt)
 wabt="$(cd -P "$(dirname "$(readlink -f "$wasm2c")")/.." && pwd -P)"
 building="$executable.build"
 mkdir -p "$building" && building="$(cd -P "$building" && pwd -P)"
-# the compiler beside what it reads (scripts/lib/wap-beside.sh), a text's layout the native one
 source "$here/../../../scripts/lib/wap-beside.sh"
-mkdir -p "$building/compiler"
-(cd "$(dirname "$compiler")" && cp -R "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "$building/compiler/") && cp "$compiler" "$building/compiler/wap.wasm"
-# (the library the compiler compiled once, types.wasm, and its warm state are the GC ones: a native build reads
-# its library anew, from its sources, --sources)
-cp "$building/compiler/types/memory_texts.wap" "$building/compiler/types/text_bytes.wap" && cp "$building/compiler/types/memory_lists.wap" "$building/compiler/types/list_items.wap"
-wap_ran "$building/compiler/wap.wasm" --sources native "$program" "$building/$MODULE_NAME.wasm"
+# (the library the compiler compiled once, types.wasm, and its warm state are the GC ones: a native build reads its
+# library anew, from its sources, --sources)
+wap_ran "$compiler" --sources native "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
 seed=()
 if [ -n "$standalone" ]; then
@@ -78,6 +86,6 @@ if [ -n "$standalone" ]; then
 	seed=(-DWAP_SEED="\"$building/seed.tar\"" -DWAP_SEED_NAME="\"$seed_name\"")
 fi
 awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"
-"$C_COMPILER" $C_FLAGS ${seed[@]+"${seed[@]}"} -I"$building" -I"$wabt/$WASM2C_RUNTIME" -I"$wabt/$WABT_HEADERS" -I"$library" -o "$executable" \
+"$C_COMPILER" $C_FLAGS $(system_linked) ${seed[@]+"${seed[@]}"} -I"$building" -I"$wabt/$WASM2C_RUNTIME" -I"$wabt/$WABT_HEADERS" -I"$library" -o "$executable" \
 	"$building/$MODULE_NAME.c" "$here/main.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-impl.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-mem-impl.c" -lm "$@"
 rm -rf "$building"

@@ -169,12 +169,13 @@ c_items(xs: list<T>): int32 := {
 }
 c_length(pointer: int, limit: int): int := prim foreign("c", "strnlen", pointer, limit)
 c_copy(destination: int32, source: int, count: int): int := prim foreign("c", "memcpy", destination, source, count)
-# a C struct of that many bytes at a C pointer, given by value: as ARM64's C passes one of more than 16 bytes, a pointer
-# to a copy the caller makes; a smaller one, which crosses in registers, is refused
-# TODO (card native-other-platforms) x86-64's C passes such a struct on the stack, which this copy does not, and no host
+# a C struct of that many bytes at a C pointer, given by value: a pointer to a copy the caller makes, which the host
+# passes as its machine's C passes the struct (wap/extensions/c/foreign.wap c_import_name); a smaller one, which
+# crosses in registers, is refused
+# DONE (card native-other-platforms) x86-64's C passes such a struct on the stack, which this copy does not, and no host
 #   answers which machine it runs on (the types module's every import is answered by every host)
 c_struct(pointer: int, size: int): int := {
-	if size <= STRUCT_IN_REGISTERS { raise "a C struct of ${STRUCT_IN_REGISTERS} bytes or less crosses in registers, which wap's C calls do not do yet: bytes<${size}>" }
+	if size <= STRUCT_IN_REGISTERS { raise "a C struct of ${STRUCT_IN_REGISTERS} bytes or less crosses in registers, which wap's C calls do not do yet: ${size}⋅byte" }
 	at = c_reserved(size)
 	c_copy(c_address(at), pointer, size)
 	c_memory_seen() + at
@@ -201,11 +202,15 @@ BYTE_RANGE := 256
 # them, as a GC array has no address, and copied back into the list once the call returns (items_returned), as C may
 # write into them. The memory may move when it grows: no C side may keep it.
 items_handed(xs: list<T>): int := {
-	global handed_at
 	if items_address(xs) != 0 { return items_address(xs) }
 	width = item_bytes(xs)
 	at = c_reserved(#xs * width)
 	for place in 0 upto #xs { item_placed(at + place * width, xs[place]) }
+	copy_handed(at)
+}
+# the copy at that address handed to the call running, after the copies of its parameters before it
+copy_handed(at: int): int := {
+	global handed_at
 	global c_handed
 	handed_at = handed_at.take(c_handed)
 	handed_at.add(at)
@@ -219,10 +224,49 @@ items_returned(xs: list<T>) := {
 	if items_address(xs) != 0 { return }
 	at = handed_at#(c_handed_from + 1)
 	c_handed_from = c_handed_from + 1
-	for place in 0 upto #xs { xs[place] = item_found(xs, at + place * item_bytes(xs)) }
+	for place in 0 upto #xs { xs[place] = item_found(xs[place], at + place * item_bytes(xs)) }
 }
 # where the copies of the lists handed to the C calls running are, in the order of their parameters, the innermost
 # call's last (c_handed)
 handed_at: list<int> = []
 item_placed(at: int, item: T) := prim item.store(at, item)
-item_found(xs: list<T>, at: int): T := prim item.load(at)
+item_found(model: T, at: int): T := prim item.load(at)
+
+# A record handed to C (extensions/c/foreign.wap, a class parameter): its fields copied as C lays out a struct of them,
+# each at the next multiple of its own width, the whole a multiple of its widest, and read back once the call returns
+c_record_bytes(widths: list<int>): int := aligned(widths.fold(0, field_end), widths.max)
+# where a field of that width ends, placed after the fields ending there
+field_end(end: int, width: int): int := aligned(end, width) + width
+aligned(at: int, width: int): int := (at + width - 1) ÷ width * width
+# the record being handed or read back: where it is, and where its next field starts in it
+c_record_at = 0
+c_record_end = 0
+c_record_started(widths: list<int>): ø := {
+	global c_record_at
+	global c_record_end
+	c_record_at = copy_handed(c_reserved(c_record_bytes(widths)))
+	c_record_end = 0
+}
+c_record_address(): int32 := {
+	global c_record_at
+	c_address(c_record_at)
+}
+c_field_placed(value: T) := item_placed(c_field_next(value_bytes(value)), value)
+# where the record's next field of that width starts
+c_field_next(width: int): int := {
+	global c_record_at
+	global c_record_end
+	c_record_end = field_end(c_record_end, width)
+	c_record_at + c_record_end - width
+}
+# the record's fields as C left them, the first of the call's copies still to be read back
+c_record_returned(): ø := {
+	global c_handed_from
+	global c_record_at
+	global c_record_end
+	global handed_at
+	c_handed_from = c_handed_from + 1
+	c_record_at = handed_at#c_handed_from
+	c_record_end = 0
+}
+value_bytes(x: T): int := item_bytes([x])

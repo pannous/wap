@@ -16,29 +16,32 @@ use "../parse/operator_table.wap"
 # the raise where a value is not of the shape a place wants
 OTHER_SHAPE = "this value is of another shape than the"
 
-# the type a shape narrows, ø for any other type
-narrowed_type(type: Node?) as Node? := if type == ø then ø else fact_of(type, NARROWS)
 # the type a shape narrows, refused for any other type
-shape_narrows(type: Node) as Node := narrowed_type(type) ?? refused(type, "a shape narrows a type")
+shape_narrows(type: Term, s: TypingState) as Term := narrowed_type(type) ?? raise("${type_text(type)} narrows no type")
 # A written type with its shape known: a declared pattern's name narrows Node, the name of a case with fields of one
 # enum that enum (`Define` is a pattern, though Op has a case of that name; a case without fields is a value, no type,
-# so LexemeKind's Key leaves `Key` Node's); a record's own name, or any other type, is as written
-shaped(type: Node, s: TypingState) as Node := {
+# so LexemeKind's Key leaves `Key` Node's); a record's name its record's own word; any other type as written
+shaped(type: Term, s: TypingState) as Term := {
 	# a compound type's parts known alike: the Triple of a map<text, Triple> narrows Node too
 	parts = type_parts(type)
-	if parts != ø { return type_built(text(parts#1), parts.drop(1).map(part => shaped(part, s))) }
-	# a written ø, `f(): ø`, is the type of ø
-	if type is Empty { return EMPTY_SYMBOL }
-	if not type is symbol or record_named(s.records, type) != ø or fact_of(type, NARROWS) != ø { return type }
+	if parts != ø { return type_built(parts#1, parts.drop(1).map(part => shaped(part, s))) }
+	if not is_word(type) or narrowed_type(type) != ø { return type }
+	# a record's name is its record's own word, the one the typing state means where it was written without its declaration
+	record = record_named(s.records, type)
+	if record != ø { return record_term(record!) }
+	word = word_of(type)!
 	# a type word nothing defines is its word alias's, `raw` a text
-	aliased = word_aliased(text(type))
-	if aliased != text(type) { return shaped(refitted(symbol(aliased), type), s) }
+	aliased = word_aliased(word)
+	if aliased != word { return shaped(word_term(aliased), s) }
 	# a block parameter takes a function of its own type, as a bare `function` does
-	if text(type) == BLOCK_WORD { return symbol(FUNCTION_WORD) }
-	if form_named(type, s) != ø { return with_fact(type, NARROWS, NODE_SYMBOL) }
-	holders = s.records.items.filter(record => cases_of(record).any(case => text(case_name(case)) == text(type) and case_fields(case) is not empty))
-	if #holders == 1 then with_fact(type, NARROWS, record_type(holders#1)) else type
+	if word == BLOCK_WORD { return FUNCTION_TERM }
+	if form_named(word, s) != ø { return narrowing(type, NODE_TERM) }
+	holders = s.records.items.filter(record => cases_of(record).any(case => text(case_name(case)) == word and case_fields(case) is not empty))
+	if #holders == 1 then case_shape(word, holders#1) else type
 }
+# a case's word as a shape of its enum: its own word, named by the enum's declaration, so two enums' cases of one
+# name narrow each its own enum
+case_shape(name: text, enum: Record) as Term := narrowing(word_keyed(name, "${name} ${declaration_place(record_declared(enum))}"), record_term(enum))
 # definitions with the shapes their written types name, each shaped once
 shaped_once(definition: Signature, s: TypingState) as Signature := {
 	if definition.shaped { return definition }
@@ -54,25 +57,25 @@ shaped_definition(definition: Node, s: TypingState) as Define := match definitio
 	_ => definition
 }
 shaped_key(n: Node, s: TypingState) as Node := match n {
-	Key(name, Op.Colon, type) => refitted(Key(name, Op.Colon, shaped(type, s)), n)
+	Key(name, Op.Colon, type) => refitted(Key(name, Op.Colon, written_of(shaped(type_term(type), s))), n)
 	Call(called, arguments) => if is_default_given(n) then refitted(Call(called, [shaped_key(arguments#1, s), arguments#2]), n) else n
 	Set(place, value) => refitted(Set(shaped_key(default_typed(place, value, s), s), value), n)
 	_ => n
 }
 # a field given only its default, `at = 0`, has the default's type, as a parameter does (wiki/class.md)
-default_typed(name: Node, default: Node, s: TypingState) as Node := if declared_type(name) != ø then name else refitted(Key(name, Op.Colon, value_of(typed_form(default, s, TypeFrame(), ø), "to give the field")), name)
+default_typed(name: Node, default: Node, s: TypingState) as Node := if declared_type(name) != ø then name else refitted(Key(name, Op.Colon, written_of(value_of(typed_form(default, s, TypeFrame(), ø), "to give the field"))), name)
 
 # The builder of a declared pattern of this name, which its taken shape and holes mark (core/rules/patterns.wap
 # pattern_builder); ø for any other name
-form_named(type: Node, s: TypingState) as Signature? := {
+form_named(type: text, s: TypingState) as Signature? := {
 	# a pattern's builder is always a written Define, held before any type is shaped: a definition not held yet, an
 	# enum's generated text(), is never one (define_of refuses a lost definition on purpose)
-	definitions_named(text(type), s).find(definition => s.defines.has(definition.key) and fact_of(defined_name(define_of(definition, s)), PATTERN_TAKEN) != ø)
+	definitions_named(type, s).find(definition => s.defines.has(definition.key) and fact_of(defined_name(define_of(definition, s)), PATTERN_TAKEN) != ø)
 }
 # the shape a declared pattern takes values apart by, its holes `$name`
 form_taken(form: Signature, s: TypingState) as Node := fact_of(defined_name(define_of(form, s)), PATTERN_TAKEN) ?? refused(define_of(form, s), "a pattern's builder carries its shape")
 # the types of a declared pattern's holes, in order, their shapes known: its builder's parameters' types
-hole_types(form: Signature, s: TypingState) as list := form.parameters.map(type => shaped(type ?? NODE_SYMBOL, s))
+hole_types(form: Signature, s: TypingState) as list := form.parameters.map(type => shaped(type ?? NODE_TERM, s))
 # The patterns an arm's pattern has at the holes of a form's shape, in order; ø when it is not of that shape
 form_parts(taken: Node, pattern: Node) as list<Node>? := {
 	if taken is symbol and text(taken).starts_with(HOLE_SIGN) { return [pattern] }
@@ -102,19 +105,19 @@ pattern_part(n: Node, typed: Node, key: Node, s: TypingState) as Node? := {
 	# the variable's id is the read's place: typing counts no definers
 	definer = with_fact(placed_like(symbol(text(key)), n), DEFINER, Text("${file_of(n)}@${line_of(n)}:${column_of(n)}"))
 	part = with_fact(with_binding(definer, DefinitionKind.Local), DEFINED_AT, definer)
-	placed_like(Case(typed, [Arm(shape_marked(bound_shape(with_part(taken, HOLE_SIGN + text(key), part), shape_narrows(type), s), type, s), part)]), n)
+	placed_like(Case(typed, [Arm(shape_marked(bound_shape(with_part(taken, HOLE_SIGN + text(key), part), shape_narrows(type, s), s), type, s), part)]), n)
 }
 # the shape a shape's values are taken apart by, its holes `$name`: a declared pattern's, or a case's, each field a
 # hole of its name, `Dot($size)` (wiki/variant.md "A case as a type"); ø for a type that is no shape
-shape_taken(type: Node, s: TypingState) as Node? := {
-	form = form_named(type, s)
+shape_taken(type: Term, s: TypingState) as Node? := {
+	form = form_named(type_text(type), s)
 	if form != ø { return form_taken(form, s) }
-	enum = narrowed_type(type) ?? return ø
-	case = case_declaring(s.records, case_bound(type, enum, s))
-	Call(symbol(text(type)), case_fields(case).map(field => symbol(HOLE_SIGN + text(declared_name(field)))))
+	if narrowed_type(type) == ø { return ø }
+	case = case_declaring(s.records, case_bound(symbol(type_text(type)), shape_narrows(type, s), s))
+	Call(symbol(type_text(type)), case_fields(case).map(field => symbol(HOLE_SIGN + text(declared_name(field)))))
 }
 # a pattern of a shape, marked with the declared pattern it names, whose holes an arm's names then hold
-shape_marked(pattern: Node, type: Node, s: TypingState) as Node := if form_named(type, s) == ø then pattern else with_fact(pattern, SHAPE_OF, type)
+shape_marked(pattern: Node, type: Term, s: TypingState) as Node := if form_named(type_text(type), s) == ø then pattern else with_fact(pattern, SHAPE_OF, symbol(type_text(type)))
 # a shape with one hole written as the variable that takes it
 with_part(taken: Node, hole: text, part: Node) as Node := if taken is symbol and text(taken) == hole then part else match taken {
 	Call(called, arguments) => Call(called, arguments.map(argument => with_part(argument, hole, part)))
@@ -124,26 +127,26 @@ with_part(taken: Node, hole: text, part: Node) as Node := if taken is symbol and
 
 # A shape as a pattern fitting each of its values, the cases it names bound to their enums: a case's name with `_` for
 # each field, `List(_, _, _)`; a declared pattern's taken shape with `_` at its holes
-shape_pattern(type: Node, s: TypingState) as Node := shape_marked(bound_shape(shape_taken(type, s) ?? refused(type, "a shape narrows a type"), shape_narrows(type), s), type, s)
-bound_shape(taken: Node, enum: Node, s: TypingState) as Node := {
+shape_pattern(type: Term, s: TypingState) as Node := shape_marked(bound_shape(shape_taken(type, s) ?? raise("${type_text(type)} narrows no type"), shape_narrows(type, s), s), type, s)
+bound_shape(taken: Node, enum: Term, s: TypingState) as Node := {
 	if taken is symbol and text(taken).starts_with(HOLE_SIGN) { return symbol(WILDCARD) }
 	match taken {
-		Get(subject, key) => case_bound(symbol(text(key)), subject, s)
+		Get(subject, key) => case_bound(symbol(text(key)), type_term(subject), s)
 		# a rest hole, `...$arguments`, takes any rest, into the variable a part read puts there
 		Call(called, arguments) => Call(if rest_named(taken) != ø then called else case_bound(called, enum, s), arguments.map(argument => bound_shape(argument, enum, s)))
 		List(items, bracket, separator) => List(items.map(item => bound_shape(item, enum, s)), bracket, separator)
 		_ => taken
 	}
 }
-case_bound(name: Node, enum: Node, s: TypingState) as Node := with_binding(in_enum(name, enum, s), DefinitionKind.Case)
+case_bound(name: Node, enum: Term, s: TypingState) as Node := with_binding(in_enum(name, enum, s), DefinitionKind.Case)
 # A kind word after `is` on a value of an enum, `n is symbol` on a Node: the enum's case of that name in lower case,
 # as a shape (wiki/Footguns.md "Tiny surprises"); ø where the value is of no enum or no case is named so
-kind_named(word: Node, type: Node?, s: TypingState) as Node? := {
+kind_named(word: Node, type: Term?, s: TypingState) as Term? := {
 	enum = record_named(s.records, base_or_self(type)) ?? return ø
 	named = cases_of(enum).filter(case => lower(text(case_name(case))) == text(word))
-	if named is empty then ø else with_fact(symbol(text(case_name(named#1))), NARROWS, record_type(enum))
+	if named is empty then ø else case_shape(text(case_name(named#1)), enum)
 }
 # whether a value is of a shape, as code: `match x { List(_, _, _) => yes; _ => no }`
-shape_test(read: Node, type: Node, at: Node, s: TypingState) as Node := with_fact(placed_like(Case(read, [Arm(shape_pattern(type, s), True), Arm(symbol(WILDCARD), False)]), at), TESTED, type)
+shape_test(read: Node, type: Term, at: Node, s: TypingState) as Node := with_fact(placed_like(Case(read, [Arm(shape_pattern(type, s), True), Arm(symbol(WILDCARD), False)]), at), TESTED, type_fact(type))
 # the raise where a value is not of the shape wanted, naming the place that wanted it
-other_shape(type: Node, at: Node) as text := "${OTHER_SHAPE} ${type} wanted at ${file_of(at)}:${line_of(at)}:${column_of(at)}"
+other_shape(type: Term, at: Node) as text := "${OTHER_SHAPE} ${type_text(type)} wanted at ${file_of(at)}:${line_of(at)}:${column_of(at)}"

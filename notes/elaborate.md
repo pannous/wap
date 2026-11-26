@@ -3,7 +3,7 @@
 The elaborator of notes/coc-plan.md (section 8) turns a program as it is written into complete terms and hands
 every declaration to the kernel (notes/theory.md). It lies in `wap/extensions/theory/elaborate/` until the switch
 and is reached through a door of its own, `elaborate/door.wap`. It is not trusted: whatever it builds, the kernel's
-`declared` and `inductive_declared` judge. This note is the contract for its first four milestones: E1 (arguments
+`declared` and `inductive_declared` judge. This note is the contract for its milestones: E1 (arguments
 found), E2 (enums, classes, match, recursion), E3 (operators, traits, conditions) and E4 (subtypes and
 obligations).
 
@@ -33,8 +33,11 @@ obligations).
   axiom is an `Axiom`.
 - **Writes** declarations into the theory's `Environment` through `declared` and `inductive_declared`, and
   nothing else. A term it hands over holds no hole.
-- **The door** `elaborate/door.wap --tree <root> program.wap` loads the prelude (`wap/extensions/theory/prelude/`), elaborates the
-  program statement by statement, and prints as the kernel's door does: nothing for an accepted declaration, the
+- **The door** `elaborate/door.wap --tree <root> program.wap` loads the prelude (`wap/extensions/theory/prelude/`): its explicit files
+  checked, `operators.wap`, `conversions.wap` and `any.wap` among them: the operators declared by their spellings as
+  wap's types module declares them (`+(m: nat, n: nat): nat := add(m, n)`), and `any`, the enum holding every value,
+  with the conversions into it. An explicit declaration of a name taken is an overload of it by the elaborator's key
+  (`overloaded`, the one key both paths use), and its found binders are its leading sorts a later binder's type names. It elaborates the program statement by statement, and prints as the kernel's door does: nothing for an accepted declaration, the
   value's type for `type of e`, a refusal as `refused by <rule>: …`. The kernel's own door, `check.wap`, stays the
   door of the explicit programs.
 
@@ -122,6 +125,7 @@ wanted before its later arguments are read, so they are read with more known.
 | `Fn(parameters, body)` | a function; a binder type not written is a hole |
 | a function type, `Prop`, `Type`, `Sort(u)` | as in the explicit corner |
 | `_` | a hole |
+| `[a, b]` | `list.item(a, list.item(b, list.empty))`, the list where the program reads, a hole for each parameter its cases do not find |
 | `Case(subject, arms)` | a recursor applied (below) |
 
 ## Declarations
@@ -161,7 +165,10 @@ adds is how a candidate fits and where its instances come from.
 
 - **Fitting.** An argument fits a parameter when its type unifies with the parameter's, or converts to it (E4's
   conversions; E3 needs the number tower's). Of the candidates that fit, one without a conversion beats one with,
-  fewer conversions beat more; two left is the refusal `overload`. So `x + y` of a `nat` and an `int` is the `int`
+  fewer conversions beat more; two left is the refusal `overload`, none the refusal `no fitting overload`, naming
+  why each candidate did not fit. A candidate whose argument fits no declaration of its own name, or that takes fewer
+  arguments than given, does not fit; that argument's refusal is the candidate's reason, so a cause inside an argument
+  stays in the message. So `x + y` of a `nat` and an `int` is the `int`
   one, and `3 + 4` the `nat` one, with no rule about operators.
 - **Numbers.** A number read against a wanted type other than the prelude's `nat` is the conversion of the number
   to that type; with no type wanted it is a `nat`.
@@ -187,16 +194,20 @@ adds is how a candidate fits and where its instances come from.
 
 ## Subtypes and obligations (E4)
 
-- **Subset types.** `T where c` is `subset(T, it => c)`, a structure of the prelude with the fields `value` and
-  `proof`. `where` is one word with two definitions, told apart by their first argument as overloads are: a list's
-  filter, and this one, whose first argument is a type. `type vector(T, n: nat) = list<T> where #it == n` is a
+- **Subset types.** `T where c` is `filter(T, it => c)`, whose value is `Subset(T, it => c)`, a structure of the
+  prelude with the fields `value` and `proof`. `where` is one word with two definitions, told apart by their first
+  argument as overloads are: a list's filter, and this one, whose first argument is a type. `type vector(T, n: nat) = list<T> where #it == n` is a
   definition whose value is a type.
 - **Conversions.** These are automatic, each a function the elaborator puts in where the type wanted differs from
   the type given: a subset to its parent (`value`); a `type X < T` to `T`; a case, as a type the subset "it is
   this case", to its enum; a part to its union, `T` to `T?`; any value to `any`; and what the prelude declares
   between its own types, the number tower. Between two types the path of conversions must be the only one, else the
   refusal `conversion` names both. A conversion lifts through a list, an optional value and a map's values as a map
-  over them.
+  over them. A bool where a proposition is wanted is the proposition that it is yes (prelude/conversions.wap), so
+  `text where #it == 1` is a condition by nat's test of equality. A conversion fits only when its fit is decided
+  now: one whose unification waits on a hole or a level not yet found is no fit.
+- **Naming a type.** `type X(…) = T` is the definition `X(…) := T` (wap/sugar/definitions.wap): `type char = text
+  where #it == 1`, `type vector(T, n: nat) = list<T> where #it == n`.
 - **Going down** needs a proof. Where a `T where c` is wanted and a `T` is given, the term is the pair of the value
   and a proof of `c` at it, and the proof is an obligation, discharged by the first of these that works (plan 3.9):
   1. computing: the decision of the condition computes to yes; computing to no is the refusal `condition`;
@@ -206,7 +217,10 @@ adds is how a candidate fits and where its instances come from.
   4. a check when the program runs, where the condition has a decision: the value becomes `T or Error`, which E5's
      effects carry as Fail. Until E5 this step is the refusal `unproved condition`;
   5. the refusal `unproved condition`, naming the condition. `! Pure` and `--strict` stop after step 3.
-- `x as S` is going down with step 4 always allowed. `x is S` is the decision of the condition at x, a `bool`.
+  Where the obligation still has holes, two facts that fill them differently are the refusal `two facts`. Among
+  overloads, a candidate whose condition computes to no does not fit, as an ill-typed one does.
+- `x as S` is going down with step 4 always allowed. `x is S` is the decision of the condition at x, a `bool`; an
+  S without a condition is the refusal `not a subtype`.
 - A provers' search is counted in steps like the kernel's work, so what is proved does not depend on the machine.
 
 ## Statements and effects (E5)
@@ -220,12 +234,70 @@ adds is how a candidate fits and where its instances come from.
   calling it. n choices in a row stay n joins, never 2^n copies; a return in a part skips the join.
 - **Only a name is given a value**: `xs#1 = 2` or `p.x = 2` is the refusal `statement` until updates of a part
   come in (a binding named by the source text would drop the write).
+- **A counted loop is a walk**: in `for i in 1 to n { body }; rest` the rest is read once as the loop's join, of the
+  names the body gives that the rest can see, and the loop is the number type's recursor down the count with the
+  motive `rounds → join's type`: no round left calls the join, a round binds its place to the successor of the rounds
+  before (so it counts 1 … n), reads the body and calls the walk of the rounds left. A continue is that call, a
+  break the join's; both pass the names the innermost round passes on (`Elaborating.round_given`). A loop over a list
+  waits for its subtypes, `while` for the effect of a walk that may not end.
 - **A return** is the block's value at once; the statements after it are never read.
-- Without rules the door sees blocks and lets only: `if` and `return` arrive as calls, which read.wap reads as calls.
-  Choices and returns reach statements.wap once the door reads with the tree's rules (E3); their lines wait in
+- `s#1: nat = n` is still accepted where it should be the refusal `statement`; its line waits in
   test_theory_statements_wanted.wap.
 - Statements are read as kernel forms (Block, Set, If, Return, While, Break, Continue), which the tree's rules
   write; the elaborator names no statement word.
+- **Effects are a type**: `T ! IO` is the prelude's `Eff(e, T)`, e the `Effects.set` of a yes or no for each effect
+  (`elaborate/effects.wap`). The effects' words are the fields of that one case, read from the prelude, so the
+  elaborator names none; a word in another case is that effect, with a got-it note. Pure is no word of a set, only what
+  `effects of` prints for none: purity is found, never written.
+- **A computation runs where its value is read**: a computation where a plain value is wanted, inside a function,
+  becomes a pending run (`Elaborating.pending`), its value a fresh variable read in its place. The nearest binder that
+  closes (a match arm, so a branch of a choice; a let's rest; a function) binds the runs opened inside it around its
+  body, the first outermost, by the prelude's `bind`; a value where a computation is wanted is its `pure`, a
+  computation of fewer effects `widened`. Where that binder's type is plain, its effects go to `Elaborating.lifts`
+  and the function's body is read again against its result's computations with them: so `if b then away(1) else 0`
+  is `nat ! Div`, its no branch `pure(…, 0)`, running nothing.
+- **A recursion that may not end is Div**: where nothing shows the end (the refusal `ending`, not a recursion's
+  wrong shape), the definition becomes an opaque constant of the result's computations with the prelude's
+  `diverging` effects joined in, `never(…)`, under the name the program wrote; its body as written is kept in
+  `Theory.run_bodies` for running it. It never unfolds, so it proves nothing and rests on no axiom. Its result type
+  must be written.
+- **A proof must be pure**: in a law or theorem no computation runs; one where a value is wanted is the refusal
+  `effect`, naming the chain from the proof. A law whose statement names a computation, or a function that gives
+  nothing (the prelude's Unit: called for what it does, never pure), is tested, never proved: with a proof it is
+  refused, without one the provers leave it.
+- **`effects of f`** prints the effects f's type ends in, by the syntax of its type (a computation type is named,
+  never unfolded): Pure, one effect, or several in brackets.
+- **`f(x) := … ! IO`** limits f's effects: an effect of its type past the limit is the refusal `effect`, and a limit
+  on a value that is no function is a misplaced effect constraint. `! IO, FFI` with a comma waits in
+  test_theory_effects_wanted.wap, as the reader puts the comma around the whole definition.
+
+## Sums (E7)
+
+- **`A or B` of two types is their union**, the prelude's `Sum(A, B)` (logic.wap), cases `left(a)` and `right(b)`
+  (`elaborate/sums.wap`). The spelling arrives as a condition, If(A, yes, B); a condition that is a type, neither a
+  bool nor a proposition, has the union as its one reading (`union_written`), until `or` is a word of the prelude.
+- **One normal form**: sums inside a union flattened, each part computed, kept once and ordered by its term's key,
+  then summed from the right; a union of one part is that part. So `id(nat) or bool`, `bool or nat` and
+  `nat or bool or nat` are one type.
+- **A value of a part is a value of the union** (`injected`, last in made_of's chain after the conversions and the
+  subsets): it is held by `left` where its type is the first part, else by `right` of its injection into the rest.
+- **Optional values are unions with nothing**: ø is the prelude's Unit where a type is wanted, its value `unit`
+  elsewhere, at the level of the nothing the union wanted holds. `T?` is `T or ø`, and nothing is ordered last at the
+  level of the part before it, so `nat?`, `nat or ø` and the prelude's `optional(nat)` = Sum(nat, Unit) are one type.
+  An optional of a union, `(A or B)?`, flattens to Sum(A, Sum(B, Unit)), which is not `optional(A or B)` written
+  with the parameter (Sum(Sum(A, B), Unit)): a normal form by sorting does not commute with putting a union in for T.
+- **A call on a union distributes over its cases** (sums.wap `distributed`): only where no declaration fits, the first
+  argument typed a Sum is matched, each arm the same call on the case's value; a union of three parts distributes
+  again inside its `right` arm, and a second union argument in turn. The match's type is the type wanted, else the
+  union of the arms' types (`nat` where every arm gives one). A match on an enum whose type takes universes (the
+  prelude's Sum, list) unifies each parameter with the recursor's domain, so its level holes are found.
+- **`any` is a data node** (prelude/any.wap): an enum of nothing, a bool, an int, a text and a list of anys, each a
+  value of it by an overload of `convert`. A conversion fits only where the value's type is its binder's, so a level
+  hole in ø's Unit fits nothing else. The way out of an any, a check when the program runs, waits for effects (E5).
+- **A match on one of several enums that name each other** (a mutual block, or a nested one like `any` and its
+  list): the block's recursor takes one motive and minors per type; the subject's own get the motive and the arms, the
+  other types' a motive giving nothing (Unit at the motives' universe) and minors giving its value. A hypothesis rides
+  the field its motive is applied to, so recursion is on fields of the subject's own type.
 
 ## Files
 
@@ -243,7 +315,9 @@ adds is how a candidate fits and where its instances come from.
 | `elaborate/conditions.wap` | conditions, their decisions, the facts a branch knows | E3 |
 | `elaborate/convert.wap` | the conversions, the path between two types, lifting through containers | E4 |
 | `elaborate/obligations.wap` | going down: prove or check | E4 |
-| `elaborate/statements.wap` | blocks, lets, a choice's rest, returns | E5 |
+| `elaborate/statements.wap` | blocks, lets, a choice's rest, counted loops, returns | E5 |
+| `elaborate/effects.wap` | computation types, `effects of`, effect bounds, recursions that may not end | E5 |
+| `elaborate/sums.wap` | unions of types as sums, their normal form | E7 |
 
 ## Rules every file keeps
 
@@ -251,7 +325,7 @@ adds is how a candidate fits and where its instances come from.
   are hints, never `==` on a term, each file names what it uses.
 - Refuse, never guess: where two readings fit, both are named. The elaborator's refusals have their own rule
   names: `cannot find`, `overload`, `covering`, `recursion`, `unknown name`, `unproved theorem`, `unproved law`; from E3 on `trait` and
-  `undecidable condition`; from E4 on `conversion`, `condition` and `unproved condition`.
+  `undecidable condition`; from E4 on `conversion`, `condition`, `unproved condition`, `two facts` and `not a subtype`.
 - Nothing here is trusted and nothing here may weaken a check: a term the kernel refuses is reported as the
   elaborator's bug, with the declaration, never retried another way.
 - Tests are lines of the pages' test files through the door: a program in, what the door says out.

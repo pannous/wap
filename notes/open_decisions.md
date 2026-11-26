@@ -6,20 +6,13 @@ An entry goes once decided (its decision then lives on its card, in the wiki or 
 
 ## The top debts still open (notes/debts.md); the "5" + 3 warning is parked (card digit-text-compile-warning)
 
-## Parked by the user (to discuss later)
-
-- Traits: `class Job { act: () -> int }` (function fields only) is read as a trait today, so `show(Job(…))`
-  recurses until the stack runs out (timers library). warp declared traits only by trait/protocol/interface,
-  structural conformance for those; a class of function fields stayed a class. Recommend: the same (0 core,
-  a port of warp's extensions/protocols.warp).
-
 ## Pending questions
 
 - wap-emitter: a C import clash is refused (A, about +3 core host.wap); a block argument with a defaulted
   parameter is run instead of passed ("no run takes (ø)").
 - wap-fixer: a standard-module word refused across feeds/random (drop the refusal at standard bind, ±3 core);
   indexing an any parameter gives an internal error (recommend a clear refusal); `try` of value ø (recommend
-  refuse); native-function-values A/B/C.
+  refuse).
 - wap-native-maps: +2 analyze for native maps (a); wap-headless `--no-window` returning (a, +33 extension).
 - Template typing: any joins every type, (a) 3-5 core.
 - List positions from 1 in lib/list.wap (wap-reviewer, library-port-rest).

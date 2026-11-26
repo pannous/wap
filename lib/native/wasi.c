@@ -152,7 +152,7 @@ void crash_context_restored(char* outer) {
 	free(outer);
 }
 static void crash_said(const char* what) {
-	const char* parts[] = {"warp: ", what, " while ", activity, "\n"};
+	const char* parts[] = {"wap: ", what, " while ", activity, "\n"};
 	for (size_t i = 0; i < sizeof parts / sizeof *parts; i++) (void)!write(STDERR_FILENO, parts[i], strlen(parts[i]));
 }
 // the crash signal's name without strsignal, which allocates: a crash inside malloc (a heap corrupted beneath it) then
@@ -205,7 +205,7 @@ static void* program_ran(void* unused) {
 }
 int main(int argc, char** argv) {
 	program_argc = argc;
-	program_argv = argv;
+	program_argv = posix_arguments(argc, argv);
 #ifdef __APPLE__
 	program_ran(NULL);
 	return 0;

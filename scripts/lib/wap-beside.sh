@@ -7,7 +7,9 @@ WAP_WARM=wap/warm.packed
 WAP_LIBRARY_MODULE=wap/types.wasm
 # everything in wap/ but what the compiled compiler holds, its own source and its warm state, and the modules compiled
 # there (its library, and the copy a compiler run from source writes beside itself): a new folder there goes along
-WAP_COMPILED=(core compiler.wap "${WAP_WARM##*/}")
+# the compiler's own source in wap/, which a build copies into the folder it builds in (test/wap/compile.sh)
+WAP_SOURCE=(core compiler.wap)
+WAP_COMPILED=("${WAP_SOURCE[@]}" "${WAP_WARM##*/}")
 WAP_BESIDE=($(cd "$(dirname "${BASH_SOURCE[0]}")/../../wap" && ls | grep -vxF "${WAP_COMPILED[@]/#/-e}" | grep -v '\.wasm$'))
 WAP_LIBRARY=lib
 # the tools the native wap runs beside its compiler, each a program of wap/ compiled once wherever a seed folder is made:
@@ -17,6 +19,17 @@ WAP_TOOLS=(verify.wasm:wap/extensions/theory/elaborate/verify.wap)
 WAP_LIBRARY_LINKED='types-*.wasm'
 # a seed folder's parts, by name: the compiler, what it reads beside itself, the tools (its machine code *.cwasm is none)
 WAP_PARTS=(wap.wasm "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "${WAP_TOOLS[@]%%:*}")
+# wap_linked <folder>: the C compiler's arguments that link the native wap with wasmtime's library in <folder>/lib, which
+# it finds beside itself wherever it moves (macOS names the executable's folder @executable_path, Linux $ORIGIN;
+# Windows has no such path: it finds the DLL beside the executable or on the PATH, and loads it only for the functions
+# imported from it, so all are, as the native wap finds each by name)
+wap_linked() {
+	case $(uname -s) in
+		Darwin) WAP_LINKED=(-L"$1/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib) ;;
+		MINGW* | MSYS*) WAP_LINKED=(-L"$1/lib" -Wl,--whole-archive -lwarp_wasmtime -Wl,--no-whole-archive) ;;
+		*) WAP_LINKED=(-L"$1/lib" -lwarp_wasmtime -Wl,-rpath,'$ORIGIN/lib') ;;
+	esac
+}
 # wap_tools_built <tree> <compiler>: each tool compiled by that compiler, by the native wap on PATH, in its folder, so
 # the tool links the library module by its name beside it and the folder can move
 wap_tools_built() {
