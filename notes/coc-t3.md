@@ -120,8 +120,10 @@ A name's bindings live in core/analyze/flow.wap. These forms are refused with a 
   int-to-float conversion.
 - **No weights are ported** (audit finding 5). read.wap's `nearest` (five weights), TRIAL_LIMIT and the numeral
   special cases (`numeral_in_cases`, `declares_case`, the `literals` and `result` counts of Trial) are not copied
-  into analyze. T3g replaces them in read.wap with analyze's choice, so the two typers choose alike and the weights
-  are gone from the tree.
+  into analyze. T5 replaces them in read.wap with analyze's choice, so the two typers choose alike and the weights
+  are gone from the tree: the theory's doors read a program as written and lower it themselves, so no fact analyze
+  writes reaches the elaborator until it reads analyze's typed nodes, and the overloads it chooses among are the
+  theory environment's declarations, not the compile's signatures.
 - **The readings typing chose stay the compile's table:** `typed_readings` (calls.wap, read by format.wap) is keyed
   by the source place, as TYPES is one table for the run: `format` prints the code as parsed, which a fact on the
   typed call never reaches.
@@ -146,9 +148,8 @@ The whole suite runs at T3b, T3d and T3e, compared line by line with main's last
 | T3d one pass | headers first, assignment as a new binding, the retyping round goes; kind rules typed in place, the refiring goes | −40 analyze, −20 rules, +40 | careful; a recursive function's result is written, or refused with the fix-it naming it; a kind rule's error names the line of its phrase |
 | T3e numbers | numerals at the wanted type, else `int`, and an empty `{}` or `[]` at the type its place wants, the right of `??` wanting the left's (`m.get(k) ?? {}`; core/pipeline.wap line_told's `has` test goes); i32 and i64; `#xs` int; the numbers prelude in wap/types; overloads by conversion order| −40 analyze (the ranking's 5 words), +170 analyze, +200 types | careful; `0 - 3` is -3; `m.get(k) ?? {}` of a map<text, map<text, text>> is a map<text, text>; `#xs - 1` is -1 on an empty list; `type of 3` is `int` |
 | T3f functions | each typed function an opaque constant of its signature in the kernel environment; the census counts them as assumed | +20 | normal plus the census |
-| T3g theory follows | read.wap's `nearest`, TRIAL_LIMIT and the numeral special cases replaced by analyze's choice | 0 core; extension −40 | theory areas; the theory census script compared per program with main (no floor) |
 
-T3a and T3g change no core behaviour. T3b is the largest diff: about 200 places edited, mechanically, plus
+T3a changes no core behaviour. T3b is the largest diff: about 200 places edited, mechanically, plus
 type_notation.wap.
 
 ## The estimate
@@ -186,7 +187,24 @@ T3 is done when all of these hold:
   warm `print "Hello"`, each measured against its time before T3a on the same machine. That is a ceiling for the
   whole step, shared out below, not slack for the first sub-step;
 - letters.wap, ROUNDS_LIMIT and the retyping round are gone (typed_readings stays the compile's table), and so are the five ranking words in
-  calls.wap and `nearest`'s weights in read.wap.
+  calls.wap (`nearest`'s weights in read.wap go in T5, above).
+
+What the gate still lacks, and the step that brings each:
+- `type of 3` is `int`, and `identity(int)`: red. `type of` is no word of the compile, and `int` in a value's place
+  names its conversion functions, so `identity(int)` is refused as several functions. Both wait for the user's
+  answer on `type of` (types as values in an expression's place).
+- `i32` and `i64` as the wrapping words: e3, waiting for the user's answer (core +8, kernel +2). `0 - 3` and
+  `#xs - 1` are green already.
+- the loop red (test_type_wanted, a loop that gives a carried name another type): a typing that can be discarded,
+  listed after T3 in coc-plan, measured before building.
+- a kind rule's error naming the line of its phrase: no test line holds it yet.
+- the census types every function and no place of the compiler's own source is typed any; the 5 places typed any
+  are the language's dynamic words, `show` four times in types/prelude.wap and `text` once in nodes.wap.
+- still in the tree: letters.wap (its letter holes, T3c3), ROUNDS_LIMIT (shape rules refiring on their own output,
+  core/rules/stages.wap), and the loop in calls.wap function_typed that types a function again where its calls of
+  itself took no result, which gives an unwritten recursive result from the other arm
+  (test_functions_returns). The retyping round of typed_among is gone.
+- speed: the self-compile takes 12.5 s CPU and a warm hello 0.11 to 0.13 s, against 18.3 s and 130 ms before T3a.
 
 ## The speed budget
 
@@ -202,7 +220,6 @@ carries over to the next one, and one that needs more goes to the supervisor bef
 | T3d | 0 | one pass in place of the retyping rounds and the refiring: expected to be faster, and a gain is credited |
 | T3e | 7 | numerals typed through the kernel, the prelude's declarations read |
 | T3f | 3 | one opaque constant per typed function |
-| T3g | 0 | extension only |
 
 ## Open for the user (through the supervisor)
 
