@@ -17,3 +17,4 @@ An entry goes once decided (its decision then lives on its card, in the wiki or 
 - Template typing: any joins every type, (a) 3-5 core.
 - List positions from 1 in lib/list.wap (wap-reviewer, library-port-rest).
 - funcref-calls-by-table: function values called through one shared table slot instead of a funcref (self compile −8.4%); built dbb342af: core/emit +6, kernel +3, extensions/native +1, +99 nodes, all checks green; morning, recommend yes. Signatures sharing one wasm type is an edge case, accepted (interviewer).
+- class-spaces-wap: format writes one-line braces spaced `{ a: 1 }` (A, +2 core, ~10 test expectations in test_reader/test_operators rewritten: needs the user's test grant) or tight (B, 0 core, 312 class lines reformatted); morning, recommend A.
