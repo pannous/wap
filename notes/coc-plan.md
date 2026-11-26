@@ -274,6 +274,24 @@ A program may also write what the compiler otherwise finds: a level in square br
 (`nat.recursor[1](n => nat, 0, (k, double_k) => double_k + 2, n)`). The kernel's own tests are written this way
 (notes/theory.md "The explicit spellings").
 
+The type words need no new form, because each one is the kernel's typing or an ordinary library word:
+- `x : T` and `x as T` are one ascription. It checks when x already has type T. Otherwise it calls the library's
+  conversion for that pair of types (`π as int`, `"1h 30m" as Duration`). After a signature, `:` and `as` declare the
+  same result type.
+- `to` is an alias of `as` (`convert text to int`). The `to` that starts a definition (`to add a to b: …`) is a
+  different word, told apart by where it stands.
+- `is` checks a value against a type and narrows it on the branch it guards.
+- `->` and `→` write only function types (Pi). `=>` and `↦` write only functions (lambda).
+- `read text as int` picks the overload whose result is the type wanted (T3e).
+- `for x: T` before a body is one binder, and `∀` and `∃` are aliases of `for` and `exists`. The body's type
+  decides what the binder means:
+  - When the body is a proposition, the binder is Pi, and its proofs are functions of x.
+  - When the body is an action, the binder is the loop, run for every x of its domain (`for i in 1...3: print i`).
+    `for x in S` is `for x: T` with `x in S` as a premise.
+  Both are the kernel's Pi and lambda, typed by the stage-3 kind rules. The theory's own reading of the `for` line
+  (extensions/theory/elaborate/declare.wap) goes at T7.
+The core cost is nothing.
+
 ## 4 What changes and what goes
 
 The freedom to overhaul is used on the compiler's middle, not on the surface. No spelling has to go: nothing in the
@@ -360,13 +378,13 @@ up to:
 | part | today | target | trusted |
 |---|---|---|---|
 | reader, operators, rules (core/parse, core/rules) | 3,036 | 3,036 | no |
-| typing: core/analyze, grown into the elaborator | 3,491 | 5,028 (2,600 added, 1,023 of five files and 40 of restarts deleted) | no |
+| typing: core/analyze, grown into the elaborator | 3,491 | 4,898 (2,470 added, 1,023 of five files and 40 of restarts deleted) | no |
 | kernel | 93 | 2,553 | yes |
 | emit | 2,081 | 2,131 | for what runs |
 | rest of core | 1,058 | 1,058 | no |
 | types module and sugar | 2,239 | 2,889 | no |
 | compiler.wap, nodes.wap | 326 | 326 | no |
-| **the compiler** | **12,324** | **17,021** | |
+| **the compiler** | **12,324** | **16,891** | |
 
 That is about 20 lines above the ballpark, with the emitter's step T1b (measured: core −43, kernel +18) counted; cutting T8 (storage
 by context) gives 16,841. The total holds near the ballpark only if
@@ -597,11 +615,8 @@ equality, `show`.
 
 **Where two rules of this plan meet.** By the checks above a type cannot hold itself under a subset type whose
 condition speaks of it, under a quotient or under an opaque type: `class Quad { parts: vector(Quad, 4) }`, a
-`list<Tree> where #it > 0`, a `set<Tree>` are all refused by strict positivity. The elaborator resolves it
-(milestone E8): it declares the plain type without the condition, defines the condition as a predicate over the
-finished value, and gives the program the subset type of the two. `map` and `set` have plain carriers for this, a
-list of entries, beside their checked forms. Until that is built the refusal names the fix: declare the plain type
-and state the condition as a `where` on its uses.
+`list<Tree> where #it > 0`, a `set<Tree>` are all refused by strict positivity, and the refusal names the fix:
+declare the plain type and state the condition as a `where` on its uses.
 
 ## 8 The elaborator
 
@@ -925,7 +940,6 @@ grows the compiler, says in which step each of them reaches it.
 | E5 statements and effects | blocks, variables, `for`, exits as terms; computation types; `effects of`; a proof refuses an impure function by inference | `total` of 3.8 is Pure, and `total([1, 2, 3]) == 6` holds by `refl`; the lines of wiki/effects.md; a proof refuses an impure function naming the chain |
 | E6 measures | recursion by measure, `while` with a measure, Div; the decrease proved for a parameter moved by a literal toward a guarded bound (wiki/Footguns.md), other measures by a written proof until P3 | `fact(4)` is 24 and `fact` is Pure; a `while` without a measure is Div and still runs; `loop` of 3.8 |
 | E7 sums | unions, optional values, `any`, class families; calls distribute | the lines of 3.10; `speak` over a list of an animal and a dog picks each one's method |
-| E8 conditions lifted | a type holds a sized list or a set of itself: the plain type, the predicate, the subset type (section 7) | `class Quad { parts: vector(Quad, 4) }` is accepted, and a Quad given three parts is refused by `condition` |
 
 **P, proving**
 
@@ -957,7 +971,7 @@ step, measured against the step before; more goes to the user.
 | T4 subtypes | `where`, `type X < T`, the declared conversions; `nat` is `int where it >= 0`; an obligation proved by computing or by facts in scope, else a check with the effect Fail (E4, 3.2, 3.3, 3.9) | `d: char = "a"` accepted and `d: char = "ab"` refused by `condition`; `char` is `text where #it == 1` and nothing else; `effects of` a function with a check left is Fail |
 | T5 definitions, statements and inductive types | enums, classes, functions, `match`, blocks, variables, loops and exits become kernel declarations and terms as analyze types them: inductive blocks, recursors, structural recursion, a measure, else Div; unions, optional values and `any`; `extends` as the closed sum, built by analyze from the class declarations while the `inherited` rule keeps copying the fields; a compiled library carries, beside its signatures, the bodies that may unfold (definitions a type or a proof computes with), as a Lean module does, which replaces the signatures-only format of notes/compile_inputs.md; a compiled library's declarations are
 carried once, as the kernel accepted them when it was built (13); the emitter erases types, levels and proofs from the checked terms (E2, E5's statements, E6, E7), and the erasure stage chooses the build's strategies, the emitter's branches on a build that keeps its values in the memory (GC structs or C structs, call_ref or a table, struct.get or a load) | a `match` that misses a case is refused by `covering`; `effects of fact` is Pure; `effects of` a `while` without a measure is Div and it still runs; `speak` over a list of an animal and a dog picks each one's method |
-| T6 laws, effects and instances | a law is a theorem; a plain compile proves by computing, else the law is Tested; effects are computation types and a proof refuses an impure function; traits are structures and instances come from overloads, a protocol (a class with a required word) is such a trait (E3, E5's effects, P1, P2); conditions lifted out of recursive types (E8); `wap check` loads the proof extension | `law double(3) == 6` Proved; `wap check` proves a law from two earlier laws; a proof using an impure function refused naming the chain; `sort` on a class without `compare` refused naming the trait; `class Quad { parts: vector(Quad, 4) }` accepted |
+| T6 laws, effects and instances | a law is a theorem; a plain compile proves by computing, else the law is Tested; effects are computation types and a proof refuses an impure function; traits are structures and instances come from overloads, a protocol (a class with a required word) is such a trait (E3, E5's effects, P1, P2); `wap check` loads the proof extension | `law double(3) == 6` Proved; `wap check` proves a law from two earlier laws; a proof using an impure function refused naming the chain; `sort` on a class without `compare` refused naming the trait |
 | T7 the theory extension retires | what is left of wap/extensions/theory goes: its run door and its prelude, whose words now live once in wap/types; the provers (P3, P4), the second opinion (K7), the export, the arithmetic proofs and the door `wap check` live in wap/extensions/proof, which only `wap check` and proofs load | every test as before; `wap check` and the second opinion from wap/extensions/proof; the trust base listed by a command |
 | T8 storage by context (cuttable) | an `int` is stored as i32 or i64 where computing or a fact in scope shows it fits (the plain compile loads no provers), else as a big number; the big numbers come from a library only the programs that need them load; `int` no longer wraps | `2 ^ 62 * 4` prints 18446744073709551616; a loop counter stays an i64 and the benchmarks keep their guardrails; the compiler's build holds no big numbers (13) |
 
@@ -982,12 +996,12 @@ follow the theory extension's elaborator, which does the same work today:
 | T3 | 350 analyze (unification 180, numerals at their expected type 170), 100 analyze (types as terms, the notation's readers), 40 analyze (one pass: headers first, assignments as bindings), 20 rules (kind rules in place), 200 types (the numbers prelude) | 524 (504 analyze: the 464 below and 40 of restarts and retypings; 20 rules: the refiring) | letters.wap (235), fits.wap (189), typed_readings and analyze's own numerals (40) | +186 |
 | T4 | 450 analyze (conditions, obligations, conversions, below), 100 types | 141 analyze | conditions.wap (141) | +409 |
 | T5 | 1,000 analyze (declarations, match, recursion, blocks, statements, sums), 200 types (data), 200 emit (erasure) | 341 (191 analyze, 150 emit) | matching.wap (191); emit's shape guessing that erasure replaces (150) | +1,059 |
-| T6 | 500 analyze (effects, instances, laws, tested), 30 analyze (protocols as traits), 130 analyze (E8), 150 types (logic, effects) | 227 analyze | dispatch.wap (227): overloads become instances | +583 |
+| T6 | 500 analyze (effects, instances, laws, tested), 30 analyze (protocols as traits), 150 types (logic, effects) | 227 analyze | dispatch.wap (227): overloads become instances | +453 |
 | T7 | 0 | 0 in the compiler; the rest of the extension | | 0 |
 | T8 | 200 emit and types | 20 | | +180 |
-| **all** | **6,130** | **1,433** | **1,023 of analyze** | **+4,697** |
+| **all** | **6,000** | **1,433** | **1,023 of analyze** | **+4,567** |
 
-The compiler ends at about 17,021 lines, near the ballpark of 17,000, with the deletions above (5.3). A step that
+The compiler ends at about 16,891 lines, near the ballpark of 17,000, with the deletions above (5.3). A step that
 needs more lines takes them and reports its measured lines; only a jump far above the ballpark goes to the
 interviewer.
 
@@ -1028,6 +1042,10 @@ Not to cut: K1 to K6, L1 to L4, E1 to E6, optional values and `any` of E7, P1, T
 10.4. Together they are the nine features in wap's own types, with `char` a subtype of `text`.
 
 ## 13 Decisions
+
+Decided by the user (2026-11-26):
+- **A small language first**: the theory may cut wap's language drastically where that serves it; parked forms
+  keep their wiki text and red tests, and come back later, on demand, as rewrites to the small core.
 
 Decided by the user (2026-11-24):
 - A name can be given a value of another type; from there on it holds that type, and where two paths meet, their
@@ -1089,8 +1107,9 @@ Decided by the user (2026-11-25), the basis of track T:
 Decided by the user (2026-11-25), after the extensions audit (data/extensions-audit/report.md) and R1:
 - **One environment per module** is step TM, between T2 and T3, measured like T1b. A declaration in a file applies
   from its declaration on, not to the whole file.
-- **Conditions lifted out of recursive types (E8)** stay, with their test, and are ported at T6; cut 7 stays optional.
-- **The run door** (theory/run: lower.wap, terms.wap) stays until T7, as planned.
+- **Conditions lifted out of recursive types (E8)** are cut (cut 7): the refusal names the fix (user 2026-11-26).
+- **The run door** is gone (user 2026-11-26): erase.wap stays without a door as T5's reference, theory/run/terms.wap
+  its vocabulary.
 - **The arithmetic provers stay** (P3, P4: linear, induction, apart). They import the elaborator's state, unify and
   match, which T3 to T6 delete: the step that deletes a file a prover imports ports that prover onto analyze and
   wap/kernel in the same step, and counts its lines.
