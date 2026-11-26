@@ -1,0 +1,1 @@
+- `git merge --no-ff --no-commit origin/main` in a cowtree worktree (/Volumes/Worktrees/template-shape, 2026-11-26) fails with `fatal: stash failed`, though no merge.autoStash or rebase.autoStash is configured; `git -c merge.autoStash=false merge …` works. Likely cowtree's or a hook's doing.
