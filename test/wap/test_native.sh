@@ -293,7 +293,7 @@ choice: Axiom"
 libraries_beyond_system() {
 	case $(uname -s) in
 	Darwin) otool -L "$1" | tail -n +2 | grep -v libSystem ;;
-	MINGW* | MSYS*) llvm-objdump -p "$1" | sed -n 's/.*DLL Name: //p' | grep -viE '^(kernel32|ntdll|ucrtbase|msvcrt|advapi32|user32|ws2_32|bcrypt|bcryptprimitives|userenv|shell32|ole32|oleaut32|psapi|dbghelp|crypt32|secur32|synchronization|api-ms-win-.*)\.dll$' ;;
+	MINGW* | MSYS*) llvm-objdump -p "$1.exe" | sed -n 's/.*DLL Name: //p' | grep -viE '^(kernel32|ntdll|ucrtbase|msvcrt|advapi32|user32|ws2_32|bcrypt|bcryptprimitives|userenv|shell32|ole32|oleaut32|psapi|dbghelp|crypt32|secur32|synchronization|api-ms-win-.*)\.dll$' ;;
 	*) ldd "$1" | grep -vE 'linux-vdso|ld-linux|lib(c|m|dl|rt|pthread|gcc_s)\.so' ;;
 	esac
 }
