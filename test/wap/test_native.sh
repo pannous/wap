@@ -73,6 +73,10 @@ a
 # a program using a compiled module (use "m.wasm", extensions/wasm/modules.wap): the native wap links its instance
 check "a native wap run links a module the program uses" "$(printf '%s\n' 'add(a: int, b: int) as int := a + b' >"$stage/adding.wap" && $wap "$compiler" "$stage/adding.wap" "$stage/adding.wasm" 2>&1 && "$native_wap" "use \"$stage/adding.wasm\"
 add(40, 2)" 2>&1)" "42"
+# a module the program uses gone before the run: said once, however many of its words the program calls
+printf '%s\n' 'add(a: int, b: int) as int := a + b' 'twice(a: int) as int := a * 2' >"$stage/gone.wap" && $wap "$compiler" "$stage/gone.wap" "$stage/gone.wasm" >/dev/null 2>&1
+printf '%s\n' "use \"$stage/gone.wasm\"" 'print add(1, 2)' 'print twice(3)' >"$stage/using_gone.wap" && $wap "$compiler" "$stage/using_gone.wap" "$stage/using_gone.wasm" >/dev/null 2>&1 && rm "$stage/gone.wasm"
+check "a missing module is said once" "$("$native_wap" "$stage/using_gone.wasm" 2>&1 | grep -c 'no module')" "1"
 # a console value is the line's exported global, one x every later line reads and its functions use
 check "the console keeps a value for the lines after it" "$(printf '%s\n' 'x = 2' 'x + 1' 'f(a: int) as int := a * x' 'f(21)' 't = "ab"' 't + t' | "$native_wap" 2>&1)" "2
 3
