@@ -1025,6 +1025,10 @@ Not to cut: K1 to K6, L1 to L4, E1 to E6, optional values and `any` of E7, P1, T
 
 ## 13 Decisions
 
+Decided by the user (2026-11-26):
+- **A small language first**: the theory may cut wap's language drastically where that serves it; parked forms
+  keep their wiki text and red tests, and come back later, on demand, as rewrites to the small core.
+
 Decided by the user (2026-11-24):
 - A name can be given a value of another type; from there on it holds that type, and where two paths meet, their
   union. A name declared with `let`, `const` or a written type keeps its type (section 4, 9.5).
