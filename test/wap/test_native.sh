@@ -384,7 +384,8 @@ mkdir -p "$stage/erring" && printf '%s\n' 'broken(): int := "ab"' >"$stage/errin
 check "an error in a used module names its full path" "$("$native_wap" "$stage/erring/main.wap" 2>&1 | grep -c "^$stage/erring/part.wap line 1:")" "1"
 # runs at the same moment each get a temporary file of their own, never another's (lib/file.wap temp_file)
 TEMP_RUNS=48
-printf '%s\n' 'use file' 'print temp_file()' >"$stage/temp_name.wap" && mkdir -p "$stage/temp_names"
-for run in $(seq $TEMP_RUNS); do "$native_wap" "$stage/temp_name.wap" >"$stage/temp_names/$run.txt" 2>&1 & done; wait
+# (compiled once: each run then only runs the module, so they start together and stay light)
+printf '%s\n' 'use file' 'print temp_file()' >"$stage/temp_name.wap" && $wap "$compiler" "$stage/temp_name.wap" "$stage/temp_name.wasm" >/dev/null 2>&1 && mkdir -p "$stage/temp_names"
+for run in $(seq $TEMP_RUNS); do "$native_wap" "$stage/temp_name.wasm" >"$stage/temp_names/$run.txt" 2>&1 & done; wait
 check "runs at the same moment get $TEMP_RUNS temporary files of their own" "$(cat "$stage/temp_names"/*.txt | grep '^/' | sort -u | wc -l | tr -d ' ')" "$TEMP_RUNS"
 exit $((failures > 0))
