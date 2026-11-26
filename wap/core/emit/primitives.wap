@@ -35,7 +35,7 @@ item_loaded(type: list<int>) as WasmOperation := WasmOperation([I32], [type], in
 item_stored(type: list<int>) as WasmOperation := WasmOperation([I32, type], [], instruction(item_access(type)#2, [2, 0]))
 # the load and the store of a value of a layout at its own width
 item_access(type: list<int>) as list<list<int>> := if type == I32 then [I32_LOAD, I32_STORE] else if type == F32 then [F32_LOAD, F32_STORE] else if type == F64 then [F64_LOAD, F64_STORE] else [I64_LOAD, I64_STORE]
-text_operations(p: Program) as map<text, WasmOperation> := {
+text_operations(p: Emission) as map<text, WasmOperation> := {
 	bytes = text_type(p.m)
 	text = text_layout(p.m)
 	{
@@ -47,7 +47,7 @@ text_operations(p: Program) as map<text, WasmOperation> := {
 # the code of an operation of wasm types: as many operands as it takes, each int it takes as an i32 wrapped, its
 # instructions, then the value it gives as its definition writes it: an i32 as an int extended, another of its own type
 # (the extension is the declared mirror of the operand's wrap: wap's host words read every i32 as an int)
-wasm_called(form: Node, arguments: list<Code>, operation: WasmOperation, p: Program) as Code := {
+wasm_called(form: Node, arguments: list<Code>, operation: WasmOperation, p: Emission) as Code := {
 	if #arguments != #operation.takes { refused(form, "this primitive takes ${#operation.takes} operands, not ${#arguments}") }
 	narrowed = (1 to #arguments).flat_map(at => arguments#at.instructions + (if arguments#at.type == operation.takes#at or arguments#at.type == NEVER then [] else if arguments#at.type == I64 and operation.takes#at == I32 then I32_WRAP_I64 else refused(form, "operand ${at} of this primitive is not of the wasm type it takes")))
 	type = typed_layout(form, p)
@@ -59,10 +59,10 @@ wasm_called(form: Node, arguments: list<Code>, operation: WasmOperation, p: Prog
 TAG_EQUAL = "tag_equal"
 # a plain case's number among its enum's cases, from 0: its tag past its enum's first one (patterns.wap declared_tag)
 CASE_NUMBER = "case_number"
-case_numbered(enum: Term, p: Program) as list<int> := tagged(p.m) + i32_const(declared_tag(cases_of(record_named(p.records, enum) ?? raise("${type_text(enum)} is no enum"))#1, p)) + I32_SUB + I64_EXTEND_I32_U
+case_numbered(enum: Term, p: Emission) as list<int> := tagged(p.m) + i32_const(declared_tag(cases_of(record_named(p.records, enum) ?? raise("${type_text(enum)} is no enum"))#1, p)) + I32_SUB + I64_EXTEND_I32_U
 # the code of a primitive: its arguments, then its instruction or a call of its helper, giving the value its
 # built-in's definition writes
-primitive_code(form: Node, operation: Node, arguments: list<Code>, p: Program) as Code := {
+primitive_code(form: Node, operation: Node, arguments: list<Code>, p: Emission) as Code := {
 	name = text(operation)
 	operands = arguments.flat_map(argument => argument.instructions)
 	# the value the operands and these instructions after them give
@@ -89,7 +89,7 @@ primitive_code(form: Node, operation: Node, arguments: list<Code>, p: Program) a
 	refused(form, "no primitive of this name")
 }
 # a host operation's row, an imported function's with the call of its import
-host_performed(name: text, p: Program) as WasmOperation := {
+host_performed(name: text, p: Emission) as WasmOperation := {
 	row = PRIMITIVES[name]
 	if is_imported(row) then WasmOperation(row.takes, row.gives, instruction(CALL, [host(p, name)])) else row
 }
@@ -100,39 +100,39 @@ first_operand_type(form: Prim) as Term := match form { Prim(operation, given) =>
 # of no optional's type (a condition found it present) itself; a missing one traps. A value any or a number holds,
 # known of its type, is cast to it first.
 # an any's value as an any, `x!` of an any (an any? is an any), is the any itself, missing raising
-optional_value(form: Node, p: Program) as list<int> := if layout_of(first_operand_type(form), p.m, p.records) == ANYREF then (if typed_layout(form, p) == ANYREF then REF_AS_NON_NULL else held_value(type_of(form), form, p)) else if base_of_optional(first_operand_type(form)) == ø then [] else present(p) + (if type_text(type_of(form)) in BOXED_WORDS then box_opened(plain_word(form), p) else [])
+optional_value(form: Node, p: Emission) as list<int> := if layout_of(first_operand_type(form), p.m, p.records) == ANYREF then (if typed_layout(form, p) == ANYREF then REF_AS_NON_NULL else held_value(type_of(form), form, p)) else if base_of_optional(first_operand_type(form)) == ø then [] else present(p) + (if type_text(type_of(form)) in BOXED_WORDS then box_opened(plain_word(form), p) else [])
 # a plain value of a type word, `int`, put in its box, and the value a box on the stack holds
-box_made(word: text, p: Program) as list<int> := struct_made([WORD_LAYOUTS[word]], () => box_index(p.m, word), p)
-box_opened(word: text, p: Program) as list<int> := if p.m.memory != ø then item_loaded(WORD_LAYOUTS[word]).code else instruction(STRUCT_GET, [box_index(p.m, word), 0])
+box_made(word: text, p: Emission) as list<int> := struct_made([WORD_LAYOUTS[word]], () => box_index(p.m, word), p)
+box_opened(word: text, p: Emission) as list<int> := if p.m.memory != ø then item_loaded(WORD_LAYOUTS[word]).code else instruction(STRUCT_GET, [box_index(p.m, word), 0])
 # an optional on the stack known to be there, trapping where it is ø: GC's non-null reference, or in the memory its
 # address, which a helper tests
-present(p: Program) as list<int> := if p.m.memory != ø then helper_call(p, MISSING_TEST, q => added_function(q.m, [I32], [I32], [], local_get(0) + I32_EQZ + if_block(UNREACHABLE) + local_get(0))) else REF_AS_NON_NULL
+present(p: Emission) as list<int> := if p.m.memory != ø then helper_call(p, MISSING_TEST, q => added_function(q.m, [I32], [I32], [], local_get(0) + I32_EQZ + if_block(UNREACHABLE) + local_get(0))) else REF_AS_NON_NULL
 # the primitive testing an optional for its ø (types/prelude.wap missing)
 MISSING_TEST = "ref.is_null"
 # the code of a primitive its helper function performs
-helper_called(form: Node, operands: list<int>, key: text, build: (Program) -> int, p: Program) as Code := finished(Code(typed_layout(form, p), operands + helper_call(p, key, build)))
+helper_called(form: Node, operands: list<int>, key: text, build: (Emission) -> int, p: Emission) as Code := finished(Code(typed_layout(form, p), operands + helper_call(p, key, build)))
 # the wasm type of the value a primitive gives, [] when its definition writes none, NEVER when it never finishes
 # a test of an any for a type: for each type whose values pass it (type_notation.wap passing_types), a char's for a
 # text, an int's or a float's for a number, its test, any of them passing
-boxed_test(form: Node, operands: list<int>, type: Term, p: Program) as Code := {
+boxed_test(form: Node, operands: list<int>, type: Term, p: Emission) as Code := {
 	types = passing_types(type)
 	if #types == 1 { return Code(typed_layout(form, p), operands + type_tested(type, form, p)) }
 	helper_called(form, operands, "is ${type_text(type, yes)}", q => passing_test_function(types, form, q), p)
 }
 # the test of the any on the stack for one type: a class's by its struct and tag, any other's by its struct or box
-type_tested(type: Term, at: Node, p: Program) as list<int> := {
+type_tested(type: Term, at: Node, p: Emission) as list<int> := {
 	record = record_named(p.records, type)
 	if record != ø and cases_of(record!) is empty then helper_call(p, "is ${place_key(record_declared(record!))}", q => class_test_function(record!, q)) else heap_instruction(REF_TEST, held_in_any(type, at, p).type_index)
 }
 # the test of an any for any of these types, its local 0 the value
-passing_test_function(types: list<Term>, at: Node, p: Program) as int := added_function(p.m, [ANYREF], [I32], [], types.flat_map(each => local_get(0) + type_tested(each, at, p)) + types.drop(1).flat_map(each => I32_OR))
+passing_test_function(types: list<Term>, at: Node, p: Emission) as int := added_function(p.m, [ANYREF], [I32], [], types.flat_map(each => local_get(0) + type_tested(each, at, p)) + types.drop(1).flat_map(each => I32_OR))
 # the test of an any for a class: its struct, then its tag. Its local: 0 the value
-class_test_function(record: Record, p: Program) as int := {
+class_test_function(record: Record, p: Emission) as int := {
 	type = struct_of(record, p.m, p.records)
 	added_function(p.m, [ANYREF], [I32], [], local_get(0) + heap_instruction(REF_TEST, type) + IF + I32 + local_get(0) + heap_instruction(REF_CAST_NULL, type) + tagged(p.m) + i32_const(class_tag(record)) + I32_EQ + ELSE + i32_const(0) + END)
 }
 # the helper function of an operation, added by `build` the first time
-helper(p: Program, operation: text, build: (Program) -> int) as int := {
+helper(p: Emission, operation: text, build: (Emission) -> int) as int := {
 	if p.helpers.has(operation) { return p.helpers[operation] }
 	index = build(p)
 	p.helpers[operation] = index
@@ -140,9 +140,9 @@ helper(p: Program, operation: text, build: (Program) -> int) as int := {
 	index
 }
 # a call of the helper function of an operation
-helper_call(p: Program, operation: text, build: (Program) -> int) as list<int> := instruction(CALL, [helper(p, operation, build)])
+helper_call(p: Emission, operation: text, build: (Emission) -> int) as list<int> := instruction(CALL, [helper(p, operation, build)])
 # a call of one of the types library's functions the emitter calls itself (kernel/primitives.wap RUNTIME_WORDS)
-runtime_call(p: Program, word: text) as list<int> := instruction(CALL, [p.helpers.get(word) ?? refused(Text(word), "the types library defines no such function")])
+runtime_call(p: Emission, word: text) as list<int> := instruction(CALL, [p.helpers.get(word) ?? refused(Text(word), "the types library defines no such function")])
 
 # the body run for each count from 0 while it stays below the limit, the count in that local
 counted(local: int, limit: list<int>, body: list<int>) as list<int> := {
@@ -157,7 +157,7 @@ slice_copied(array: int, source: list<int>) as list<int> := int_local(2) + instr
 int_local(slot: int) as list<int> := local_get(slot) + I32_WRAP_I64
 # The helper giving a case's name by its tag, among the cases of every enum the program declares (patterns.wap
 # tag_of). Its local: 0 the case.
-case_naming_function(p: Program) as int := {
+case_naming_function(p: Emission) as int := {
 	cases = p.records.items.flat_map(cases_of)
 	named = (1 to #cases).flat_map(at => local_get(0) + tagged(p.m) + i32_const(at - 1) + I32_EQ + if_block(text_literal(text(case_name(cases#at)), p.m).instructions + RETURN))
 	added_function(p.m, [enum_layout(p.m)], [text_layout(p.m)], [], named + UNREACHABLE)
