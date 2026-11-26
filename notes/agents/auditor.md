@@ -34,7 +34,7 @@ closes the session.
 ## One place to look: two type systems
 The dependent theory (wap/extensions/theory/) and the pragmatic compiler (wap/core/analyze, wap/types) give the same
 words two meanings, and most of the bridging code exists only because of that. Ask, for each item, how a rewrite with
-one elaborator (the theory is the typer; milestone S3 in notes/coc-plan.md) would remove it, and whether S3 as
+one elaborator (the theory is the typer; track T in notes/coc-plan.md) would remove it, and whether track T as
 planned goes far enough:
 - Two definitions of one word: the prelude and the types module both declare `+`, `<=`, text `+`; the trust base in
   notes/theory.md is a hand list of these pairs. One definition per word, its host spelling attached to it, would make
@@ -56,4 +56,4 @@ planned goes far enough:
   start would remove that conflict.
 - The reader: annotations such as `@runs` do not attach in operated code or on an enum.
 For each item give the rewrite's shape, rough lines added and deleted, and what it unblocks. Say plainly if a full
-rewrite beats finishing S3 and S4 on the current split.
+rewrite beats finishing track T on the current split.
