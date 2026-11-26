@@ -90,11 +90,12 @@ ATOM_TYPES = [CHAR_TYPE, INT_TYPE, FLOAT_TYPE, NUMBER_TYPE, TEXT_TYPE]
 TYPE_WORDS = ATOM_TYPES + [BOOL_TYPE, ANY_TYPE, LIST_TYPE, MAP_TYPE, ENUM_TYPE]
 
 # The table of the types a compile met: the terms by place, the places by hash, the environment declaring their words
-# by key, the declaration a record's own word names (two records of one name are two words), the type a shape's word
-# narrows (core/analyze/shapes.wap) and the key of the function a function value's word calls. It is the compile's
-# own, as a symbol table is: every stage reads a type fact through it, so it is one value for the whole run, not
-# handed down every call
-class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {} }
+# by key, the declaration a record's own word names (two records of one name are two words, the first word of each
+# name kept and the words sharing one marked, so their texts tell them apart), the type a shape's word narrows
+# (core/analyze/shapes.wap) and the key of the function a function value's word calls. It is the compile's own, as a
+# symbol table is: every stage reads a type fact through it, so it is one value for the whole run, not handed down
+# every call
+class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; shared: map<int, bool> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {} }
 TYPES: TypeTerms = TypeTerms()
 core_environment() as Environment := {
 	e = Environment()
@@ -124,7 +125,7 @@ word_named(n: Node) as Term := {
 declared_word(name: text, declared: Node) as Term := {
 	if core_place(name) != ø { return word_term(name) }
 	own = word_keyed(name, "${name} ${declaration_place(declared)}")
-	if not TYPES.declared.has(word_id(own)) { TYPES.names[name] = (TYPES.names.get(name) ?? 0) + 1 }
+	if not TYPES.declared.has(word_id(own)) { if TYPES.names.has(name) { TYPES.shared[TYPES.names[name]] = yes; TYPES.shared[word_id(own)] = yes } else { TYPES.names[name] = word_id(own) } }
 	TYPES.declared[word_id(own)] = declared
 	own
 }
@@ -210,7 +211,7 @@ runtime_named(name: text) as bool := RUNTIME_WORDS.any(word => word.starts_with(
 # its declaration, as a key tells instances apart by them, and so does any record that shares its name with another
 type_text(type: Term?, whole: bool = no) as text := {
 	if type == ø { return "no type" }
-	if is_word(type) { return if whole or name_shared(type!) then declared_at(TYPES.environment, word_id(type!))!.name else if TYPES.functions.has(word_id(type!)) then FUNCTION_WORD else word_of(type)! }
+	if is_word(type) { return if whole or TYPES.shared.has(word_id(type!)) then declared_at(TYPES.environment, word_id(type!))!.name else if TYPES.functions.has(word_id(type!)) then FUNCTION_WORD else word_of(type)! }
 	if function_value_key(type) != ø and not whole { return FUNCTION_WORD }
 	base = base_of_optional(type)
 	if base != ø { return type_text(base, whole) + OPTIONAL_MARK }
@@ -218,9 +219,6 @@ type_text(type: Term?, whole: bool = no) as text := {
 	if function != ø { return "(${types_text(function.parameters, whole)}) ${FUNCTION_ARROW} ${type_text(function.result, whole)}" }
 	"${type_text(head_of(type!), whole)}<${types_text(parts_of(type!), whole)}>"
 }
-# whether another record of the program is declared by the same name as this record's own word (TypeTerms names, the
-# records declared by each name), so its text tells the two apart by their places
-name_shared(word: Term) as bool := (TYPES.names.get(word_of(word)!) ?? 0) > 1
 types_text(types: list<Term>, whole: bool = no) as text := types.map(type => type_text(type, whole)).join(", ")
 # a value of a type read as another where that one is wanted: a char as its text, a range as its list
 READS = [[CHAR_TERM, TEXT_TERM], [RANGE_TERM, list_type(INT_TERM)]]
