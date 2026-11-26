@@ -86,11 +86,18 @@ static void posix_path(char* path) {
 		path[0] = '/';
 	}
 }
-// the program's arguments as POSIX writes them: Git Bash gives a program not its own a path as Windows writes it,
-// "/d/a" as "D:/a", which each drive path is again ("D:\\a" too); other arguments as given
+// a drive path as POSIX writes it: Git Bash gives a program not its own the paths in its arguments and environment
+// as Windows writes them, "/d/a" as "D:/a" (HOME too), and "D:\\a" is one as well; any other text as given
+static void drive_path_posix(char* text) {
+	if (isalpha((unsigned char)text[0]) && text[1] == ':' && (text[2] == '/' || text[2] == '\\') && !strchr(text, ';')) posix_path(text);
+}
+// the program's arguments, and its environment's values, as POSIX writes them
 static char** posix_arguments(int count, char** words) {
-	for (int i = 1; i < count; i++)
-		if (isalpha((unsigned char)words[i][0]) && words[i][1] == ':' && (words[i][2] == '/' || words[i][2] == '\\')) posix_path(words[i]);
+	for (int i = 1; i < count; i++) drive_path_posix(words[i]);
+	for (char** variable = _environ; *variable; variable++) {
+		char* value = strchr(*variable, '=');
+		if (value) drive_path_posix(value + 1);
+	}
 	return words;
 }
 static int is_drive_path(const char* path) { return path[0] == '/' && isalpha((unsigned char)path[1]) && (path[2] == '/' || !path[2]); }
