@@ -30,24 +30,34 @@ on main ade14e3b.
 
 ## Subtypes as narrowings
 
-- **The term:** `T where p` is read by the type door into `Subset(T, condition)`, a type term of the parent T and
-  the condition's place in TypeTerms (`conditions: map<int, Node>`, the condition as written with `it` free). Two
-  subtypes are one type when their parents are and their conditions are the same code; `narrowed_type` of a subset
-  is its parent, so every reader of narrowing reads it unchanged.
+- **The term:** `T where p` is read as its parent and a predicate: the condition is lifted to a function of `it`,
+  `it => p`, the names it reads besides `it` (`n` in `#it == n`, `xs` in `it <= #xs`) its further parameters. The
+  predicate is a function like any other, so analyze types it and it enters the kernel as an opaque constant (T3f);
+  the subset is the term `Subset(T, p(args))`, compared as every term is. Two `#it == n` of different `n` are two
+  types, and T4d gives the constant its body, T4e its value arguments, with no second representation of a type.
+- **One test for both kinds of narrowing:** `narrowed_type` of a subset is its parent, but the readers that take a
+  narrowed type for a shape (conditions.wap `type_test_typed`, dispatch.wap's shape tests, matching.wap's three,
+  shapes.wap `pattern_part`) are made to ask one function, `narrowing_test(value, type)`, which a shape answers by its
+  pattern and a subset by a call of its predicate. Narrowing is from any type that converts to the parent as Same,
+  so an `int` narrows to `index` through `nat`, not from the exact parent only (fits.wap `conversion`).
+- **Where the filter sugar stops:** `$xs where $condition` (sugar/data.wap) is the list filter. In a type's place
+  the type door reads `where` first, so the rule's left side takes a typed hole, `$xs: list`, and leaves a type
+  alone: no reader branch.
 - **Where it is written:** a type alias, `type positive = int where it > 0` (an alias is a rewrite rule, so the alias
   names the subset wherever it is used); a parameter's type, `initial(name: text where #it > 0)`; a field's or a
   variable's type, anywhere a type is.
 - **Up is free:** a subset's value is its parent's (Same), so `shout(c)` with a char c costs nothing and every
   function of the parent takes it.
 - **Down is an obligation:** where a subset is wanted and its parent given, conversion answers Narrowed, and the
-  emitter tests the condition with `it` the value, raising `refused by condition: #"ab" == 1` (the condition with
-  the value written in, as the wiki's run-time check names it). `x is positive` is the same test giving a bool, and
+  value is checked by a call of its predicate, raising `refused by condition: #"ab" == 1` (the condition with the
+  value written in, as the wiki's run-time check names it). `x is positive` is the same call giving a bool, and
   `line as char` the conversion, through the existing `as` sugar (sugar/types.wap).
 - **Facts in scope:** a parameter of a subset is of it in its body, so its own condition holds with nothing to
   check. An `if` whose condition is a subset's condition at a variable (the same code, `it` read as that variable)
   finds the variable of the subset in its then-arm, and after the if where the other arm never finishes: `if #line
-  == 1 { e: char = line }` needs no check. The comparison is by code, so `1 == #line` is no finding: a prover finds
-  more (step 3, after T5).
+  == 1 { e: char = line }` needs no check. The two are compared as bound nodes after the rules ran, so `1 == #line`
+  is no finding: a prover finds more (step 3, after T5). A predicate is pure, and a finding ends where the variable
+  or a field of it is assigned, so a fact about a mutable `person` never outlives the value it was about.
 - **Computed obligations,** a literal that breaks the condition refused when compiled (`d: char = "ab"`), come with
   the conditions as kernel terms: T4d, after T5's first step.
 
@@ -57,28 +67,30 @@ T4a and T4b add a type form, so they take the careful path; T4c changes the valu
 
 | step | what | core lines (estimate) | checks |
 |---|---|---|---|
-| T4a subsets | `T where p` read into a subset term; up Same, down Narrowed with the run-time test of the condition naming it; `x is S` | +60 (the door +15, the conditions table +10, the test emitted +25, `is` +10) | careful; test_subtype_wanted's `positive`, `adult`, `initial` lines; the run-time check line of test/wap/test_subtype_wanted |
-| T4b facts | a parameter's condition holds in its body; an `if` condition equal to a subset's condition at a variable is a finding | +30 (conditions.wap `found`) | normal; the `if #line == 1` line |
-| T4c char | `char` is `text where #it == 1`; core's char conversions go (char_text, the READS row, the place-typed `'a'`, `is_plain`'s char); `type Port < int where …` once c-type-names has `<` | −30 core, +20 types | careful (value layout); test_subtype_page and test_char_page unchanged, the Port line |
-| T4d computed | an obligation whose value and condition compute is decided when compiling: no is refused by condition, yes needs no check | +40 (the condition read as a term with T5a's reader; `computed` at the value) | normal plus the census; the two compile-time refusal lines of test/wap/test_subtype_wanted |
+| T4a subsets | `T where p` read as its parent and a lifted predicate; up Same, down Narrowed with the predicate's call; `x is S`; the readers of narrowing ask one `narrowing_test`; narrowing through Same; the filter rule's typed hole | +90 (the door and the lifting +35, `narrowing_test` and its five readers +40, `conversion` +5, `is` +10) | careful; test_subtype_wanted's `positive`, `adult`, `initial` lines |
+| T4b facts | a parameter's condition holds in its body; an `if` condition equal to a subset's condition at a variable is a finding, ended by an assignment to it | +30 (conditions.wap `found`) | normal; the `if #line == 1` line |
+| T5a | definitions and pure expressions as kernel terms (notes/coc-t5.md) | T5's | T5's |
+| T4d computed | an obligation whose value and predicate compute is decided when compiling: no is refused by condition, yes needs no check | +30 (the predicate's constant given its body by T5a; `computed` at the value) | normal plus the census; the two compile-time refusal lines of test/wap/test_subtype_wanted |
+| T4c char | `char` is `text where #it == 1`, stored as its text; today's i32 code point is `codepoint` (wiki/char.md); core's char conversions go (char_text, the READS row, the place-typed `'a'`, `is_plain`'s char, about 49 uses); `type Port < int where …` once c-type-names has `<` | −30 core, +30 types | careful (value layout), the speed gate measured at this step; test_subtype_page and test_char_page unchanged; the run-time check line of test/wap/test_subtype_wanted; the Port line |
 | T4e value arguments | a type alias of value parameters, `vector(T, n: nat)`, `index(xs)`; its arguments found by unification and compared by computing | +60 | careful; the vector and index lines; test_type_wanted's `dot` and `append` lines |
 
-Order: T4a, T4b, T4c (after c-type-names lands), then T5a (definitions and pure expressions as kernel terms), then
-T4d and T4e. T4d and T4e are T4's in what they give and T5's in what they need, so they land after T5a, before the
-rest of T5.
+Order: T4a, T4b, then T5a (definitions and pure expressions as kernel terms), then T4d, T4c (after c-type-names
+lands) and T4e. A char literal is a char by computing (`#"a" == 1`), so T4c follows T4d: before it, every char
+literal would be checked at run time, or the place-typed `'a'` kept under another name. T4 closes after T5a.
 
 ## The estimate
 
-T4 as a whole: about +180 core (+60, +30, −30, +40, +60) and +20 types, against coc-plan's +409 (450 analyze and 100
+T4 as a whole: about +180 core (+90, +30, +30, −30, +60) and +30 types, against coc-plan's +409 (450 analyze and 100
 types added, 141 deleted). The difference: the plan counted a mechanism of its own for conditions and obligations,
-where narrowing and findings exist; and the extension's obligations.wap (64) and convert.wap (28) are not deleted in
-T4, since the theory's doors read programs as written until T5 (as T3g's work moved to T5).
+where narrowing and findings exist. The 141 deleted lines are the extension's elaborate/conditions.wap (with
+obligations.wap, 64, and convert.wap, 28): they go in T5, since the theory's doors read programs as written until
+then (as T3g's work moved to T5); core's analyze/conditions.wap stays and grows by T4b's 30.
 
 ## Gate
 
 T4 is done when all of these hold:
 - the T4 row's test lines are green: `d: char = "a"` accepted and `d: char = "ab"` refused by `condition`; `char` is
-  `text where #it == 1` and nothing else; the lines of test/test_subtype_wanted.wap and
+  `text where #it == 1` and nothing else (both T4d's and T4c's, so T4 closes after T5a); the lines of test/test_subtype_wanted.wap and
   test/wap/test_subtype_wanted.wap move to a page test, except `type Color < int`'s, which are c-type-names';
 - the whole suite has no new red;
 - the census types every function, with 0 places typed any beyond the language's 5;
@@ -94,8 +106,8 @@ The T4 row's `effects of` line (a function with a check left is Fail) moves to T
 - **The order:** T4d and T4e after T5a, as above, is the recommendation: computing a condition needs the bodies of
   the functions it calls, which T5a reads into kernel definitions. Without them, T4 proves nothing by computing and
   every obligation not found in scope is checked at run time. Core cost either way: the same lines, landing later.
-- **char's storage:** the plan stores a char as its text (3.2), today it is an i32 code point. T4c as written
-  changes the value layout: a char is its text, `ord(c)` decodes it, and lists of chars cost a reference per item
-  instead of 4 bytes. The other reading keeps the code point as char's storage and makes the up-conversion a
-  declared one (c-type-names' `<`), which costs a conversion where the plan's costs nothing. Recommendation: the
-  plan's, its text; core −30 either way, the layout question is the emitter's (+10 for the declared conversion).
+- **char's storage:** the plan and wiki/subtype.md store a char as its text (3.2); today it is an i32 code point.
+  T4c changes the value layout: a char is its text, and today's i32 becomes `codepoint`, the type wiki/char.md gives
+  `.chars`. The other reading keeps the code point as char's storage and makes the up-conversion a declared one
+  (c-type-names' `<`); it keeps core's READS row and costs a conversion where the plan's costs nothing.
+  Recommendation: the plan's, its text, core −30; the other reading about −10.
