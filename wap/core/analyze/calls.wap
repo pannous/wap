@@ -318,43 +318,52 @@ with_answers(argument: Node, answers: list<Answer>) as Node := {
 	type = answered(given, answers)
 	if type == given then argument else with_type_of(argument, type)
 }
-# Among several definitions that fit, the most specific: one is more specific than another when each of its parameter
-# types, with its letters as these arguments bind them, converts into the other's and not all of the other's back
-# (`text(c: char)` before `text(t: text)`, `contains(xs: list<T>, item: T)` before `contains(xs: list<T>, item: T?)`
-# for an item that is no optional and after it for one that is, a written type before a letter or none); several
-# equally specific are left for the caller to refuse
+# Among several definitions that fit, the most specific (notes/coc-t3.md "Numbers through the kernel"): one that
+# takes these arguments as they are where the other wraps one into an optional (`contains(xs: list<T>, item: T)`
+# before `contains(xs: list<T>, item: T?)` for an item that is no optional); else one whose parameter types each
+# convert into the other's and not all of the other's back (`text(c: char)` before `text(t: text)`, `empty(xs: list)`
+# before `empty(x: T)`, `==(a: T?, b: T?)` before `==(a: T, b: T)`, a written type before a letter or none); else the
+# program's before a rule's; several equally specific are left for the caller to refuse
 most_specific(definitions: list<Signature>, types: list, s: TypingState) as list<Signature> := {
-	instances = definitions.map(definition => instance(definition, types, s))
-	instances.filter(one => not instances.any(other => more_specific(other, one, s))).map(one => one.definition)
+	candidates = candidates_of(definitions, types, s)
+	candidates.filter(one => not candidates.any(other => more_specific(other, one, s))).map(one => one.definition)
 }
-# a definition with its parameter types as a call of these argument types binds its letters
-class Instance { definition: Signature; parameters: list<Term?> }
-instance(definition: Signature, types: list, s: TypingState) as Instance := {
+# a definition with the places where it wraps an argument into an optional, its letters as the call binds them
+class Candidate { definition: Signature; wrapped: list<int> }
+candidates_of(definitions: list<Signature>, types: list, s: TypingState) as list<Candidate> := definitions.map(definition => {
 	called = letters_bound(definition, types, s) ?? NOTHING_CALLED
-	Instance(definition, definition.parameters.map(type => substituted(type, called.letters)))
+	Candidate(definition, (1 to #types).filter(at => wraps(substituted(parameter_type_at(definition, at), called.letters), types#at)))
+})
+more_specific(one: Candidate, other: Candidate, s: TypingState) as bool := fewer_wrapped(one.wrapped, other.wrapped) ?? strictly_converts(one.definition.parameters, other.definition.parameters, s) ?? (derived(other.definition, s) > derived(one.definition, s))
+# whether one definition wraps a strict part of the arguments the other wraps, ø where neither's are part of the other's
+fewer_wrapped(mine: list<int>, theirs: list<int>) as bool? := if mine == theirs then ø else if mine.all(at => at in theirs) then yes else if theirs.all(at => at in mine) then no else ø
+# whether these parameter types convert into the others and those not back, ø where both or neither do
+strictly_converts(given: list<Term?>, wanted: list<Term?>, s: TypingState) as bool? := {
+	into = converts_into(given, wanted, s)
+	if into == converts_into(wanted, given, s) then ø else into
 }
-more_specific(one: Instance, other: Instance, s: TypingState) as bool := converts_into(one, other, s) and (not converts_into(other, one, s) or derived(other.definition, s) > derived(one.definition, s))
-# whether each parameter type of one definition converts into the other's
-converts_into(one: Instance, other: Instance, s: TypingState) as bool := #one.parameters == #other.parameters and (1 to #one.parameters).all(at => type_converts(one.parameters#at, other.parameters#at, s))
-# whether a parameter type converts into another: none takes every type and is taken only by none, a letter left
-# unbound and a protocol take every written type; a type that writes letters takes those whose parts convert into its
-# parts, read as such where they read so (a Range as a list<int>), an optional the type of its value too
+# whether each of these parameter types converts into the other's at its place
+converts_into(given: list<Term?>, wanted: list<Term?>, s: TypingState) as bool := #given == #wanted and (1 to #given).all(at => type_converts(given#at, wanted#at, s))
+# whether a parameter type converts into another: none takes every type and is taken only by none, a letter, a hole
+# and a protocol take every written type; a type that writes letters takes those whose parts convert into its parts,
+# read as such where they read so (a Range as a list<int>), an optional the type of its value too
 type_converts(given: Term?, wanted: Term?, s: TypingState) as bool := {
 	if wanted == ø or given == ø { return wanted == ø }
-	if is_letter(wanted, s.records) or protocol_named(s.records, wanted) != ø { return yes }
-	if is_letter(given, s.records) { return no }
-	if not has_letters(wanted, s.records) { return conversion(given, wanted, s) in STATIC_CONVERSIONS }
+	if is_letter(wanted, s.records) or is_unknown(wanted) or protocol_named(s.records, wanted) != ø { return yes }
+	if is_letter(given, s.records) or is_unknown(given) { return no }
+	if not has_letters(wanted, s.records) and not has_unknowns(wanted) { return conversion(given, wanted, s) in STATIC_CONVERSIONS }
 	if wraps(wanted, given) { return type_converts(given, base_of_optional(wanted), s) }
 	given_parts = type_parts(read_type(given, wanted, s.records) ?? given) ?? return no
 	wanted_parts = type_parts(wanted) ?? return no
 	#given_parts == #wanted_parts and (1 to #given_parts).all(at => type_converts(given_parts#at, wanted_parts#at, s))
 }
-# The one ranking of a word's definitions for these argument types, the most specific first, a program's before a
-# rule's, by how many are more specific: the static choice takes its first that fits, a dynamic call
-# (core/analyze/dispatch.wap) tests them in this order
+# The one ranking of a word's definitions for these argument types, the most specific first, by how many are more
+# specific: the static choice takes its first that fits, a dynamic call (core/analyze/dispatch.wap) tests them in
+# this order
 ranked(definitions: list<Signature>, types: list, s: TypingState) as list<Signature> := {
-	instances = definitions.map(definition => instance(definition, types, s))
-	instances.sorted(by: one => #instances.filter(other => more_specific(other, one, s))).map(one => one.definition)
+	candidates = candidates_of(definitions, types, s)
+	above = candidates.map(one => #candidates.filter(other => more_specific(other, one, s)))
+	(1 to #candidates).sorted(by: at => above#at).map(at => definitions#at)
 }
 derived(definition: Signature, s: TypingState) as int := if has_fact(defined_name(define_of(definition, s)), DERIVED) then 1 else 0
 # of equally specific definitions, those of the innermost scope: a program's `===(a: T, b: T)` hides the library's
