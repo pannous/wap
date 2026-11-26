@@ -36,19 +36,20 @@ echo 'print "Hello"' >"$scratch/hello.wap"
 # prepared <compiler>: what the compiler built from the tree holds, written beside the tree's source first
 # (scripts/lib/wap-beside.sh wap_stage_prepared)
 prepared() { wap_stage_prepared "$1" "$seed" "$tree/wap" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: $(basename "$1" .wasm) wrote no library or warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }; }
-# timed <compiler> <output>: the prepared compiler compiling wap's source; its cost in user + system CPU seconds in
+# timed <compiler> <output> <seed>: the prepared compiler compiling wap's source, as a program where it is the seed,
+# else as sources (none: every compiler reads it as sources); its cost in user + system CPU seconds in
 # $cost, timed warm: a first hello lets the host compile a new module's machine code before the clock starts, else a
 # new compiler pays for it
 timed() {
 	wap_ran "$1" "$scratch/hello.wap" "$scratch/warm.wasm" >/dev/null 2>&1
-	cost=$( { TIMEFORMAT="%U %S"; time wap_stage_compiled "$1" "$seed" "$tree/wap" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
+	cost=$( { TIMEFORMAT="%U %S"; time wap_stage_compiled "$1" "$3" "$tree/wap" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
 	[ -f "$2" ] || { echo "refresh-seed: $(basename "$2" .wasm) FAILED: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
 }
 # stage <compiler> <output>: the compiler compiling wap's source, prepared and timed
 stage() {
 	local start=$SECONDS
 	prepared "$1"
-	timed "$1" "$2"
+	timed "$1" "$2" "$seed"
 	echo "refresh-seed: $(basename "$2" .wasm) $(wc -c <"$2" | tr -d ' ') B in $((SECONDS - start)) s, $cost s CPU, sha256 $(shasum -a 256 "$2" | cut -c1-16)"
 }
 # the lesser of two costs, the first when the second is empty
@@ -63,15 +64,15 @@ for name in $STAGES; do
 done
 chosen=$previous
 
-# the seed and the compiler that built the last stage, timed in turns, each by its best round
+# the seed and the compiler that built the last stage, timed in turns, each by its best round, both reading wap's
+# source as sources, so both do the same work
+round_timed() { prepared "$1" && timed "$1" "$scratch/timed.wasm" ""; }
 old_cost=
 new_cost=
 for round in $(seq "$TIMING_ROUNDS"); do
-	prepared "$seed"
-	timed "$seed" "$scratch/timed.wasm"
+	round_timed "$seed"
 	old_cost=$(least "$cost" "$old_cost")
-	prepared "$runner"
-	timed "$runner" "$scratch/timed.wasm"
+	round_timed "$runner"
 	new_cost=$(least "$cost" "$new_cost")
 	echo "refresh-seed: timing round $round: the seed $old_cost s CPU at best, the new compiler $new_cost s"
 done
