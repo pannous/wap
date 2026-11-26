@@ -306,7 +306,7 @@ theory needs the syntax changed. What goes is looseness in what a type means.
 | `x = 1; x = "a"` makes x an any, with a warning | allowed without an any: an assignment is a new binding, so x holds the new type from there on; where two paths meet, a name they left with unlike types holds their union | nothing in the theory forbids it; a `let`, a `const` or a written type still fixes the type |
 | unlike types join to `any` | they join to their union: `[1, "a"]` is a `list<int or text>`; `any` only where written | no silent loss of types |
 | char to text, range to list, case to enum, int to float: conversions inside the typing code | conversions declared in the types module (3.2) | no special cases |
-| overloads ranked by weights | the most specific is the one whose parameters convert into the others' | one order, the conversions' |
+| overloads ranked by weights | the most specific takes the arguments as they are where another converts one, then has parameters that convert into the others', then is the program's own | one order, the conversions' |
 | run-time dispatch written by the typing code for `any` | a call on a sum distributes over its cases (3.10) | one rule for any, unions, class families |
 | `T?` also holds an Error | `T?` is T or ø; an error is `T or Error`, the effect Fail | each type says one thing |
 | `==` compares values, loosely across types | `==` is the type's test after both sides are converted to the type they join in; the derived test is proved to be equality, a type's own `equals` and the floats' stay tests (3.5) | laws rewrite with equality, and no script is asked for a proof |

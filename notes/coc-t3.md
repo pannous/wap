@@ -105,12 +105,16 @@ A name's bindings live in core/analyze/flow.wap. These forms are refused with a 
   (theory/prelude/numbers.wap 197, checked.wap 43) moves into wap/types in the explicit spelling. Compiler source does
   not use its words, so no seed refresh is needed. `int` keeps today's storage until T8.
 - **Overloads: the most specific by conversion order** (coc-plan 4). Of the definitions that fit, one is more
-  specific than another when each of its parameter types converts into the other's. Ties go to the innermost scope.
-  This one rule replaces `fewest_conversions`, `most_specific` with its `rank`, `typing_weight`, `type_weight` and
-  `written_structure`, and the exact-fit prefilter in `chosen_definition`. `ranked` in dispatch.wap uses the same
-  order. A derived definition (`DERIVED`, a class's `show` that a rule wrote) is declared in the scope around the
-  class, so the program's own `show` wins as the innermost. If the census shows a case that needs `derived` still, it
-  goes to the interviewer.
+  specific than another by the first of three steps that decides:
+  1. it takes the arguments as they are where the other converts one, compared as sets of places and read as the call
+     binds the letters: `text(c: char)` before `text(t: text)` for a char, `contains(xs: list<T>, item: T)` before
+     `contains(xs: list<T>, item: T?)` for an item that is no optional, and after it for one that is;
+  2. each of its parameter types converts into the other's and not all of the other's back: `empty(xs: list)` before
+     `empty(x: T)`, `==(a: T?, b: T?)` before `==(a: T, b: T)`, a written type before a letter or none;
+  3. the program wrote it and a rule wrote the other (`DERIVED`, a class's `show`).
+  Ties go to the innermost scope. This one order replaces `fewest_conversions`, `most_specific`'s `rank`,
+  `typing_weight`, `type_weight` and `written_structure`, and the exact-fit prefilter in `chosen_definition`; `ranked`
+  in dispatch.wap sorts by it, so a dynamic call tests the definitions as the static choice would pick them.
 - **An argument is read at its parameter's type when every fitting definition wants the same type there,** else alone,
   where a numeral is an `int`. `abs(0 - 3)` subtracts ints, and `1.5 + 2` adds floats through the declared
   int-to-float conversion.
