@@ -470,12 +470,29 @@ static int posix_kill(int id, int signal_number) {
 // macOS and Linux run /bin/sh; none there, NULL (warp says "cannot run sh for …")
 enum { MOST_STREAMS = 16 };
 static struct { FILE* stream; int child; } streams[MOST_STREAMS];
+// the shell a line runs in, POSIX's sh as Git for Windows brings it: 0 when it is not on the PATH
+static int sh_found(char sh[MAX_PATH]) {
+	if (SearchPathA(NULL, "sh.exe", NULL, MAX_PATH, sh, NULL)) return 1;
+	errno = ENOENT;
+	return 0;
+}
+// a line run by sh, as POSIX runs it (not cmd, Windows's own system's); its status as waitpid gives it
+static int posix_system(const char* line) {
+	char sh[MAX_PATH];
+	if (!sh_found(sh)) return -1;
+	char* words[] = {sh, "-c", (char*)line, NULL};
+	int child, status;
+	struct spawn_actions actions = {0};
+	int failed = posix_spawnp(&child, sh, &actions, NULL, words, NULL);
+	if (failed) {
+		errno = failed;
+		return -1;
+	}
+	return posix_waitpid(child, &status, 0) < 0 ? -1 : status;
+}
 static FILE* posix_popen(const char* line, const char* mode) {
 	char sh[MAX_PATH];
-	if (!SearchPathA(NULL, "sh.exe", NULL, MAX_PATH, sh, NULL)) {
-		errno = ENOENT;
-		return NULL;
-	}
+	if (!sh_found(sh)) return NULL;
 	int ends[2];
 	if (posix_pipe(ends)) return NULL;
 	int reading = mode[0] == 'r';
@@ -552,7 +569,7 @@ static const struct { const char* name; void* function; } POSIX_CALLS[] = {
 	POSIX_CALL(nanosleep), POSIX_CALL(usleep), POSIX_CALL(localtime_r), POSIX_CALL(getloadavg), POSIX_CALL(flock),
 	POSIX_CALL(pipe), POSIX_NAMED(posix_spawn_file_actions_init), POSIX_NAMED(posix_spawn_file_actions_destroy),
 	POSIX_NAMED(posix_spawn_file_actions_adddup2), POSIX_NAMED(posix_spawn_file_actions_addclose), POSIX_NAMED(posix_spawnp),
-	POSIX_CALL(waitpid), POSIX_CALL(popen), POSIX_CALL(pclose), POSIX_CALL(access), POSIX_CALL(chdir), POSIX_CALL(creat),
+	POSIX_CALL(waitpid), POSIX_CALL(popen), POSIX_CALL(pclose), POSIX_CALL(system), POSIX_CALL(access), POSIX_CALL(chdir), POSIX_CALL(creat),
 	POSIX_CALL(fopen), POSIX_CALL(mkdir), POSIX_CALL(rmdir), POSIX_CALL(unlink), POSIX_CALL(rename),
 	POSIX_NAMED(wasi_config_preopen_dir), POSIX_NAMED(wasi_config_set_stdout_file), POSIX_NAMED(wasi_config_set_stderr_file),
 	POSIX_NAMED(wasmtime_config_cache_config_load), POSIX_NAMED(wasmtime_module_deserialize_file), POSIX_NAMED(posix_spawn_file_actions_addchdir_np), POSIX_CALL(kill),
