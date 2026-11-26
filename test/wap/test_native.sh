@@ -373,4 +373,7 @@ g(x: int): int := x * 2"
 # from the root (the user's rule 2026-11-26: a compiler's modules are found through its own folder)
 printf '%s\n' 'print "relative"' >"$stage/relative.wap"
 check "a program compiled by a compiler named by a relative path runs from any folder" "$(cd "$(dirname "$(dirname "$compiler")")" && "$native_wap" "$(basename "$(dirname "$compiler")")/$(basename "$compiler")" "$stage/relative.wap" "$stage/relative.wasm" && cd / && "$native_wap" "$stage/relative.wasm" 2>&1)" "relative"
+# an error in a used module names that module by its full path, as it names the program (core/errors.wap place_of)
+mkdir -p "$stage/erring" && printf '%s\n' 'broken(): int := "ab"' >"$stage/erring/part.wap" && printf '%s\n' 'use "part.wap"' 'print broken()' >"$stage/erring/main.wap"
+check "an error in a used module names its full path" "$("$native_wap" "$stage/erring/main.wap" 2>&1 | grep -c "^$stage/erring/part.wap line 1:")" "1"
 exit $((failures > 0))
