@@ -17,6 +17,15 @@
 // the trap signal Windows has no number for: signal() refuses it, the crash lines go without it
 #define SIGTRAP 5
 
+// WASI's random_get: the system's random numbers (the C runtime's rand_s), four bytes at a time
+errno_t __cdecl rand_s(unsigned int* number);
+static void arc4random_buf(void* buffer, size_t length) {
+	for (size_t at = 0; at < length; at += sizeof(unsigned int)) {
+		unsigned int number;
+		rand_s(&number);
+		memcpy((char*)buffer + at, &number, length - at < sizeof number ? length - at : sizeof number);
+	}
+}
 // strndup by a name of its own: some mingw headers declare it, some don't
 #define strndup posix_strndup
 static char* posix_strndup(const char* text, size_t most) {
