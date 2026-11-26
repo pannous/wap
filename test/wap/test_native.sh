@@ -297,7 +297,7 @@ libraries_beyond_system() {
 	*) ldd "$1" | grep -vE 'linux-vdso|ld-linux|lib(c|m|dl|rt|pthread|gcc_s)\.so' ;;
 	esac
 }
-check "a standalone wap needs no library but the system's" "$(libraries_beyond_system "$stage/standalone/wap" | grep -vc '^$')" "0"
+check "a standalone wap needs no library but the system's" "$(libraries_beyond_system "$stage/standalone/wap")" ""
 # `wap format <file>` prints the program in canonical spelling, by the compiler beside it
 printf '%s\n' 'x = 1+2' 'f(a)= a*2' >"$stage/unformatted.wap"
 check "wap format prints the program in canonical spelling" "$(cd "$stage" && "$native_wap" format unformatted.wap 2>&1)" "x = 1 + 2
