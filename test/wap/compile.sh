@@ -54,10 +54,11 @@ steps_built() {
 tree_copied() { cp "$1" "$2.$$" && mv "$2.$$" "$2"; }
 # the compiler under test: the module a test script is given as its first arguments, --compiler <module>
 # (test/wap/run.sh --stage passes one wap built of itself), else wap1, this tree's source compiled by the seed, built
-# once for each state of wap/, lib/ and this file's build steps, and shared by every script
+# once for each state of wap/, lib/ and the build steps (this file and scripts/lib/wap-beside.sh), and shared by every
+# script
 if [ "$1" = --compiler ]; then compiler="$2"; shift 2
 else
-	sources=$(cd "$tree" && { cat "$seed" test/wap/compile.sh; find wap "$WAP_LIBRARY" \( -name '*.wap' -o -name '*.warp' -o -name '*.c' -o -name '*.h' -o -name '*.sh' -o -name '*.awk' \) | sort | xargs cat; } | shasum | cut -c1-16)
+	sources=$(cd "$tree" && { cat "$seed" test/wap/compile.sh scripts/lib/wap-beside.sh; find wap "$WAP_LIBRARY" \( -name '*.wap' -o -name '*.warp' -o -name '*.c' -o -name '*.h' -o -name '*.sh' -o -name '*.awk' \) | sort | xargs cat; } | shasum | cut -c1-16)
 	compiler=$(compiler_built "$data/wap1-$sources" 1) || { echo "wap1: $compiler" >&2; exit 1; }
 fi
 # native_wap_built <folder> [--standalone]: the tree's native wap (wap/extensions/native/driver.wap) built into the

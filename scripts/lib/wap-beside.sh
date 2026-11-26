@@ -64,15 +64,18 @@ wap_beside_mirrored() {
 # builds of one source are the same bytes wherever they ran
 wap_file() { if [ "$1" = . ]; then echo "$2"; else echo "$1/$2"; fi; }
 # wap_stage_prepared <compiler> <seed> <wap folder>: what the compiler built holds, written beside its source first:
-# the library, compiled by the compiler, and the warm state, written by its full path so the state's paths are marked
-# as the wap folder's (extensions/warm.wap marked); the seed writes neither (it may write older ones) and its compiler
-# holds none
+# the library, compiled by the compiler beside itself from the types module there (the one it already knows, so no
+# word is declared twice; the warm state reads it there), and the warm state, written by its full path so the state's
+# paths are marked as the wap folder's (extensions/warm.wap marked); the seed writes neither (it may write older ones)
+# and its compiler holds none
 wap_stage_prepared() {
-	local library warm
-	library=$(wap_file "$3" "${WAP_LIBRARY_MODULE##*/}") warm=$(wap_file "$3" "${WAP_WARM##*/}")
+	local folder library own warm
+	folder=$(dirname "$1") library=$(wap_file "$3" "${WAP_LIBRARY_MODULE##*/}") warm=$(wap_file "$3" "${WAP_WARM##*/}")
+	own=$(wap_file "$folder" "${WAP_LIBRARY_MODULE##*/}")
 	: >"$library" && : >"$warm" || return 1
 	[ "$1" != "$2" ] || return 0
-	wap_ran "$1" --sources "$(wap_file "$3" types/types.wap)" "$library" && wap_ran "$(cd "$(dirname "$1")" && pwd -P)/${1##*/}" --sources warm "$warm"
+	wap_ran "$1" --sources "$(wap_file "$folder" types/types.wap)" "$own" && wap_ran "$(cd "$folder" && pwd -P)/${1##*/}" --sources warm "$warm" || return 1
+	[ "$own" -ef "$library" ] || cp "$own" "$library"
 }
 # wap_stage_compiled <compiler> <seed> <wap folder> <output>: wap's compiler compiled from the folder's source, which a
 # compiler built from the tree reads as sources and the seed as a program
