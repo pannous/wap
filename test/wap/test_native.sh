@@ -293,7 +293,15 @@ native_wap_built "$stage/standalone" --standalone >/dev/null && rm -rf "$stage/s
 check "a standalone wap runs a program and verifies a file with no seed folder beside it" "$(cd "$stage" && HOME="$stage/home" "$stage/standalone/wap" hello.wap 2>&1 && HOME="$stage/home" "$stage/standalone/wap" verify axiom_only.wap 2>&1)" "Hello
 choice: Axiom"
 # and wasmtime's static library beside the shared one (warp's scripts/wasmtime-c-api.sh) is linked into it whole
-check "a standalone wap needs no library but the system's" "$(otool -L "$stage/standalone/wap" | tail -n +2 | grep -vc libSystem)" "0"
+# the libraries an executable loads beyond the system's own
+libraries_beyond_system() {
+	case $(uname -s) in
+	Darwin) otool -L "$1" | tail -n +2 | grep -v libSystem ;;
+	MINGW* | MSYS*) llvm-objdump -p "$1.exe" | sed -n 's/.*DLL Name: //p' | grep -viE '^(kernel32|ntdll|ucrtbase|msvcrt|advapi32|user32|ws2_32|bcrypt|bcryptprimitives|userenv|shell32|ole32|oleaut32|psapi|dbghelp|crypt32|secur32|synchronization|api-ms-win-.*)\.dll$' ;;
+	*) ldd "$1" | grep -vE 'linux-vdso|ld-linux|lib(c|m|dl|rt|pthread|gcc_s)\.so' ;;
+	esac
+}
+check "a standalone wap needs no library but the system's" "$(libraries_beyond_system "$stage/standalone/wap")" ""
 # `wap format <file>` prints the program in canonical spelling, by the compiler beside it
 printf '%s\n' 'x = 1+2' 'f(a)= a*2' >"$stage/unformatted.wap"
 check "wap format prints the program in canonical spelling" "$(cd "$stage" && "$native_wap" format unformatted.wap 2>&1)" "x = 1 + 2
