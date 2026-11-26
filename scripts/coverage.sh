@@ -12,6 +12,8 @@ RUN_SECONDS=60
 RUN_MEMORY_GB=4
 RUNS_AT_ONCE=4
 COVERED_MARK=covered
+# samples that bring in one of these C libraries open a window even under --no-window, so coverage leaves them out (user 2026-11-26)
+WINDOW_LIBRARIES='raylib'
 tree="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 wap=$(command -v wap) || { echo "coverage.sh: no native wap on PATH: scripts/refresh-seed.sh installs it" >&2; exit 2; }
 out="$tree/data/wap-tests/coverage.txt"
@@ -50,7 +52,7 @@ commit=$(sed -n 's/^wap.wasm of \([0-9a-f]*\) .*/\1/p' <<<"$version")
 library="$(dirname "$(sed -n '1s/.*(\(.*\))$/\1/p' <<<"$version")")/lib"
 [ -d "$library" ] || { echo "coverage.sh: no library beside the installed wap's compiler ($library)" >&2; exit 2; }
 modules=$(find "$library" -maxdepth 1 \( -name '*.warp' -o -name '*.wap' \) | sort)
-samples=$(find -L "$tree/samples" \( -name '*.warp' -o -name '*.wap' \) | sort)
+samples=$(find -L "$tree/samples" \( -name '*.warp' -o -name '*.wap' \) -print0 | xargs -0 grep -LE "^(use|import)\b.*\b($WINDOW_LIBRARIES)\b" | sort)
 [ "${1:-}" = --runnable ] && { printf '%s\n%s\n' "$modules" "$samples"; exit 0; }
 lines=$({
 	xargs -P "$RUNS_AT_ONCE" -I{} bash -c 'module_covered "$1"' _ {} <<<"$modules"

@@ -58,11 +58,12 @@ emitted(program: Block, file: text, exports: list<text> = [], memory: MemoryLayo
 	m = WasmModule()
 	m.memory = memory
 	m.tag_module = tag_module
-	p = Program(m, file)
+	p = Emission(m, file)
 	statements = statements_in(program)
 	for name in host_calls(program) { p.host[name] = imported(m, WASI, name, PRIMITIVES[name].takes, PRIMITIVES[name].gives) }
 	p.records = added_records(Records(), statements)
-	for call in foreign_calls(program) { foreign_imported(call, p) }
+	foreign = foreign_calls(program)
+	for call in foreign { foreign_imported(call, foreign, p) }
 	foreign_values_imported(statements, p)
 	# a call into a compiled module may raise by the library's tag, so that tag is the program's and main catches a
 	# raise left uncaught
@@ -92,7 +93,7 @@ primitives_in(n: Node) as list<text> := match n {
 
 # What the emitter knows of the whole program: the module, the host functions it imported, and the functions and
 # globals emitted so far, each a Placed
-class Program {
+class Emission {
 	m: WasmModule
 	# the program's own file, whose functions are emitted, so never kept in place
 	source: text = ""
@@ -112,9 +113,9 @@ class Program {
 	records: Records = Records()
 }
 # the layout of a type the program lays out, refused where it has none
-known_layout(type: Term, p: Program, at: Node? = ø) as list<int> := known_layout(type, p.m, p.records, at)
+known_layout(type: Term, p: Emission, at: Node? = ø) as list<int> := known_layout(type, p.m, p.records, at)
 # a constant value read from the global it starts, one global for equal instructions
-constant_global(value: Code, p: Program) as Code := {
+constant_global(value: Code, p: Emission) as Code := {
 	key = "${value.instructions}"
 	if not p.constants.has(key) { p.constants[key] = added_global(p.m, value.type, IMMUTABLE, value.instructions) }
 	Code(value.type, instruction(GLOBAL_GET, [p.constants[key]]))
@@ -146,7 +147,7 @@ class Placed {
 }
 
 # the code of a kernel form
-code(form: Node, p: Program, f: Frame) as Code := {
+code(form: Node, p: Emission, f: Frame) as Code := {
 	last = f.last_place
 	f.last_place = no
 	match form {
@@ -179,7 +180,7 @@ code(form: Node, p: Program, f: Frame) as Code := {
 
 # Statements run in order, the value the last one's, every other value dropped. The functions the block defines are
 # placed at its start, so a call before a definition's line finds it; a definition emits its body and leaves no value.
-block_code(statements: list<Node>, p: Program, f: Frame, last: bool = no) as Code := {
+block_code(statements: list<Node>, p: Emission, f: Frame, last: bool = no) as Code := {
 	for definition in statements.filter(s => s is Define) { if is_in_place(definition) and file_of(defined_name(definition)) != p.source then p.in_place[function_key(definition)] = definition else function_placed(definition, p) }
 	codes = (1 to #statements).map(at => code_at(at == #statements and last, statements#at, p, f))
 	if codes is empty { return Code() }
@@ -188,7 +189,7 @@ block_code(statements: list<Node>, p: Program, f: Frame, last: bool = no) as Cod
 
 # A choice by a condition, yes or no (an i32), of the type typing gives it: with none, each part's value is dropped, as
 # a missing else part's ø is.
-if_code(form: Node, condition: Code, then_part: Code, else_part: Code, p: Program) as Code := {
+if_code(form: Node, condition: Code, then_part: Code, else_part: Code, p: Emission) as Code := {
 	checked_condition(form, condition)
 	type = typed_layout(form, p)
 	Code(type, condition.instructions + IF + block_type(type) + kept(then_part, type) + ELSE + kept(else_part, type) + END)
@@ -197,7 +198,7 @@ if_code(form: Node, condition: Code, then_part: Code, else_part: Code, p: Progra
 # place, no closure made, its parameter a local of the frame holding the raise as a Node, Error(Text(text))
 #   block (done)  block (caught: text)  try_table (raise → caught)  body  end  br done  end  call error_node
 #   local.set error  handler  end
-try_code(form: Node, body: Node, handler: Node, p: Program, f: Frame) as Code := match handler {
+try_code(form: Node, body: Node, handler: Node, p: Emission, f: Frame) as Code := match handler {
 	Fn(parameters, handling) => {
 		tried = choice_fitted(form, labelled(f, [Other, Other, Caught], () => code(body, p, f)), body, p)
 		error = slotted(f, place_key(declared_name(items_of(parameters)#1)), known_layout(NODE_TERM, p))
@@ -209,19 +210,19 @@ try_code(form: Node, body: Node, handler: Node, p: Program, f: Frame) as Code :=
 	_ => refused(handler, "a Try's handler is a function written in place, `error => …`")
 }
 # the program's code, a raise no Try caught written and the program ended
-uncaught_ended(body: list<int>, p: Program) as list<int> := BLOCK + text_layout(p.m) + try_table(VOID_BLOCK, raised_tag(p), 0, body) + RETURN + END + uncaught(p)
+uncaught_ended(body: list<int>, p: Emission) as list<int> := BLOCK + text_layout(p.m) + try_table(VOID_BLOCK, raised_tag(p), 0, body) + RETURN + END + uncaught(p)
 # a structured instruction's type: the value it leaves, or none
 block_type(type: list<int>) as list<int> := if valued(type) then type else VOID_BLOCK
 # a part's code where its choice has the type: its value kept, or dropped when the choice has none
 kept(part: Code, type: list<int>) as list<int> := if valued(type) then part.instructions else dropped(part)
-arm_code(choice: Node, part: Node, p: Program, f: Frame, last: bool = no) as Code := choice_fitted(choice, labelled(f, [Other], () => code_at(last, part, p, f)), part, p)
+arm_code(choice: Node, part: Node, p: Emission, f: Frame, last: bool = no) as Code := choice_fitted(choice, labelled(f, [Other], () => code_at(last, part, p, f)), part, p)
 # the code of a form, in the function's last place or not
-code_at(last: bool, form: Node, p: Program, f: Frame) as Code := {
+code_at(last: bool, form: Node, p: Emission, f: Frame) as Code := {
 	f.last_place = last
 	code(form, p, f)
 }
 # a part's value made to fit its choice's type, an If's or a Case's
-choice_fitted(choice: Node, given: Code, part: Node, p: Program) as Code := {
+choice_fitted(choice: Node, given: Code, part: Node, p: Emission) as Code := {
 	wanted = typed_layout(choice, p)
 	if valued(wanted) then fitted(given, wanted, part, p) else given
 }
@@ -230,7 +231,7 @@ checked_condition(form: Node, condition: Code) := if condition.type != I32 { ref
 
 # A loop: its condition tested before each run of its body, the loop left when it is no. It has no value.
 #   block (exit)  loop (next)  condition, not, br_if exit; body; br next  end  end
-while_code(form: Node, condition: Node, body: Node, p: Program, f: Frame) as Code := {
+while_code(form: Node, condition: Node, body: Node, p: Emission, f: Frame) as Code := {
 	inner = labelled(f, [Exit, Next], () => {
 		test = code(condition, p, f)
 		checked_condition(form, test)
@@ -241,7 +242,7 @@ while_code(form: Node, condition: Node, body: Node, p: Program, f: Frame) as Cod
 
 # A counted loop: the count held in the frame, the place counted up before the body, so `continue` moves on; it has no
 # value
-for_code(form: Node, place: Node, count: Node, body: Node, p: Program, f: Frame) as Code := {
+for_code(form: Node, place: Node, count: Node, body: Node, p: Emission, f: Frame) as Code := {
 	last = slotted(f, "${place_of_code(form)} count", I64)
 	at = variable_of(place, p, f) ?? added_variable(place, I64, p, f)
 	inner = labelled(f, [Exit, Next], () => Code([], fetched(at) + local_get(last.index) + I64_GE_S + instruction(BRANCH_IF, [jump(form, f, Exit)]) + fetched(at) + i64_const(1) + I64_ADD + kept(at) + DROP + dropped(code(body, p, f)) + instruction(BRANCH, [jump(form, f, Next)])))
@@ -250,7 +251,7 @@ for_code(form: Node, place: Node, count: Node, body: Node, p: Program, f: Frame)
 
 # The function left with a value, or with none for a bare return of a function that gives nothing (`return ø` of a
 # function giving P? gives its ø); the code after it never runs
-return_code(form: Node, value: Node, p: Program, f: Frame) as Code := {
+return_code(form: Node, value: Node, p: Emission, f: Frame) as Code := {
 	if not f.function { refused(form, "a return leaves a function; the program has none to leave") }
 	given = if value is Empty and not valued(f.signed) then Code() else signed_fit(code_at(not f.labels.has(Caught), value, p, f), value, f, p)
 	# a value that never finishes, `return refused(n, …)`, gives nothing back
@@ -266,7 +267,7 @@ return_code(form: Node, value: Node, p: Program, f: Frame) as Code := {
 # cast to the wanted reference type (checked_cast); a reference where another is wanted as it is, for wasm to check as
 # its subtype; any other value refused, never written as invalid wasm. A plain value arrives boxed already, by typing's
 # `prim box`. `form` is the value's code, the place a failed cast names.
-fitted(given: Code, wanted: list<int>, form: Node, p: Program) as Code := {
+fitted(given: Code, wanted: list<int>, form: Node, p: Emission) as Code := {
 	if given.type == wanted { return given }
 	if wanted == ANYREF and is_reference(given.type) { return Code(wanted, given.instructions) }
 	if given.type == ANYREF and is_reference(wanted) { return Code(wanted, given.instructions + cast_called(wanted, "one", form, p)) }
@@ -277,7 +278,7 @@ fitted(given: Code, wanted: list<int>, form: Node, p: Program) as Code := {
 # a reference type taking ø too; else a raise naming the type and the place that wanted it. `form` is the code
 # wanting it, whose type names a plain value's box; `name` the type's name. Its locals: 0 the value, 1 the place.
 ANY_OF_ANOTHER_TYPE = "this any holds a value of another type than the"
-checked_cast(p: Program, wanted: list<int>, name: text, form: Node) as int := {
+checked_cast(p: Emission, wanted: list<int>, name: text, form: Node) as int := {
 	plain = wanted in PLAIN_VALUES
 	box = if plain then box_index(p.m, plain_word(form)) else 0
 	test = if plain then heap_instruction(REF_TEST, box) else REF_TEST_NULL + heap_of(wanted)
@@ -286,12 +287,12 @@ checked_cast(p: Program, wanted: list<int>, name: text, form: Node) as int := {
 	added_function(p.m, [ANYREF, text_layout(p.m)], [wanted], [], fits + raised_with("${ANY_OF_ANOTHER_TYPE} ${name} wanted at ", local_get(1), p))
 }
 # a casting helper's call given the place, one helper for each type, the type's name for the raise
-cast_called(wanted: list<int>, name: text, form: Node, p: Program) as list<int> := text_literal(place_of_code(form), p.m).instructions + helper_call(p, "cast to ${wanted} ${name}", q => checked_cast(q, wanted, name, form))
+cast_called(wanted: list<int>, name: text, form: Node, p: Emission) as list<int> := text_literal(place_of_code(form), p.m).instructions + helper_call(p, "cast to ${wanted} ${name}", q => checked_cast(q, wanted, name, form))
 # where code was written, file:line:column
 place_of_code(form: Node) as text := "${file_of(form)}:${line_of(form)}:${column_of(form)}"
-items_fitted(type: Term, items: list<Node>, p: Program, f: Frame) as list<Code> := items.map(item => fitted(code(item, p, f), layout_of(type, p.m, p.records) ?? refused(item, "the emitter has no value layout for this type yet"), item, p))
+items_fitted(type: Term, items: list<Node>, p: Emission, f: Frame) as list<Code> := items.map(item => fitted(code(item, p, f), layout_of(type, p.m, p.records) ?? refused(item, "the emitter has no value layout for this type yet"), item, p))
 # a function's value made to fit its signed result, a frame without one leaving it as it is
-signed_fit(given: Code, form: Node, f: Frame, p: Program) as Code := if valued(f.signed) then fitted(given, f.signed, form, p) else given
+signed_fit(given: Code, form: Node, f: Frame, p: Emission) as Code := if valued(f.signed) then fitted(given, f.signed, form, p) else given
 # code emitted inside wasm's structured instructions, which open these labels
 labelled(f: Frame, labels: list<Label>, emit: function) as Code := {
 	f.labels += labels
