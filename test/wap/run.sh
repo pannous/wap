@@ -8,7 +8,7 @@
 # runs them in the foreground and prints the summary. Its modules run on the native wap on PATH. The self-build ratchet,
 # ratchet_census.sh (about 4 min), is no default script: run it by name, test/wap/run.sh --wait
 # test/wap/ratchet_census.sh, after each wap landing.
-# The reds are compared with the baseline test/reds.txt, every check expected red as `<test file>: <check name>`, one
+# The reds are compared with the baseline test/reds.txt, every check expected red as `<test key>: <check name>` (test_key), one
 # red on one system only led by its name, `[Linux] test_png.wap: …`: the summary names only the regressions, red checks
 # the baseline lacks here, and the fixed ones, the baseline's checks of the tests run that went green here; a run is
 # green when it has no regression. --known writes this system's reds of the tests run into the baseline instead, after
@@ -29,12 +29,11 @@ OTHER_SYSTEM=$(printf '%s\n' "${SYSTEMS[@]}" | grep -vx "$SYSTEM")
 cores=$(( $(getconf _NPROCESSORS_ONLN) - 2 ))
 job_slot="$here/../../scripts/job-slot.sh"
 
-# the outputs of the tests run, each data/wap-tests/<test file>.txt, a script's data/wap-tests/wap/<test file>.txt
-outputs() {
-	for test in "$@"; do
-		if in_scripts "$test"; then echo "$results/wap/$(basename "$test").txt"; else echo "$results/$(basename "$test").txt"; fi
-	done
-}
+# the outputs of the tests run, each data/wap-tests/<test key>.txt
+outputs() { for test in "$@"; do echo "$results/$(test_key "$test").txt"; done; }
+# a test's name in the baseline and the outputs: a program's file name, a script's wap/<file name>, so a program and a
+# script of one file name (test/test_types.wap, test/wap/test_types.wap) keep their reds apart
+test_key() { if in_scripts "$1"; then echo "wap/$(basename "$1")"; else basename "$1"; fi; }
 # a test of test/wap/, however its path is written
 in_scripts() { [ "$(cd -P "$(dirname "$1")" && pwd -P)" = "$here" ]; }
 # the tests' outputs read into one line: checks passed and failed, the tests that failed
@@ -42,11 +41,15 @@ summed() {
 	local passed failed
 	passed=$(outputs "$@" | xargs cat | grep -c '^✓')
 	failed=$(outputs "$@" | xargs cat | grep -c '^✗')
-	echo "wap tests: $passed ✓, $failed ✗ in $# tests, $(($(date +%s) - started)) s$( [ "$failed" = 0 ] || printf '; failed: %s' "$(outputs "$@" | xargs grep -l '^✗' | xargs -n1 basename | sed 's/\.txt$//' | tr '\n' ' ')")"
+	echo "wap tests: $passed ✓, $failed ✗ in $# tests, $(($(date +%s) - started)) s$( [ "$failed" = 0 ] || printf '; failed: %s' "$(outputs "$@" | xargs grep -l '^✗' | sed -e "s|^$results/||" -e 's/\.txt$//' | tr '\n' ' ')")"
 }
 # the red checks of the tests run, `<test file>: <check name>` each, without the values got and expected
+# a test that did not compile and run through read none of its checks after that: each the baseline expects red stays red
 reds() {
-	for test in "$@"; do grep '^✗' "$(outputs "$test")" | sed -e 's/^✗ //' -e 's/: got .*//' -e "s|^|$(basename "$test"): |"; done | LC_ALL=C sort -u
+	for test in "$@"; do
+		grep '^✗' "$(outputs "$test")" | sed -e 's/^✗ //' -e 's/: got .*//' -e "s|^|$(test_key "$test"): |"
+		! grep -q "^✗ $(basename "$test") compiled and ran" "$(outputs "$test")" || expected_reds "$test"
+	done | LC_ALL=C sort -u
 }
 # the baseline's lines of the tests run (known_reds in <tests>), or of every other test (known_reds out <tests>)
 known_reds() {
@@ -57,7 +60,7 @@ known_reds() {
 	awk -v side="$side" '
 		FILENAME == ARGV[1] { run[$0]; next }
 		{ file = $0; sub(/^\[[^]]*\] /, "", file); sub(/: .*/, "", file) }
-		(file in run) == (side == "in")' <(for test in "$@"; do basename "$test"; done) "$KNOWN_REDS" | LC_ALL=C sort -u
+		(file in run) == (side == "in")' <(for test in "$@"; do test_key "$test"; done) "$KNOWN_REDS" | LC_ALL=C sort -u
 }
 # the checks of the tests run expected red here: those red everywhere and this system's own, without its name
 expected_reds() {
