@@ -4,13 +4,13 @@
 # to the Trash. The C words run natively; a page, which has no C library, has none of them yet.
 use foreign
 use path
-use random
 use time
 
 # the folder for temporary files when $TMPDIR names none
 DEFAULT_TEMP_FOLDER := "/tmp"
-TEMP_PREFIX := "warp-"
-TEMP_NAMES := 1000000000
+# a temporary file's or folder's name, C's X's replaced by letters no file there has yet, made at once (mkstemps, mkdtemp),
+# so runs at the same moment never share one
+TEMP_NAME := "warp-XXXXXX"
 # a folder made for the Trash is the owner's alone (0700)
 OWNER_ONLY := 448
 TRASH_DATE := Pattern("yyyy-MM-dd'T'HH:mm:ss")
@@ -19,6 +19,13 @@ unlink(path: text): i32 from 'c'
 rename(from: text, to: text): i32 from 'c'
 rmdir(path: text): i32 from 'c'
 mkdir(path: text, mode: i32): i32 from 'c'
+strdup(t: text): handle from 'c'
+# the text a C copy holds after C wrote into it, copied again and handed back
+strndup(copy: handle, limit: i64): owned_text from 'c'
+free(pointer: handle): ø from 'c'
+close(descriptor: i32): i32 from 'c'
+mkstemps(template: handle, suffix_length: i32): i32 from 'c'
+mkdtemp(template: handle): handle from 'c'
 
 # the text added at the end of the file, which is made when it is not there
 append_file(path: text, addition: text) := {
@@ -43,23 +50,19 @@ temp_folder(): text := {
 	folder = started_env("TMPDIR") ?? ""
 	if folder == "" then DEFAULT_TEMP_FOLDER else path_trimmed(folder)
 }
-# the path of a new empty file, or folder, in temp_folder(), named as no file there is yet
-temp_file(): text := {
-	path = fresh_temp_path()
-	write(path, "")
+# the path of a new empty file, or folder, in temp_folder(), its name its own: a run beside this one never gets it
+temp_file(): text := temp_made(template => close(mkstemps(template, 0)) >= 0)
+temp_dir(): text := temp_made(template => mkdtemp(template) != 0)
+# the path C made of the temporary name, its template a C copy C writes into
+temp_made(made: (int) -> bool): text := {
+	named = path_join(temp_folder(), TEMP_NAME)
+	template = strdup(named)
+	done = made(template)
+	path = strndup(template, byte_count(named))
+	free(template)
+	if not done { raise "cannot make a temporary file in ${temp_folder()}" }
 	path
 }
-temp_dir(): text := {
-	path = fresh_temp_path()
-	ensured_folder(path)
-	path
-}
-fresh_temp_path(): text := {
-	path = temp_named()
-	while exists(path) { path = temp_named() }
-	path
-}
-temp_named(): text := path_join(temp_folder(), TEMP_PREFIX + text(random_below(TEMP_NAMES)))
 # the folder and the folders above it made where they are missing
 ensured_folder(written: text) := {
 	path = home_expanded(written)

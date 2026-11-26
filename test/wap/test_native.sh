@@ -382,4 +382,9 @@ print "${Color.Green} ${Wide(2.5).x}"')" "Green 2.5"
 # an error in a used module names that module by its full path, as it names the program (core/errors.wap place_of)
 mkdir -p "$stage/erring" && printf '%s\n' 'broken(): int := "ab"' >"$stage/erring/part.wap" && printf '%s\n' 'use "part.wap"' 'print broken()' >"$stage/erring/main.wap"
 check "an error in a used module names its full path" "$("$native_wap" "$stage/erring/main.wap" 2>&1 | grep -c "^$stage/erring/part.wap line 1:")" "1"
+# runs at the same moment each get a temporary file of their own, never another's (lib/file.wap temp_file)
+TEMP_RUNS=48
+printf '%s\n' 'use file' 'print temp_file()' >"$stage/temp_name.wap" && mkdir -p "$stage/temp_names"
+for run in $(seq $TEMP_RUNS); do "$native_wap" "$stage/temp_name.wap" >"$stage/temp_names/$run.txt" 2>&1 & done; wait
+check "runs at the same moment get $TEMP_RUNS temporary files of their own" "$(cat "$stage/temp_names"/*.txt | grep '^/' | sort -u | wc -l | tr -d ' ')" "$TEMP_RUNS"
 exit $((failures > 0))
