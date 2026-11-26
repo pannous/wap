@@ -274,6 +274,17 @@ A program may also write what the compiler otherwise finds: a level in square br
 (`nat.recursor[1](n => nat, 0, (k, double_k) => double_k + 2, n)`). The kernel's own tests are written this way
 (notes/theory.md "The explicit spellings").
 
+The type words need no new form, because each one is the kernel's typing or an ordinary library word:
+- `x : T` and `x as T` are one ascription. It checks when x already has type T. Otherwise it calls the library's
+  conversion for that pair of types (`π as int`, `"1h 30m" as Duration`). After a signature, `:` and `as` declare the
+  same result type.
+- `to` is an alias of `as` (`convert text to int`). The `to` that starts a definition (`to add a to b: …`) is a
+  different word, told apart by where it stands.
+- `is` checks a value against a type and narrows it on the branch it guards.
+- `->` and `→` write only function types (Pi). `=>` and `↦` write only functions (lambda).
+- `read text as int` picks the overload whose result is the type wanted (T3e).
+The core cost is nothing.
+
 ## 4 What changes and what goes
 
 The freedom to overhaul is used on the compiler's middle, not on the surface. No spelling has to go: nothing in the
