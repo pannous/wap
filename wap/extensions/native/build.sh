@@ -39,11 +39,11 @@ whole_archive() {
 	esac
 }
 # the linker's arguments each system spells its own way: the executable's own C functions (main.c native_call,
-# wap_host_callback) exported, found by name as libc's are; on Windows its threads (winpthreads) and a main thread's
-# stack as deep as the others give it (Windows gives 1 MB)
+# wap_host_callback) exported, found by name as libc's are; on Windows its threads (winpthreads, linked in, so no
+# DLL of the compiler's goes with it) and a main thread's stack as deep as the others give it (Windows gives 1 MB)
 system_linked() {
 	case $(uname -s) in
-		MINGW* | MSYS*) echo "-Wl,--export-all-symbols -pthread -Wl,--stack,0x10000000" ;;
+		MINGW* | MSYS*) echo "-Wl,--export-all-symbols -Wl,-Bstatic -lpthread -Wl,-Bdynamic -Wl,--stack,0x10000000" ;;
 		*) echo "-rdynamic" ;;
 	esac
 }
