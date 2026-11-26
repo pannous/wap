@@ -41,16 +41,13 @@ folder_built() {
 	rm -rf "$1" && mv "$building" "$1" || return 1
 	tree_copied "$1/${WAP_LIBRARY_MODULE##*/}" "$library_module" && tree_copied "$1/${WAP_WARM##*/}" "$warm_state"
 }
-# the compilers of folder_built, in the folder: wap0 holds no library and no warm state, reading the sources; the
-# library is compiled once by it, from the sources, and each next compiler holds it and the warm state the one before
-# wrote beside it, run by its full path so the state's paths are marked as the wap folder's (extensions/warm.wap marked)
-# and a compile from any other folder finds them
+# the compilers of folder_built, in the folder: wap0 is the seed's, holding no library and no warm state; each next one
+# is the one before's, holding the library and warm state that one writes beside the source (scripts/lib/wap-beside.sh)
 steps_built() {
-	local n source=compiler.wap library=${WAP_LIBRARY_MODULE##*/} warm=${WAP_WARM##*/}
-	: >"$library" && : >"$warm" && $wap "$seed" "$source" wap0.wasm 2>&1 || return 1
-	$wap wap0.wasm --sources types/types.wap "$library" 2>&1 || return 1
-	for ((n = 1; n <= $1; n++)); do
-		$wap "$PWD/wap$((n - 1)).wasm" --sources warm "$warm" 2>&1 && $wap "wap$((n - 1)).wasm" --sources "$source" "wap$n.wasm" 2>&1 || return 1
+	local n compiler=$seed
+	for ((n = 0; n <= $1; n++)); do
+		{ wap_stage_prepared "$compiler" "$seed" . && wap_stage_compiled "$compiler" "$seed" . "wap$n.wasm"; } 2>&1 || return 1
+		compiler=wap$n.wasm
 	done
 }
 # a built file put in the tree whole, so a reader never sees half of it
