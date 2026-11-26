@@ -76,7 +76,9 @@ TYPE fact holds `Number(place)` in that table.
 ## One pass
 
 - **Headers first:** a recursive function's header is typed before its body, so a call of the function in its own
-  body reads the written result type; one without it is refused with the fix-it naming it. The body is typed once.
+  body reads the written result type. A call of itself without a written result takes none at first, and the body
+  is typed again once its other arm gives the type (calls.wap function_typed); a body no other arm gives a type is
+  refused with the fix-it naming the result to write.
 - **An assignment of another type is a new binding:** `x = 1; x = "a"`, and from there on x holds a text. The
   retyping round goes: typed_among's restart, TypingState `retyped`, `retypings` and `fixed`, and `retyped(…)` in
   types.wap. A `let`, a `const` or a written type still fixes the type
@@ -145,7 +147,7 @@ The whole suite runs at T3b, T3d and T3e, compared line by line with main's last
 | T3b terms | the table; TYPE facts hold its places; signatures hold terms; type_notation.wap's readers read terms; one notation door; `type_shown` for messages and format; emit through the readers | about +300 (the table +30, the door +40, `type_shown` +30, the readers on terms, about 200 call sites edited and about 120 comparisons by `==` or `text()` rewritten; the user decides the size) | careful; the whole suite as before; `--stage 2` time and warm hello measured against the baseline |
 | T3c holes | letters.wap goes: letters, `_` and α are holes of the unifier, `settles`/`deferred` are answers; fits.wap's remaining comparisons go to kernel equality (`bare_fit`, `joined_settling`'s settling) | −169 letters, −45 fits, +60 | careful; `identity(3)` and `identity(int)`; the census |
 | T3c3 holes by id | a definition's letters are holes made once in a table by its key (letters.wap letter_holes), the signature's holes in all but where they are kept, so declare stays apart from the typing state; a call's answers, `s.unknowns` and `s.members` keyed by the hole's id (`variable_id`), a letter's name only in the types the definition writes; `hole_text` and its cache in TypeTerms go | about −10 type_notation, +20 letters (the call's letters and answers apart) | careful; two calls of one generic, a generic calling itself (test_letters) |
-| T3d one pass | headers first, assignment as a new binding, the retyping round goes; kind rules typed in place, the refiring goes | −40 analyze, −20 rules, +40 | careful; a recursive function's result is written, or refused with the fix-it naming it; a kind rule's error names the line of its phrase |
+| T3d one pass | headers first, assignment as a new binding, the retyping round goes; kind rules typed in place, the refiring goes | −40 analyze, −20 rules, +40 | careful; a recursive function's result is written, or found once its other arm gives the type, else refused with the fix-it naming it; a kind rule's error names the line of its phrase |
 | T3e numbers | numerals at the wanted type, else `int`, and an empty `{}` or `[]` at the type its place wants, the right of `??` wanting the left's (`m.get(k) ?? {}`; core/pipeline.wap line_told's `has` test goes); i32 and i64; `#xs` int; the numbers prelude in wap/types; overloads by conversion order| −40 analyze (the ranking's 5 words), +170 analyze, +200 types | careful; `0 - 3` is -3; `m.get(k) ?? {}` of a map<text, map<text, text>> is a map<text, text>; `#xs - 1` is -1 on an empty list; `type of 3` is `int` |
 | T3f functions | each typed function an opaque constant of its signature in the kernel environment; the census counts them as assumed | +20 | normal plus the census |
 
@@ -178,16 +180,16 @@ Two budget differences:
 
 T3 is done when all of these hold:
 - the T3 row's test lines are green: `0 - 3` is -3; `#xs - 1` is -1 on an empty list; `type of 3` is `int`;
-  `identity(3)` and `identity(int)`; a recursive function's result is written, or refused with the fix-it naming it; a kind rule's
+  `identity(3)` and `identity(int)`; a recursive function's result is written, or found once its other arm gives the type, else refused with the fix-it naming it; a kind rule's
   error names the line of the phrase it rewrote;
 - the whole suite has no new red;
-- the census types every function, with 0 places typed any beyond today's 4;
+- the census types every function, with 0 places typed any beyond the language's 5 dynamic words (`show` four times in types/prelude.wap, `text` once in nodes.wap);
 - `--stage 2` is a fixed point;
 - typing stays fast: T3 as a whole adds at most 25% to `--stage 2` (84 s on the integrator's last run) and to a
   warm `print "Hello"`, each measured against its time before T3a on the same machine. That is a ceiling for the
   whole step, shared out below, not slack for the first sub-step;
-- letters.wap, ROUNDS_LIMIT and the retyping round are gone (typed_readings stays the compile's table), and so are the five ranking words in
-  calls.wap (`nearest`'s weights in read.wap go in T5, above).
+- typed_among's retyping round is gone (typed_readings stays the compile's table), and so are the five ranking words
+  in calls.wap; letters.wap, ROUNDS_LIMIT and `nearest`'s weights in read.wap go in T5.
 
 What the gate still lacks, and the step that brings each:
 - `type of 3` is `int`, and `identity(int)`: red. `type of` is no word of the compile, and `int` in a value's place
@@ -198,12 +200,8 @@ What the gate still lacks, and the step that brings each:
 - the loop red (test_type_wanted, a loop that gives a carried name another type): a typing that can be discarded,
   listed after T3 in coc-plan, measured before building.
 - a kind rule's error naming the line of its phrase: no test line holds it yet.
-- the census types every function and no place of the compiler's own source is typed any; the 5 places typed any
-  are the language's dynamic words, `show` four times in types/prelude.wap and `text` once in nodes.wap.
-- still in the tree: letters.wap (its letter holes, T3c3), ROUNDS_LIMIT (shape rules refiring on their own output,
-  core/rules/stages.wap), and the loop in calls.wap function_typed that types a function again where its calls of
-  itself took no result, which gives an unwritten recursive result from the other arm
-  (test_functions_returns). The retyping round of typed_among is gone.
+- letters.wap (its letter holes) and ROUNDS_LIMIT (shape rules refiring on their own output, core/rules/stages.wap)
+  go in T5.
 - speed: the self-compile takes 12.5 s CPU and a warm hello 0.11 to 0.13 s, against 18.3 s and 130 ms before T3a.
 
 ## The speed budget
