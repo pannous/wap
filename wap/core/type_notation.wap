@@ -15,7 +15,6 @@ use "../kernel/forms.wap"
 use "../kernel/primitives.wap"
 use "../kernel/terms.wap"
 use "../kernel/environment.wap"
-use "../kernel/typing.wap"
 
 # a written `block`: code run by its call, a function of no parameters (wiki/block.md)
 BLOCK_WORD = "block"
@@ -79,6 +78,11 @@ BOOL_TERM = core_word(BOOL_TYPE)
 ENUM_TERM = core_word(ENUM_TYPE)
 MAP_TERM = core_word(MAP_TYPE)
 FUNCTION_TERM = core_word(FUNCTION_WORD)
+BLOCK_TERM = core_word(BLOCK_WORD)
+OPTIONAL_TERM = core_word(OPTIONAL_MARK)
+ARROW_TERM = core_word(FUNCTION_ARROW)
+PARAMETERS_TERM = core_word(PARAMETERS_WORD)
+NO_PARAMETERS_TERM = core_word(NO_PARAMETERS_WORD)
 NEVER_TERM = core_word(NEVER_TYPE)
 # the types of the values a Node holds as its cases, read as a Node where one is wanted: `n: Node = 'a'` is Char('a')
 ATOM_TYPES = [CHAR_TYPE, INT_TYPE, FLOAT_TYPE, NUMBER_TYPE, TEXT_TYPE]
@@ -97,10 +101,11 @@ core_environment() as Environment := {
 	for core in CORE_WORDS { word_declared(e, core.word, core.parts) }
 	e
 }
-# a type word declared, an opaque type of its parts' types; its id, its place in the environment
+# a type word declared, an opaque type of its parts' types; its id, its place in the environment. Its type is a
+# type by construction, so it is added unchecked
 word_declared(e: Environment, key: text, parts: int) as int := {
 	data = type_at(Zero)
-	declared(e, Declaration(key, [], (1 to parts).fold(data, (kind, at) => pi("_", data, kind)), DeclarationKind.Axiom))
+	added(e, Declaration(key, [], (1 to parts).fold(data, (kind, at) => pi("_", data, kind)), DeclarationKind.Axiom))
 	size(e)
 }
 # a type word's term, the word declared by its key the first time
@@ -158,7 +163,6 @@ type_built(word: Term, parts: list<Term>) as Term := {
 	applied(word, parts)
 }
 applied(word: Term, parts: list<Term>) as Term := parts.fold(word, (applied, part) => apply(applied, part))
-generic_type(word: text, parts: list<Term>) as Term := type_built(core_word(word), parts)
 # the name a type's word has, `list` of list<int>, `text` of text; ø for a type headed by no word
 word_of(type: Term?) as text? := if type == ø then ø else match head_of(type!).shape {
 	Constant(name, levels, id) => name
@@ -174,12 +178,12 @@ parts_of(type: Term) as list<Term> := spine(type).drop(1)
 # any type's word and parts, `list` and `int` of `list<int>`, a function type's under the arrow; ø for a word alone
 type_parts(type: Term?) as list<Term>? := if type == ø then ø else match type!.shape {
 	Apply(function, argument) => spine(type!)
-	Pi(binder, domain, body) => [core_word(FUNCTION_ARROW)] + parameters_listed(domain) + [body]
+	Pi(binder, domain, body) => [ARROW_TERM] + parameters_listed(domain) + [body]
 	_ => ø
 }
 # A function's signature, its parameter types and its result type, as a function type writes them; ø for any other type
 class FunctionType { parameters: list<Term>, result: Term }
-function_type_of(parameters: list<Term>, result: Term) as Term := pi("_", parameters.reverse().fold(core_word(NO_PARAMETERS_WORD), (rest, parameter) => generic_type(PARAMETERS_WORD, [parameter, rest])), result)
+function_type_of(parameters: list<Term>, result: Term) as Term := pi("_", parameters.reverse().fold(NO_PARAMETERS_TERM, (rest, parameter) => applied(PARAMETERS_TERM, [parameter, rest])), result)
 function_parts(type: Term?) as FunctionType? := if type == ø then ø else match type!.shape {
 	Pi(binder, domain, body) => FunctionType(parameters_listed(domain), body)
 	_ => ø
@@ -193,7 +197,7 @@ items_or_one(n: Node) as list := match n { List(items, bracket, separator) => it
 # an optional's value type, any other type itself: int of int? and of int
 base_of(type: Term) as Term := base_of_optional(type) ?? type
 base_or_self(type: Term?) as Term? := if type == ø then ø else base_of(type!)
-optional_type(base: Term) as Term := if base_of_optional(base) != ø or same(base, ANY_TERM) then base else applied(core_word(OPTIONAL_MARK), [base])
+optional_type(base: Term) as Term := if base_of_optional(base) != ø or same(base, ANY_TERM) then base else applied(OPTIONAL_TERM, [base])
 base_of_optional(type: Term?) as Term? := only_term(parts_of_type(OPTIONAL_MARK, type))
 only_term(parts: list<Term>?) as Term? := if parts != ø and #parts == 1 then parts#1 else ø
 # a function as the kernel's runtime words name it, `write(text, int, bool)`, when it is one of them
@@ -201,12 +205,12 @@ only_term(parts: list<Term>?) as Term? := if parts != ø and #parts == 1 then pa
 runtime_word(name: text, types: list<Term?>) as text? := if runtime_named(name) then RUNTIME_WORDS.find(word => word == "${name}(${types.map(type => type_text(type)).join(", ")})") else ø
 runtime_named(name: text) as bool := RUNTIME_WORDS.any(word => word.starts_with(name + "("))
 # a type as a message writes it, as a program writes it: `int?`, `list<(int) -> int>`; whole, a function value's own
-# type spelled with its key and captures, `fn<"f.wap:3:5 λ", int>`, and a record's word sharing its name with
-# another by its declaration, as a key tells instances apart by them
+# type spelled with its key and captures, `fn f.wap 3:5<int>`, and a record's word sharing its name with another by
+# its declaration, as a key tells instances apart by them
 type_text(type: Term?, whole: bool = no) as text := {
 	if type == ø { return "no type" }
+	if is_word(type) { return if whole then declared_at(TYPES.environment, word_id(type!))!.name else if TYPES.functions.has(word_id(type!)) then FUNCTION_WORD else word_of(type)! }
 	if function_value_key(type) != ø and not whole { return FUNCTION_WORD }
-	if is_word(type) { return if whole then declared_at(TYPES.environment, word_id(type!))!.name else word_of(type)! }
 	base = base_of_optional(type)
 	if base != ø { return type_text(base, whole) + OPTIONAL_MARK }
 	function = function_parts(type)
@@ -220,12 +224,12 @@ read_of(given: Term?) as Term? := if given == ø then ø else (READS.find(pair =
 # the types whose values pass an any's test for a type: its own and those read as it, a char for a text; a number has
 # no box of its own, its values are ints and floats
 passing_types(type: Term) as list<Term> := if same(type, NUMBER_TERM) then [INT_TERM, FLOAT_TERM] else [type] + READS.filter(pair => same(pair#2, type)).map(pair => pair#1)
-list_type(item: Term) as Term := generic_type(LIST_TYPE, [item])
+list_type(item: Term) as Term := applied(LIST_TERM, [item])
 # the word a type is named by, `list` of list<int>, `text` of text
 type_word(type: Term) as text := word_of(type) ?? type_text(type)
 item_type(type: Term?) as Term? := only_term(parts_of_type(LIST_TYPE, type))
 # a map's type, `map<text, int>`, and its keys' and values' types, ø for any other type
-map_type(key: Term, value: Term) as Term := generic_type(MAP_TYPE, [key, value])
+map_type(key: Term, value: Term) as Term := applied(MAP_TERM, [key, value])
 key_type(type: Term?) as Term? := map_part(type, 1)
 held_type(type: Term?) as Term? := map_part(type, 2)
 map_part(type: Term?, at: int) as Term? := {
