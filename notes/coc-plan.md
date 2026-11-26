@@ -283,6 +283,13 @@ The type words need no new form, because each one is the kernel's typing or an o
 - `is` checks a value against a type and narrows it on the branch it guards.
 - `->` and `→` write only function types (Pi). `=>` and `↦` write only functions (lambda).
 - `read text as int` picks the overload whose result is the type wanted (T3e).
+- `for x: T` before a body is one binder, and `∀` and `∃` are aliases of `for` and `exists`. The body's type
+  decides what the binder means:
+  - When the body is a proposition, the binder is Pi, and its proofs are functions of x.
+  - When the body is an action, the binder is the loop, run for every x of its domain (`for i in 1...3: print i`).
+    `for x in S` is `for x: T` with `x in S` as a premise.
+  Both are the kernel's Pi and lambda, typed by the stage-3 kind rules. The theory's own reading of the `for` line
+  (extensions/theory/elaborate/declare.wap) goes at T7.
 The core cost is nothing.
 
 ## 4 What changes and what goes
