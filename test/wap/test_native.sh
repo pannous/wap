@@ -373,4 +373,10 @@ g(x: int): int := x * 2"
 # from the root (the user's rule 2026-11-26: a compiler's modules are found through its own folder)
 printf '%s\n' 'print "relative"' >"$stage/relative.wap"
 check "a program compiled by a compiler named by a relative path runs from any folder" "$(cd "$(dirname "$(dirname "$compiler")")" && "$native_wap" "$(basename "$(dirname "$compiler")")/$(basename "$compiler")" "$stage/relative.wap" "$stage/relative.wasm" && cd / && "$native_wap" "$stage/relative.wasm" 2>&1)" "relative"
+# a class without fields shows as its constructor form; an enum beside a class builds too (wiki/class.md, wiki/enum.md)
+check "a native program shows a class without fields" "$(native_ran flag 'class Flag {}
+print Flag()')" "Flag{}"
+check "a native program with an enum beside a class" "$(native_ran enum_beside 'enum Color { Red, Green }
+class Wide { x: float }
+print "${Color.Green} ${Wide(2.5).x}"')" "Green 2.5"
 exit $((failures > 0))
