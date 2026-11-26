@@ -108,7 +108,9 @@ this file and your role file beat the handover.
   that make the compiler faster and much smaller, like core-int-division (core writes `÷`, so big numbers leave
   the compiler build). Card each one you spot; they rank above new forms. The compiler's own source may change
   minimally where that helps a lot (it stops using a sugar form, so the form can leave the core); the language itself
-  is never simplified to shrink the core: every spelling programs may write stays (self-source-minimal).
+  is never simplified to shrink the core: every spelling programs may write stays (self-source-minimal). Exception,
+  the theory work (dependent types, proofs): forms may be parked to keep the core small; their tests stay red, the
+  wiki unchanged, and each comes back on demand as a rewrite to the small core (user 2026-11-26).
 - No special cases: a fix is the general rule, holding for the siblings of the example. A test that seems to force a
   special case goes to warp-interviewer.
 - Never degrade the input to suit a tool (compiler stage, reader, harness): fix or card the tool. wap source, the

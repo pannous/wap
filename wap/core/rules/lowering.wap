@@ -99,7 +99,7 @@ embedded_text(n: Node, group: Node) as Node := Text(read(beside(file_of(n) ?? ""
 
 # an operator call: the defining operators as their kernel forms, any other a call of the operator's function
 operator_lowered(language: Language, n: Node, spelling: text, arguments: list) as Node := match spelling {
-	"=" => assigned(language, arguments#1, if is_code_block(arguments#2) and names_it(arguments#2) then it_function(language, arguments#2) else lowered(language, arguments#2))
+	"=" => assigned(language, n, arguments#1, if is_code_block(arguments#2) and names_it(arguments#2) then it_function(language, arguments#2) else lowered(language, arguments#2))
 	":=" => defined(language, n, arguments#1, lowered(language, arguments#2))
 	_ => if FUNCTION_ARROWS.contains(spelling) then Fn(parameter_list(language, arguments#1), lowered(language, arguments#2)) else Call(symbol(spelling), all_lowered(language, arguments))
 }
@@ -118,11 +118,11 @@ is_value(n: Node) as bool := match n {
 # typed rule takes the phrase (wiki/significant-whitespace.md, core/rules/typed.wap parted_rewritten)
 parted_map(items: list) as bool := #items == 2 and items#1 is symbol and match items#2 { List(fields, Bracket.Curly, separator) => fields.all(is_fields); _ => no }
 
-# `x = 1` gives x a value, `3 = 4` none; a Variable place, `let x = 1` or `global x = 1`, also says which variable x is
-# (core/analyze/scope.wap)
-assigned(language: Language, place: Node, value: Node) as Node := match place {
+# `x = 1` gives x a value, `3 = 4` or `unknown = 0` (ø, which has no place of its own) none, refused where written; a
+# Variable place, `let x = 1` or `global x = 1`, also says which variable x is (core/analyze/scope.wap)
+assigned(language: Language, n: Node, place: Node, value: Node) as Node := match place {
 	Variable(name, kind) => with_fact(Set(name, value), ASSIGNS, kind)
-	_ => if is_place(language, place) then Set(lowered(language, place), value) else refused(place, "no place to assign: a name, a variable, a part or an item")
+	_ => if is_place(language, place) then Set(lowered(language, place), value) else refused(n, "no place to assign: a name, a variable, a part or an item")
 }
 # a name, typed or not, a part or an item; a word a rule takes standing alone, `ø` (also written nothing), `yes`, is none
 is_place(language: Language, place: Node) as bool := (place is symbol or place is Key or place is Get or place is Item) and rules_on(language.grammar.shape_rules, [WORD_HEAD + canonical_word("${declared_name(place)}")]) is empty
@@ -158,12 +158,13 @@ call_arguments_lowered(language: Language, head: Node, arguments: list) as list<
 	if is_deferred(argument) and takes_code(language, head, at, #arguments, 0, is_code_block(argument)) then Fn(parameter_list(language, Empty), lowered(language, argument)) else if names_it(argument) and takes_code(language, head, at, #arguments, 1, no) then it_function(language, argument) else argument_lowered(language, argument)
 })
 is_code_block(n: Node) as bool := match n { List(items, Bracket.Curly, separator) => not items.all(is_fields); _ => no }
-# what a code place runs later: a block or any other code, `go f(3)`; a name or a function value is passed as it is
-is_deferred(n: Node) as bool := is_code_block(n) or not (n is symbol or match n { Call(called, parts) => FUNCTION_ARROWS.contains(text(called)); _ => no })
-# whether every declaration of a word taking this many arguments takes code at this place: a block, or a function of
-# that many parameters; for code written in braces one such declaration is enough, typing then chooses it
+# what a code place runs later: a block or any other code, `go f(3)`; a name, a named argument or a function value is
+# passed as it is
+is_deferred(n: Node) as bool := is_code_block(n) or not (n is symbol or match n { Call(called, parts) => FUNCTION_ARROWS.contains(text(called)); Key(name, Op.Colon, value) => yes; _ => no })
+# whether every declaration of a word taking at least this many arguments takes code at this place: a block, or a
+# function of that many parameters; for code written in braces one such declaration is enough, typing then chooses it
 takes_code(language: Language, head: Node, at: int, count: int, taking: int, braced: bool) as bool := {
-	declared = (if head is symbol then language.declarations.by_name.get(text(head)) ?? [] else []).filter(signature => #signature.parameters == count)
+	declared = (if head is symbol then language.declarations.by_name.get(text(head)) ?? [] else []).filter(signature => #signature.parameters >= count)
 	wanting = declared.filter(signature => wants_code(signature.parameters#at, taking))
 	wanting is not empty and (braced or #wanting == #declared)
 }

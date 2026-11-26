@@ -274,6 +274,24 @@ A program may also write what the compiler otherwise finds: a level in square br
 (`nat.recursor[1](n => nat, 0, (k, double_k) => double_k + 2, n)`). The kernel's own tests are written this way
 (notes/theory.md "The explicit spellings").
 
+The type words need no new form, because each one is the kernel's typing or an ordinary library word:
+- `x : T` and `x as T` are one ascription. It checks when x already has type T. Otherwise it calls the library's
+  conversion for that pair of types (`π as int`, `"1h 30m" as Duration`). After a signature, `:` and `as` declare the
+  same result type.
+- `to` is an alias of `as` (`convert text to int`). The `to` that starts a definition (`to add a to b: …`) is a
+  different word, told apart by where it stands.
+- `is` checks a value against a type and narrows it on the branch it guards.
+- `->` and `→` write only function types (Pi). `=>` and `↦` write only functions (lambda).
+- `read text as int` picks the overload whose result is the type wanted (T3e).
+- `for x: T` before a body is one binder, and `∀` and `∃` are aliases of `for` and `exists`. The body's type
+  decides what the binder means:
+  - When the body is a proposition, the binder is Pi, and its proofs are functions of x.
+  - When the body is an action, the binder is the loop, run for every x of its domain (`for i in 1...3: print i`).
+    `for x in S` is `for x: T` with `x in S` as a premise.
+  Both are the kernel's Pi and lambda, typed by the stage-3 kind rules. The theory's own reading of the `for` line
+  (extensions/theory/elaborate/declare.wap) goes at T7.
+The core cost is nothing.
+
 ## 4 What changes and what goes
 
 The freedom to overhaul is used on the compiler's middle, not on the surface. No spelling has to go: nothing in the
@@ -1024,6 +1042,10 @@ Not to cut: K1 to K6, L1 to L4, E1 to E6, optional values and `any` of E7, P1, T
 10.4. Together they are the nine features in wap's own types, with `char` a subtype of `text`.
 
 ## 13 Decisions
+
+Decided by the user (2026-11-26):
+- **A small language first**: the theory may cut wap's language drastically where that serves it; parked forms
+  keep their wiki text and red tests, and come back later, on demand, as rewrites to the small core.
 
 Decided by the user (2026-11-24):
 - A name can be given a value of another type; from there on it holds that type, and where two paths meet, their
