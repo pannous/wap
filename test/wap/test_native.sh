@@ -361,9 +361,9 @@ exit(doubled(21))" >/dev/null; echo $?)" "42"
 printf '%s\n' 'x = 2' 'if x == 1 { print 1 }' 'else if x == 2 { print 2 }' 'else { print 3 }' >"$stage/else_if.wap"
 check "wap format keeps an else-if chain over lines" "$(cd "$stage" && "$native_wap" format else_if.wap >else_if_formatted.wap && cat else_if_formatted.wap)
 $(cd "$stage" && "$native_wap" else_if_formatted.wap 2>&1)" "x = 2
-if x == 1 {print 1}
-else if x == 2 {print 2}
-else {print 3}
+if x == 1 { print 1 }
+else if x == 2 { print 2 }
+else { print 3 }
 2"
 # wap format writes a function's result type after a colon, the canonical spelling; `as` is its alias (card format-colon-result)
 printf '%s\n' 'f(x: int) as int := x + 1' 'g(x: int): int := x * 2' >"$stage/result_type.wap"
