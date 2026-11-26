@@ -209,7 +209,7 @@ char_text(character: Node) as Node := with_type(refitted(Text(text(character)), 
 # a call's typed arguments as their parameters (their letters bound by the call) have them: a char read as its text,
 # a plain value boxed for an any or an optional
 arguments_fitted(definition: Signature, given: list, s: TypingState) as list := {
-	letters = letters_bound(definition, given.map(value_type), s) ?? []
+	letters = (letters_bound(definition, given.map(value_type), s) ?? NOTHING_CALLED).letters
 	wanted = definition.parameters.map(type => substituted(type, letters))
 	(1 to #given).map(at => as_wanted(given#at, wanted#at, s))
 }
@@ -318,17 +318,21 @@ takes(definition: Signature, given: list, s: TypingState, fit: function) as bool
 	parameters = parameters_in(definition, s)
 	if not takes_count(definition, #given, s) { return no }
 	plain = (1 to #given).filter(at => not has_letters(definition.parameters#at, s.records) and not has_unknowns(value_type(given#at)))
-	if not plain.all(at => argument_taken(given#at, parameters#at, [], s, fit)) { return no }
-	letters = letters_bound(definition, given.map(value_type), s)
-	letters != ø and (1 to #given).all(at => argument_taken(given#at, parameters#at, letters, s, fit))
+	if not plain.all(at => argument_taken(given#at, parameters#at, NOTHING_CALLED, s, fit)) { return no }
+	called = letters_bound(definition, given.map(value_type), s) ?? return no
+	(1 to #given).all(at => argument_taken(given#at, parameters#at, called, s, fit))
 }
 # whether a definition takes these arguments, each one fitting its parameter by fits
 takes_fitting(definition: Signature, given: list, s: TypingState) as bool := takes(definition, given, s, (argument, wanted) => fits(argument, wanted, s))
-argument_taken(argument: Node, parameter: Node, letters: list<Binding>, s: TypingState, fit: function) as bool := function_parts(substituted(type_given(parameter), letters)) != ø or conforms(value_type(argument), type_given(parameter), s) or fit(with_letters(argument, letters), substituted(type_given(parameter), letters))
-# an argument of the type its letters' binding gives it, `xs` of a list<α1> the call settles as a list<int>
-with_letters(argument: Node, letters: list<Binding>) as Node := {
-	type = substituted(value_type(argument), letters)
-	if type == value_type(argument) then argument else with_type_of(argument, type)
+argument_taken(argument: Node, parameter: Node, called: Called, s: TypingState, fit: function) as bool := {
+	wanted = substituted(type_given(parameter), called.letters)
+	function_parts(wanted) != ø or conforms(value_type(argument), type_given(parameter), s) or fit(with_answers(argument, called.answers), wanted)
+}
+# an argument of the type the call's answers give it, `xs` of a list<α1> the call settles as a list<int>
+with_answers(argument: Node, answers: list<Answer>) as Node := {
+	given = value_type(argument) ?? return argument
+	type = answered(given, answers)
+	if type == given then argument else with_type_of(argument, type)
 }
 # Among several definitions that fit, the most specific: a written type beats a bare kind, `==(a: Node, b: Node)`
 # beats `==(a: enum, b: enum)`, a kind beats a generic letter, a letter beats no
@@ -406,7 +410,12 @@ overloads_checked(defined: list<Signature>, declared: list<Signature>, library: 
 	}
 }
 # whether two definitions take the same values: as many parameters, a value reaching both of each pair
-taken_alike(word: Signature, signature: Signature, s: TypingState) as bool := #word.parameters == #signature.parameters and (1 to #word.parameters).all(at => either_takes(word.parameters#at, signature.parameters#at, s))
+taken_alike(word: Signature, signature: Signature, s: TypingState) as bool := {
+	if #word.parameters != #signature.parameters { return no }
+	words = parameters_holed(word, s)
+	signatures = parameters_holed(signature, s)
+	(1 to #words).all(at => either_takes(words#at, signatures#at, s))
+}
 # whether a value reaches parameters of both types: one untyped, or one taking the other's values as a call fits them
 # (as they are, boxed or wrapped, a letter binding it, a protocol it does)
 either_takes(a: Term?, b: Term?, s: TypingState) as bool := a == ø or b == ø or [[a!, b!], [b!, a!]].any(pair => conversion(pair#2, pair#1, s) in STATIC_CONVERSIONS or unified(pair#1, pair#2, [], s) != ø or conforms(pair#2, pair#1, s))
@@ -510,9 +519,10 @@ result_given(body: Node, frame: TypeFrame, name: Node, s: TypingState) as Term? 
 A_DEFINE = "a function's definition is a Define"
 shaped_typed(definition: Signature, argument_types: list, s: TypingState, at: Node) as TypedFunction := match define_of(definition, s) { Define(name, parameters, body) => {
 	key = definition.key
-	letters = letters_bound(definition, argument_types, s) ?? []
-	settled_by(letters, s)
-	types = (1 to #argument_types).map(place => parameter_type(definition.parameters#place, type_substituted(argument_types#place ?? refused(at, "an argument reached typing without its type"), letters), letters, s.records))
+	called = letters_bound(definition, argument_types, s) ?? NOTHING_CALLED
+	settled_by(called.answers, s)
+	letters = called.letters
+	types = (1 to #argument_types).map(place => parameter_type(definition.parameters#place, answered(argument_types#place ?? refused(at, "an argument reached typing without its type"), called.answers), letters, s.records))
 	if (1 to #types).any(place => has_unknowns(types#place) and not takes_any_item(definition.parameters#place)) { return deferred_typed(definition, types, letters, s, at) }
 	for typed in instances_of(key, s) {
 		if same_instance(typed, key, types, s) {
