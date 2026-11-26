@@ -77,11 +77,10 @@ ATOM_TYPES = [CHAR_TYPE, INT_TYPE, FLOAT_TYPE, NUMBER_TYPE, TEXT_TYPE]
 TYPE_WORDS = ATOM_TYPES + [BOOL_TYPE, ANY_TYPE, LIST_TYPE, MAP_TYPE, ENUM_TYPE]
 
 # The table of the types a compile met: the terms by place, the places by hash, and of the words core does not build
-# their ids by name, the declaration a record's own word names (two records of one name are two words), the
-# declaration the bare word of a name stands for, and the type a
+# their ids by name, the declaration a record's own word names (two records of one name are two words) and the type a
 # shape's word narrows (core/analyze/shapes.wap). It is the compile's own, as a symbol table is: every stage reads a
 # type fact through it, so it is one value for the whole run, not handed down every call
-class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; words: map<text, int> = {}; keys: map<int, text> = {}; declared: map<int, Node> = {}; bare: map<text, Node> = {}; narrows: map<int, Term> = {} }
+class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; words: map<text, int> = {}; keys: map<int, text> = {}; declared: map<int, Node> = {}; narrows: map<int, Term> = {} }
 TYPES: TypeTerms = TypeTerms()
 # a type word's term: core's own by its fixed id, any other by the id the table gives it the first time
 word_term(word: text) as Term := word_keyed(word, word)
@@ -102,21 +101,17 @@ word_named(n: Node) as Term := {
 	narrows = fact_of(n, NARROWS)
 	if narrows == ø then word else narrowing(word, type_term(narrows!))
 }
-# a record's word: the bare word for the record a name read without its declaration means, the first met until a
-# typing state says which, and a core word's; a word of its own for another record of that name, so it means that
-# record wherever the name is declared again
+# a record's word: its own, named by its declaration's place, so it means that record wherever the name is declared
+# again; a core word's is the core word. A bare word, written without a declaration, has none: the typing state
+# finds the record it means (core/stage.wap record_named)
 declared_word(name: text, declared: Node) as Term := {
-	if not TYPES.bare.has(name) { record_meant_bare(name, declared) }
-	if CORE_WORDS.contains(name) or declaration_place(TYPES.bare[name]) == declaration_place(declared) { return word_term(name) }
+	if CORE_WORDS.contains(name) { return word_term(name) }
 	own = word_keyed(name, "${name} ${declaration_place(declared)}")
 	TYPES.declared[word_id(own)] = declared
 	own
 }
-# the record the bare word of a name stands for: the typing stage's last of the name, which a typing state finds by
-# the name (core/stage.wap record_named)
-record_meant_bare(name: text, declared: Node) := { TYPES.bare[name] = declared }
 word_id(word: Term) as int := match word.shape { Constant(name, levels, id) => id; _ => 0 }
-# the declaration of the record a record's own word names, ø for a bare word and any other type
+# the declaration of the record a record's own word names, ø for any other type
 declared_by(type: Term?) as Node? := if is_word(type) then TYPES.declared.get(word_id(type!)) else ø
 # a shape's word, known from here on to narrow this type
 narrowing(word: Term, type: Term) as Term := {
@@ -232,30 +227,29 @@ refused_type(type: Term, why: text) as never := raise("${why}: ${type_text(type)
 type_term(n: Node) as Term := {
 	known = fact_type(fact_of(n, TYPE))
 	if known != ø { return known! }
-	base = written_optional(n)
-	if base != ø { return optional_type(type_term(base!)) }
-	function = written_function(n)
-	if function != ø { return function_type_of(function!.take(#function! - 1).map(part => type_term(part)), type_term(function!.last)) }
+	parts = written_parts(n)
+	if parts != ø { return type_built(word_term(text(parts#1)), parts.drop(1).map(part => type_term(part))) }
 	match n {
-		Key(name, Op.None, List(items, Bracket.Less, separator)) => type_built(word_term(text(name)), items.map(item => type_term(item)))
 		Call(times, items) => if text(times) == ARRAY_TIMES and #items == 2 and items#1 is number then list_type(type_term(items#2)) else raise("${n} is no type")
 		Text(value) => quoted(value)
 		Empty => EMPTY_TERM
 		_ => word_named(n)
 	}
 }
-# a written optional's base, `int` of `int?`
-written_optional(n: Node) as Node? := match n {
-	List(items, Bracket.None, separator) => if #items == 2 and text(items#2) == OPTIONAL_MARK then items#1 else ø
+# A written type with parts read as its word and then the parts, as type_parts reads a term: `list<int>` as list and
+# int, `int?` as ? and int, `(int, text) -> bool` as ->, int, text and bool, in round brackets or not; ø for a word
+# alone and any other code
+written_parts(n: Node) as list<Node>? := match n {
+	Key(name, Op.None, List(items, Bracket.Less, separator)) => [name] + items
+	List(items, Bracket.None, separator) => if #items == 2 and text(items#2) == OPTIONAL_MARK then [items#2, items#1] else ø
+	Call(called, items) => if text(called) == FUNCTION_ARROW and #items == 2 then [called] + items_or_one(items#1) + [items#2] else ø
+	List(items, Bracket.Round, separator) => if #items == 1 then written_parts(items#1) else ø
 	_ => ø
 }
-# a written function type's parameters and then its result, `(int, text) -> bool`, in round brackets or not
-written_function(n: Node) as list<Node>? := match n {
-	Call(called, items) => if text(called) == FUNCTION_ARROW and #items == 2 then items_or_one(items#1) + [items#2] else ø
-	List(items, Bracket.Round, separator) => if #items == 1 then written_function(items#1) else ø
-	_ => ø
+# the parts a written type of this word has, `int` of `int?`; ø for code of another word
+written_parts_of(word: text, n: Node) as list<Node>? := {
+	parts = written_parts(n) ?? return ø
+	if text(parts#1) == word then parts.drop(1) else ø
 }
 # two types are one where their terms are the same
 ==(a: Term, b: Term) as bool := same(a, b)
-# whether written code is a type with parts, `list<int>`, `int?`, `(int) -> text`, not a word alone
-writes_compound_type(n: Node) as bool := written_optional(n) != ø or written_function(n) != ø or (match n { Key(name, Op.None, List(items, Bracket.Less, separator)) => yes; _ => no })
