@@ -21,13 +21,13 @@ WAP_LIBRARY_LINKED='types-*.wasm'
 WAP_PARTS=(wap.wasm "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "${WAP_TOOLS[@]%%:*}")
 # wap_linked <folder>: the C compiler's arguments that link the native wap with wasmtime's library in <folder>/lib, which
 # it finds beside itself wherever it moves (macOS names the executable's folder @executable_path, Linux $ORIGIN;
-# Windows has no such path: it finds the DLL beside the executable or on the PATH)
+# Windows has no such path: it finds the DLL beside the executable or on the PATH, and loads it only for the functions
+# imported from it, so all are, as the native wap finds each by name)
 wap_linked() {
-	WAP_LINKED=(-L"$1/lib" -lwarp_wasmtime)
 	case $(uname -s) in
-		Darwin) WAP_LINKED+=(-Wl,-rpath,@executable_path/lib) ;;
-		MINGW* | MSYS*) ;;
-		*) WAP_LINKED+=(-Wl,-rpath,'$ORIGIN/lib') ;;
+		Darwin) WAP_LINKED=(-L"$1/lib" -lwarp_wasmtime -Wl,-rpath,@executable_path/lib) ;;
+		MINGW* | MSYS*) WAP_LINKED=(-L"$1/lib" -Wl,--whole-archive -lwarp_wasmtime -Wl,--no-whole-archive) ;;
+		*) WAP_LINKED=(-L"$1/lib" -lwarp_wasmtime -Wl,-rpath,'$ORIGIN/lib') ;;
 	esac
 }
 # wap_tools_built <tree> <compiler>: each tool compiled by that compiler, by the native wap on PATH, in its folder, so
