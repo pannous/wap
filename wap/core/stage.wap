@@ -199,6 +199,9 @@ signature_key(definer: Node) as text := if fact_of(definer, SIGNATURE) == ø the
 # DEFINED_AT on a bound name: the name that defined it, positioned (core/analyze/scope.wap learns it; its other
 # facts are in core/bindings.wap)
 DEFINED_AT = "defined_at"
+# a type's name bound to the name of the Record declaring it, as the code writing it sees it: a module's class hides
+# the types module's of one name only inside the module (core/analyze/scope.wap type_bound)
+DECLARED_BY = "declared_by"
 SELF_WORD = "self"
 # on a call's word in a method, the receiver it passes first to a sibling method called bare (core/analyze/scope.wap)
 RECEIVER = "receiver"
@@ -268,22 +271,31 @@ items_named(index: NameIndex, items: list<T>, name: text, name_of: (T) -> text) 
 # The Records a program declares, in the order written, found by name through their index; added_records is their
 # only writer, so the index keeps up with the list
 class Records { items: list<Node> = [], names: NameIndex = NameIndex() }
-added_records(records: Records, added: list<Node>) as Records := Records(records.items + added.filter(statement => statement is Record), records.names)
+added_records(records: Records, added: list<Node>) as Records := {
+	declared = added.filter(statement => statement is Record)
+	# the last record of a name is the one a type naming it without its declaration means (record_named)
+	for record in declared { TYPES.last[record_name(record)] = place_key(record_declared(record)) }
+	Records(records.items + declared, records.names)
+}
 # A record's TYPE is its name, `Point`; these find a record among the Records a program declares, and its fields,
 # each a typed name `x: int` (declared_name, declared_type)
 record_named(records: Records, type: Term?) as Node? := {
 	if not is_word(type) { return ø }
 	named = items_named(records.names, records.items, word_of(type)!, record => record_name(record))
-	# the one declared last: a program's own class, or a used module's, shadows the types module's
-	if named is empty then ø else named.last
+	# the one its code sees, else the one declared last: a program's own class, or a used module's, shadows the types
+	# module's
+	declared = declared_by(type)
+	if declared == ø { return if named is empty then ø else named.last }
+	named.find(record => place_key(record_declared(record)) == place_key(declared)) ?? refused(declared!, "this type names a record its scope declared at ${place_key(declared)}, but the program's records hold no record from that place")
 }
 record_name(record: Record) as text := text(record_declared(record))
 record_declared(record: Record) as Node := match record { Record(name, fields, variants) => name }
 # the class a class extends, `@extends(A)` on its name (wap/sugar/records.wap), ø for one extending none
 class_extended(record: Node) as Node? := match annotation(record_declared(record), EXTENDS_ANNOTATION) { Key(name, op, List(items, bracket, separator)) => items#1; _ => ø }
-# a record as a type, its name, as code and as a term (core/type_notation.wap)
-record_type(record: Record) as Node := symbol(record_name(record))
-record_term(record: Record) as Term := word_term(record_name(record))
+# a record as a type, its name bound to it, so it means this record wherever another of its name is declared too
+record_type(record: Record) as Node := with_fact(symbol(record_name(record)), DECLARED_BY, record_declared(record))
+# its term (core/type_notation.wap)
+record_term(record: Record) as Term := type_term(record_type(record))
 fields_of(record: Record) as list := match record { Record(name, fields, variants) => items_of(fields) }
 # An enum's cases, as its Record's variants hold them: a bare name, `Dot`, or a name with its fields, `Circle(r: float)`
 cases_of(record: Record) as list<Node> := match record { Record(name, fields, variants) => items_of(variants) }

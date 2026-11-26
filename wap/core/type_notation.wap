@@ -80,7 +80,7 @@ TYPE_WORDS = ATOM_TYPES + [BOOL_TYPE, ANY_TYPE, LIST_TYPE, MAP_TYPE, ENUM_TYPE]
 # their ids by name, the declaration a record's word names (two records of one name are two words) and the type a
 # shape's word narrows (core/analyze/shapes.wap). It is the compile's own, as a symbol table is: every stage reads a
 # type fact through it, so it is one value for the whole run, not handed down every call
-class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; words: map<text, int> = {}; narrows: map<int, Term> = {} }
+class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; words: map<text, int> = {}; keys: map<int, text> = {}; last: map<text, text> = {}; declared: map<int, Node> = {}; narrows: map<int, Term> = {} }
 TYPES: TypeTerms = TypeTerms()
 # a type word's term: core's own by its fixed id, any other by the id the table gives it the first time
 word_term(word: text) as Term := word_keyed(word, word)
@@ -90,16 +90,29 @@ word_keyed(word: text, key: text) as Term := {
 	if id == ø {
 		id = #TYPES.words + 1
 		TYPES.words[key] = id!
+		TYPES.keys[id!] = key
 	}
 	constant(id!, word, [])
 }
-# a written word's term, a shape's with the type it narrows known
+# a written word's term: a record's own by its declaration, a shape's with the type it narrows known
 word_named(n: Node) as Term := {
-	word = word_term(text(n))
+	declared = fact_of(n, DECLARED_BY)
+	word = if declared == ø then word_term(text(n)) else declared_word(text(n), declared!)
 	narrows = fact_of(n, NARROWS)
 	if narrows == ø then word else narrowing(word, type_term(narrows!))
 }
+# a record's word: the bare word for the record a name read without its declaration means, the last of its name
+# (core/stage.wap record_named), and for a core word's; a word of its own for another record of that name, so it means
+# that record wherever the name is declared again
+declared_word(name: text, declared: Node) as Term := {
+	if CORE_WORDS.contains(name) or TYPES.last.get(name) == place_key(declared) { return word_term(name) }
+	own = word_keyed(name, "${name} ${place_key(declared)}")
+	TYPES.declared[word_id(own)] = declared
+	own
+}
 word_id(word: Term) as int := match word.shape { Constant(name, levels, id) => id; _ => 0 }
+# the declaration of the record a type names, ø for a type no declaration bound
+declared_by(type: Term?) as Node? := if is_word(type) then TYPES.declared.get(word_id(type!)) else ø
 # a shape's word, known from here on to narrow this type
 narrowing(word: Term, type: Term) as Term := {
 	TYPES.narrows[word_id(word)] = type
@@ -160,7 +173,8 @@ only_term(parts: list<Term>?) as Term? := if parts != ø and #parts == 1 then pa
 runtime_word(name: text, types: list<Term?>) as text? := if runtime_named(name) then RUNTIME_WORDS.find(word => word == "${name}(${types.map(type => type_text(type)).join(", ")})") else ø
 runtime_named(name: text) as bool := RUNTIME_WORDS.any(word => word.starts_with(name + "("))
 # a type as a message writes it, as a program writes it: `int?`, `list<(int) -> int>`; whole, a function value's own
-# type spelled with its key and captures, `fn<"f.wap:3:5 λ", int>`, as a key tells instances apart by it
+# type spelled with its key and captures, `fn<"f.wap:3:5 λ", int>`, and a record's word sharing its name with
+# another by its declaration, as a key tells instances apart by them
 type_text(type: Term?, whole: bool = no) as text := {
 	if type == ø { return "no type" }
 	base = base_of_optional(type)
@@ -171,7 +185,7 @@ type_text(type: Term?, whole: bool = no) as text := {
 	match type!.shape {
 		Quoted(value) => "\"${value}\""
 		Numeral(value) => "${value}"
-		_ => if is_word(type) then word_of(type)! else "${word_of(type) ?? "?"}<${types_text(parts_of(type!), whole)}>"
+		_ => if is_word(type) then (if whole then TYPES.keys.get(word_id(type!)) ?? word_of(type)! else word_of(type)!) else "${word_of(type) ?? "?"}<${types_text(parts_of(type!), whole)}>"
 	}
 }
 types_text(types: list<Term>, whole: bool = no) as text := types.map(type => type_text(type, whole)).join(", ")

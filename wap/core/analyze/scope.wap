@@ -75,11 +75,11 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	Get(subject, key) => qualified_case(n, subject, key, scope) ?? refitted(Get(bound(subject, scope, depth), bound(key, scope, depth)), n)
 	Item(subject, key) => refitted(Item(bound(subject, scope, depth), bound(key, scope, depth)), n)
 	List(items, Bracket.Square, separator) => refitted(List(all_bound(items, scope, depth), Bracket.Square, separator), n)
-	Key(name, Op.Colon, type) => refitted(Key(bound(name, scope, depth), Op.Colon, type), n)
+	Key(name, Op.Colon, type) => refitted(Key(bound(name, scope, depth), Op.Colon, type_bound(type, scope)), n)
 	# a function's name glued to a map calls it with the map, `style{a: 1}` style({a: 1}) (wiki/significant-whitespace.md)
-	Key(head, Op.None, List(items, Bracket.Curly, separator)) => if names_function_in(head, scope) then bound(refitted(Call(head, [refitted(List(items, Bracket.Curly, separator), n)]), n), scope, depth) else refitted(Key(head, Op.None, List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator)), n)
+	Key(head, Op.None, List(items, Bracket.Curly, separator)) => if names_function_in(head, scope) then bound(refitted(Call(head, [refitted(List(items, Bracket.Curly, separator), n)]), n), scope, depth) else refitted(Key(type_bound(head, scope), Op.None, List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator)), n)
 	List(items, Bracket.Curly, separator) => refitted(List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator), n)
-	Record(name, fields, variants) => n
+	Record(name, fields, variants) => refitted(Record(name, with_items(fields, items_of(fields).map(field => field_bound(field, scope))), with_items(variants, items_of(variants).map(variant => field_bound(variant, scope)))), n)
 	Number(value) => n
 	Text(value) => n
 	Char(value) => n
@@ -90,6 +90,7 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	Key(head, Op.None, List(items, Bracket.Less, separator)) => refused(n, "a type with parts is no value: write it as the type of one, after a colon, `x: ${n}`")
 	_ => refused(n, "the binding analysis reads only kernel forms; the lowering should have removed this")
 }
+# A written type with each record name in it bound to the Record its scope sees, `Box` of `b: Box` or `list<Box>?`
 # whether a name in scope names functions and no class, whose constructor is a function too
 names_function_in(name: Node, scope: Scope) as bool := {
 	meant = definitions_meant(text(name), scope)
@@ -97,6 +98,23 @@ names_function_in(name: Node, scope: Scope) as bool := {
 }
 # the class a name means in a scope, ø where it means none
 record_meant(scope: Scope, name: text) as Definition? := named_in(scope, name).find(definition => definition.kind == DefinitionKind.Record)
+# a record's field, or a case with fields, its written types bound as a parameter's are
+field_bound(field: Node, scope: Scope) as Node := match field {
+	Key(name, Op.Colon, type) => refitted(Key(name, Op.Colon, type_bound(type, scope)), field)
+	Set(place, value) => refitted(Set(field_bound(place, scope), value), field)
+	Call(called, fields) => refitted(Call(called, fields.map(each => field_bound(each, scope))), field)
+	_ => field
+}
+type_bound(type: Node, scope: Scope) as Node := match type {
+	Symbol(name) => {
+		record = record_meant(scope, name) ?? return type
+		with_fact(type, DECLARED_BY, record_declared(record.definer))
+	}
+	List(items, bracket, separator) => refitted(List(items.map(item => type_bound(item, scope)), bracket, separator), type)
+	Call(called, arguments) => refitted(Call(called, arguments.map(argument => type_bound(argument, scope))), type)
+	Key(name, op, parts) => refitted(Key(name, op, type_bound(parts, scope)), type)
+	_ => type
+}
 # An arm: the name its pattern holds a new variable of the arm, which its result sees; `_` and literals name none
 arm_bound(arm: Arm, scope: Scope, depth: int) as Node := match arm {
 	Arm(pattern, result) => {
