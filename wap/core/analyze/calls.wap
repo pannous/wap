@@ -287,29 +287,13 @@ chosen_definition(n: Node, called: Node, scopes: list, given: list, expected: Te
 	dispatcher = dispatching(called, candidates, types, s)
 	if dispatcher != ø { return dispatcher }
 	fitting = candidates.filter(definition => takes_fitting(definition, given, s) and not reads_all_nodes(definition, given, s))
-	exact = fitting.filter(definition => takes(definition, given, s, (argument, wanted) => fits_exactly(argument, wanted, s)) and not (1 to #given).any(at => wrapped_at(definition, given, at)))
-	if #fitting > 1 { fitting = if exact then exact else fewest_conversions(fitting, given, s) }
-	if #fitting > 1 { fitting = most_specific(fitting, s) }
+	if #fitting > 1 { fitting = most_specific(fitting, types, s) }
 	if #fitting > 1 { fitting = innermost(fitting, scopes) }
 	if #fitting > 1 and wants_value(expected) { fitting = fitting.filter(definition => definition.result != ø and (definition.result) == expected!) }
 	if fitting is empty { refused(n, "no ${called} takes (${types_text(types)}): ${candidates_text(candidates, s)}${words_missing(candidates, types, s)}; define ${called}(${(1 to #types).map(at => "${PARAMETER_NAMES#at}: ${type_text(types#at)}").join(", ")}) to take them") }
 	if #fitting > 1 { refused(n, "this reads as a call of each of ${candidates_text(fitting, s)}; write the arguments' types or the type wanted") }
 	fitting#1
 }
-# A definition the arguments fit exactly wins over one they fit only by a conversion (`text('é')` is text(c: char),
-# not text(t: text)); of those they fit by conversions, those converting the fewest (`t == "?"` compares texts, not
-# Nodes)
-fewest_conversions(definitions: list<Signature>, given: list, s: TypingState) as list<Signature> := {
-	counts = definitions.map(definition => conversions_taken(definition, given, s))
-	least = counts.min
-	(1 to #definitions).filter(at => counts#at == least).map(at => definitions#at)
-}
-conversions_taken(definition: Signature, given: list, s: TypingState) as int := {
-	#((1 to #given).filter(at => not fits_exactly(given#at, parameter_type_at(definition, at), s) or wrapped_at(definition, given, at)))
-}
-# whether an argument is wrapped into the optional its parameter is written as: `==(a: T?, b: T?)` takes two anys
-# only by wrapping, so `==(a: T, b: T)` is theirs
-wrapped_at(definition: Signature, given: list, at: int) as bool := wraps(parameter_type_at(definition, at), value_type(given#at))
 # whether a definition takes these arguments, each one fitting its parameter
 # (a parameter typed by generic letters takes an argument whose type binds them alike, and one of a function type a
 # function value whose function gives that type's result for its parameters, see letters_bound); the arguments known
@@ -335,32 +319,63 @@ with_answers(argument: Node, answers: list<Answer>) as Node := {
 	type = answered(given, answers)
 	if type == given then argument else with_type_of(argument, type)
 }
-# Among several definitions that fit, the most specific: a written type beats a bare kind, `==(a: Node, b: Node)`
-# beats `==(a: enum, b: enum)`, a kind beats a generic letter, a letter beats no
-# type, `===(a: T, b: T)` beats `===(a, b)`; of those, more written structure beats less, `==(a: T?, b: T?)` beats
-# `==(a: T, b: T)`; several equally specific are left for the caller to refuse
-# DEBT: Overloads rank by weights (`ranked`: typing weight, written structure, derived), not by subsumption, so
-#   `text(1 to 3)` is refused as reading two ways. Paused for the self-build census: the subsumption ranking is built
-#   and parked on branch subsumption-ranking (still leaves 4 more functions untyped than main). Paid off when wap
-#   compiles itself: that branch lands.
-most_specific(definitions: list<Signature>, s: TypingState) as list<Signature> := {
-	order = ranked(definitions, s)
-	first = rank(order#1, s)
-	order.filter(definition => rank(definition, s) == first)
+# Among several definitions that fit, the most specific (notes/coc-t3.md "Numbers through the kernel"): one that
+# takes these arguments as they are where the other converts one (`text(c: char)` before `text(t: text)` for a char,
+# `contains(xs: list<T>, item: T)` before `contains(xs: list<T>, item: T?)` for an item that is no optional); else
+# one whose parameter types each convert into the other's and not all of the other's back (`empty(xs: list)` before
+# `empty(x: T)`, `==(a: T?, b: T?)` before `==(a: T, b: T)`, a written type before a letter or none); else the
+# program's before a rule's; several equally specific are left for the caller to refuse
+most_specific(definitions: list<Signature>, types: list, s: TypingState) as list<Signature> := {
+	candidates = candidates_of(definitions, types, s)
+	candidates.filter(one => not candidates.any(other => more_specific(other, one, s))).map(one => one.definition)
 }
-# a definition's place in the ranking: its typing weight, written structure and whether a rule wrote it
-rank(definition: Signature, s: TypingState) as list<int> := [typing_weight(definition, s.records), written_structure(definition), derived(definition, s)]
-# The one ranking of a word's definitions, most specific first, by typing weight, then by written structure, then one
-# the program wrote before one a rule wrote, the class's derived show(self: P) after its own show(p: P): the static
-# choice takes its first that fits, a dynamic call (core/analyze/dispatch.wap) tests them in this order
-ranked(definitions: list<Signature>, s: TypingState) as list<Signature> := definitions.sorted(by: definition => derived(definition, s)).sorted(by: definition => -written_structure(definition)).sorted(by: definition => -typing_weight(definition, s.records))
+# a definition with the places where it converts an argument, its letters as the call binds them
+class Candidate { definition: Signature; converted: list<int> }
+candidates_of(definitions: list<Signature>, types: list, s: TypingState) as list<Candidate> := definitions.map(definition => {
+	called = letters_bound(definition, types, s) ?? NOTHING_CALLED
+	Candidate(definition, (1 to #types).filter(at => converted_at(parameter_type_at(definition, at), called, types#at, s)))
+})
+# an argument converted to its parameter's type: wrapped where the parameter is written as an optional or becomes one
+# as the call binds its letters (`==(a: T, b: T)` of a Node? and a Node wraps the Node), else converted to a type
+# that writes no letters as bound (an int to a float, an enum's value to a Node); a function value is typed for a
+# function type, not converted
+converted_at(written: Term?, called: Called, given: Term?, s: TypingState) as bool := {
+	if wraps(written, given) { return yes }
+	wanted = substituted(written, called.letters) ?? return no
+	if function_parts(wanted) != ø { return no }
+	if has_letters(wanted, s.records) or has_unknowns(wanted) then wraps(wanted, given) else conversion(given, wanted, s) != Conversion.Same
+}
+more_specific(one: Candidate, other: Candidate, s: TypingState) as bool := {
+	mine = one.definition.parameters
+	theirs = other.definition.parameters
+	decided(one.converted.all(at => at in other.converted), other.converted.all(at => at in one.converted)) ?? decided(converts_into(mine, theirs, s), converts_into(theirs, mine, s)) ?? (derived(other.definition, s) > derived(one.definition, s))
+}
+# what a relation holding one way says: yes where it holds forward only, no where back only, ø where both or neither
+decided(forward: bool, back: bool) as bool? := if forward == back then ø else forward
+# whether each of these parameter types converts into the other's at its place
+converts_into(given: list<Term?>, wanted: list<Term?>, s: TypingState) as bool := #given == #wanted and (1 to #given).all(at => type_converts(given#at, wanted#at, s))
+# whether a parameter type converts into another: none takes every type and is taken only by none, a letter, a hole
+# and a protocol take every written type; a type that writes letters takes those whose parts convert into its parts,
+# read as such where they read so (a Range as a list<int>), an optional the type of its value too
+type_converts(given: Term?, wanted: Term?, s: TypingState) as bool := {
+	if wanted == ø or given == ø { return wanted == ø }
+	if is_letter(wanted, s.records) or is_unknown(wanted) or protocol_named(s.records, wanted) != ø { return yes }
+	if is_letter(given, s.records) or is_unknown(given) { return no }
+	if not has_letters(wanted, s.records) and not has_unknowns(wanted) { return conversion(given, wanted, s) in STATIC_CONVERSIONS }
+	if wraps(wanted, given) { return type_converts(given, base_of_optional(wanted), s) }
+	given_parts = type_parts(read_type(given, wanted, s.records) ?? given) ?? return no
+	wanted_parts = type_parts(wanted) ?? return no
+	#given_parts == #wanted_parts and (1 to #given_parts).all(at => type_converts(given_parts#at, wanted_parts#at, s))
+}
+# The one ranking of a word's definitions for these argument types, the most specific first, by how many are more
+# specific: the static choice takes its first that fits, a dynamic call (core/analyze/dispatch.wap) tests them in
+# this order
+ranked(definitions: list<Signature>, types: list, s: TypingState) as list<Signature> := {
+	candidates = candidates_of(definitions, types, s)
+	above = candidates.map(one => #candidates.filter(other => more_specific(other, one, s)))
+	(1 to #candidates).sorted(by: at => above#at).map(at => definitions#at)
+}
 derived(definition: Signature, s: TypingState) as int := if has_fact(defined_name(define_of(definition, s)), DERIVED) then 1 else 0
-# how much structure a definition's parameter types write: each `?`, `list<…>`, `map<…>` or `(…) -> …` one more
-written_structure(definition: Signature) as int := definition.parameters.map(structure).sum()
-structure(type: Term?) as int := {
-	parts = type_parts(type) ?? return 0
-	1 + parts[1 ..].map(structure).sum()
-}
 # of equally specific definitions, those of the innermost scope: a program's `===(a: T, b: T)` hides the library's
 innermost(definitions: list<Signature>, scopes: list) as list<Signature> := {
 	for scope in scopes {
@@ -368,15 +383,6 @@ innermost(definitions: list<Signature>, scopes: list) as list<Signature> := {
 		if inner { return inner }
 	}
 	definitions
-}
-typing_weight(definition: Signature, records: Records) as int := definition.parameters.map(type => type_weight(type, records)).sum()
-# how much a parameter's type says of its argument: nothing, a letter or a protocol, a kind, a type and what its parts
-# say, so `map<text, V>` says more than `map<K, V>` and `list<int>` more than `list<T>`
-type_weight(type: Term?, records: Records) as int := {
-	if type == ø { return 0 }
-	if is_letter(type, records) or protocol_named(records, type) != ø { return 1 }
-	if names_bare_kind(type) { return 2 }
-	3 + (type_parts(type) ?? []).drop(1).map(part => type_weight(part, records)).sum()
 }
 
 # Protocols (wiki/trait.md): a class of required words, members without a body, `class shape { area() }`, its record
@@ -465,7 +471,6 @@ reads_all_nodes(definition: Signature, given: list, s: TypingState) as bool := {
 PARAMETER_NAMES = "abcdefghijklmnopqrstuvwxyz"
 # whether an argument fits a parameter, exactly or by a static conversion (core/analyze/fits.wap conversion)
 fits(argument: Node, wanted: Term?, s: TypingState) as bool := wanted == ø or conversion(value_type(argument), wanted, s) in STATIC_CONVERSIONS
-fits_exactly(argument: Node, wanted: Term?, s: TypingState) as bool := wanted == ø or conversion(value_type(argument), wanted, s) == Conversion.Same
 # the bare words of a kind, which every value of the kind fits (core/analyze/fits.wap bare_fit)
 BARE_KINDS = [LIST_TYPE, MAP_TYPE, FUNCTION_WORD, ENUM_TYPE]
 # the bare kinds of containers, whose item types a call may leave unknown: all but function
