@@ -379,4 +379,7 @@ print Flag()')" "Flag{}"
 check "a native program with an enum beside a class" "$(native_ran enum_beside 'enum Color { Red, Green }
 class Wide { x: float }
 print "${Color.Green} ${Wide(2.5).x}"')" "Green 2.5"
+# an error in a used module names that module by its full path, as it names the program (core/errors.wap place_of)
+mkdir -p "$stage/erring" && printf '%s\n' 'broken(): int := "ab"' >"$stage/erring/part.wap" && printf '%s\n' 'use "part.wap"' 'print broken()' >"$stage/erring/main.wap"
+check "an error in a used module names its full path" "$("$native_wap" "$stage/erring/main.wap" 2>&1 | grep -c "^$stage/erring/part.wap line 1:")" "1"
 exit $((failures > 0))
