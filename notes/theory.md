@@ -329,8 +329,7 @@ The types module adds two more, made by the declarations themselves (elaborate/d
   proofs read the prelude's definition, and the program runs the types module's function for it, by its name, where
   the prelude lays out none. The signature is the name, the parameters' types and the result's. The pairs, every
   declaration of the types module whose signature a prelude declaration has: int's `+`, `-` (both arities), `*`,
-  `==`, `<`, `<=`, `>`, `>=`, and text's `+` (types/text_bytes.wap's host operation; a native build takes
-  types/memory_texts.wap for that file, never both). Every other function of the types module runs its own body, as
+  `==`, `<`, `<=`, `>`, `>=`, and text's `+` (types/texts.wap's `+(a: text, b: text)`). Every other function of the types module runs its own body, as
   the theory read it. A name is laid out once: a second layout of it is refused, never a silent replacement.
 - **The host's operations.** A function of the types module whose body is `prim …` is a constant of its written
   type, never unfolded; it runs as the host's operation. One giving a proposition, or a type that may be one (a
