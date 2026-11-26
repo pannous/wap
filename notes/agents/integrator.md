@@ -29,6 +29,9 @@ A change to core/ or extensions/ (sugar rules and small extensions included) lan
 before the work (AGENTS.md "Core and extensions"): find it as a card note ("OK <date> via wap-interviewer: …"). A worker's word
 alone is not the record: without one, ask wap-interviewer to confirm and note it, and hold the branch. One that
 skipped the question is refused and goes to wap-interviewer; there is no FYI path.
+The census size ceiling (SIZE_NODES in test/wap/ratchet_census.sh) rises with a user-approved change by its rise as
+measured on the merge with main, named in the merge message: the change's approval covers it. Only a rise above about
+300 nodes for one change goes to the user (user 2026-11-26 via wap-interviewer).
 
 ## Watching main
 - Every push to main starts `scripts/integrate/after-push.sh` by itself: the pre-push hook (scripts/integrate/on-push.sh)
