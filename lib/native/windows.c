@@ -126,6 +126,8 @@ static int final_path(const char* path, char* resolved, size_t size) {
 	posix_path(resolved);
 	return 1;
 }
+// BSD's copy, its source first
+static void posix_bcopy(const void* source, void* destination, size_t count) { memmove(destination, source, count); }
 static ssize_t posix_readlink(const char* path, char* buffer, size_t size) {
 	if (strcmp(path, SELF_LINK)) {
 		errno = EINVAL;
@@ -475,7 +477,7 @@ static void* wasmtime_module_deserialize_file(void* engine, const char* path, vo
 // (POSIX's own posix_ calls, under their names)
 #define POSIX_NAMED(name) {#name, (void*)name}
 static const struct { const char* name; void* function; } POSIX_CALLS[] = {
-	POSIX_CALL(readlink), POSIX_CALL(realpath), POSIX_CALL(getcwd), POSIX_CALL(uname), POSIX_CALL(setenv),
+	POSIX_CALL(bcopy), POSIX_CALL(readlink), POSIX_CALL(realpath), POSIX_CALL(getcwd), POSIX_CALL(uname), POSIX_CALL(setenv),
 	POSIX_CALL(unsetenv), POSIX_CALL(srand48), POSIX_CALL(drand48), POSIX_CALL(getline), POSIX_CALL(clock_gettime),
 	POSIX_CALL(nanosleep), POSIX_CALL(usleep), POSIX_CALL(localtime_r), POSIX_CALL(getloadavg), POSIX_CALL(flock),
 	POSIX_CALL(pipe), POSIX_NAMED(posix_spawn_file_actions_init), POSIX_NAMED(posix_spawn_file_actions_destroy),
