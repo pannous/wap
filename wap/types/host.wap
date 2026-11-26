@@ -10,10 +10,12 @@ use "text_bytes.wap"
 IOVEC_AT := 0
 MOVED_AT := 8
 BYTES_AT := 16
-# WASI: the folders the host opens for a program, the current one and the root (core/native/driver.warp), so a path
-# starting with / opens in the second; links followed; the rights to read and seek; seek from the start or the end
+# WASI: the folders the host opens for a program, the current one and then the root (wap/extensions/native/run.wap),
+# where a path starting with / opens; links followed; the rights to read and seek; seek from the start or the end
 CURRENT_FOLDER := 3
 ROOT_FOLDER := 4
+# the root folders looked through for an absolute path's: one, or each drive's on Windows
+MOST_ROOTS := 26
 FOLLOW_LINKS := 1
 # a link's target read at most this long; links followed by hand at most this often in one path
 LINK_BYTES := 4096
@@ -123,8 +125,22 @@ zero_ended(at: int): text := {
 # from the root by its real path; ø for a path it cannot open
 opened_at(written: text, flags: int, rights: int): int? := {
 	path = home_expanded(written)
-	rooted = if path.starts_with("/") then 1 else 0
-	opened_in(CURRENT_FOLDER + rooted, path[rooted ..], flags, rights) ?? opened_in(ROOT_FOLDER, (real_path(path) ?? return ø)[1 ..], flags, rights)
+	(if path.starts_with("/") then opened_from_root(path, flags, rights) else opened_in(CURRENT_FOLDER, path, flags, rights)) ?? opened_from_root(real_path(path) ?? return ø, flags, rights)
+}
+opened_from_root(path: text, flags: int, rights: int): int? := {
+	root = root_of(path) ?? return ø
+	opened_in(root.folder, root.inside, flags, rights)
+}
+# an absolute path's root folder and the path inside it: of the folders the host opens after the current one, the first
+# whose name begins the path, "/" (on Windows each drive's, "/c", "/d")
+class Rooted { folder: int, inside: text }
+root_of(path: text): Rooted? := {
+	for folder in ROOT_FOLDER upto ROOT_FOLDER + MOST_ROOTS {
+		name = folder_name(folder) ?? return ø
+		start = if name.ends_with("/") then name else name + "/"
+		if path.starts_with(start) { return Rooted(folder, path[byte_count(start) ..]) }
+	}
+	ø
 }
 opened_in(folder: int, path: text, flags: int, rights: int): int? := {
 	place(path)
@@ -157,21 +173,26 @@ real_path(path: text): text? := {
 }
 # the target of the link at an absolute path, ø when it is no link
 link_target(path: text): text? := {
-	length = byte_count(path) - 1
+	root = root_of(path) ?? return ø
+	length = byte_count(root.inside)
 	at = scratch(length + LINK_BYTES)
-	memory_placed(at, path[1 ..])
-	if path_readlink(ROOT_FOLDER, at, length, at + length, LINK_BYTES, MOVED_AT) != 0 { return ø }
+	memory_placed(at, root.inside)
+	if path_readlink(root.folder, at, length, at + length, LINK_BYTES, MOVED_AT) != 0 { return ø }
 	memory_text(at + length, memory_word(MOVED_AT))
 }
 # the current folder's absolute path, as the host names the first folder it opens (WASI's prestat: the name's length
 # at 4); ø when the host names it otherwise (".")
 current_folder(): text? := {
-	if fd_prestat_get(CURRENT_FOLDER, MOVED_AT) != 0 { return ø }
+	name = folder_name(CURRENT_FOLDER) ?? return ø
+	if name.starts_with("/") then name else ø
+}
+# the name the host gives a folder it opens, ø for a number it opens no folder at
+folder_name(folder: int): text? := {
+	if fd_prestat_get(folder, MOVED_AT) != 0 { return ø }
 	length = memory_word(MOVED_AT + 4)
 	at = scratch(length)
-	fd_prestat_dir_name(CURRENT_FOLDER, at, length)
-	name = memory_text(at, length)
-	if name.starts_with("/") then name else ø
+	fd_prestat_dir_name(folder, at, length)
+	memory_text(at, length)
 }
 # the file opened, a path it cannot open raising the refusal and the path
 opened(path: text, flags: int, rights: int, refusal: text): int := opened_at(path, flags, rights) ?? raise(refusal + path)

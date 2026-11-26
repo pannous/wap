@@ -16,4 +16,3 @@ An entry goes once decided (its decision then lives on its card, in the wiki or 
 - wap-native-maps: +2 analyze for native maps (a); wap-headless `--no-window` returning (a, +33 extension).
 - Template typing: any joins every type, (a) 3-5 core.
 - List positions from 1 in lib/list.wap (wap-reviewer, library-port-rest).
-- funcref-calls-by-table: function values called through one shared table slot instead of a funcref (self compile −8.4%); built dbb342af: core/emit +6, kernel +3, extensions/native +1, +99 nodes, all checks green; morning, recommend yes. Signatures sharing one wasm type is an edge case, accepted (interviewer).
