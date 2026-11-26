@@ -52,4 +52,3 @@ blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** 
 | 1: unit_names | unit_names.warp:101 | units as mixed `[amount, dimension]` lists of exact fractions (10^-3) | open: wants a class and exact numbers |
 | 1: fractions | fractions.warp:26 | `is rational`: wap has no exact rational type | compiler |
 | 1: time | time.warp:24 | clock_time_get lives in wap/types/host.wap, which a library module can't `use` by name | compiler/layout |
-| 1: regex | lib/regex.warp, lib/crates/regex.warp | the crate spec in lib/crates/ is found as a second module regex | layout: the module search should skip crates/, or the spec be renamed |
