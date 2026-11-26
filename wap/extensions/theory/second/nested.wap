@@ -1,0 +1,112 @@
+# The second checker's nested blocks (notes/coc-plan.md 7, "Nested types"), made plain here, apart from the kernel's
+# nested.wap: each container of a family of the block at its parameters, `list(Rose(T))`, becomes one more family of
+# the block, its cases the container's copied in, and replaces the container wherever the block's cases hold it. The
+# plain block is checked as any other; its recursors' types are turned back into the containers, and a container's
+# case taken apart by a recursor is read as the added family's.
+# A port of the kernel's nested.wap: independence means no shared code or modules, and a second algorithm for unnesting
+# is not worth its cost.
+use "expressions.wap"
+use "read.wap"
+use "judge.wap"
+use "blocks.wap"
+
+# an added family takes the name of the block's first family, this mark and its count: a name no program writes
+NESTED_MARK := "#"
+
+# the block being made plain, its parameters as locals, the containers found so far and the families added for them
+class Unnesting { j: Judge; block: Block; parameters: list<Expr>; containers: list<Expr> = []; added: list<Family> = [] }
+
+# A block made plain: its families' cases with each container replaced, then a family for each container, which the
+# block keeps as a function of its parameters; a block without nesting is itself
+unnested(j: Judge, block: Block, parameters: list<Expr>): Block := {
+	u = Unnesting(j, block, parameters)
+	families = block.families.map(family => family_unnested(u, family))
+	at = 1
+	while at <= #u.added {
+		u.added#at = family_unnested(u, u.added#at)
+		at += 1
+	}
+	Block(block.levels, block.parameters, families + u.added, u.containers.map(container => lams(j, parameters, container)))
+}
+family_unnested(u: Unnesting, family: Family): Family := Family(family.name, family.type, family.cases.map(case => case_unnested(u, case)))
+# a case whose parameters are not the block's is left to its check
+case_unnested(u: Unnesting, case: Case): Case := {
+	if not parameters_alike(u.j, case.type, u.parameters) { return case }
+	written = given(case.type, u.parameters)
+	plain = replaced(u, written)
+	if alike(plain, written) then case else Case(case.name, pis(u.j, u.parameters, plain))
+}
+
+# a term with each container replaced by the family added for it
+replaced(u: Unnesting, t: Expr): Expr := {
+	if not mentions(t, family_names(u.block)) { return t }
+	container = container_of(u, t)
+	if container is not ø { return apply_all(Const(added_for(u, container!), block_universes(u.block)), u.parameters + arguments_of(t).drop(#arguments_of(container!))) }
+	walked(t, 0, (part, depth) => replaced(u, part))
+}
+# The container a term applies: a family of another block at parameters that hold a family of this one and no
+# variable of the case; that family applied to its parameters alone
+container_of(u: Unnesting, t: Expr): Expr? := {
+	name = head_name(t) ?? return ø
+	if family_names(u.block).contains(name) { return ø }
+	of = family_block(u.j.environment, name) ?? return ø
+	parameters = arguments_of(t).take(of.parameters)
+	if #parameters < of.parameters or not parameters.any(x => mentions(x, family_names(u.block))) or parameters.any(x => loose(x, 0)) { return ø }
+	apply_all(head_of(t), parameters)
+}
+# The family added for a container, added when it is new: the container's type and cases as declared (written, not
+# made plain: a container nested itself holds no added family of its own block), at its levels and parameters, under
+# the block's parameters
+added_for(u: Unnesting, container: Expr): text := {
+	for at in 1 to #u.containers { if alike(u.containers#at, container) { return u.added#at.name } }
+	name = "${u.block.families#1.name}${NESTED_MARK}${#u.containers + 1}"
+	of = container_family(u.j.environment, container)
+	at_container = (declared: text) => {
+		k = known(u.j, declared)
+		pis(u.j, u.parameters, given(with_levels(k.type, k.levels, head_levels(container)), arguments_of(container)))
+	}
+	u.containers += [container]
+	u.added += [Family(name, at_container(of.name), of.cases.map(case => Case("${name}.${case.name}", at_container(case.name))))]
+	name
+}
+
+# the family a container applies, as its block declares it
+container_family(e: Environment, container: Expr): Family := {
+	name = head_name(container)!
+	family_block(e, name)!.families.find(family => family.name == name)!
+}
+head_levels(t: Expr): list<Universe> := match head_of(t) {
+	Const(name, us) => us
+	_ => []
+}
+
+# --- the containers again
+
+# the families a block added for containers, after those written
+added_families(block: Block): list<Family> := block.families.drop(#block.families - #block.nested)
+# A term with each added family, and each of its cases, applied to the block's parameters and more, turned back into
+# the container's own
+contained(e: Environment, block: Block, t: Expr): Expr := {
+	if not mentions(t, added_families(block).flat_map(family => [family.name] + family.cases.map(case => case.name))) { return t }
+	name = head_name(t) ?? ""
+	for at in 1 to #block.nested {
+		family = added_families(block)#at
+		place = family.cases.map(case => case.name).index_of(name)
+		if name == family.name or place > 0 {
+			xs = arguments_of(t).map(x => contained(e, block, x))
+			container = given(block.nested#at, xs.take(block.parameters))
+			leading = if place == 0 then head_of(container) else Const(container_family(e, container).cases#place.name, head_levels(container))
+			return apply_all(leading, arguments_of(container) + xs.drop(block.parameters))
+		}
+	}
+	walked(t, 0, (part, depth) => contained(e, block, part))
+}
+# A value of the k-th family of a block, for an added family a case of its container: that case read as the added
+# family's at these levels and the block's parameters
+uncontained(j: Judge, block: Block, k: int, levels: list<Universe>, parameters: list<Expr>, value: Expr): Expr := {
+	at = k - (#block.families - #block.nested)
+	if at < 1 { return value }
+	container = given(block.nested#at, parameters)
+	place = container_family(j.environment, container).cases.map(case => case.name).index_of(head_name(value) ?? "")
+	if place == 0 then value else apply_all(Const(block.families#k.cases#place.name, levels), parameters + arguments_of(value).drop(#arguments_of(container)))
+}

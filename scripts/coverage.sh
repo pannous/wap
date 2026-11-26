@@ -3,8 +3,8 @@
 # (✓, or ✗ with the run's last line) and the summary line last, into data/wap-tests/coverage.txt (read by warp's
 # scripts/vitals.py). A library module counts when a program of `use <module>` and a print runs; a sample when it runs to
 # its end. The installed wap and its own library are what is measured, named by the commit its compiler was built of
-# (`wap version`), whatever this checkout holds. Each run is capped and goes through a job slot, niced; run hourly
-# by cron (user 2026-11-23)
+# (`wap version`), whatever this checkout holds. Each run is capped, windowless (--no-window) and goes through a job
+# slot, niced; run hourly by cron (user 2026-11-23)
 set -uo pipefail
 # ✓, ✗ and the runs' messages are UTF-8: counted and cut by characters, whatever locale cron gives (none)
 export LC_ALL=C.UTF-8
@@ -12,12 +12,6 @@ RUN_SECONDS=60
 RUN_MEMORY_GB=4
 RUNS_AT_ONCE=4
 COVERED_MARK=covered
-# no run shows a window or plays sound (user 2026-11-23: skip them): a sample never runs here by its folder, by a module
-# it takes in, by its use of the window or by its painting; nor does such a module. `scripts/coverage.sh --runnable`
-# prints the files that do run, one path per line (modules, then samples), for every other runner of samples
-SHOWING_FOLDERS='graphics|gpu|sound'
-SHOWING_MODULES='raylib|SDL2|SDL3|draw|pga_draw|graphics|shown_frames|meshlets|forest|image|keys|sound|midi|webview|gpu'
-SHOWING_CODE="^[[:space:]]*(import|use)[[:space:]]+($SHOWING_MODULES)\\b|\\bwindow\\.|\\bpaint\\("
 tree="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 wap=$(command -v wap) || { echo "coverage.sh: no native wap on PATH: scripts/refresh-seed.sh installs it" >&2; exit 2; }
 out="$tree/data/wap-tests/coverage.txt"
@@ -29,7 +23,7 @@ shown() { local file=${1#"$tree/"}; echo "${file#"$(dirname "$library")/"}"; }
 # file's folder; it counts when it exits well and, given <expected>, its last line says that
 covered() {
 	local kind=$1 file=$2 program=${3:-$2} expected=${4:-} said status
-	said=$(cd "$(dirname "$file")" && "$tree/scripts/job-slot.sh" "$wap" --seconds "$RUN_SECONDS" --memory-gb "$RUN_MEMORY_GB" "$program" 2>&1 </dev/null)
+	said=$(cd "$(dirname "$file")" && "$tree/scripts/job-slot.sh" "$wap" --no-window --seconds "$RUN_SECONDS" --memory-gb "$RUN_MEMORY_GB" "$program" 2>&1 </dev/null)
 	status=$?
 	if [ $status -eq 0 ] && { [ -z "$expected" ] || [ "$(tail -n 1 <<<"$said")" = "$expected" ]; }; then
 		echo "✓ $kind $(shown "$file")"
@@ -55,10 +49,8 @@ commit=$(sed -n 's/^wap.wasm of \([0-9a-f]*\) .*/\1/p' <<<"$version")
 # the modules a `use` finds: the library beside the installed wap's compiler, not this checkout's lib/
 library="$(dirname "$(sed -n '1s/.*(\(.*\))$/\1/p' <<<"$version")")/lib"
 [ -d "$library" ] || { echo "coverage.sh: no library beside the installed wap's compiler ($library)" >&2; exit 2; }
-modules=$(find "$library" -maxdepth 1 \( -name '*.warp' -o -name '*.wap' \) | grep -vE "/($SHOWING_MODULES)\.wa?rp$" |
-	xargs grep -LE "$SHOWING_CODE" | sort)
-samples=$(find -L "$tree/samples" \( -name '*.warp' -o -name '*.wap' \) | grep -vE "/samples/($SHOWING_FOLDERS)/" |
-	xargs grep -LE "$SHOWING_CODE" | sort)
+modules=$(find "$library" -maxdepth 1 \( -name '*.warp' -o -name '*.wap' \) | sort)
+samples=$(find -L "$tree/samples" \( -name '*.warp' -o -name '*.wap' \) | sort)
 [ "${1:-}" = --runnable ] && { printf '%s\n%s\n' "$modules" "$samples"; exit 0; }
 lines=$({
 	xargs -P "$RUNS_AT_ONCE" -I{} bash -c 'module_covered "$1"' _ {} <<<"$modules"

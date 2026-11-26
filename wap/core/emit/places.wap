@@ -2,6 +2,7 @@
 # reached, read and written, and the variables a bound name refers to.
 
 use folder
+use "../../kernel/opcodes.wap"
 use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
@@ -12,35 +13,54 @@ use "../../kernel/forms.wap"
 # never finishes
 typed_layout(n: Node, p: Program) as list<int> := if fact_of(n, TYPE) == ø then [] else result_layout(type_of(n), p, n)
 # a type's layout as a value or a result: none for ø, NEVER for never
-result_layout(type: Node, p: Program, at: Node? = ø) as list<int> := if text(type) == EMPTY_TYPE_WORD then [] else if text(type) == NEVER_WORD then NEVER else known_layout(type, p, at)
+result_layout(type: Node, p: Program, at: Node? = ø) as list<int> := if text(type) == EMPTY_TYPE then [] else if text(type) == NEVER_TYPE then NEVER else known_layout(type, p, at)
 layout(n: Node, p: Program) as list<int> := layout_of(type_of(n), p.m, p.records, n) ?? no_layout(type_of(n), n)
 # The way to a record's field: the instructions that reach it, then the one that reads it and the one that writes it;
 # a list's item or a map's entry comes as a call of its `#` and its set (core/analyze/data.wap item_got)
 class Place { reached: list<int>; read: list<int>; written: list<int> }
 place_of(subject: Node, key: Node, p: Program, f: Frame) as Place := {
 	record = record_named(p.records, type_of(subject)) ?? refused(subject, "a part reaching the emitter is a record's field: typing writes an item as a call of #")
-	field = index_where(fields_of(record), field => text(declared_name(field)) == text(key))
-	if p.m.memory != ø { return memory_place(code(subject, p, f).instructions, field, known_layout(field_declared(fields_of(record)#field), p), p.m.memory!.field_bytes) }
+	field = index_where(fields_of(record), field => same_name(field, key))
+	if p.m.memory != ø { return field_place(code(subject, p, f).instructions, record_layouts(record, p), field) }
 	at = [struct_of(record, p.m, p.records), field]
 	Place(code(subject, p, f).instructions, instruction(STRUCT_GET, at), instruction(STRUCT_SET, at))
 }
-# a field of a record in the memory (wap/types/memory_lists.wap): its bytes at the record's address, one after another
-# in its record's order
-memory_place(reached: list<int>, field: int, type: list<int>, bytes: int) as Place := Place(reached + i32_const((field - 1) * bytes) + I32_ADD, item_loaded(type).code, item_stored(type).code)
+# A record's instance in the memory is laid out as C lays out a struct, so C reads it as one: its fields in its
+# record's order, each at the next multiple of its own width, the whole a multiple of its widest field's
+memory_place(reached: list<int>, offset: int, type: list<int>) as Place := Place(reached + i32_const(offset) + I32_ADD, item_loaded(type).code, item_stored(type).code)
+# the place of a field, from 1, of a struct of these layouts at the address reached, and its value read
+field_place(reached: list<int>, layouts: list<list<int>>, at: int) as Place := memory_place(reached, field_offset(layouts, at), layouts#at)
+field_read(reached: list<int>, layouts: list<list<int>>, at: int) as list<int> := read_code(layouts#at, field_place(reached, layouts, at)).instructions
+record_layouts(record: Record, p: Program) as list<list<int>> := fields_of(record).map(field => known_layout(field_declared(field), p))
+aligned(bytes: int, width: int) as int := (bytes + width - 1) ÷ width * width
+fields_end(layouts: list<list<int>>) as int := layouts.fold(0, (end, layout) => aligned(end, layout_bytes(layout)) + layout_bytes(layout))
+field_offset(layouts: list<list<int>>, field: int) as int := aligned(fields_end(layouts.take(field - 1)), layout_bytes(layouts#field))
+struct_bytes(layouts: list<list<int>>) as int := aligned(fields_end(layouts), max(layouts.map(layout_bytes)))
+# a new struct, its fields' values on the stack: in the memory, by the helper storing them, one for each layout of
+# fields, an instance of no fields taking no bytes but an address past 0, which is ø; else GC's struct of that type
+struct_made(layouts: list<list<int>>, gc_struct: () -> int, p: Program) as list<int> := if p.m.memory != ø then memory_struct_made(layouts, p) else instruction(STRUCT_NEW, [gc_struct()])
+memory_struct_made(layouts: list<list<int>>, p: Program) as list<int> := if layouts is empty then i32_const(0) + helper_call(p, MEMORY_TAKEN, memory_taking_function) else helper_call(p, "memory struct ${layouts}", q => memory_struct_function(layouts, q))
+memory_struct_function(layouts: list<list<int>>, p: Program) as int := {
+	address = #layouts
+	stored = (1 to #layouts).flat_map(at => written_code(field_place(local_get(address), layouts, at), Code(layouts#at, local_get(at - 1))).instructions)
+	added_function(p.m, layouts, [I32], [I32], i32_const(struct_bytes(layouts)) + helper_call(p, MEMORY_TAKEN, memory_taking_function) + local_set(address) + stored + local_get(address))
+}
 read_code(type: list<int>, place: Place) as Code := Code(type, place.reached + place.read)
 written_code(place: Place, value: Code) as Code := Code([], place.reached + value.instructions + place.written)
 
 # A map, `{yes: 1, no: 0}`: its keys, a word's spelling as a text, in a new list, its values in another, both in a
 # new struct of the map's type
 map_code(form: Node, entries: list<Node>, p: Program, f: Frame) as Code := {
-	keys = entries.map(entry => match entry { Key(key, Op.Colon, value) => if key is symbol then text_literal(text(key), p.m) else code(key, p, f); _ => refused(entry, NOT_AN_ENTRY) })
+	keys = entries.map(entry => match entry { Key(key, Op.Colon, value) => code(key, p, f); _ => refused(entry, NOT_AN_ENTRY) })
 	Code(layout(form, p), map_made(type_of(form), keys, items_fitted(map_value(type_of(form)), entries.map(given_value), p, f), p))
 }
 
 # An instance, `Point{x: 1, y: 2}`: its fields' values in the order its record writes them, a new struct
 instance_code(form: Node, record: Record, items: list<Node>, p: Program, f: Frame) as Code := {
-	values = fields_of(record).map(field => items.filter(item => text(declared_name(item)) == text(declared_name(field)))#1)
-	Code(layout(form, p), i32_const(class_tag(record)) + (1 to #values).flat_map(at => field_filled(fields_of(record)#at, given_value(values#at), p, f)) + instruction(STRUCT_NEW, [struct_of(record, p.m, p.records)]))
+	values = fields_of(record).map(field => items.filter(item => same_name(item, field))#1)
+	filled = (1 to #values).flat_map(at => field_filled(fields_of(record)#at, given_value(values#at), p, f))
+	if p.m.memory != ø { return Code(layout(form, p), filled + memory_struct_made(record_layouts(record, p), p)) }
+	Code(layout(form, p), i32_const(class_tag(record)) + filled + instruction(STRUCT_NEW, [struct_of(record, p.m, p.records)]))
 }
 # the instructions of a value given to a field, made to fit the field's type
 field_filled(field: Node, value: Node, p: Program, f: Frame) as list<int> := {
@@ -63,7 +83,7 @@ set_code(form: Node, place: Node, given: Node, p: Program, f: Frame) as Code := 
 	if not valued(value.type) { refused(form, "this gives no value to set") }
 	if held.type != value.type { refused(form, "this name held another kind of value before") }
 	# (a global defined by a constant starts with it, so a module using this one reads it before anything runs)
-	start = constant(given)
+	start = constant(given, p.m)
 	if not held.local and fact_of(place, DEFINER) != ø and start != ø and start!.type == held.type { initial_given(p.m, held.index, start!.instructions) }
 	Code(value.type, value.instructions + kept(held))
 }

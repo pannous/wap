@@ -4,6 +4,8 @@
 # before its code is written.
 
 use folder
+use "../../kernel/opcodes.wap"
+use "../../kernel/primitives.wap"
 use "../errors.wap"
 use "../stage.wap"
 use "../type_notation.wap"
@@ -14,7 +16,7 @@ type_equality(type: Node, p: Program) as list<int> := {
 	if base_of_optional(type) != ø { return by_parts("optional_equal ${type}", optionals_compared(type, p)) }
 	if item_type(type) != ø { return parts_compared(p, "list_equal ${type}", list_layout(type, p), lists_compared(type, p)) }
 	record = record_named(p.records, type)
-	if text(type) == ENUM_WORD or record != ø and cases_of(record) is not empty { return if plain_enums(p.m) then equality(I32, p) else parts_compared(p, "tag_equal", nullable(enum_base(p.m)), cases_compared(p)) }
+	if text(type) == ENUM_TYPE or record != ø and cases_of(record) is not empty { return if plain_enums(p.m) then equality(I32, p) else parts_compared(p, "tag_equal", nullable(enum_base(p.m)), cases_compared(p)) }
 	if record != ø { return by_parts("record_equal ${place_key(record_declared(record!))}", records_compared(record, p)) }
 	equality(known_layout(type, p), p)
 }
@@ -25,7 +27,7 @@ equality(type: list<int>, p: Program) as list<int> := {
 	if type == F64 { return F64_EQ }
 	if type == F32 { return F32_EQ }
 	if type == I32 { return I32_EQ }
-	if type == text_layout(p.m) { return helper_call(p, "text_equal", text_equality_function) }
+	if type == text_layout(p.m) { return runtime_call(p, TEXT_EQUALITY) }
 	if type == ANYREF { return helper_call(p, "any_equal", any_equality_function) }
 	if is_reference(type) { return REF_EQ }
 	refused(Text("${type}"), "wap compares ints, floats, yes/no, characters and texts so far")
@@ -64,29 +66,20 @@ records_compared(record: Record, p: Program) as function := () => {
 }
 # Two lists: one count and equal items in order. Its locals: 0 and 1 the lists, 2 a count.
 lists_compared(type: Node, p: Program) as function := () => {
-	item = local => items_in(type, local, p) + local_get(2) + instruction(ARRAY_GET, [items_array(type, p)])
+	item = local => item_read(type, local, local_get(2), p)
 	Compared([I32], pair_compared(local => count_in(type, local, p), I32_EQ) + counted(2, count_in(type, 0, p), pair_compared(item, type_equality(list_item(type), p))))
 }
 # Two optionals: both ø, or both there and their values equal. Its locals: 0 and 1 the optionals.
 optionals_compared(type: Node, p: Program) as function := () => {
 	base = base_of_optional(type) ?? refused(type, "this is no optional type")
 	boxed = text(base) in BOXED_WORDS
-	held = local => local_get(local) + (if boxed then instruction(STRUCT_GET, [box_index(p.m, text(base)), 0]) else [])
-	Compared([], missing_compared() + pair_compared(held, type_equality(base, p)))
+	held = local => local_get(local) + (if boxed then box_opened(text(base), p) else [])
+	Compared([], missing_compared(p.m) + pair_compared(held, type_equality(base, p)))
 }
 
 # when either of locals 0 and 1 is ø: yes when both are, else no
-missing_compared() as list<int> := local_get(0) + REF_IS_NULL + if_block(local_get(1) + REF_IS_NULL + RETURN) + local_get(1) + REF_IS_NULL + if_block(i32_const(0) + RETURN)
+missing_compared(m: WasmModule) as list<int> := local_get(0) + missing_tested(m) + if_block(local_get(1) + missing_tested(m) + RETURN) + local_get(1) + missing_tested(m) + if_block(i32_const(0) + RETURN)
 
-# The helper of text_equal: yes when both texts have the same bytes. Its locals: 0 and 1 the texts, 2 the length, 3 a
-# count.
-text_equality_function(p: Program) as int := {
-	type = text_type(p.m)
-	byte = local => local_get(local) + local_get(3) + instruction(ARRAY_GET_U, [type])
-	lengths = local_get(0) + ARRAY_LEN + instruction(LOCAL_TEE, [2]) + local_get(1) + ARRAY_LEN + I32_EQ + NO_UNLESS_YES
-	bytes = counted(3, local_get(2), pair_compared(byte, I32_EQ))
-	added_function(p.m, [nullable(type), nullable(type)], [I32], [I32, I32], lengths + bytes + i32_const(1))
-}
 # The helper of equality of two values of `any` or `number`: two ø are equal; two plain values of one type in their
 # boxes and two texts by their values; any other two references only when they are the same one. Its locals: 0 and 1
 # the values.
@@ -95,7 +88,7 @@ any_equality_function(p: Program) as int := {
 	texts = compared_as(text_type(p.m), [], equality(text_layout(p.m), p))
 	instances = p.records.items.filter(record => cases_of(record) is empty).flat_map(record => compared_as(struct_of(record, p.m, p.records), [], type_equality(record_type(record), p)))
 	same = local_get(0) + REF_CAST + EQ_HEAP + local_get(1) + REF_CAST + EQ_HEAP + REF_EQ
-	added_function(p.m, [ANYREF, ANYREF], [I32], [], missing_compared() + boxed + texts + instances + same)
+	added_function(p.m, [ANYREF, ANYREF], [I32], [], missing_compared(p.m) + boxed + texts + instances + same)
 }
 # when the value in local 0 is of a type: no unless local 1 is too, else both taken out and compared
 compared_as(type: int, taken: list<int>, compare: list<int>) as list<int> := {

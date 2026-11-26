@@ -8,12 +8,12 @@ then read this file and the Owners row with your name.
 ## Idle by default (user 2026-11-23)
 - The language grows in lib/ and from the wiki pages; your files change only when that is really necessary. Most of
   the day you sit idle, and that is the job done well.
-- Requests reach you only through wap-lead, never straight from a wiki worker or another owner: a wiki example that
-  needs your stage, with what was tried in lib/ first. Answer wap-lead once: "lib can do it: …", "needs N lines in
+- Requests reach you only through wap-supervisor, never straight from a wiki worker or another owner: a wiki example that
+  needs your stage, with what was tried in lib/ first. Answer wap-supervisor once: "lib can do it: …", "needs N lines in
   <file>: …" (then the user discussion runs through wap-interviewer before you build), or "the page is wrong: …".
 - Between requests you make your stage beautiful: fewer lines, one mechanism per job, the simplifier's findings in your
   files. Pure shrinks land without discussion; anything else that changes behaviour waits for the user's OK.
-- Talk to the other owners only about a contract between your stages, and say the outcome to wap-lead in one line.
+- Talk to the other owners only about a contract between your stages, and say the outcome to wap-supervisor in one line.
 
 ## What owning means
 - **You are the expert.** You know every function in your files, why it is there, and the stage contract: the input
@@ -32,8 +32,8 @@ then read this file and the Owners row with your name.
 
 ## Keeping the pattern
 - Every wap file has exactly one owner row (test_guardrails checks it); a file without one is an error, not a gap.
-- An owner who retires hands the row to a named successor (wap-lead decides), with a handover note on the card.
-- Ownership changes only by wap-lead, written in the Owners table, never by drift.
+- An owner who retires hands the row to a named successor (wap-supervisor decides), with a handover note on the card.
+- Ownership changes only by wap-supervisor, written in the Owners table, never by drift.
 
 ## Rules for every file
 
@@ -63,6 +63,20 @@ wap/
   kernel/                     the kernel layer: the emitter's whole input language
     forms.wap                 the kernel forms, each a named pattern of Node
     surface.wap               the forms rules write and typing turns into kernel forms (Item, Variable)
+    terms.wap                 the type theory's terms, locally nameless (notes/theory.md, notes/coc-plan.md 6.1)
+    levels.wap                universe levels compared (6.2)
+    environment.wap           the declarations accepted, the state of one check, the refusals (6.6)
+    compute.wap               a term computed to its head (6.4)
+    equal.wap                 definitional equality (6.5)
+    typing.wap                a term's type, a declaration checked (6.3, 6.6)
+    inductive.wap             an inductive block checked (7, checks 1 to 5)
+    nested.wap                a block nested in another inductive type made plain (7)
+    recursors.wap             a block's recursors and their computation rules (7, checks 6 and 7)
+    quotients.wap             the quotients statement (6.4, 6.6)
+    numbers.wap               the numbers, shortcut and texts statements (6.7)
+    show.wap                  a term shown in wap notation
+    primitives.wap            the host's operations a Prim names, each a row of the wasm types it takes and gives
+    opcodes.wap               the wasm format's codes: section ids, value and heap types, opcodes
 
   core/                       the machinery: mechanisms only, no names of a domain
     pipeline.wap              one function per step from source to typed program, shared by compiler and census
@@ -85,6 +99,7 @@ wap/
       operator_table.wap      the operator table as the operator stage reads it
       tokens.wap              a phrase's tokens as the operator stage reads them: what each touches
       keys.wap                what a key the reader built becomes: the colon block, the choice, an infix call, an assignment
+      raw.wap                 a raw parameter's block taken verbatim: the words a file declares raw, the block read to its brace
 
     rules/                    the rule engine
       patterns.wap            a rule's pattern declared and compiled to a Matcher: holes, typed holes, rests, guards
@@ -130,7 +145,6 @@ wap/
       values.wap              the value layout (notes/self_hosting.md "Value layout"), reused as it is
       memory.wap              how a build keeping values in the memory lays them out: the record its extension fills
       wasm.wap                the wasm binary format: modules, sections, instructions; knows no warp form
-      opcodes.wap             the format's codes: section ids, value and heap types, opcodes
 
   types/                    the standard language every program gets: whole definitions, data and rules
     types.wap               the word files below, included in place: the one library every program is bound in
@@ -143,12 +157,12 @@ wap/
     lists.wap                 list words over function values: map, filter, contains …
     maps.wap                  map words: a key's value, set, has, remove; text keys found by their hash
     texts.wap                 text words over a text's UTF-8 bytes
+    characters.wap            a character's kind (digit, letter, hex) and a text's case
     numbers.wap               number words over the prelude's comparisons
     floats.wap                float, the fast variant of exact real numbers
     host.wap                  the host machinery system.wap's words use, hidden from programs
     memory_texts.wap          a native build's texts in the module's memory, read by its build in the place of text_bytes.wap
     memory_lists.wap          a native build's lists in the module's memory, read by its build in the place of list_items.wap
-    c.wap                     a C function's texts passed as NUL-terminated copies and given back; its out-pointers
 
   sugar/                      the rules of the surface spellings wap's own source uses, one file per topic
     calls.wap                 x.f(y), x.f → calls and Get
@@ -207,7 +221,7 @@ A rule file is in sugar/ exactly when wap's own source uses its spelling; when t
 ## Owners
 
 Each wap file has one expert owner, whose duties are above (user 2026-11-18); ownership changes
-only through wap-lead, in this table. Owners go by stage (user 2026-11-18).
+only through wap-supervisor, in this table. Owners go by stage (user 2026-11-18).
 Anyone may edit any wap file on a branch; the owner of the file's stage reviews the change before the handoff, and owns the stage's contract: what its output
 language is (notes/backbone.md "Stage languages"). Breadth stops until milestone 2: wap gets only what its own
 source uses, and every landing names the functions of wap it turned green (scripts/wap-census.warp). Tests
@@ -223,7 +237,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 
 | stage | owner | files (under wap/) |
 |---|---|---|
-| lead: the queue, the contracts, the self-build | wap-lead | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp, compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/forms.wap, kernel/surface.wap; the test/wap/ scripts no other row names |
+| lead: the queue, the contracts, the self-build | wap-supervisor | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp, compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/; the test/wap/ scripts no other row names |
 | front: read, operators, rules, lowering | wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap, extensions/packed.wap, extensions/warm.wap |
 | types: declare, bind, type | wap-binding | core/analyze/, core/paths.wap |
 | back: emitter, runtime, native | wap-emitter | core/emit/, extensions/wasm/, extensions/c/, extensions/native/; test/wap/test_native.sh, test/wap/test_guardrails.wap, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |

@@ -1,0 +1,209 @@
+# The second checker's terms (notes/theory.md "A second opinion"): universe levels and expressions as the export
+# writes them, with the plain walks over them. Nothing is kept on a term: every walk walks it whole.
+#
+# A variable bound inside a term is an index counting the binders between it and its own from 0; a binder the checker
+# has gone into is a Local, numbered by its place among the checker's locals (judge.wap).
+use magnitude
+
+enum Universe {
+	Zero
+	Next(of: Universe)
+	Most(left: Universe, right: Universe)
+	# zero where right is zero, else the larger of the two
+	MostUnlessZero(left: Universe, right: Universe)
+	Named(name: text)
+}
+
+enum Expr {
+	Var(index: int)
+	Local(id: int)
+	Sort(level: Universe)
+	Const(name: text, levels: list<Universe>)
+	App(function: Expr, argument: Expr)
+	Lam(domain: Expr, body: Expr)
+	Pi(domain: Expr, body: Expr)
+	Let(type: Expr, value: Expr, body: Expr)
+	Number(value: Magnitude)
+	# a text, its code points as a list, through the texts statement's function
+	Text(value: text)
+	# a field of a structure value, counted from 1
+	Field(structure: text, place: int, of: Expr)
+}
+
+PROPOSITIONS := Sort(Zero)
+
+# --- levels
+
+level_alike(a: Universe, b: Universe): bool := match a {
+	Zero => match b { Zero => yes; _ => no }
+	Next(x) => match b { Next(y) => level_alike(x, y); _ => no }
+	Most(x, y) => match b { Most(u, v) => level_alike(x, u) and level_alike(y, v); _ => no }
+	MostUnlessZero(x, y) => match b { MostUnlessZero(u, v) => level_alike(x, u) and level_alike(y, v); _ => no }
+	Named(name) => match b { Named(other) => name == other; _ => no }
+}
+level_put(level: Universe, names: list<text>, levels: list<Universe>): Universe := match level {
+	Next(x) => Next(level_put(x, names, levels))
+	Most(x, y) => Most(level_put(x, names, levels), level_put(y, names, levels))
+	MostUnlessZero(x, y) => MostUnlessZero(level_put(x, names, levels), level_put(y, names, levels))
+	Named(name) => if names.contains(name) then levels#(names.index_of(name)) else level
+	_ => level
+}
+level_names(level: Universe): list<text> := match level {
+	Next(x) => level_names(x)
+	Most(x, y) => level_names(x) + level_names(y)
+	MostUnlessZero(x, y) => level_names(x) + level_names(y)
+	Named(name) => [name]
+	_ => []
+}
+surely_zero(level: Universe): bool := match level {
+	Zero => yes
+	Most(x, y) => surely_zero(x) and surely_zero(y)
+	MostUnlessZero(x, y) => surely_zero(y)
+	_ => no
+}
+surely_above_zero(level: Universe): bool := match level {
+	Next(x) => yes
+	Most(x, y) => surely_above_zero(x) or surely_above_zero(y)
+	MostUnlessZero(x, y) => surely_above_zero(y)
+	_ => no
+}
+# a level with every MostUnlessZero gone whose right side is surely zero or surely above it
+settled(level: Universe): Universe := match level {
+	Next(x) => Next(settled(x))
+	Most(x, y) => Most(settled(x), settled(y))
+	MostUnlessZero(x, y) => {
+		right = settled(y)
+		if surely_zero(right) then Zero else if surely_above_zero(right) then Most(settled(x), right) else MostUnlessZero(settled(x), right)
+	}
+	_ => level
+}
+# the parameter whose being zero would decide whether a level is zero
+deciding_name(level: Universe): text? := match level {
+	Named(name) => name
+	Most(x, y) => deciding_name(x) ?? deciding_name(y)
+	MostUnlessZero(x, y) => deciding_name(y)
+	_ => ø
+}
+# a parameter deciding a MostUnlessZero still in a settled level
+open_name(level: Universe): text? := match level {
+	Next(x) => open_name(x)
+	Most(x, y) => open_name(x) ?? open_name(y)
+	MostUnlessZero(x, y) => deciding_name(y) ?? open_name(x)
+	_ => ø
+}
+# a level without open MostUnlessZero is the largest of its parts, each a parameter (ø: none) with a number added
+class Part { name: text?; plus: int }
+parts_of(level: Universe, plus: int): list<Part> := match level {
+	Zero => [Part(ø, plus)]
+	Next(x) => parts_of(x, plus + 1)
+	Most(x, y) => parts_of(x, plus) + parts_of(y, plus)
+	MostUnlessZero(x, y) => parts_of(x, plus) + parts_of(y, plus)
+	Named(name) => [Part(name, plus)]
+}
+# whether a <= b whatever the parameters are: an open parameter is tried as zero and as one more than itself
+level_at_most(a: Universe, b: Universe): bool := {
+	left = settled(a)
+	right = settled(b)
+	split = open_name(left) ?? open_name(right)
+	if split is ø {
+		bigger = parts_of(right, 0)
+		return parts_of(left, 0).all(part => bigger.any(other => other.plus >= part.plus and (part.name is ø or part.name == other.name)))
+	}
+	names = [split!]
+	cases = [[Zero], [Next(Named(split!))]]
+	cases.all(levels => level_at_most(level_put(left, names, levels), level_put(right, names, levels)))
+}
+level_equal(a: Universe, b: Universe): bool := level_at_most(a, b) and level_at_most(b, a)
+levels_equal(a: list<Universe>, b: list<Universe>): bool := #a == #b and (1 .. #a + 1).all(at => level_equal(a#at, b#at))
+
+# --- expressions
+
+alike(a: Expr, b: Expr): bool := match a {
+	Var(i) => match b { Var(j) => i == j; _ => no }
+	Local(i) => match b { Local(j) => i == j; _ => no }
+	Sort(u) => match b { Sort(v) => level_alike(u, v); _ => no }
+	Const(name, us) => match b { Const(other, vs) => name == other and #us == #vs and (1 .. #us + 1).all(at => level_alike(us#at, vs#at)); _ => no }
+	App(f, x) => match b { App(g, y) => alike(f, g) and alike(x, y); _ => no }
+	Lam(d, body) => match b { Lam(e, other) => alike(d, e) and alike(body, other); _ => no }
+	Pi(d, body) => match b { Pi(e, other) => alike(d, e) and alike(body, other); _ => no }
+	Let(t, v, body) => match b { Let(s, w, other) => alike(t, s) and alike(v, w) and alike(body, other); _ => no }
+	Number(n) => match b { Number(m) => digits(n) == digits(m); _ => no }
+	Text(t) => match b { Text(other) => t == other; _ => no }
+	Field(s, i, x) => match b { Field(r, j, y) => s == r and i == j and alike(x, y); _ => no }
+}
+
+# a term with each of its parts walked: binders' bodies at one more depth
+walked(t: Expr, depth: int, part: (Expr, int) -> Expr): Expr := match t {
+	App(f, x) => App(part(f, depth), part(x, depth))
+	Lam(d, body) => Lam(part(d, depth), part(body, depth + 1))
+	Pi(d, body) => Pi(part(d, depth), part(body, depth + 1))
+	Let(type, value, body) => Let(part(type, depth), part(value, depth), part(body, depth + 1))
+	Field(s, i, x) => Field(s, i, part(x, depth))
+	_ => t
+}
+# a binder's body with its variable replaced by a value that holds no variable
+instantiate(body: Expr, value: Expr): Expr := put_at(body, 0, value)
+put_at(t: Expr, depth: int, value: Expr): Expr := match t {
+	Var(i) => if i == depth then value else if i > depth then Var(i - 1) else t
+	_ => walked(t, depth, (part, at) => put_at(part, at, value))
+}
+# the body under binders with all their variables replaced, the outermost binder's value first
+instantiate_all(body: Expr, values: list<Expr>): Expr := values.reverse().fold(body, instantiate)
+# a term as a binder's body: the local becomes the binder's variable
+abstract(t: Expr, id: int): Expr := bind_at(t, 0, id)
+bind_at(t: Expr, depth: int, id: int): Expr := match t {
+	Local(i) => if i == id then Var(depth) else t
+	_ => walked(t, depth, (part, at) => bind_at(part, at, id))
+}
+# whether a test holds for one of a term's parts: binders' bodies at one more depth
+any_part(t: Expr, depth: int, test: (Expr, int) -> bool): bool := match t {
+	App(f, x) => test(f, depth) or test(x, depth)
+	Lam(d, body) => test(d, depth) or test(body, depth + 1)
+	Pi(d, body) => test(d, depth) or test(body, depth + 1)
+	Let(type, value, body) => test(type, depth) or test(value, depth) or test(body, depth + 1)
+	Field(s, i, x) => test(x, depth)
+	_ => no
+}
+# whether a term holds a variable bound outside it, at or past this depth
+loose(t: Expr, depth: int): bool := match t {
+	Var(i) => i >= depth
+	_ => any_part(t, depth, loose)
+}
+# whether a term names one of these constants
+mentions(t: Expr, names: list<text>): bool := match t {
+	Const(name, us) => names.contains(name)
+	_ => any_part(t, 0, (part, at) => mentions(part, names))
+}
+# the constants a term names, a field's structure among them
+constants_of(t: Expr): list<text> := match t {
+	Const(name, us) => [name]
+	Field(s, i, x) => [s] + constants_of(x)
+	App(f, x) => constants_of(f) + constants_of(x)
+	Lam(d, body) => constants_of(d) + constants_of(body)
+	Pi(d, body) => constants_of(d) + constants_of(body)
+	Let(type, value, body) => constants_of(type) + constants_of(value) + constants_of(body)
+	_ => []
+}
+# a term at levels: each named parameter replaced by the level at its place
+with_levels(t: Expr, names: list<text>, levels: list<Universe>): Expr := match t {
+	Sort(u) => Sort(level_put(u, names, levels))
+	Const(name, us) => Const(name, us.map(u => level_put(u, names, levels)))
+	_ => walked(t, 0, (part, at) => with_levels(part, names, levels))
+}
+
+apply_all(f: Expr, xs: list<Expr>): Expr := xs.fold(f, (g, x) => App(g, x))
+head_of(t: Expr): Expr := match t {
+	App(f, x) => head_of(f)
+	_ => t
+}
+arguments_of(t: Expr): list<Expr> := match t {
+	App(f, x) => arguments_of(f) + [x]
+	_ => []
+}
+# the name of a term's head constant, ø for another head
+head_name(t: Expr): text? := match head_of(t) {
+	Const(name, us) => name
+	_ => ø
+}
+# a term named for a refusal: its head constant
+named(t: Expr): text := head_name(t) ?? "a term"

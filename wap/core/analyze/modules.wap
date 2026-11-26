@@ -4,6 +4,7 @@
 use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
+use "../parse/operator_table.wap"
 use "../../kernel/forms.wap"
 use folder
 
@@ -11,7 +12,10 @@ use folder
 # that module's, one word
 modules_scope(modules: list<Module>) as list<Definition> := (1 to #modules).flat_map(at => [Definition(module_name(modules#at.code), DefinitionKind.Module, modules#at.code, MODULE_DEPTH)] + modules#at.signatures.filter(signature => not modules.take(at - 1).any(earlier => defines_identically(earlier, modules#at, signature))).flat_map(signature => library_words(signature, MODULE_DEPTH)))
 # a module's name, its file's without the folder and the extension
-module_name(module: Node) as text := (file_of(module) ?? "").split("/").last.split(".")#1
+module_name(module: Node) as text := file_module_name(file_of(module) ?? "")
+file_module_name(file: text) as text := file.split("/").last.split(".")#1
+# a standard module's file as a program writes it, `lib/math.wap`
+library_path(file: text) as text := LIBRARY_FOLDER + "/" + ("/" + file).split("/" + LIBRARY_FOLDER + "/").last
 # the names a module declares itself: its functions, variables and types, not their fields or cases
 module_names(module: Node) as list := signatures_of(module).map(signature => signature.definer)
 # Two used modules defining one word alike, refused naming both, even where nothing calls it: the same name taking the
@@ -26,8 +30,10 @@ clashes_refused(modules: list<Module>) := for later in 2 to #modules {
 }
 # whether an earlier module defines a module's word identically: alike, and its code read alike
 defines_identically(earlier: Module, module: Module, signature: Signature) as bool := earlier.signatures.any(other => alike(other, signature) and definition_text(earlier.code, other) == definition_text(module.code, signature))
-# a module's definition of a word as code reads, without its places: two identical ones read alike
-definition_text(module: Node, signature: Signature) as text := text(defining_statement(module, signature) ?? signature.definer)
+# a module's definition of a word as code reads, without its places, each name a rule made fresh as the rule wrote it:
+# two identical ones read alike, the expansions of one rule too
+definition_text(module: Node, signature: Signature) as text := text(as_written(defining_statement(module, signature) ?? signature.definer))
+as_written(n: Node) as Node := fact_of(n, FRESH) ?? with_parts(unwrapped(n), as_written)
 # whether two modules may not both define these words: one name, both functions taking the same parameter types, or
 # neither a function
 alike(one: Signature, other: Signature) as bool := one.name == other.name and is_function(one) == is_function(other) and (not is_function(one) or same_types(parameter_types(one), parameter_types(other)))
@@ -55,4 +61,19 @@ module_call(n: Node, called: Node, arguments: list, scope: Scope, depth: int) as
 	if not called is symbol or arguments is empty { return ø }
 	word = module_word(called, arguments#1, text(called), scope) ?? return ø
 	refitted(Call(word, all_bound(arguments.drop(1), scope, depth)), n)
+}
+
+# a word nothing but a standard module the code does not use defines, bound to that module's file: the pipeline brings
+# the module in (pipeline.wap standard_brought); two modules defining it refused naming both, a word none defines too
+standard_word_bound(name: Node, scope: Scope) as Node := {
+	modules = scope.standard.get(text(name)) ?? []
+	if modules is empty { refused(name, "nothing defines this name, neither the program nor the library") }
+	if #modules > 1 { refused(name, "${modules.map(library_path).join(" and ")} both define ${name}: write the `use` of one") }
+	with_fact(with_binding(name, DefinitionKind.Standard), DEFINED_AT, Text(modules#1))
+}
+# whether a call of this name is one of a field's value: nothing defines the name, or only a standard module the code
+# does not use, as a word only such a module defines ranks below the program's own names, a record's field among them
+field_meant(name: text, scope: Scope) as bool := {
+	word = word_aliased(name)
+	definitions_meant(word, scope) is empty and (not scope.standard.has(word) or every_definition(scope).any(definition => definition.kind == DefinitionKind.Record and field_named(definition.definer, symbol(name)) != ø))
 }

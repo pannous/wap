@@ -1,0 +1,273 @@
+# Numbers and texts in the theory (notes/coc-plan.md 5.4 and 6.7; this folder's files: notes/theory.md "The
+# declarations that bind names"). A number literal is a natural number below 2^63, a short way to write
+# `successor(… zero)`, and seven shortcuts compute arithmetic on two literals at once, as long as the result stays
+# below 2^63. A text literal is a short way to write the texts statement's function of the list of its code points. The numbers statement names the number type; each shortcut
+# statement binds a library function by naming the theorems that fix it on every number. The kernel itself names no
+# library word.
+
+use "terms.wap"
+use "environment.wap"
+use "compute.wap"
+use "typing.wap"
+use "equal.wap"
+use "show.wap"
+use "inductive.wap"
+use "quotients.wap"
+
+# the shortcuts, each fixed on every number by its theorems; a divide statement binds the remainder too
+enum Shortcut { Add, Subtract, Multiply, Equal, AtMost, Divide, Remainder }
+# the shortcuts a statement names, by the word it names them with
+SHORTCUT_WORDS := ["add", "subtract", "multiply", "equal", "at_most", "divide"]
+DECLARED_SHORTCUTS := [Shortcut.Add, Shortcut.Subtract, Shortcut.Multiply, Shortcut.Equal, Shortcut.AtMost, Shortcut.Divide]
+# the names a numbers statement takes: the number type, the yes case, equality
+# the largest number a literal holds and a shortcut gives, i64's (6.7)
+LARGEST := 9223372036854775807
+
+# What the numbers statement bound, each a constant: the number type and its two cases, the truth values' type and
+# cases, the type of equality, and the functions bound to shortcuts
+class Numbers {
+	number: Term
+	zero: Term
+	successor: Term
+	truth: Term
+	yes_case: Term
+	no_case: Term
+	equality: Term
+	shortcuts: list<BoundFunction> = []
+}
+# a function bound to a shortcut
+class BoundFunction { function: Term; kind: Shortcut }
+
+# The free variables a theorem's statement is built with, made its binders when the statement uses them
+class Quantified { id: int; binder: text }
+FOR_M := Quantified(1, "m")
+FOR_N := Quantified(2, "n")
+
+# --- the statements
+
+# `numbers(number, yes_case, equality)`: the number type is a block of one type in Type with a case without fields
+# and a case with one number; the yes case is a case of a block of one type in Type with two cases without fields;
+# equality has the shape of `Equal`. It stands once
+numbers_declared(e: Environment, nat: Term, yes_case: Term, equality: Term) := {
+	if e.numbers is not ø { refused(NUMBERS, "the numbers are declared already") }
+	natural = block_of(e, nat, NUMBERS)
+	if not block_shaped(natural, 0, 0, TYPE, [nat, pi("n", nat, nat)]) { refused(NUMBERS, "${constant_name(nat)} is no block like `enum nat { zero; successor(n: nat) }`") }
+	truth = match declaration_of(e, yes_case).kind {
+		Constructor(of, place, fields) => of
+		_ => refused(NUMBERS, "${constant_name(yes_case)} is no case of a block")
+	}
+	truths = block_of(e, truth, NUMBERS)
+	if not block_shaped(truths, 0, 0, TYPE, [truth, truth]) { refused(NUMBERS, "${constant_name(truth)} is no block like `enum bool { no; yes }`") }
+	equality_checked(e, equality, NUMBERS)
+	no_case = block_case(truths, truth, if is_constant(block_case(truths, truth, 1), yes_case) then 2 else 1)
+	e.numbers = Numbers(nat, block_case(natural, nat, 1), block_case(natural, nat, 2), truth, yes_case, no_case, equality)
+}
+
+# What the texts statement bound: the function a text literal stands for, the list's two cases its argument is made
+# of, each a constant, and the type the function gives
+class Texts { function: Term; empty_case: Term; item_case: Term; type: Term }
+# the level the list of code points is at: a list of numbers, which lie in Type
+POINTS_LEVEL := Successor(Zero)
+# the texts statement, `texts(text_of, list.empty, list.item)`: a list block like the prelude's, `enum list(T:
+# Sort(u)): Sort(max(1, u)) { empty: list(T), item(first: T, rest: list(T)): list(T) }`, and a function of a list of
+# numbers; bound once, after the numbers statement
+texts_declared(e: Environment, function: Term, empty_case: Term, item_case: Term) := {
+	n = e.numbers ?? refused(TEXTS, "no numbers are declared")
+	if e.texts is not ø { refused(TEXTS, "texts are declared already") }
+	list = match declaration_of(e, empty_case).kind {
+		Constructor(of, place, fields) => of
+		_ => refused(TEXTS, "${constant_name(empty_case)} is no case of a block")
+	}
+	cases = block_of(e, list, TEXTS)
+	if #cases.block.levels != 1 { refused(TEXTS, "${constant_name(list)} has ${#cases.block.levels} level parameters, and a list has one") }
+	u = Parameter(cases.block.levels#1)
+	listed = (rest: Term) => apply(at_levels(list, [u]), rest)
+	type = pi("T", universe(u), universe(Max(Successor(Zero), u)))
+	empty_type = pi("T", universe(u), listed(bound(0)))
+	item_type = pi("T", universe(u), pi("first", bound(0), pi("rest", listed(bound(1)), listed(bound(2)))))
+	if not block_shaped(cases, 1, 1, type, [empty_type, item_type]) or not is_constant(block_case(cases, list, 1), empty_case) or not is_constant(block_case(cases, list, 2), item_case) { refused(TEXTS, "${constant_name(list)} is no block like `enum list(T: Sort(u)): Sort(max(1, u)) { ${constant_name(empty_case)}: list(T), ${constant_name(item_case)}(first: T, rest: list(T)): list(T) }`") }
+	d = declaration_of(e, function)
+	points = apply(at_levels(list, [POINTS_LEVEL]), number_type(n))
+	result = match d.type.shape {
+		Pi(binder, domain, body) => if d.levels is empty and body.loose == 0 and computes_as(e, domain, points) then body else ø
+		_ => ø
+	}
+	if result is ø { refused(TEXTS, "${constant_name(function)} is a ${shown(d.type)}, and a text literal needs a function of one ${shown(points)}") }
+	e.texts = Texts(function, empty_case, item_case, result!)
+}
+# a text literal where a rule computes it: the bound function applied to the list of its code points, each a number
+text_opened(c: Checker, value: text): Term := {
+	n = c.environment.numbers ?? refused(TEXTS, "no numbers are declared")
+	texts = c.environment.texts ?? refused(TEXTS, "no texts are declared, so a text literal means nothing")
+	nat = number_type(n)
+	points = value.codepoints.reverse().fold(apply(at_levels(texts.empty_case, [POINTS_LEVEL]), nat), (rest, point) => apply_all(at_levels(texts.item_case, [POINTS_LEVEL]), [nat, numeral(ord(point)), rest]))
+	apply(texts.function, points)
+}
+
+# a shortcut statement, `shortcut(add, plus, plus_zero, plus_successor)`: its kind, then the functions it binds and
+# the theorems that fix them
+shortcut_kind(word: text): Shortcut := {
+	at = SHORTCUT_WORDS.index_of(word)
+	if at == 0 { refused(SHORTCUT, "${word} is no shortcut; the shortcuts are ${SHORTCUT_WORDS}") }
+	DECLARED_SHORTCUTS#at
+}
+shortcut_bound(e: Environment, kind: Shortcut, constants: list<Term>) := {
+	count = #bound_kinds(kind)
+	shortcut_declared(e, kind, constants.take(count), constants.drop(count))
+}
+# the functions a shortcut statement binds: a divide statement binds the remainder too
+bound_kinds(kind: Shortcut): list<Shortcut> := if kind == Shortcut.Divide then [Shortcut.Divide, Shortcut.Remainder] else [kind]
+
+# `shortcut(kind, functions, theorems)`: each function has the shortcut's type and the theorems fix it on every number
+# (the table in notes/theory.md); neither rests on an axiom, and a function the statements name is bound already
+shortcut_declared(e: Environment, kind: Shortcut, functions: list<Term>, theorems: list<Term>) := {
+	n = e.numbers ?? refused(SHORTCUT, "no numbers are declared")
+	kinds = bound_kinds(kind)
+	if kind == Shortcut.Remainder or #functions != #kinds { refused(SHORTCUT, "${kind} binds ${#kinds} functions, and is given ${#functions}") }
+	for at in 1 to #kinds {
+		if bound_function(n, kinds#at) is not ø { refused(SHORTCUT, "${kinds#at} is bound already") }
+		axiom_free(e, functions#at)
+		d = declaration_of(e, functions#at)
+		wanted = function_type(n, kinds#at)
+		if d.levels is not empty or not computes_as(e, d.type, wanted) { refused(SHORTCUT, "${d.name} is a ${shown(d.type)}, and ${kinds#at} takes a ${shown(wanted)}") }
+	}
+	statements = shortcut_statements(n, kind, functions)
+	if #theorems != #statements { refused(SHORTCUT, "${kind} is fixed by ${#statements} theorems, and is given ${#theorems}") }
+	for at in 1 to #statements { theorem_fixes(e, theorems#at, statements#at) }
+	for at in 1 to #kinds { n.shortcuts += [BoundFunction(functions#at, kinds#at)] }
+}
+
+TYPE := type_at(Zero)
+
+# whether a declared type is the wanted one up to computing, `0` standing for `nat.zero`
+computes_as(e: Environment, type: Term, wanted: Term): bool := equal(checker(e, []), type, wanted)
+
+# a declaration resting on no axiom
+axiom_free(e: Environment, constant: Term) := {
+	resting = axioms_of(e, constant)
+	if resting is not empty { refused(SHORTCUT, "${constant_name(constant)} rests on the axiom ${resting#1}") }
+}
+# a theorem whose type is the statement, resting on no axiom
+theorem_fixes(e: Environment, theorem: Term, statement: Term) := {
+	d = declaration_of(e, theorem)
+	match d.kind {
+		Theorem(value) => ø
+		_ => refused(SHORTCUT, "${d.name} is no theorem")
+	}
+	if d.levels is not empty or not computes_as(e, d.type, statement) { refused(SHORTCUT, "${d.name} states ${shown(d.type)}, and the shortcut needs ${shown(statement)}") }
+	axiom_free(e, theorem)
+}
+
+# the function bound to a shortcut, ø while none is
+# the type of the numbers
+number_type(n: Numbers): Term := n.number
+bound_function(n: Numbers, kind: Shortcut): Term? := (n.shortcuts.find(bound => bound.kind == kind) ?? return ø).function
+# the function a statement needs bound first
+needed(n: Numbers, kind: Shortcut, by: Shortcut): Term := bound_function(n, kind) ?? refused(SHORTCUT, "${by} needs ${kind} bound first")
+
+# a shortcut's function type: two numbers to a number, or to a truth value for a comparison
+function_type(n: Numbers, kind: Shortcut): Term := {
+	nat = number_type(n)
+	pi("m", nat, pi("n", nat, if compares(kind) then n.truth else n.number))
+}
+compares(kind: Shortcut): bool := kind == Shortcut.Equal or kind == Shortcut.AtMost
+
+# The statements that fix a shortcut's functions on every number, in the order of the table in notes/theory.md
+shortcut_statements(n: Numbers, kind: Shortcut, functions: list<Term>): list<Term> := {
+	m = free(FOR_M.id)
+	k = free(FOR_N.id)
+	z = n.zero
+	f = functions#1
+	match kind {
+		Add => [numbers_equal(n, call(f, m, z), m), numbers_equal(n, call(f, m, next(n, k)), next(n, call(f, m, k)))]
+		Subtract => [numbers_equal(n, call(f, m, z), m), numbers_equal(n, call(f, z, k), z), numbers_equal(n, call(f, next(n, m), next(n, k)), call(f, m, k))]
+		Multiply => [numbers_equal(n, call(f, m, z), z), numbers_equal(n, call(f, m, next(n, k)), call(needed(n, Shortcut.Add, kind), call(f, m, k), m))]
+		Equal => [truths_equal(n, call(f, z, z), truth(n, yes)), truths_equal(n, call(f, next(n, m), z), truth(n, no)), truths_equal(n, call(f, z, next(n, k)), truth(n, no)), truths_equal(n, call(f, next(n, m), next(n, k)), call(f, m, k))]
+		AtMost => [truths_equal(n, call(f, z, k), truth(n, yes)), truths_equal(n, call(f, next(n, m), z), truth(n, no)), truths_equal(n, call(f, next(n, m), next(n, k)), call(f, m, k))]
+		Divide => {
+			rest = functions#2
+			add = needed(n, Shortcut.Add, kind)
+			multiply = needed(n, Shortcut.Multiply, kind)
+			at_most = needed(n, Shortcut.AtMost, kind)
+			[numbers_equal(n, call(add, call(multiply, call(f, m, k), k), call(rest, m, k)), m), numbers_equal(n, call(f, m, z), z), truths_equal(n, call(at_most, call(rest, m, next(n, k)), k), truth(n, yes))]
+		}
+		Remainder => []
+	}
+}
+call(f: Term, a: Term, b: Term): Term := apply(apply(f, a), b)
+next(n: Numbers, t: Term): Term := apply(n.successor, t)
+# `left == right` for every m and n it names, between numbers or between truth values
+numbers_equal(n: Numbers, left: Term, right: Term): Term := for_all(n, equation(n, n.number, left, right))
+truths_equal(n: Numbers, left: Term, right: Term): Term := for_all(n, equation(n, n.truth, left, right))
+# `left == right` at a type in Type
+equation(n: Numbers, type: Term, left: Term, right: Term): Term := apply_all(at_levels(n.equality, [Successor(Zero)]), [type, left, right])
+# the statement for every m and n it names, m first
+for_all(n: Numbers, statement: Term): Term := {
+	result = statement
+	for variable in [FOR_N, FOR_M] {
+		inner = abstracted(result, variable.id)
+		if inner.loose > 0 { result = pi(variable.binder, number_type(n), inner) }
+	}
+	result
+}
+
+# --- computing
+
+# a shortcut on two numbers: a number, or for a comparison a truth value. Subtracting past zero gives zero, dividing
+# by zero gives zero and the remainder is then the number itself, as the theorems fix them. A sum or a product past
+# LARGEST is ø: the shortcut does not fire, and the term is left to the definitions and the step budget (6.7)
+shortcut_value(n: Numbers, shortcut: Shortcut, a: int, b: int): Term? := match shortcut {
+	Add => if a <= LARGEST - b then numeral(a + b) else ø
+	Subtract => numeral(if a <= b then 0 else a - b)
+	Multiply => if b == 0 or a <= LARGEST ÷ b then numeral(a * b) else ø
+	Divide => numeral(if b == 0 then 0 else a ÷ b)
+	Remainder => numeral(if b == 0 then a else a % b)
+	Equal => truth(n, a == b)
+	AtMost => truth(n, a <= b)
+}
+truth(n: Numbers, holds: bool): Term := if holds then n.yes_case else n.no_case
+
+# the number a literal holds, ø for any other term
+literal(t: Term): int? := match t.shape {
+	Numeral(value) => value
+	_ => ø
+}
+
+# the number t computes to: a literal, the zero case, or the successor case of a number; ø for any other term. It is
+# computed one level deeper, so a number a long chain of unfoldings makes gives up before the stack does
+number_computed(c: Checker, n: Numbers, t: Term): int? := {
+	u = deeper(c, () => computed(c, t))
+	given = arguments(u)
+	match head(u).shape {
+		Constant(name, levels, _) => if is_constant(head(u), n.zero) and given is empty then 0 else if is_constant(head(u), n.successor) and #given == 1 then successor_of(number_computed(c, n, given#1) ?? return ø) else ø
+		_ => literal(u)
+	}
+}
+
+# What a shortcut makes of t: ø unless t is a bound function without levels applied to two arguments that compute to
+# numbers
+shortcut_fired(c: Checker, t: Term): Term? := {
+	n = c.environment.numbers ?? return ø
+	shortcut = match head(t).shape {
+		Constant(name, levels, id) => if levels is empty then (n.shortcuts.find(bound => constant_id(bound.function) == id) ?? return ø).kind else ø
+		_ => ø
+	}
+	if shortcut is ø { return ø }
+	given = arguments(t)
+	if #given != 2 { return ø }
+	a = number_computed(c, n, given#1) ?? return ø
+	b = number_computed(c, n, given#2) ?? return ø
+	stepped(c)
+	shortcut_value(n, shortcut!, a, b)
+}
+
+# a number taken as the case of the number type it stands for, any other term as it is: a recursor's major premise
+as_case(c: Checker, t: Term): Term := {
+	n = c.environment.numbers ?? return t
+	value = literal(t) ?? return t
+	opened(n, value)
+}
+# a number where a rule asks for a case of the number type: zero, or the successor of the number before it (6.4)
+opened(n: Numbers, value: int): Term := if value == 0 then n.zero else next(n, numeral(value - 1))
+# the number after a number, ø past LARGEST
+successor_of(value: int): int? := if value < LARGEST then value + 1 else ø

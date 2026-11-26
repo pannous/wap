@@ -80,7 +80,7 @@ distinct_instances(functions: list<TypedFunction>, s: TypingState) as list<Typed
 	for typed in functions {
 		key = typed.function.key
 		types = settled_arguments(typed, s)
-		alike = if kept.has(key) then kept[key] else []
+		alike = kept.get(key) ?? []
 		if not alike.any(other => same_types(other, types)) {
 			kept[key] = alike + [types]
 			instance_added(typed, s)
@@ -94,10 +94,9 @@ settled_arguments(typed: TypedFunction, s: TypingState) as list<Node> := typed.a
 # typed code with every unknown settled, the names its calls name too
 settled_everywhere(n: Node, s: TypingState) as Node := {
 	whole = facts_settled(refitted(with_parts(n, part => settled_everywhere(part, s)), n), s)
-	definer = fact_of(whole, DEFINED_AT)
-	if definer == ø { return whole }
+	definer = fact_of(whole, DEFINED_AT) ?? return whole
 	settled = facts_settled(definer, s)
-	with_fact(whole, DEFINED_AT, if s.settled_calls.has(place_key(settled)) then s.settled_calls[place_key(settled)] else settled)
+	with_fact(whole, DEFINED_AT, s.settled_calls.get(place_key(settled)) ?? settled)
 }
 # a node whose type and signature hold no unknown
 facts_settled(n: Node, s: TypingState) as Node := {
@@ -164,8 +163,9 @@ bound_as(letter: Node, type: Node, bound: list<Binding>, s: TypingState) as list
 	# bound to a shape and to the type it narrows, the letter is that type: `[Call(…)] + inner` of a list<Node> adds
 	# two list<Node>s
 	if same_type(narrowed_type(type) ?? type, held) { return bound }
-	# bound to a type and to one it reads as, the letter is the one it reads as: `same(["/"], paths)` of chars and texts
-	if same_type(narrowed_type(held) ?? held, type) or conversion(held, type, s) == Conversion.Read { return bound.filter(binding => binding.key != text(letter)) + [Binding(text(letter), type)] }
+	# bound to a type and to one it reads as, or boxes into, the letter is that one: `same(["/"], paths)` of chars and
+	# texts, `m["a"] = 7` of a map<any, any>
+	if boxed_fit(held, type) or same_type(narrowed_type(held) ?? held, type) or conversion(held, type, s) == Conversion.Read { return bound.filter(binding => binding.key != text(letter)) + [Binding(text(letter), type)] }
 	ø
 }
 # a type holding the letter itself, `α1` for map<text, α1>: no type is that, so a generic letter binds none, while an
@@ -188,14 +188,13 @@ reads_as(held: Node, given: Node, records: Records) as bool := {
 # the letters bound with those a function value binds against a function type, [parameter types, result type]: its
 # function typed for the parameter types, its result the type's result; ø when it takes others or gives another
 function_value_bound(wanted: FunctionType, value: Node, bound: list<Binding>, s: TypingState) as list<Binding>? := {
-	# a letter only the value's written parameter types bind, `f: (A) -> B` given double_it(x: int), bound so first
+	# a letter only the value's written parameter types bind, `f: (A) -> B` given double_it(x: int), bound so first; a
+	# letter bound already stays, `(value: any)` where `(T)` of a list<text> is takes texts
 	own = written_parameters(value, #wanted.parameters, s)
-	known = (1 to #own).fold(bound, (held, at) => if own#at == ø then held else unified(wanted.parameters#at, own#at!, held, s) ?? held)
+	known = (1 to #own).fold(bound, (held, at) => if own#at == ø or not has_letters(type_substituted(wanted.parameters#at, held), s.records) then held else unified(wanted.parameters#at, own#at!, held, s) ?? held)
 	parameters = wanted.parameters.map(type => type_substituted(type, known))
 	if parameters.any(type => has_letters(type, s.records)) { return ø }
-	# a function that gives nothing gives ø, `T` of `-> T` bound to ø; one whose result is not known yet binds nothing
-	typed = value_function_typed(parameters, value, s) ?? return ø
-	result = typed.result ?? (if typed.done then EMPTY_SYMBOL else return ø)
+	result = result_given(value_function_typed(parameters, value, s) ?? return ø) ?? return ø
 	unified(wanted.result, result, known, s) ?? (if conversion(result, wanted.result, s) in STATIC_CONVERSIONS then known else ø)
 }
 # the parameter types a function value's definition writes, the last count of them (a function value's own takes its
@@ -219,7 +218,7 @@ value_function_typed(parameters: list<Node>, type: Node?, s: TypingState) as Typ
 	taken = typed.arguments[#closure ..]
 	if (1 to #parameters).all(at => conversion(parameters#at, taken#at, s) in STATIC_CONVERSIONS + [Conversion.Narrowed]) then typed else ø
 }
-is_lambda_key(key: text, s: TypingState) as bool := s.lambdas.any(lambda => function_key_of(lambda) == key)
+is_lambda_key(key: text, s: TypingState) as bool := s.lambdas.any(lambda => function_key(lambda) == key)
 # a type with its letters replaced by the types they are bound to, none where none is given
 substituted(type: Node?, bound: list<Binding>) as Node? := if type == ø then ø else type_substituted(type, bound)
 # a type with the unknowns it holds settled: only a type holding one looks them up

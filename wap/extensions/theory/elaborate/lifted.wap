@@ -1,0 +1,137 @@
+# Conditions lifted out of recursive types (notes/elaborate.md "Conditions lifted (E8)", notes/coc-plan.md section 7):
+# a field whose type is a subset whose carrier holds a type of its own block, `parts: vector(Quad, 4)`, would hold
+# the block under its condition, which strict positivity refuses. So the block is declared plain, each such field of
+# its carrier (`list(Quad)`); each type of it gets a bool that decides every lifted condition of a value and of the
+# values inside it, along the plain block's recursor; and the name the program wrote is the subset of the plain type
+# where that bool is yes. The cases make plain values, and where the program's type is wanted a value goes down to it
+# as to any subset (obligations.wap): computed, a Quad given three parts is refused by `condition`.
+use "../../../kernel/terms.wap"
+use "../../../kernel/levels.wap"
+use "../../../kernel/environment.wap"
+use "../../../kernel/inductive.wap"
+use "../../../kernel/recursors.wap"
+use "../../../kernel/compute.wap"
+use "../../../kernel/typing.wap"
+use "../../../kernel/show.wap"
+use "../explicit.wap"
+use "../../../core/analyze/holes.wap"
+use "state.wap"
+use "read.wap"
+use "conditions.wap"
+use "obligations.wap"
+use "blocks.wap"
+
+# the marked names of a lifted type's plain type and of its bool, which no program writes
+PLAIN := "plain"
+VALID := "valid"
+# what the program's type says of a plain value: its bool is yes
+EQUAL := "Equal"
+BOOL := "bool"
+YES := "yes"
+NO := "no"
+BOTH := "both"
+# the binder of the plain value a lifted type's condition speaks of
+VALUE_BINDER := "value"
+# the level of a motive that gives a bool, a Type
+BOOL_LEVEL := Successor(Zero)
+
+# a field's condition, lifted out of its type: the field's place among its case's fields, and the condition, a
+# function of the block's parameters, the case's fields and the field's plain value
+class Lifted { field: int; condition: Term }
+# a field type that is a subset whose carrier holds a type of the block: the carrier, and the condition on it
+class Carried { carrier: Term; condition: Term }
+carried(x: Elaborating, domain: Term, types: list<Term>): Carried? := {
+	parts = arguments(computed_subset(x, domain) ?? return ø)
+	held = free_variables(filled(x.el, parts#1))
+	if not types.any(type => held.contains(variable_id(type))) { return ø }
+	Carried(parts#1, parts#2)
+}
+# the kernel name of a lifted type's plain type, and of its bool
+plain_name(name: text): text := "${name}${HIDING_MARK}${PLAIN}"
+valid_name(name: text): text := "${name}${HIDING_MARK}${VALID}"
+
+# The plain block declared, each of its types (plain, in the order written) gets its bool and the name written
+# (written, the same order) the subset where that bool is yes. lifted: the conditions of each written case, in the
+# order of the plain block's cases, whose containers' cases come after them and hold none
+conditions_lifted(x: Elaborating, plain: list<text>, written: list<text>, lifted: list<list<Lifted>>) := {
+	c = x.el.c
+	levels = x.reading.levels.map(name => Parameter(name))
+	first = recursor_of(x, plain#1)
+	parameters = entered(x, first.type, first.facts.parameters)
+	values = parameters.variables.copy()
+	rest = parameters.rest
+	for at in 1 to first.facts.motives {
+		motive = bool_motive(x, binder_domain(c, rest)!)
+		values += [motive]
+		rest = instantiated(binder_body(c, rest), motive)
+	}
+	# the block made plain, nested containers among its types: one minor premise per case of each, in order
+	block = match declaration(x.theory.environment, plain#1)!.kind { Inductive(facts) => facts; _ => refused(BLOCK, "${plain#1} is no inductive type") }
+	fields = block.fields.flat_map(counts => counts)
+	for at in 1 to first.facts.minors {
+		minor = minor_decided(x, binder_domain(c, rest)!, fields#at, if at <= #lifted then lifted#at else [], parameters.variables)
+		values += [minor]
+		rest = instantiated(binder_body(c, rest), minor)
+	}
+	for at in 1 to #plain {
+		recursor = recursor_of(x, plain#at)
+		major = entered(x, instantiated_all(body_under(recursor.type, #values), values))
+		valid = closed_over(c, apply_all(constant_of(x.theory.environment, recursor_name(plain#at), recursor.levels), values + major.variables), parameters.variables + major.variables, yes)
+		unscoped(x.el, major.variables)
+		defined(x, valid_name(written#at), valid)
+		defined(x, written#at, where_valid(x, plain#at, constant_of(x.theory.environment, valid_name(written#at), levels), levels))
+	}
+	unscoped(x.el, parameters.variables)
+}
+# a plain type's recursor, its type at the motive level of a bool and the block's levels
+class RecursorAt { type: Term; levels: list<Level>; facts: RecursorFacts }
+recursor_of(x: Elaborating, plain: text): RecursorAt := {
+	d = declaration(x.theory.environment, recursor_name(plain))!
+	facts = match d.kind { Recursor(facts) => facts; _ => refused(BLOCK, "${plain} has no recursor") }
+	block = x.reading.levels.map(name => Parameter(name))
+	if #d.levels == #block { refused(BLOCK, "${shown(constant_of(x.theory.environment, plain, []))} is a proposition, which holds no condition a bool decides: state the condition as a `where` on its uses") }
+	levels = [BOOL_LEVEL] + block
+	RecursorAt(with_levels(d.type, d.levels, levels), levels, facts)
+}
+# A function type's binders gone into, in scope so a search's holes may name them: the first count of them, or
+# (ø) all; their variables, and what is left inside them
+class Inside { variables: list<Term>; rest: Term }
+entered(x: Elaborating, t: Term, count: int? = ø): Inside := {
+	if count == 0 { return Inside([], t) }
+	parts = match t.shape { Pi(binder, domain, body) => PiParts(binder, domain, body); _ => return Inside([], t) }
+	variable = scoped(x.el, parts.binder, parts.domain)
+	inner = entered(x, instantiated(parts.body, variable), if count is ø then ø else count! - 1)
+	Inside([variable] + inner.variables, inner.rest)
+}
+# a motive that gives a bool for every value of its type
+bool_motive(x: Elaborating, motive: Term): Term := {
+	inside = entered(x, motive)
+	unscoped(x.el, inside.variables)
+	closed_over(x.el.c, bool_type(x), inside.variables, yes)
+}
+# A case's minor premise: yes where the decision of each lifted condition of its fields and each induction hypothesis
+# is yes
+minor_decided(x: Elaborating, minor: Term, fields: int, lifted: list<Lifted>, parameters: list<Term>): Term := {
+	inside = entered(x, minor).variables
+	values = inside.take(fields)
+	decisions = lifted.map(field => decided_bool(x, condition_at(x, apply_all(field.condition, parameters + values), values#(field.field))))
+	unscoped(x.el, inside)
+	closed_over(x.el.c, filled(x.el, all_yes(x, decisions + inside.drop(fields))), inside, yes)
+}
+# yes where every one of the bools is
+all_yes(x: Elaborating, bools: list<Term>): Term := bools.reverse().fold(bool_value(x, YES), (rest, value) => apply_all(constant_of(x.theory.environment, kernel_name(x.theory, BOTH), []), [value, rest]))
+# The program's type: the plain type, at its parameters and indices, where its bool is yes
+where_valid(x: Elaborating, plain: text, valid: Term, levels: list<Level>): Term := {
+	c = x.el.c
+	header = entered(x, declaration(x.theory.environment, plain)!.type)
+	inside = header.variables
+	unscoped(x.el, inside)
+	carrier = apply_all(constant_of(x.theory.environment, plain, levels), inside)
+	value = hypothesis(c, VALUE_BINDER, carrier)
+	holds = apply_all(constant_of(x.theory.environment, kernel_name(x.theory, EQUAL), [BOOL_LEVEL]), [bool_type(x), apply_all(valid, inside + [value]), bool_value(x, YES)])
+	closed_over(c, apply_all(constant_of(x.theory.environment, subset(x), [sort_level(header.rest)]), [carrier, closed_over(c, holds, [value], yes)]), inside, yes)
+}
+bool_type(x: Elaborating): Term := constant_of(x.theory.environment, kernel_name(x.theory, BOOL), [])
+bool_value(x: Elaborating, case: text): Term := constant_of(x.theory.environment, "${kernel_name(x.theory, BOOL)}${DOT}${case}", [])
+# a definition the elaborator made declared, at the block's levels
+defined(x: Elaborating, name: text, value: Term) := declared(x.theory.environment, Declaration(name, x.reading.levels, type_of(x.el.c, value), Defined(value)))

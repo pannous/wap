@@ -59,9 +59,15 @@ rules_loaded(language: Language, code: Node) as Node := match code {
 sequence_rule(statement: Node) as Node := match statement {
 	List(items, Bracket.None, separator) => if separator != Separator.Semicolon and separator != Separator.Comma then statement else match items#1 {
 		Call(called, arguments) => if spelling_written(called) == RULE_ARROW and #arguments == 2 then Call(called, [arguments#1, List([arguments#2] + items[1 ..], Bracket.None, separator)]) else statement
-		_ => statement
+		_ => comma_headed(items, separator) ?? statement
 	}
 	_ => statement
+}
+# `rule for $k, $v in $m $body => …`: the row starts with the rule's word and ends with its `=>`, so the row before the
+# arrow is the rule's pattern (wiki/inventions.md `for key, value in map`)
+comma_headed(items: list, separator: Separator) as Node? := match items.last {
+	Call(called, arguments) => if spelling_written(called) == RULE_ARROW and #arguments == 2 and declares(phrase_items(items#1)) then Call(called, [List([phrase_items(items#1)#1, List([List(phrase_items(items#1)[1 ..], Bracket.None, Separator.Space)] + items[1 .. #items - 1] + [arguments#1], Bracket.None, separator)], Bracket.None, Separator.Space), arguments#2]) else ø
+	_ => ø
 }
 
 # a rule or pattern statement taken in, what it leaves in the code: a pattern its builder, a rule nothing; ø for any
@@ -95,23 +101,21 @@ rule_added(language: Language, written: Node, pattern: Node, template: Node, fac
 	output = if writes_nothing then NOTHING_WRITTEN else ungrouped(template)
 	for hole in holes_in(output) { if not holes_in(normal).contains(hole) and not holes_in(normal).contains(hole + REST_MARK) { refused(written, "the rule writes " + hole + ", which its pattern has no hole for") } }
 	stage = matcher_stage(compiled_pattern(language, normal))
-	# a typed rule meets typed kernel: its pattern and template are lowered as the program is, `twice $x: int`
-	if stage == TYPED_STAGE { normal = lowered(language, normal); output = if writes_nothing then output else forms_built(language, lowered(language, output)) }
+	# a typed rule meets typed kernel: its pattern and template are lowered as the program is, `twice $x: int`; a
+	# refusal stays as written
+	if stage == TYPED_STAGE { normal = lowered(language, normal); output = if writes_nothing or refusal_of(output) != ø then output else forms_built(language, lowered(language, output)) }
 	matcher = compiled_pattern(language, normal)
-	rule = Rule(heads_of(language, normal)#1, matcher, output, names_bound_in(language, output), parameters_bound_in(language, output), written, specificity(matcher) + (if fact == "" then 0 else 1), fact)
+	rule = Rule(heads_of(language, normal)#1, matcher, output, names_bound_in(language, output), parameters_bound_in(language, output), written, specificity(matcher) + (if fact == "" then 0 else 2), fact, "${written}" + matcher.annotations.map(said => " ${said}").join(""))
 	rules = rules_of_stage(language, stage)
-	if not rules.by_head.has(rule.head) { rules.by_head[rule.head] = [] }
-	# a rule loaded again, its file read twice, is the rule already there
-	if rules.by_head[rule.head].filter(other => "${other.written}" == "${written}") is not empty { return }
-	rules.by_head[rule.head].add(rule)
-	rules.checked = no
-	match normal { List(items, Bracket.None, Separator.Space) => words_told(language, items, #matcher.parts.filter(takes_block) > 0); _ => ø }
+	if not rule_added(rules, rule) { return }
+	language.grammar.declares = yes
+	match normal { List(items, Bracket.None, Separator.Space) => words_told(language, items, matcher.parts.any(takes_block)); _ => ø }
 }
 # a phrase pattern's words told the operator stage: the first ones lead it, the words after the first are inner words,
 # each with the words whose phrases it continues
 words_told(language: Language, items: list, block: bool) := {
-	for word in list_heads(language, items) { if block or not language.phrase_words.leading.has(word) { language.phrase_words.leading[word] = block } }
-	for word in items[1 ..].filter(item => item is symbol and not is_hole(item)) { continued(language.phrase_words.inner, spelling_written(word), list_heads(language, items)) }
+	for word in list_heads(language, items) { if block or not language.grammar.phrase_words.leading.has(word) { language.grammar.phrase_words.leading[word] = block } }
+	for word in items[1 ..].filter(item => item is symbol and not is_hole(item)) { continued(language.grammar.phrase_words.inner, spelling_written(word), list_heads(language, items)) }
 }
 # a pattern part that takes a block: a braced sequence, `{ ($pattern => $result)... }`, or a hole of a shape a block has
 takes_block(m: Matcher) as bool := m.test == Test.Sequence and m.bracket == Bracket.Curly or m.test == Test.Hole and m.type != Empty and matches(m, SAMPLE_BLOCK, {})
@@ -123,17 +127,14 @@ refusal_of(template: Node) as text? := phrase_text(template, REFUSE_WORD)
 
 # ---- the stage
 
-# a program's own rules and patterns taken in, then the program shaped by every shape rule loaded
-# DEBT: A module's rules reach files that don't `use` it: all loaded rules go into one table, so once a module is
-#   shaped its rules also apply to every file shaped after it (the types module's and the census's included). Bends
-#   "use builds the language the program is written in". Paid off by a rule table per program: the language's rules
-#   plus those of the modules it uses.
-shaped_program(language: Language, program: Node) as Node := {
-	rest = rules_loaded(language, program)
-	for stage in [SHAPE_STAGE, DECLARED_STAGE, TYPED_STAGE] { terminating(language, rules_of_stage(language, stage)) }
+# a program's own rules and patterns taken in, then the program shaped by the shape rules of its grammar
+shaped_program(language: Language, program: Node) as Node := shaped_rest(language, program, rules_loaded(language, program))
+# code whose rules are taken in already shaped, standing for the program it was
+shaped_rest(language: Language, program: Node, rest: Node) as Node := {
+	for stage in RULE_STAGES { terminating(language, rules_of_stage(language, stage)) }
 	# the rewritten program stands for the program: it keeps its facts, the file it was read from among them; a
 	# program of rules only is an empty block, as Empty carries no facts
-	shaped = rewritten_by(language, language.shape_rules, rest).code ?? Block([])
+	shaped = rewritten_by(language, language.grammar.shape_rules, rest).code ?? Block([])
 	with_facts_of(if shaped is Empty then Block([]) else shaped, program)
 }
 
@@ -170,10 +171,12 @@ parts_applied(language: Language, rules: Rules, whole: Node, fired: list) as Nod
 		List(items, bracket, Separator.Space) => {
 			phrase = with_facts_of(List(items, Bracket.None, Separator.Space), whole)
 			if one_phrase(language, items, bracket) then noted(fired, group_kept(applied(phrase), bracket))!
-			else if bracket == Bracket.Square and items#1 is symbol and language.phrase_words.leading.has(spelling_written(items#1)) then noted(fired, List([applied(phrase)], bracket, Separator.None))!
+			else if bracket == Bracket.Square and items#1 is symbol and language.grammar.phrase_words.leading.has(spelling_written(items#1)) then noted(fired, List([applied(phrase)], bracket, Separator.None))!
 			else with_parts(whole, applied)
 		}
-		List(items, bracket, separator) => with_facts_of(List(statements_applied(language, items, separator, applied, fired), bracket, separator), whole)
+		# a group stage 1 kept round one phrase is opened as stage 1 opens one, for what a later stage writes in it; a block
+		# of one phrase stays a block, as rules read it (`klass P { … }` of test_rules), a list its items
+		List(items, bracket, separator) => if bracket == Bracket.Round and #items == 1 and is_phrase(items#1) then group_kept(applied(items#1), bracket) else with_facts_of(List(statements_applied(language, items, separator, applied, fired), bracket, separator), whole)
 		# a key's word names, a field, a parameter or a map's key, `{yes: 1}`: no rule of one word takes it, its value is code
 		Key(left, Op.Colon, right) => if left is symbol then with_facts_of(Key(left, Op.Colon, applied(right)), whole) else with_parts(whole, applied)
 		_ => with_parts(whole, applied)
@@ -199,12 +202,18 @@ phrase_placed(words: list, bracket: Bracket, origin: Node) as Node := with_facts
 # a rule or pattern line is printed as written
 groupings_written(language: Language, n: Node) as Node := match n {
 	List(items, Bracket.None, Separator.Space) => if declares(items) then n else phrase_written(language, unglued(language, n) ?? n)
-	_ => with_facts_of(with_parts(n, part => groupings_written(language, part)), n)
+	List(items, bracket, separator) => if STATEMENT_SEPARATORS.contains(separator) then refitted(List((1 to #items).map(at => statement_written(language, items, at)), bracket, separator), n) else parts_written(language, n)
+	_ => parts_written(language, n)
 }
+parts_written(language: Language, n: Node) as Node := refitted(with_parts(n, part => groupings_written(language, part)), n)
+# a line that continues the one before is part of its phrase, which the rules read whole: `else if b {…}`
+statement_written(language: Language, statements: list, at: int) as Node := if at > 1 and continued(language, phrase_items(statements#(at - 1)), statements#at) then parts_written(language, statements#at) else groupings_written(language, statements#at)
 phrase_written(language: Language, phrase: Node) as Node := match phrase {
-	List(items, Bracket.None, Separator.Space) => with_facts_of(with_parts(inner_rewritten(language, language.shape_rules, items, phrase) ?? phrase, part => groupings_written(language, part)), phrase)
+	List(items, Bracket.None, Separator.Space) => with_facts_of(with_parts(regrouped(language, language.grammar.shape_rules, items, phrase), part => groupings_written(language, part)), phrase)
 	_ => refused(phrase, "only a spaced phrase is written by its rules")
 }
+# grouped as the walk groups it: a phrase a rule fits whole stays as written, `if a {…} else if b {…}`
+regrouped(language: Language, rules: Rules, items: list, phrase: Node) as Node := if #rule_applied(language, rules, phrase) > 0 then phrase else inner_rewritten(language, rules, items, phrase) ?? phrase
 declares(items: list) as bool := items#1 == symbol(RULE_WORD) or items#1 == symbol(PATTERN_WORD)
 
 # A rule's result as the items it stands for in its list or block: a statement sequence, `A; B`, its statements; a row a
@@ -241,16 +250,11 @@ with_rule_of(item: Node, sequence: Node) as Node := {
 one_phrase(language: Language, items: list, bracket: Bracket) as bool := bracket == Bracket.Curly or bracket == Bracket.Round and not names_pattern(language, items#1)
 
 rewritten(language: Language, rules: Rules, n: Node, fired: list) as Node := {
-	current = n
-	steps = rule_applied(language, rules, current)
-	while steps is not empty {
-		fired[FIRED] = yes
-		fired[CHANGED] = yes
-		if steps#1 is Empty { return steps#1 }
-		current = replaced(current, steps#1)
-		steps = rule_applied(language, rules, current)
-	}
-	current
+	steps = rule_applied(language, rules, n)
+	if steps is empty { return n }
+	fired[FIRED] = yes
+	fired[CHANGED] = yes
+	if steps#1 is Empty then steps#1 else rewritten(language, rules, replaced(n, steps#1), fired)
 }
 
 # a typed rule's holes, each the code it took marked typed already, a sequence's items each (core/bindings.wap TYPED_HOLE)
@@ -263,20 +267,21 @@ typed_holes(bindings: map<text, Node>) as map<text, Node> := {
 marked_typed(code: Node) as Node := if code is Empty then code else with_fact(code, TYPED_HOLE, True)
 # a call of a function the program defines, `f(x)`, is the program's own: no rule of that glued head rewrites it, the
 # program's word wins (phrase rules, `print x`, still fire)
-programs_own(language: Language, n: Node, head: text) as bool := match n { Key(left, Op.None, group) => left is symbol and language.defined_words.has(spelling_written(left)) and head.starts_with(spelling_written(left) + " "); _ => no }
+programs_own(language: Language, n: Node, head: text) as bool := match n { Key(left, Op.None, group) => left is symbol and language.grammar.words.has(spelling_written(left)) and head.starts_with(spelling_written(left) + " "); _ => no }
 # what of a phrase the program wrote, where a refusal of it points: the phrase where it has a place, else its first part
 # that has one (a phrase an earlier rule built, `c_type int`, holds the program's own `int` or the place it came from)
 written_of(n: Node) as Node? := if line_of(n) != ø then n else direct_parts(n).map(written_of).find(found => found != ø)
 # the code the most specific fitting rule builds from it, as a list of that one code, empty when none fits; of two
-# equally specific ones the one under the more specific head, else they are refused
+# equally specific ones the one under the more specific head, else they are refused; a block glued to the phrase's
+# end tried apart when no rule fits it glued (lines.wap apart)
 rule_applied(language: Language, rules: Rules, n: Node) as list<Node> := {
 	# the most specific fitting rule so far
 	best: Rule? = ø
-	best_bindings = {}
+	best_bindings: map<text, Node> = {}
 	for head in heads_of(language, n) {
 		if rules.by_head.has(head) and not programs_own(language, n, head) {
 			for rule in rules.by_head[head] {
-				bindings = {}
+				bindings: map<text, Node> = {}
 				if (rule.fact == "" or fact_of(n, rule.fact) == True) and matches(rule.matcher, n, bindings) {
 					if best != ø and best!.specificity == rule.specificity and best!.head == rule.head { refused(n, "two rules fit equally: ${best!.written} and ${rule.written}") }
 					if best == ø or rule.specificity > best!.specificity { best = rule; best_bindings = bindings }
@@ -284,11 +289,15 @@ rule_applied(language: Language, rules: Rules, n: Node) as list<Node> := {
 			}
 		}
 	}
-	chosen = best ?? return []
+	chosen = best ?? return (if apart(n) == ø then [] else rule_applied(language, rules, apart(n)!))
 	refusal = refusal_of(chosen.template)
 	if refusal != ø { refused(placed_like(n, written_of(n) ?? n), refusal) }
 	taken_holes = if matcher_stage(chosen.matcher) == TYPED_STAGE then typed_holes(best_bindings) else best_bindings
-	result = built(language, chosen.template, with_bound_names(taken_holes, chosen))
+	made = built(language, chosen.template, with_bound_names(taken_holes, chosen))
+	# a declaration rule writes surface code, which the shape rules shape as they shaped the program's (stage 1)
+	result = if matcher_stage(chosen.matcher) == DECLARED_STAGE then rewritten_by(language, language.grammar.shape_rules, made).code ?? made else made
 	taken = if chosen.fact == "" or result is Empty then result else with_fact(result, chosen.fact, False)
-	[if taken is Empty then taken else with_fact(taken, RULE, chosen.written)]
+	# the annotations the rule asked for are spent: what it writes keeps only the others, so it never fires on it again
+	spent = if chosen.matcher.annotations is empty or taken is Empty then taken else with_fact(taken, ANNOTATIONS, List(annotations_of(taken) + annotations_of(n).filter(said => not chosen.matcher.annotations.any(asked => "${asked}" == "${said}")), Bracket.None, Separator.Space))
+	[if taken is Empty then taken else with_fact(spent, RULE, chosen.written)]
 }

@@ -9,4 +9,7 @@ architecture. Let's keep things red rather than ugly. Maybe sometimes we need to
 think we can copy paste lots of functionality."): copy warp's functionality freely, but every ported file fits wap's
 layers and principles: vocabulary as enums or class values, no domain words in core, no repeated code, no environment
 variables, no workaround for a missing form. A piece that works only through a warp hack stays red and gets a card; a
-port that needs a rearchitecture names it and goes to wap-interviewer. wap-reviewer reviews port branches against this.
+port that needs a rearchitecture names it and goes to wap-interviewer. wap-supervisor reviews port branches against this.
+
+Never wait on the integrator (user 2026-11-25): a step that depends on a landing starts on the merged tree as soon as the
+integrator says it compiles; build stacked branches meanwhile. A red found later on main is fixed forward by you.

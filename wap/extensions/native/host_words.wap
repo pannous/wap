@@ -3,6 +3,7 @@
 # the module's values as C takes them by their wasm types: an i32 an address of the caller's memory, given as a pointer
 # to it (0 as NULL), an i64 an int or a pointer as it is, an f64 a double. wasmtime calls main.c's wap_host_callback
 # with the import's record, which calls the driver's export host_word, answered here.
+use foreign
 use "c.wap"
 use "run.wap"
 
@@ -16,7 +17,8 @@ KIND_F64 := 3
 REGISTERS := 8
 # an import's record, the data wasmtime calls it with: the C function, found at its first call (0 before), its result's
 # kind (NO_RESULT for none), a scratch extern, the REGISTERS integer and REGISTERS float arguments of a call, and the
-# library and name it is found by, so a module importing a function no library here has (kernel32's on a Mac) links
+# library and name it is found by, the size of a struct given by value last (0 for none: extensions/c/foreign.wap
+# c_import_name) and whether it opens a window or a sound device (1, its foreign line marked `! Device`), so a module importing a function no library here has (kernel32's on a Mac) links
 # and stops only where it calls it, as warp's driver does
 FUNCTION_SLOT := 0
 RESULT_SLOT := 8
@@ -25,10 +27,19 @@ INTEGERS_SLOT := 40
 FLOATS_SLOT := INTEGERS_SLOT + 8 * REGISTERS
 LIBRARY_SLOT := FLOATS_SLOT + 8 * REGISTERS
 NAME_SLOT := LIBRARY_SLOT + 8
-RECORD_BYTES := NAME_SLOT + 8
+STRUCT_SLOT := NAME_SLOT + 8
+DEVICE_SLOT := STRUCT_SLOT + 8
+RECORD_BYTES := DEVICE_SLOT + 8
+# an import's name is the C name, then its marks: a struct's size `40*byte`, the effect Device
+STRUCT_MARK := " "
+DEVICE_MARK := "Device"
+STRUCT_TIMES := "*"
 NO_RESULT := -1
 # the C names this file finds, the library of main.c's
 callback_name(): int32 := prim data_address("wap_host_callback")
+# WASI's path_readlink as main.c answers it, wasmtime's following no link to an absolute path (types/host.wap real_path)
+READLINK_NAME := "path_readlink"
+readlink_name(): int32 := prim data_address("wap_path_readlink")
 c_library(): int32 := prim data_address("c")
 fired_name(): int32 := prim data_address("c_callback_fired")
 FIRED_NAME_BYTES := 16
@@ -42,6 +53,7 @@ calling: int = 0
 # stops the run naming it
 native_function(library: i64, name: i64): i64 from 'c'
 native_call(function: i64, integers: i64, floats: i64, float_result: i64): i64 from 'c'
+native_call_struct(function: i64, integers: i64, count: i64, bytes: i64, size: i64): i64 from 'c'
 wasm_importtype_type(imported: i64): i64 from 'c'
 wasm_externtype_as_functype_const(type: i64): i64 from 'c'
 wasm_functype_results(type: i64): i64 from 'c'
@@ -50,20 +62,36 @@ wasmtime_linker_define_func(linker: i64, module: i64, module_size: i64, name: i6
 wasmtime_caller_context(caller: i64): i64 from 'c'
 wasmtime_caller_export_get(caller: int, name: int32, size: int, item_at: int): int := prim foreign("c", "wasmtime_caller_export_get", caller, name, size, item_at)
 wasmtime_memory_data(context: i64, memory_at: i64): i64 from 'c'
-free(block: i64): ø from 'c'
 
+# a call of a C function that opens a window or a sound device stops a run under --no-window, so no test or sample run shows a window; a program that only imports
+# one, as window.wap does and skips under windowless(), runs (its record `word`)
+headless_checked(word: int) := {
+	if windowless and long_at(word + DEVICE_SLOT) == 1 {
+		eprint("wap: ${slot_text(word, NAME_SLOT)} from ${slot_text(word, LIBRARY_SLOT)} opens a window or a sound device: refused under --no-window")
+		exit(1)
+	}
+}
+# the C string in an import record's slot as a text
+slot_text(word: int, slot: int): text := c_copied(long_at(word + slot), strlen(long_at(word + slot)))
 # whether an import of the module of that name is a C function's
-is_c_import(module: text): bool := module != "wasi_snapshot_preview1" and module != "host"
+is_c_import(module: text): bool := module != WASI_MODULE and module != "host"
 # the import, `from` and `name` its host name vectors (size, data), defined in the linker as the C function of its name
 c_function_defined(linker: int, imported: int, from: int, name: int): int := {
-	type = wasm_externtype_as_functype_const(wasm_importtype_type(imported))
+	type = import_type(imported)
 	record = host_block(RECORD_BYTES)
 	set_long_at(record + FUNCTION_SLOT, 0)
 	set_long_at(record + LIBRARY_SLOT, strndup(long_at(from + 8), long_at(from)))
-	set_long_at(record + NAME_SLOT, strndup(long_at(name + 8), long_at(name)))
+	parts = vector_text(name).split(STRUCT_MARK)
+	set_long_at(record + NAME_SLOT, strndup(long_at(name + 8), byte_count(parts#1)))
+	sizes = parts.filter(part => part.contains(STRUCT_TIMES))
+	set_long_at(record + STRUCT_SLOT, if sizes is empty then 0 else int(sizes#1.split(STRUCT_TIMES)#1))
+	set_long_at(record + DEVICE_SLOT, if parts.contains(DEVICE_MARK) then 1 else 0)
 	set_long_at(record + RESULT_SLOT, result_kind(type))
-	wasmtime_linker_define_func(linker, long_at(from + 8), long_at(from), long_at(name + 8), long_at(name), type, native_function(host_of(c_library()), host_of(callback_name())), record, 0)
+	import_defined(linker, imported, from, name, callback_name(), record)
 }
+# the import defined in the linker as the C function of the executable's at `callback`, called with `data`
+import_defined(linker: int, imported: int, from: int, name: int, callback: int32, data: int): int := wasmtime_linker_define_func(linker, long_at(from + 8), long_at(from), long_at(name + 8), long_at(name), import_type(imported), native_function(host_of(c_library()), host_of(callback)), data, 0)
+import_type(imported: int): int := wasm_externtype_as_functype_const(wasm_importtype_type(imported))
 # the kind of a function type's one result, NO_RESULT for none
 result_kind(type: int): int := {
 	results = wasm_functype_results(type)
@@ -83,19 +111,25 @@ host_word_answered(word: int, caller: int, given: int, count: int, results: int,
 		# (a float goes in a float register's low 32 bits, where C reads its float; a double fills the register)
 		if host_byte(value) == KIND_F64 or host_byte(value) == KIND_F32 {
 			set_long_at(word + FLOATS_SLOT + 8 * float_count, if host_byte(value) == KIND_F32 then four_bytes(value + VALUE_OFFSET) else number)
-			float_count = float_count + 1
+			float_count += 1
 		} else {
 			set_long_at(word + INTEGERS_SLOT + 8 * integer_count, if host_byte(value) == KIND_I32 then c_pointer(memory, four_bytes(value + VALUE_OFFSET)) else number)
-			integer_count = integer_count + 1
+			integer_count += 1
 		}
-		i = i + 1
+		i += 1
 	}
 	kind = long_at(word + RESULT_SLOT)
 	global calling
 	outer: int = calling
 	global calling = caller
-	if long_at(word + FUNCTION_SLOT) == 0 { set_long_at(word + FUNCTION_SLOT, native_function(long_at(word + LIBRARY_SLOT), long_at(word + NAME_SLOT))) }
-	returned = native_call(long_at(word + FUNCTION_SLOT), word + INTEGERS_SLOT, word + FLOATS_SLOT, if kind == KIND_F64 or kind == KIND_F32 then 1 else 0)
+	if long_at(word + FUNCTION_SLOT) == 0 {
+		headless_checked(word)
+		set_long_at(word + FUNCTION_SLOT, native_function(long_at(word + LIBRARY_SLOT), long_at(word + NAME_SLOT)))
+	}
+	function = long_at(word + FUNCTION_SLOT)
+	size = long_at(word + STRUCT_SLOT)
+	# (a struct given by value is the last integer, a pointer to its bytes)
+	returned = if size > 0 then native_call_struct(function, word + INTEGERS_SLOT, integer_count - 1, long_at(word + INTEGERS_SLOT + 8 * (integer_count - 1)), size) else native_call(function, word + INTEGERS_SLOT, word + FLOATS_SLOT, if kind == KIND_F64 or kind == KIND_F32 then 1 else 0)
 	global calling = outer
 	if results_count > 0 {
 		set_long_at(results, kind)
@@ -116,7 +150,7 @@ word32_at(at: int): int32 := prim i32.load(at)
 # an address of the memory as C's pointer, the address 0 as NULL
 c_pointer(memory: int, address: int): int := if address == 0 then 0 else memory + address
 # C calling back the function a program handed it (lib/callbacks.wap c_callback; lib/native/callbacks.h, whose
-# trampoline of the slot calls the driver's export c_callback_answered): the export c_callback_fired(slot, a, b, c, d,
+# trampoline of the slot calls the driver's export c_callback_fired): the export c_callback_fired(slot, a, b, c, d,
 # e, f) of the module whose C call is in progress, its int result C's
 callback_answered(slot: int, a: int, b: int, c: int, d: int, e: int, f: int): int := {
 	global calling

@@ -53,7 +53,6 @@ Owned elsewhere, not ranked here:
 | parse/atoms.wap:68 and :119, decimals are f64, long ints read as floats | low until after self-build | exact numbers |
 | core/format.wap:5, format prints no comments | low | the printer reads Meta |
 | sugar/definitions.wap:17, `public` changes nothing | low | untyped words module-private |
-| sugar/loops.wap:14, `for` is two rules, no iterator | low | the first third kind of thing to walk |
 | sugar/records.wap:8, the class rule's helper words are ordinary words | low | private words for rule files |
-| types/c.wap:36, C pointers dangle if the memory moves | low on wasmtime | — |
+| lib/foreign.wap, C pointers dangle if the memory moves | low on wasmtime | — |
 | extensions/native/commands.wap, a command's words one spaced text | low | a native list of texts (native memory) |

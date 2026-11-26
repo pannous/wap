@@ -3,6 +3,7 @@
 
 use "../stage.wap"
 use "../bindings.wap"
+use "../type_notation.wap"
 
 # What a name refers to: its kind as seen from the function that defined it, and the defining name itself
 # (owner: a case's enum)
@@ -11,12 +12,14 @@ class Definition { name: text; kind: DefinitionKind; definer: Node; depth: int; 
 # The definitions a name may mean, layer by layer, innermost first: a block's, a function's parameters …, the
 # program's, then the used modules' and the types module's; each layer finds its definitions of a name through its index
 class Layer { definitions: list<Definition>; index: NameIndex = NameIndex() }
-# looped: inside a loop of the program's own statements, whose functions capture the program variables they read
-class Scope { layers: list<Layer> = []; looped: bool = no }
+# looped: inside a loop of the program's own statements, whose functions capture the program variables they read;
+# standard: the words of the standard library's modules, each with the modules defining it, looked up only where no
+# layer defines a name
+class Scope { layers: list<Layer> = []; looped: bool = no; standard: map<text, list<text>> = {} }
 # a scope of these definitions alone
 scope_of(definitions: list<Definition>) as Scope := Scope([Layer(definitions)])
 # a scope with these definitions in front of it, innermost
-within(scope: Scope, definitions: list<Definition>) as Scope := if definitions is empty then scope else Scope([Layer(definitions)] + scope.layers, scope.looped)
+within(scope: Scope, definitions: list<Definition>) as Scope := if definitions is empty then scope else Scope([Layer(definitions)] + scope.layers, scope.looped, scope.standard)
 # the definitions of a name, innermost first
 named_in(scope: Scope, name: text) as list<Definition> := scope.layers.flat_map(layer => items_named(layer.index, layer.definitions, name, definition => definition.name))
 # every definition, innermost first
@@ -34,14 +37,21 @@ definitions_meant(name: text, scope: Scope) as list<Definition> := {
 	meant = []
 	for definition in (if others is empty then values else others) {
 		if not is_function(definition) { return if meant is empty then [definition] else meant }
-		meant = meant + [definition]
+		meant += [definition]
 	}
 	meant
 }
 # what a word a rule spells itself may mean: the functions of its name past any variable that would hide them, the
 # predicate `missing` of `x == ø` beside a program's variable `missing`; where none has the name, what any name means
 rule_word_meant(name: text, scope: Scope) as list<Definition> := {
-	functions = named_in(scope, name).filter(is_function)
+	functions = functions_named(name, scope)
 	if functions is empty then definitions_meant(name, scope) else functions
 }
+functions_named(name: text, scope: Scope) as list<Definition> := named_in(scope, name).filter(is_function)
+# a called name whose nearest definition is a value carries the functions of its name further out, which take the
+# call where the value is no function: `min(1, 2)` beside the units' value min
+with_functions_beyond(bound: Node, given: int?, nearest: Definition, scope: Scope) as Node := if given == ø or is_function(nearest) or functions_named(text(bound), scope) is empty then bound else with_fact(bound, FUNCTIONS_BEYOND, data_list(functions_named(text(bound), scope).map(definition => definition.definer)))
 is_function(definition: Definition) as bool := definition.kind == DefinitionKind.Function or definition.kind == DefinitionKind.Library
+# a value right of `is`, `3 is 3`, or a variable's name, `x is y`, asks equality; a type's name or notation tests the type
+VALUE_KINDS = [DefinitionKind.Local, DefinitionKind.Parameter, DefinitionKind.Capture, DefinitionKind.Global, DefinitionKind.Field]
+names_value(tested: Node, scope: Scope) as bool := if tested is symbol then definitions_meant(text(tested), scope).any(definition => VALUE_KINDS.contains(definition.kind)) else type_parts(tested) == ø

@@ -1,0 +1,59 @@
+# Proof by cases told apart (wiki/proof.md "Ways to prove"): a hypothesis that two values are equal whose sides
+# compute to different cases of an enum proves any goal. The equality carries `(g: G) => g` along the hypothesis,
+# its motive choosing, by the enum's recursor, `G -> G` at the left side's case and G at every other: what holds at
+# the left side then holds at the right. So `x > 0` at x = 0, computing to `no == yes`, proves whatever is asked
+use "../../kernel/terms.wap"
+use "../../kernel/inductive.wap"
+use "../../kernel/environment.wap"
+use "../../kernel/typing.wap"
+use "../../kernel/compute.wap"
+use "../../kernel/numbers.wap"
+use "../../kernel/recursors.wap"
+use "../../kernel/nested.wap"
+use "../../core/analyze/holes.wap"
+use "../../core/analyze/unify.wap"
+use "../theory/elaborate/match.wap"
+use "goals.wap"
+use "rewriting.wap"
+
+# the name of the proof the hypothesis carries, of what holds at the left side
+KEPT := "g"
+
+by_cases_apart(goal: Goal): Term? := {
+	wanted = filled(goal.el, goal.statement)
+	if open(goal.el, wanted) { return ø }
+	for parameter in goal.parameters {
+		proof = apart(goal.el.c, filled(goal.el, type_of(goal.el.c, parameter)), parameter, wanted)
+		if proof is not ø { return proof }
+	}
+	ø
+}
+# a proof of the goal from a hypothesis whose sides compute to different cases, ø for any other hypothesis
+apart(c: Checker, given_type: Term, given: Term, wanted: Term): Term? := {
+	equation = equation_of(c, given_type) ?? return ø
+	type = computed(c, equation.type)
+	recursor = case_recursor(c, type) ?? return ø
+	facts = recursor_facts(c.environment, recursor.name)!
+	left = case_at(c, facts, equation.left) ?? return ø
+	right = case_at(c, facts, equation.right) ?? return ø
+	if left == right { return ø }
+	kept = hypothesis(c, KEPT, wanted)
+	choices = (1 to #facts.cases).map(at => if at == left then closed_over(c, wanted, [kept], no) else wanted)
+	chooser = chosen(c, recursor, type, arguments(type).take(facts.parameters), choices)
+	carried(c, equation, given, closed_over(c, kept, [kept], yes), value => apply(chooser, value))
+}
+# the place among the recursor's cases of the case a value computes to, ø where it computes to none
+case_at(c: Checker, facts: RecursorFacts, value: Term): int? := {
+	at = case_place(facts, as_case(c, computed(c, value)))
+	if at == 0 then ø else at
+}
+# the function choosing a proposition by the case of a value: the recursor at the parameters, into Prop, each minor
+# premise its choice under the case's fields
+chosen(c: Checker, recursor: Declaration, type: Term, parameters: list<Term>, choices: list<Term>): Term := {
+	start = apply_all(constant_of(c.environment, recursor.name, [Successor(Zero)] + constant_levels(head(type))), parameters)
+	choices.fold(apply(start, lambda(CARRIED_VALUE, type, PROP)), (applied, choice) => {
+		minor = opened(c, computed(c, type_of(c, applied)), 1).binders#1.domain
+		fields = opened(c, minor, binders_counted(minor)).binders
+		apply(applied, closed_over(c, choice, variables(fields), yes))
+	})
+}

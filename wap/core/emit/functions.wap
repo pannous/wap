@@ -2,6 +2,8 @@
 # function values and their captures; calls.
 
 use folder
+use "../../kernel/opcodes.wap"
+use "../../kernel/primitives.wap"
 use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
@@ -17,7 +19,6 @@ INIT_EXPORT = "warp/start"
 # `prim shown(print(show(x)))`: the statement a script shows its value by, its code that of the print
 SHOWN_VALUE = "shown"
 
-function_key(form: Define) as text := place_key(defined_name(form))
 # what a module exports a definition by: its id and its word, as a dispatching function placed like a definition
 # shares its id, not its word
 export_key(definer: Node) as text := "${definer_id(definer)} ${definer}"
@@ -34,6 +35,8 @@ function_placed(form: Define, p: Program) as Placed := match form { Define(name,
 	if placed_by_key(p.functions, place_key(declared_name(name))) != ø { refused(name, "the typing stage wrote two definitions of this function for one type") }
 	p.functions += [Placed(place_key(declared_name(name)), reserved_function(p.m, types, if valued(signed) then [signed] else []), signed, types)]
 	named_function(p.m, p.functions.last.index, header_line(form))
+	word = runtime_word(text(declared_name(name)), items_of(parameters).map(type_given))
+	if word != ø { p.helpers[word!] = p.functions.last.index }
 	p.functions.last
 } }
 # A function's body: its parameters the first slots of a new frame, its body's value its result
@@ -45,7 +48,7 @@ function_bodied(form: Define, p: Program) := match form { Define(name, parameter
 	signed = placed.type
 	f.signed = signed
 	loaded = captures_loaded(form, items_of(parameters), p, f)
-	value = signed_fit(code(body, p, f), body, f, p)
+	value = signed_fit(code_at(yes, body, p, f), body, f, p)
 	given = result_type(name, value, f)
 	if valued(signed) and given != signed and given != NEVER { refused(name, "this function's body gives another type than its signature says") }
 	finished_body = if valued(signed) or given == NEVER then value.instructions else dropped(value)
@@ -95,7 +98,7 @@ function_of(m: WasmModule, parameters: list<list<int>>, body: Code, f: Frame) as
 # a parameter's type, as the typing stage gives it
 parameter_type(parameter: Node, function: Node, p: Program) as list<int> := known_layout(type_of(declared_name(parameter)), p, function)
 # A call of a function the program or the types module defined, its arguments of its parameters' types
-call_code(form: Node, called: Node, arguments: list<Node>, p: Program, f: Frame) as Code := {
+call_code(form: Node, called: Node, arguments: list<Node>, p: Program, f: Frame, last: bool = no) as Code := {
 	if is_case(called) { return case_value_code(form, called, arguments, p, f) }
 	if (not called is symbol or not names_function(called)) and function_parts(fact_of(called, TYPE)) != ø { return value_call_code(form, called, arguments, p, f) }
 	kept = if names_function(called) and p.in_place.has(defining_key(called)) then in_place_body(p.in_place[defining_key(called)]) else ø
@@ -104,7 +107,9 @@ call_code(form: Node, called: Node, arguments: list<Node>, p: Program, f: Frame)
 	if #arguments != #function.parameters { refused(form, "the call gives ${#arguments} arguments, the function takes ${#function.parameters}") }
 	given = (1 to #arguments).map(at => fitted(code(arguments#at, p, f), function.parameters#at, arguments#at, p))
 	if not (1 to #given).all(at => passes(given#at.type, function.parameters#at, p.m)) { refused(form, "the arguments are not of the parameters' types") }
-	finished(Code(function.type, given.flat_map(argument => argument.instructions) + instruction(CALL, [function.index])))
+	passed = given.flat_map(argument => argument.instructions)
+	if last and function.type == f.signed { return Code(NEVER, passed + instruction(RETURN_CALL, [function.index])) }
+	finished(Code(function.type, passed + instruction(CALL, [function.index])))
 }
 # A function whose body is only a primitive of its parameters in their order, `byte_at(t, at) := prim array.get_u(t,
 # at)`: a call compiles to its arguments, fitted to the primitive's operands, then the primitive in place, as a
@@ -119,31 +124,41 @@ in_place_code(kept: Prim, arguments: list<Node>, p: Program, f: Frame) as Code :
 # its primitive, typed as the function's signature says (a generic body's own type is its type variable)
 in_place_body(definition: Define) as Node := match definition { Define(name, parameters, body) => {
 	result = signed_parts(declared_name(name)).result
-	if text(result) == EMPTY_TYPE_WORD then body else with_fact(body, TYPE, result)
+	if text(result) == EMPTY_TYPE then body else with_fact(body, TYPE, result)
 } }
 # whether a value of one wasm type may be passed where another is taken: the same type, code that never finishes, or a
 # list where any list is taken (a list<T> given to a `list` parameter, its type extending the list base)
-passes(given: list<int>, taken: list<int>, m: WasmModule) as bool := given == taken or given == NEVER or (taken == nullable(list_base(m)) and given#1 == NULLABLE_REFERENCE)
+passes(given: list<int>, taken: list<int>, m: WasmModule) as bool := given == taken or given == NEVER or (taken == nullable(list_base(m)) and given#1 == NULLABLE_REFERENCE) or supertype_passes(given, taken, m)
+# a reference to a struct passes where one to its supertype is taken, a class's instance where the class it extends is
+supertype_passes(given: list<int>, taken: list<int>, m: WasmModule) as bool := {
+	sub = m.supertypes.keys.find(at => given.drop(1) == signed(at)) ?? return no
+	passes([given#1] + signed(m.supertypes[sub]), taken, m)
+}
 called_function(form: Node, called: Node, p: Program) as Placed := {
 	if not names_function(called) { refused(form, "the emitter calls functions, not a ${binding_of(called)} yet") }
 	placed_for(p.functions, called) ?? refused(form, "this function was never placed")
 }
 # A module's exports (wiki/wasm-representation.md "Export names"): each function compiled once, by its export key, under its
 # header line written as wap, `add(a: int, b: int = 1) → int`, which tells overloads apart, and under its plain word
-# too where it is the word's one definition in the file or among the exports (a used module's `export`)
+# too where it is the word's one definition in the file or among the exports (a used module's `export`); a dispatcher
+# (core/analyze/dispatch.wap) only under the plain word it dispatches
 functions_exported(statements: list<Node>, exports: list<text>, p: Program) := {
-	own = statements.filter(s => s is Define and (file_of(defined_name(s)) == p.source or exports.contains(export_key(defined_name(s)))))
-	for definition in statements.filter(s => s is Define and exports.contains(export_key(defined_name(s)))) {
+	own = statements.filter(s => is_exported(s, exports) or s is Define and file_of(defined_name(s)) == p.source)
+	for definition in statements.filter(s => is_exported(s, exports)) {
 		placed = placed_by_key(p.functions, function_key(definition)) ?? refused(definition, "this function was never placed")
 		# the header line last, the name a backtrace shows
 		for name in export_names(definition, own) { exported(p.m, name, FUNCTION_KIND, placed.index) }
 	}
 }
+is_exported(statement: Node, exports: list<text>) as bool := statement is Define and (exports.contains(export_key(defined_name(statement))) or has_fact(defined_name(statement), EXPORTED_AS))
 export_names(definition: Define, own: list<Node>) as list<text> := {
-	name = text(defined_name(definition))
-	alone = #own.filter(other => text(defined_name(other)) == name) == 1 and not [MAIN_EXPORT, INIT_EXPORT, MEMORY_EXPORT].contains(name)
+	name = plain_word(definition)
+	if has_fact(defined_name(definition), EXPORTED_AS) { return [name] }
+	alone = #own.filter(other => plain_word(other) == name) == 1 and not [MAIN_EXPORT, INIT_EXPORT, MEMORY_EXPORT].contains(name)
 	(if alone then [name] else []) + [header_line(definition)]
 }
+# the word a definition is exported under alone: its name, a dispatcher's the word it dispatches
+plain_word(definition: Define) as text := text(fact_of(defined_name(definition), EXPORTED_AS) ?? defined_name(definition))
 # each value compiled once, the program's own global, under its header line `x: int`: a module using it shares it,
 # exported once however often it is assigned
 values_exported(program: Node, exports: list<text>, p: Program) := {
@@ -164,5 +179,5 @@ value_header(name: Node) as text := "${name}: ${type_text(type_of(name))}"
 # the header line of a function's instance, with the types typing gave it
 header_line(definition: Define) as text := match definition { Define(name, parameters, body) => {
 	result = signed_parts(declared_name(name)).result
-	signature_text(declared_name(name), items_of(parameters), if text(result) == EMPTY_TYPE_WORD then ø else result, EXPORT_ARROW)
+	signature_text(declared_name(name), items_of(parameters), if text(result) == EMPTY_TYPE then ø else result, EXPORT_ARROW)
 } }
