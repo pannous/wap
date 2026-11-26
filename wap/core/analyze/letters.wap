@@ -6,6 +6,7 @@ use "../errors.wap"
 use "../stage.wap"
 use "../type_notation.wap"
 use "../../kernel/forms.wap"
+use "../../kernel/terms.wap"
 use "../bindings.wap"
 
 # Generic letters (wiki/type.md "Foreign type names and generic letters"): a one-letter type name, `f(x: T)`, stands
@@ -14,17 +15,18 @@ use "../bindings.wap"
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 is_letter(type: Term?, records: Records) as bool := is_word(type) and #type_text(type) == 1 and LETTERS.contains(type_text(type)) and record_named(records, type) == ø
 has_letters(type: Term?, records: Records) as bool := is_letter(type, records) or (type_parts(type) ?? []).any(part => has_letters(part, records))
-# An empty list's item type before a use settles it, α1, α2 … (data.wap list_typed): bound like a letter by the calls
-# that use the list, `xs + [1]` settles it to int; settled everywhere once the program is typed, any where none did
-UNKNOWN_MARK = "α"
+# An empty list's item type before a use settles it, α1, α2 … (data.wap list_typed): a hole of the typing state's
+# elaboration (holes.wap), bound like a letter by the calls that use the list and answered so, `xs + [1]` settles it
+# to int; filled in everywhere once the program is typed, any where nothing answered it
 UNSETTLED = "this value's type is not settled yet where a function without a written result type takes it: write its type, `xs: list<int> = []`"
 unknown_type(s: TypingState) as Term := {
-	s.unknowns += 1
-	word_term(UNKNOWN_MARK + text(s.unknowns))
+	unknown_hole = hole(s.el, UNKNOWN_MARK, DATA_TERM)
+	s.unknowns[type_text(unknown_hole)] = unknown_hole
+	unknown_hole
 }
-is_unknown(type: Term?) as bool := is_word(type) and type_text(type).starts_with(UNKNOWN_MARK)
+is_unknown(type: Term?) as bool := type != ø and variable_id(type!) != 0
 holds_type(type: Term, part: Term) as bool := type == part or (type_parts(type) ?? []).any(each => holds_type(each, part))
-has_unknowns(type: Term?) as bool := is_unknown(type) or (type_parts(type) ?? []).any(has_unknowns)
+has_unknowns(type: Term?) as bool := type != ø and type!.holds_free
 # a parameter of a bare `list` or `enum` takes any list or enum alike, so an unknown item type it is given forces no
 # instance of its own: `#[]` is 0 (a typed instance found again once its unknowns settle)
 takes_any_item(written: Term?) as bool := is_word(written) and CONTAINER_KINDS.contains(type_text(written!))
@@ -37,15 +39,19 @@ settles(given: Term, wanted: Term, s: TypingState) as bool := {
 }
 # the unknowns a call's binding settled, remembered for every later use
 settled_by(bound: list<Binding>, s: TypingState) := {
-	for binding in bound { if is_unknown(word_term(binding.key)) and type_keyed(binding.key, s.settled) == ø { unknown_settled(binding.key, type_substituted(binding.type, bound), s) } }
+	for binding in bound {
+		unknown_hole = s.unknowns.get(binding.key)
+		if unknown_hole != ø and is_unknown(filled(s.el, unknown_hole!)) { unknown_settled(unknown_hole!, type_substituted(binding.type, bound), s) }
+	}
 }
 # an unknown settled to a type, remembered for every later use; one holding function values takes a further one in
 # instead, and settles only to their signature (core/analyze/function_values.wap member_settled)
-unknown_settled(key: text, type: Term, s: TypingState) := {
-	if functions_joined(word_term(key), type, s) != ø { return }
+unknown_settled(unknown_hole: Term, type: Term, s: TypingState) := {
+	if functions_joined(unknown_hole, type, s) != ø { return }
+	key = type_text(unknown_hole)
 	# each value it holds typed for the signature now, while typing still settles what the instance asks
 	if s.members.has(key) and function_parts(type) != ø { for own in s.members[key] { adapted_name(own, type, s) } }
-	s.settled += [Binding(key, type)]
+	if not unified(s.el, unknown_hole, type) { raise("the unknown_hole ${key} settles to ${type_text(type)}, which the kernel refuses") }
 }
 # A call of a function for types an unknown still holds: typed once the unknowns settle, so no instance is made for a
 # guess; meanwhile of its written result type, which a function typed later must write
@@ -58,8 +64,8 @@ deferred_typed(definition: Signature, types: list, letters: list<Binding>, s: Ty
 # every unknown settled, one nothing settled as any (it held no item that mattered), then the deferred calls' functions
 # typed for the settled types; a function's own deferred calls are typed in turn
 all_settled(s: TypingState) := {
-	while s.deferred or #s.settled < s.unknowns {
-		for at in 1 to s.unknowns { settled_by([Binding(UNKNOWN_MARK + text(at), ANY_TERM)], s) }
+	while s.deferred or s.unknowns.values().any(unknown_hole => is_unknown(filled(s.el, unknown_hole))) {
+		for key in s.unknowns.keys() { settled_by([Binding(key, ANY_TERM)], s) }
 		waiting = s.deferred
 		s.deferred = []
 		for call in waiting {
@@ -222,11 +228,11 @@ is_lambda_key(key: text, s: TypingState) as bool := s.lambdas.any(lambda => func
 # a type with its letters replaced by the types they are bound to, none where none is given
 substituted(type: Term?, bound: list<Binding>) as Term? := if type == ø then ø else type_substituted(type, bound)
 # a type with the unknowns it holds settled: only a type holding one looks them up
-settled_type(type: Term, s: TypingState) as Term := if has_unknowns(type) then type_substituted(type, s.settled) else type
+settled_type(type: Term, s: TypingState) as Term := if has_unknowns(type) then filled(s.el, type) else type
 settled_optional(type: Term?, s: TypingState) as Term? := if type == ø then ø else settled_type(type, s)
 type_substituted(type: Term, bound: list<Binding>) as Term := {
 	if bound is empty { return type }
-	if is_word(type) {
+	if is_word(type) or is_unknown(type) {
 		held = type_keyed(type_text(type), bound) ?? return type
 		return if held == type then type else type_substituted(held, bound)
 	}
