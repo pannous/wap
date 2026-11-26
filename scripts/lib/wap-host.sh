@@ -25,7 +25,8 @@ guest_file() { if on_windows; then echo "/$(drive)$1"; else echo "$1"; fi; }
 # so a path Git Bash writes as /<drive>/… reaches it as /…, left so for the module (MSYS_NO_PATHCONV); the module's own
 # file wasmtime opens as the host names it
 on_windows() { case $(uname -s) in MINGW* | MSYS*) return 0 ;; *) return 1 ;; esac; }
-drive() { pwd | cut -d/ -f2; }
+# the current folder's drive, read as POSIX writes it: a sh a Windows program starts holds it as Windows does, D:/a
+drive() { cygpath -u "$PWD" | cut -d/ -f2; }
 root_folder() { if on_windows; then local drive=$(drive); echo "${drive^^}:\\::/"; else echo /; fi; }
 module_path() { if on_windows && [[ $1 == /$(drive)/* ]]; then echo "${1#/$(drive)}"; else echo "$1"; fi; }
 host_path() { if on_windows; then cygpath -w "$1"; else echo "$1"; fi; }
