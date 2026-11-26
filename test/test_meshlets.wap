@@ -1,0 +1,80 @@
+# the outcomes of warp's test/graphics/test_meshlets.pairs.warp: meshlet clustering, grid LOD, frustum and cone
+# culling. The coarse mesh is every other vertex of an even heightfield; touching cases stay visible
+use "check.wap"
+use meshlets
+use bits
+use geometry
+
+near(a: float, b: float): bool := abs(a - b) < 0.000001
+peak_heights := [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+flat = grid_levels(2, 2, flat_heights(2, 2))
+peak = grid_levels(2, 2, peak_heights)
+check("a flat grid coarsens exactly, a peak is 1 above the coarse surface", [#flat[0].triangles, #flat[1].triangles, #peak[0].triangles, #peak[1].triangles, near(flat[1].error, 0.0), near(peak[1].error, 1.0)], [8, 2, 8, 2, yes, yes])
+
+levels = grid_levels(4, 6, flat_heights(4, 6))
+check("48 triangles stay one cluster", [#levels[0].triangles, #levels[0].clusters, #levels[0].clusters[0].triangles, #levels[1].triangles], [48, 1, 48, 12])
+clusters = cluster_triangles(grid_triangles(8, 6, flat_heights(8, 6)))
+check("64 triangles fill a cluster", clusters.map(cluster => #cluster.triangles), [64, 32])
+
+flat_sphere = flat[0].clusters[0].sphere
+peak_sphere = peak[0].clusters[0].sphere
+check("the box sphere holds the corners", [near(flat_sphere.center[0], 1.0), near(flat_sphere.center[1], 1.0), near(flat_sphere.center[2], 0.0), near(flat_sphere.radius, sqrt(2.0)), near(peak_sphere.center[2], 0.5), near(peak_sphere.radius, 1.5)], [yes, yes, yes, yes, yes, yes])
+
+up = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+down = [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+flat_line = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]
+mixed = cluster_triangles([up, down])
+degenerate = cluster_triangles([flat_line])
+flat_cone = flat[0].clusters[0].cone
+check("a flat grid may be cone-culled, opposite and degenerate triangles may not", [flat_cone.cullable, near(flat_cone.cutoff, 0.0), near(flat_cone.axis[2], 1.0), peak[0].clusters[0].cone.cullable, mixed[0].cone.cullable, degenerate[0].cone.cullable, cluster_triangles([up, flat_line])[0].cone.cullable], [yes, yes, yes, yes, no, no, no])
+
+cs = flat[0].clusters
+r = cs[0].sphere.radius
+seen(planes: list<list<float>>, camera: list<float>): int := #visible_clusters(cs, planes, camera)
+check("in front stays, behind goes, exactly a radius behind stays", [seen([], [1.0, 1.0, 10.0]), seen([], [1.0, 1.0, -10.0]), seen([], [1.0, 1.0, -r]), seen([], [1.0, 1.0, -r - 1])], [1, 0, 1, 0])
+check("a plane touching the sphere keeps it, one step further drops it", [seen([[1.0, 0.0, 0.0, -1 - r]], [1.0, 1.0, 10.0]), seen([[1.0, 0.0, 0.0, -2 - r]], [1.0, 1.0, 10.0]), seen([[1.0, 0.0, 0.0, -10.0]], [1.0, 1.0, 10.0])], [1, 0, 0])
+check("mixed-facing and degenerate clusters stay seen from behind", [#visible_clusters(mixed, [], [1.0, 1.0, -10.0]), #visible_clusters(degenerate, [], [1.0, 1.0, -10.0])], [1, 1])
+
+fine = chosen_level(peak, 2, 1, 2, 0)
+coarse = chosen_level(peak, 2, 1, 2, 0.5)
+check("half a pixel of error picks the coarse level", [fine, coarse, chosen_level(flat, 2, 1, 2, 0), triangle_count(visible_clusters(peak[fine - 1].clusters, [], [1.0, 1.0, 10.0])), triangle_count(visible_clusters(peak[coarse - 1].clusters, [], [1.0, 1.0, 10.0]))], [1, 2, 2, 8, 2])
+check("the projected peak error is half a pixel", near(projected_error(1, 2, 1, 2), 0.5), yes)
+
+refusal(f: () -> any): text := try { "${f()}" } catch e { "${e}" }
+check("refusals, rather than a guess", [refusal(() => grid_triangles(3, 2, flat_heights(2, 2))), refusal(() => grid_triangles(2, 2, [0.0])), refusal(() => cluster_triangles([[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]])), refusal(() => projected_error(0, 0, 1, 1)), refusal(() => chosen_level([MeshLevel([], [], 1.0), MeshLevel([], [], 0.0)], 1, 1, 1, 1)), refusal(() => chosen_level([MeshLevel([], [], 2.0)], 1, 1, 1, 0))], ["meshlets: a grid needs even cell counts of at least 2, not 3 by 2", "meshlets: a 2 by 2 grid needs 9 heights, not 1", "meshlets needs 3D points, not [0, 0]", "meshlets: distance must be positive, not 0", "meshlets: level errors must not decrease", "meshlets: no level is within the error threshold"])
+
+straight = local_view([[0.0, 0.0, 1.0, -1.0]], [4.0, 2.0, 6.0], [4.0, 0.0, 0.0, 2.0])
+turned = local_view([], [4.0, 2.0, 6.0], [4.0, 0.0, pi / 2, 2.0])
+check("a place moves the camera and planes into the tree's frame", [near(straight[1][0], 0.0), near(straight[1][1], 1.0), near(straight[1][2], 3.0), near(straight[0][0][3], -0.5), near(turned[1][0], 3.0), near(turned[1][1], 1.0), near(turned[1][2], 0.0)], [yes, yes, yes, yes, yes, yes, yes])
+
+moved = cluster_triangles([[[4.0, 0.0, 0.0], [6.0, 0.0, 0.0], [4.0, 2.0, 0.0]]])
+here = cluster_triangles([up])
+check("a moved triangle keeps and drops as the camera does", [#visible_clusters(here, [], [0.0, 0.5, 3.0]), #visible_clusters(here, [], [0.0, 0.5, -10.0]), #visible_clusters(moved, [], [4.0, 1.0, 6.0]), #visible_clusters(moved, [], [4.0, 1.0, -20.0])], [1, 0, 1, 0])
+
+u32(n: int): list<int> := int_bytes(n, 32, ByteOrder.little)
+f32(x: float): list<int> := float_bytes(x, 32, ByteOrder.little)
+u16(n: int): list<int> := int_bytes(n, 16, ByteOrder.little)
+magic = [69, 90, 84, 49]
+vertex = f32(0.0) + f32(0.0) + f32(0.0) + f32(0.0) + f32(0.0)
+body = vertex + vertex + vertex + u16(0) + u16(0) + u16(0) + u16(0)
+falling = magic + u32(2) + u32(3) + u32(1) + f32(1.0) + body + u32(3) + u32(1) + f32(0.0)
+outside = magic + u32(1) + u32(3) + u32(1) + f32(0.0) + vertex + vertex + vertex + u16(5) + u16(0) + u16(0) + u16(0)
+check("a tree file that is not one is refused", [refusal(() => tree_mesh_of([0, 0, 0, 0])), refusal(() => tree_mesh_of(magic)), refusal(() => tree_mesh_of(falling)), refusal(() => tree_mesh_of(outside))], ["meshlets: a tree mesh starts with EZT1", "meshlets: a tree mesh starts with EZT1", "meshlets: level errors must not decrease", "meshlets: a triangle index is outside the vertices, not 5"])
+
+# the outcomes of warp's test/graphics/test_meshlet_gpu.pairs.warp: indexed meshes, placed bounds and the fps figure
+indexed = grid_indexed(2, 2, flat_heights(2, 2))
+soup = grid_triangles(2, 2, flat_heights(2, 2))
+check("grid_indexed is the triangles of grid_triangles", (0 .. #soup * 3).map(k => indexed.vertices[indexed.indices[k]]) == soup.flat_map(t => t), yes)
+check("the peaked centre is a vertex, one above the ground", grid_indexed(2, 2, peak_heights).vertices[4][2], 1.0)
+check("triangle records lose the part and stay in order", mesh_draw_indices([[0, 1, 2, 0], [2, 1, 3, 1]]), [0, 1, 2, 2, 1, 3])
+check("30 frames in half a second is 60", near(frame_rate(30, 500), 60.0), yes)
+place = [4.0, 6.0, 1.2, 2.0]
+bound = placed_bounds(cs[0], place)
+check("a placed cluster's bound is its centre, its radius grown with the scale", near(geo_distance(bound[0 .. 3], placed_point(cs[0].sphere.center, place)), 0.0) and near(bound[3], cs[0].sphere.radius * 2.0), yes)
+camera = [1.0, 2.0, 8.0]
+planes = [[0.0, 1.0, 0.0, 1.0]]
+view = local_view(planes, camera, place)
+check("world culling keeps the clusters culling in the tree's frame keeps", placed_visible(cs, planes, camera, place) == #visible_clusters(cs, view[0], view[1]), yes)
+ranges = cluster_ranges(cs)
+check("a cluster's index range starts where it does, three indices a triangle", [#ranges == #cs, ranges[0][0] == 0.0, ranges[0][1] == #cs[0].triangles * 3, placed_cone_row(cs[0], [0.0, 0.0, 0.0, 1.0])[3] == cs[0].cone.cutoff], [yes, yes, yes, yes])
+check("indexed meshes and fps refuse rather than guess", [refusal(() => grid_indexed(3, 2, flat_heights(2, 2))), refusal(() => mesh_draw_indices([])), refusal(() => mesh_draw_indices([[0, 1]])), refusal(() => frame_rate(0, 1)), refusal(() => frame_rate(1, 0))], ["meshlets: a grid needs even cell counts of at least 2, not 3 by 2", "meshlets: indices are empty", "meshlets: an index triple is three numbers, not [0, 1]", "meshlets: frames must be a positive int, not 0", "meshlets: the measured time must be positive, not 0"])
