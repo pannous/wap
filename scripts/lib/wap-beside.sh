@@ -1,6 +1,7 @@
 # scripts/lib/wap-beside.sh: what a compiled wap compiler reads beside itself, from wap/: the types module, the Node it
 # includes, the kernel, the extensions' rule files; and from the tree's root the standard library, where `use name` finds a module (sourced by
 # test/wap/compile.sh and scripts/refresh-seed.sh, which copy and publish them)
+source "$(dirname "${BASH_SOURCE[0]}")/wap-host.sh"
 # the warm state a built compiler embeds (wap/compiler.wap WARM_STATE), written from the sources before each build
 WAP_WARM=wap/warm.packed
 # the library compiled once a built compiler holds (wap/compiler.wap LIBRARY), written before each build
@@ -55,4 +56,30 @@ wap_beside_mirrored() {
 	synced=$(cd "$1/wap" && rsync -a --delete -i "${WAP_BESIDE[@]}" "$2/" && cd .. && rsync -a --delete -i "$WAP_LIBRARY" "$2/") || return 1
 	removed="$removed $(echo "$synced" | sed -n 's/^\*deleting *//p' | tr '\n' ' ')"
 	[ -z "${removed// /}" ] || echo "wap-beside: removed from $2:${removed% }"
+}
+
+# One stage of wap's bootstrap (test/wap/compile.sh and scripts/refresh-seed.sh): a compiler building wap's compiler
+# from the source in a wap folder, which holds compiler.wap, core/ and types/, and beside them what the compiler built
+# holds. A file in the wap folder, named as written there, relative where the folder is the current one ("."), so two
+# builds of one source are the same bytes wherever they ran
+wap_file() { if [ "$1" = . ]; then echo "$2"; else echo "$1/$2"; fi; }
+# wap_stage_prepared <compiler> <seed> <wap folder>: what the compiler built holds, written beside its source first:
+# the warm state, written by its full path so the state's paths are marked as the wap folder's (extensions/warm.wap
+# marked), and once, by the first compiler built from the tree, the library: compiled by it beside itself from the types
+# module there, on the paths its build reads. A later compiler holds that library already and keeps it, as its own
+# words would be declared twice; the seed writes neither (it may write older ones) and its compiler holds none
+wap_stage_prepared() {
+	local folder library own warm
+	folder=$(dirname "$1") library=$(wap_file "$3" "${WAP_LIBRARY_MODULE##*/}") warm=$(wap_file "$3" "${WAP_WARM##*/}")
+	own=$(wap_file "$folder" "${WAP_LIBRARY_MODULE##*/}")
+	[ "$1" != "$2" ] || { : >"$library" && : >"$warm"; return; }
+	if [ ! -s "$library" ]; then wap_ran "$1" --sources "$(wap_file "$folder" types/types.wap)" "$own" && { [ "$own" -ef "$library" ] || cp "$own" "$library"; } || return 1; fi
+	wap_ran "$(cd "$folder" && pwd -P)/${1##*/}" --sources warm "$warm"
+}
+# wap_stage_compiled <compiler> <seed> <wap folder> <output>: wap's compiler compiled from the folder's source, which a
+# compiler built from the tree reads as sources and the seed as a program
+wap_stage_compiled() {
+	local sources=(--sources)
+	[ "$1" != "$2" ] || sources=()
+	wap_ran "$1" ${sources[@]+"${sources[@]}"} "$(wap_file "$3" compiler.wap)" "$4"
 }

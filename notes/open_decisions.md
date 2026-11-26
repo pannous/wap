@@ -8,11 +8,4 @@ An entry goes once decided (its decision then lives on its card, in the wiki or 
 
 ## Pending questions
 
-- wap-emitter: a C import clash is refused (A, about +3 core host.wap); a block argument with a defaulted
-  parameter is run instead of passed ("no run takes (ø)").
-- wap-fixer: a standard-module word refused across feeds/random (drop the refusal at standard bind, ±3 core);
-  indexing an any parameter gives an internal error (recommend a clear refusal); `try` of value ø (recommend
-  refuse).
-- wap-native-maps: +2 analyze for native maps (a); wap-headless `--no-window` returning (a, +33 extension).
-- Template typing: any joins every type, (a) 3-5 core.
-- List positions from 1 in lib/list.wap (wap-reviewer, library-port-rest).
+(none)

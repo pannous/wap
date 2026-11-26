@@ -22,6 +22,8 @@ use "../bindings.wap"
 
 RULE_WORD = "rule"
 PATTERN_WORD = "pattern"
+# `type Long = int`: a name for a type, the same type, rewritten to it as a rule (wiki/alias.md)
+TYPE_WORD = "type"
 RULE_ARROW = "=>"
 # a template that refuses what its pattern matched: `=> refuse "message"`
 REFUSE_WORD = "refuse"
@@ -36,6 +38,8 @@ NOTHING_WRITTEN = List([], Bracket.None, Separator.Newline)
 # a walk's notes (rewritten_by): whether a rule fired, whether the node in hand changed, by a rule or a regrouping
 FIRED = 0
 CHANGED = 1
+# how often the rules may fire again on their own output before the program is refused
+ROUNDS_LIMIT = 100
 
 # code after a stage's rules, and whether any of them fired
 class Fired { code: Node, fired: bool }
@@ -83,6 +87,7 @@ declaration_taken(language: Language, called: text, arguments: list) as list<Nod
 	if #words < 2 or not (words#1 is symbol) { return ø }
 	keyword = spelling_written(words#1)
 	if called == DEFINITION and keyword == PATTERN_WORD and #words == 2 { return [pattern_builder(declare_pattern(language, words#2, arguments#2))] }
+	if called == DEFINITION and keyword == TYPE_WORD and #words == 2 { rule_added(language, arguments#1, words#2, arguments#2, ""); return [] }
 	if called == RULE_ARROW and keyword == RULE_WORD {
 		guarded = #words > 3 and spelling_written(words#(#words - 1)) == WHERE_WORD and not is_hole(words.last)
 		if guarded and spelling_written(words.last) == "" { refused(arguments#1, "a rule's guard is one word after `where`, `where unbound`: this one has more, and a rule never drops a guard it cannot read") }
@@ -243,19 +248,19 @@ with_rule_of(item: Node, sequence: Node) as Node := {
 	rule = fact_of(sequence, RULE)
 	if rule == ø or item is Empty then item else with_fact(item, RULE, rule)
 }
-# DEBT: A rewrite that loops forever hangs the compiler instead of being refused: letting any rule read a square list
-#   as one phrase made `xs = [1 2 3]` hang (some rule rewrote `1 2 3` again and again). A list is now one phrase only
-#   when its first word leads a rule. A rewrite whose result fires the rules again without end should be refused by
-#   name.
+# a square list is one phrase only when its first word leads a rule: `xs = [1 2 3]` stays a list
 one_phrase(language: Language, items: list, bracket: Bracket) as bool := bracket == Bracket.Curly or bracket == Bracket.Round and not names_pattern(language, items#1)
 
-rewritten(language: Language, rules: Rules, n: Node, fired: list) as Node := {
+rewritten(language: Language, rules: Rules, n: Node, fired: list, rounds: int = 0) as Node := {
 	steps = rule_applied(language, rules, n)
 	if steps is empty { return n }
 	fired[FIRED] = yes
 	fired[CHANGED] = yes
-	if steps#1 is Empty then steps#1 else rewritten(language, rules, replaced(n, steps#1), fired)
+	if steps#1 is Empty then steps#1 else rewritten(language, rules, replaced(n, steps#1), fired, refired(n, rounds))
 }
+
+# the next round of rules firing on their own output, refused past ROUNDS_LIMIT: `rule go $f => $f go` on `go go`
+refired(n: Node, rounds: int) as int := if rounds < ROUNDS_LIMIT then rounds + 1 else refused(n, "the rules still fire after ${ROUNDS_LIMIT} rewrites: a rule writes code it fires on again")
 
 # a typed rule's holes, each the code it took marked typed already, a sequence's items each (core/bindings.wap TYPED_HOLE)
 typed_holes(bindings: map<text, Node>) as map<text, Node> := {
