@@ -47,8 +47,31 @@ in analyze, 26 in emit) become the kernel constants of the type words.
 - **Shown:** the kernel's show writes the notation for messages and `format`, `list<int>` as written.
 - **emit** reads the type through the same readers, a type word's value layout by its constant's row (T1b's
   table). Its lines are measured at T3b; the estimate is none.
-- **Compared by computing:** `same_type` is kernel equality. Opaque types compare structurally, so typing should be
+- **Compared by computing:** two types are one where their terms are: `==` of two terms is the kernel's `same`, and
+  fits.wap's `same_type` and `same_types` are gone into it. Opaque types compare structurally, so typing should be
   little slower; the gate below measures it.
+
+### Where a type lives
+
+A fact is a Node, and a kernel Term cannot be one. So a compile keeps one table of the type terms it met, and a
+TYPE fact holds `Number(place)` in that table.
+
+- **The table** (core/type_terms.wap) is `class TypeTerms { terms: list<Term>; places: map<int, list<int>>;
+  words: map<text, int> }`. A term is entered once, found again by its hash, so two equal types have one place, and
+  a TYPE fact compared with `==` compares the types. A type word gets its constant's id from `words` the first time
+  the door reads it, an opaque constant without levels. T3e and T3f move these ids to the program's kernel
+  environment, once the prelude declares the words there.
+- **The table is the compile's own, as a symbol table is:** one value for the whole run in core/type_notation.wap
+  (`TYPES`), so `value_type(n)` and emit's `type_of(n)` read a fact through it without a parameter. Handing it down
+  would add a parameter to about 300 functions of analyze, emit and rules, and give nothing: a run compiles one
+  program, and a table that only grows reads the same from every stage.
+- **Signatures hold terms:** `Signature.parameters: list<Term?>` and `result: Term?`. declare reads each written
+  type through the door as it builds them.
+- **The warm state is unchanged.** It packs the files read and the modules lowered, which is code with its types
+  written as notation, never a signature or a typed node. The door reads that notation each compile, so constants
+  are taken by name and nothing depends on the order of a log; packed.wap gets no new line.
+- **Shown:** `type_shown(t)` writes the notation, `list<int>`, `(int) -> text`, `int?`, the door's inverse, used in
+  messages and `format` only.
 
 ## One pass
 
@@ -100,10 +123,10 @@ The whole suite runs at T3b, T3d and T3e, compared line by line with main's last
 | step | what | core lines (estimate) | checks |
 |---|---|---|---|
 | T3a unifier | unify.wap and state.wap `git mv` into wap/core/analyze (unify.wap, holes.wap); the elaborator and the provers import them from there; nothing else changes | +268 moved, extension −268 | normal path: theory areas, prove's tests, test_hello |
-| T3b terms | TYPE facts hold terms; type_notation.wap's readers read terms; the type words declared in wap/types; one notation door; show for messages and format; emit through the readers | +100 (type_notation rewritten in place, the door +40, the declarations in wap/types +40) | careful; the whole suite as before; `--stage 2` time and warm hello measured against the baseline |
-| T3c holes | letters.wap goes: letters, `_` and α are holes of the unifier, `settles`/`deferred` are answers; fits.wap's comparisons go to kernel equality (`same_type`, `same_types`, `bare_fit`, `joined_settling`'s settling) | −169 letters, −45 fits, +60 | careful; `identity(3)` and `identity(int)`; the census |
+| T3b terms | the table; TYPE facts hold its places; signatures hold terms; type_notation.wap's readers read terms; one notation door; `type_shown` for messages and format; emit through the readers | about +300 (the table +30, the door +40, `type_shown` +30, the readers on terms, about 200 call sites edited and about 120 comparisons by `==` or `text()` rewritten; the user decides the size) | careful; the whole suite as before; `--stage 2` time and warm hello measured against the baseline |
+| T3c holes | letters.wap goes: letters, `_` and α are holes of the unifier, `settles`/`deferred` are answers; fits.wap's remaining comparisons go to kernel equality (`bare_fit`, `joined_settling`'s settling) | −169 letters, −45 fits, +60 | careful; `identity(3)` and `identity(int)`; the census |
 | T3d one pass | headers first, assignment as a new binding, the retyping round goes; kind rules typed in place, the refiring goes | −40 analyze, −20 rules, +40 | careful; a recursive function's result found from its body; a kind rule's error names the line of its phrase |
-| T3e numbers | numerals at the wanted type, else `int`; i32 and i64; `#xs` int; the numbers prelude in wap/types; overloads by conversion order; READING fact | −40 analyze (typed_readings, the ranking's 5 words), +170 analyze, +200 types | careful; `0 - 3` is -3; `#xs - 1` is -1 on an empty list; `type of 3` is `int` |
+| T3e numbers | numerals at the wanted type, else `int`, and an empty `{}` or `[]` at the type its place wants, the right of `??` wanting the left's (`m.get(k) ?? {}`; core/pipeline.wap line_told's `has` test goes); i32 and i64; `#xs` int; the numbers prelude in wap/types; overloads by conversion order; READING fact | −40 analyze (typed_readings, the ranking's 5 words), +170 analyze, +200 types | careful; `0 - 3` is -3; `m.get(k) ?? {}` of a map<text, map<text, text>> is a map<text, text>; `#xs - 1` is -1 on an empty list; `type of 3` is `int` |
 | T3f functions | each typed function an opaque constant of its signature in the kernel environment; the census counts them as assumed | +20 | normal plus the census |
 | T3g theory follows | read.wap's `nearest`, TRIAL_LIMIT and the numeral special cases replaced by analyze's choice | 0 core; extension −40 | theory areas; the theory census script compared per program with main (no floor) |
 

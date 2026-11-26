@@ -73,6 +73,10 @@ a
 # a program using a compiled module (use "m.wasm", extensions/wasm/modules.wap): the native wap links its instance
 check "a native wap run links a module the program uses" "$(printf '%s\n' 'add(a: int, b: int) as int := a + b' >"$stage/adding.wap" && $wap "$compiler" "$stage/adding.wap" "$stage/adding.wasm" 2>&1 && "$native_wap" "use \"$stage/adding.wasm\"
 add(40, 2)" 2>&1)" "42"
+# a module the program uses gone before the run: said once, however many of its words the program calls
+printf '%s\n' 'add(a: int, b: int) as int := a + b' 'twice(a: int) as int := a * 2' >"$stage/gone.wap" && $wap "$compiler" "$stage/gone.wap" "$stage/gone.wasm" >/dev/null 2>&1
+printf '%s\n' "use \"$stage/gone.wasm\"" 'print add(1, 2)' 'print twice(3)' >"$stage/using_gone.wap" && $wap "$compiler" "$stage/using_gone.wap" "$stage/using_gone.wasm" >/dev/null 2>&1 && rm "$stage/gone.wasm"
+check "a missing module is said once" "$("$native_wap" "$stage/using_gone.wasm" 2>&1 | grep -c 'no module')" "1"
 # a console value is the line's exported global, one x every later line reads and its functions use
 check "the console keeps a value for the lines after it" "$(printf '%s\n' 'x = 2' 'x + 1' 'f(a: int) as int := a * x' 'f(21)' 't = "ab"' 't + t' | "$native_wap" 2>&1)" "2
 3
@@ -289,7 +293,15 @@ native_wap_built "$stage/standalone" --standalone >/dev/null && rm -rf "$stage/s
 check "a standalone wap runs a program and verifies a file with no seed folder beside it" "$(cd "$stage" && HOME="$stage/home" "$stage/standalone/wap" hello.wap 2>&1 && HOME="$stage/home" "$stage/standalone/wap" verify axiom_only.wap 2>&1)" "Hello
 choice: Axiom"
 # and wasmtime's static library beside the shared one (warp's scripts/wasmtime-c-api.sh) is linked into it whole
-check "a standalone wap needs no library but the system's" "$(otool -L "$stage/standalone/wap" | tail -n +2 | grep -vc libSystem)" "0"
+# the libraries an executable loads beyond the system's own
+libraries_beyond_system() {
+	case $(uname -s) in
+	Darwin) otool -L "$1" | tail -n +2 | grep -v libSystem ;;
+	MINGW* | MSYS*) llvm-objdump -p "$1.exe" | sed -n 's/.*DLL Name: //p' | grep -viE '^(kernel32|ntdll|ucrtbase|msvcrt|advapi32|user32|ws2_32|bcrypt|bcryptprimitives|userenv|shell32|ole32|oleaut32|psapi|dbghelp|crypt32|secur32|synchronization|api-ms-win-.*)\.dll$' ;;
+	*) ldd "$1" | grep -vE 'linux-vdso|ld-linux|lib(c|m|dl|rt|pthread|gcc_s)\.so' ;;
+	esac
+}
+check "a standalone wap needs no library but the system's" "$(libraries_beyond_system "$stage/standalone/wap")" ""
 # `wap format <file>` prints the program in canonical spelling, by the compiler beside it
 printf '%s\n' 'x = 1+2' 'f(a)= a*2' >"$stage/unformatted.wap"
 check "wap format prints the program in canonical spelling" "$(cd "$stage" && "$native_wap" format unformatted.wap 2>&1)" "x = 1 + 2

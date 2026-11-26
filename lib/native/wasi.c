@@ -205,7 +205,7 @@ static void* program_ran(void* unused) {
 }
 int main(int argc, char** argv) {
 	program_argc = argc;
-	program_argv = argv;
+	program_argv = posix_arguments(argc, argv);
 #ifdef __APPLE__
 	program_ran(NULL);
 	return 0;
