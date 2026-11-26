@@ -382,4 +382,11 @@ print "${Color.Green} ${Wide(2.5).x}"')" "Green 2.5"
 # an error in a used module names that module by its full path, as it names the program (core/errors.wap place_of)
 mkdir -p "$stage/erring" && printf '%s\n' 'broken(): int := "ab"' >"$stage/erring/part.wap" && printf '%s\n' 'use "part.wap"' 'print broken()' >"$stage/erring/main.wap"
 check "an error in a used module names its full path" "$("$native_wap" "$stage/erring/main.wap" 2>&1 | grep -c "^$stage/erring/part.wap line 1:")" "1"
+# wap format reads a program in its own grammar, the operators of the modules it uses known (wiki/operator.md), and a
+# used module's refusal leaves it reading the same (card refusal-partway)
+for refused in no yes; do
+	mkdir -p "$stage/format_$refused" && printf '%s\n' 'infix operator ⊕ := left + right' "$([ $refused = yes ] && echo 'to move piece from a to b := piece + a - b')" >"$stage/format_$refused/m.wap" && printf '%s\n' 'use "m.wap"' 'x = 1⊕2' >"$stage/format_$refused/p.wap"
+	check "wap format spaces an operator of a used module$([ $refused = yes ] && echo ' that refuses a form')" "$(cd "$stage/format_$refused" && "$native_wap" format p.wap 2>&1)" 'use "m.wap"
+x = 1 ⊕ 2'
+done
 exit $((failures > 0))
