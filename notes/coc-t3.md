@@ -122,8 +122,9 @@ A name's bindings live in core/analyze/flow.wap. These forms are refused with a 
   special cases (`numeral_in_cases`, `declares_case`, the `literals` and `result` counts of Trial) are not copied
   into analyze. T3g replaces them in read.wap with analyze's choice, so the two typers choose alike and the weights
   are gone from the tree.
-- **The readings typing chose travel as facts:** `typed_readings` (calls.wap:76, read by format.wap:21) becomes a
-  READING fact on the call node.
+- **The readings typing chose stay the compile's table:** `typed_readings` (calls.wap, read by format.wap) is keyed
+  by the source place, as TYPES is one table for the run: `format` prints the code as parsed, which a fact on the
+  typed call never reaches.
 
 ## Functions in the kernel until T5
 
@@ -143,7 +144,7 @@ The whole suite runs at T3b, T3d and T3e, compared line by line with main's last
 | T3c holes | letters.wap goes: letters, `_` and α are holes of the unifier, `settles`/`deferred` are answers; fits.wap's remaining comparisons go to kernel equality (`bare_fit`, `joined_settling`'s settling) | −169 letters, −45 fits, +60 | careful; `identity(3)` and `identity(int)`; the census |
 | T3c3 holes by id | a definition's letters are holes made once in a table by its key (letters.wap letter_holes), the signature's holes in all but where they are kept, so declare stays apart from the typing state; a call's answers, `s.unknowns` and `s.members` keyed by the hole's id (`variable_id`), a letter's name only in the types the definition writes; `hole_text` and its cache in TypeTerms go | about −10 type_notation, +20 letters (the call's letters and answers apart) | careful; two calls of one generic, a generic calling itself (test_letters) |
 | T3d one pass | headers first, assignment as a new binding, the retyping round goes; kind rules typed in place, the refiring goes | −40 analyze, −20 rules, +40 | careful; a recursive function's result found from its body; a kind rule's error names the line of its phrase |
-| T3e numbers | numerals at the wanted type, else `int`, and an empty `{}` or `[]` at the type its place wants, the right of `??` wanting the left's (`m.get(k) ?? {}`; core/pipeline.wap line_told's `has` test goes); i32 and i64; `#xs` int; the numbers prelude in wap/types; overloads by conversion order; READING fact | −40 analyze (typed_readings, the ranking's 5 words), +170 analyze, +200 types | careful; `0 - 3` is -3; `m.get(k) ?? {}` of a map<text, map<text, text>> is a map<text, text>; `#xs - 1` is -1 on an empty list; `type of 3` is `int` |
+| T3e numbers | numerals at the wanted type, else `int`, and an empty `{}` or `[]` at the type its place wants, the right of `??` wanting the left's (`m.get(k) ?? {}`; core/pipeline.wap line_told's `has` test goes); i32 and i64; `#xs` int; the numbers prelude in wap/types; overloads by conversion order| −40 analyze (the ranking's 5 words), +170 analyze, +200 types | careful; `0 - 3` is -3; `m.get(k) ?? {}` of a map<text, map<text, text>> is a map<text, text>; `#xs - 1` is -1 on an empty list; `type of 3` is `int` |
 | T3f functions | each typed function an opaque constant of its signature in the kernel environment; the census counts them as assumed | +20 | normal plus the census |
 | T3g theory follows | read.wap's `nearest`, TRIAL_LIMIT and the numeral special cases replaced by analyze's choice | 0 core; extension −40 | theory areas; the theory census script compared per program with main (no floor) |
 
@@ -162,7 +163,7 @@ type_notation.wap.
 | the numbers prelude (types) | +200 | +240 (numbers 197, checked 43), moved from the extension |
 | functions as opaque constants | | +20 |
 | the holes wired into analyze | | +60 |
-| deleted | letters 235, fits 189, typed_readings and numerals 40 | letters 169, fits 45, ranking and typed_readings 40 |
+| deleted | letters 235, fits 189, typed_readings and numerals 40 | letters 169, fits 45, ranking 40 |
 | **net** | **+186** | **about +584 in the compiler, −548 in the extension** |
 
 Two budget differences:
@@ -184,7 +185,7 @@ T3 is done when all of these hold:
 - typing stays fast: T3 as a whole adds at most 25% to `--stage 2` (84 s on the integrator's last run) and to a
   warm `print "Hello"`, each measured against its time before T3a on the same machine. That is a ceiling for the
   whole step, shared out below, not slack for the first sub-step;
-- letters.wap, typed_readings, ROUNDS_LIMIT and the retyping round are gone, and so are the five ranking words in
+- letters.wap, ROUNDS_LIMIT and the retyping round are gone (typed_readings stays the compile's table), and so are the five ranking words in
   calls.wap and `nearest`'s weights in read.wap.
 
 ## The speed budget
