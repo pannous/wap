@@ -143,6 +143,14 @@ static ssize_t posix_readlink(const char* path, char* buffer, size_t size) {
 #define readlink posix_readlink
 // a path made absolute, NULL for one that names nothing; resolved NULL: a copy the caller frees
 static char* posix_realpath(const char* path, char* resolved) {
+	// Linux's link to this executable, followed as on Linux
+	char self[MAX_PATH];
+	if (!strcmp(path, SELF_LINK)) {
+		ssize_t length = posix_readlink(path, self, sizeof self - 1);
+		if (length < 0) return NULL;
+		self[length] = 0;
+		path = self;
+	}
 	char buffer[MAX_PATH];
 	path = windows_path(path, buffer);
 	char* full = resolved ? resolved : malloc(MAX_PATH);
