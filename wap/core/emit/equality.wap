@@ -11,7 +11,7 @@ use "../stage.wap"
 use "../type_notation.wap"
 
 # the instructions that compare two values of a type on the stack, giving yes or no
-type_equality(type: Term, p: Program) as list<int> := {
+type_equality(type: Term, p: Emission) as list<int> := {
 	by_parts = (key, compared) => parts_compared(p, key, known_layout(type, p), compared)
 	if base_of_optional(type) != ø { return by_parts("optional_equal ${type_text(type, yes)}", optionals_compared(type, p)) }
 	if item_type(type) != ø { return parts_compared(p, "list_equal ${type_text(type, yes)}", list_layout(type, p), lists_compared(type, p)) }
@@ -22,7 +22,7 @@ type_equality(type: Term, p: Program) as list<int> := {
 }
 # the instructions that compare two values of a wasm type: an int, float, yes/no or character, a text, an `any`; any
 # other reference, a function value, only to itself
-equality(type: list<int>, p: Program) as list<int> := {
+equality(type: list<int>, p: Emission) as list<int> := {
 	if type == I64 { return I64_EQ }
 	if type == F64 { return F64_EQ }
 	if type == F32 { return F32_EQ }
@@ -35,7 +35,7 @@ equality(type: list<int>, p: Program) as list<int> := {
 # A call of the helper comparing two values of one layout by their parts, its locals after the two values; the helper
 # takes its place before its code is written, so its code may call it again
 class Compared { locals: list<list<int>>; code: list<int> }
-parts_compared(p: Program, key: text, layout: list<int>, compared: function) as list<int> := {
+parts_compared(p: Emission, key: text, layout: list<int>, compared: function) as list<int> := {
 	if p.helpers.has(key) { return instruction(CALL, [p.helpers[key]]) }
 	index = reserved_function(p.m, [layout, layout], [I32])
 	p.helpers[key] = index
@@ -48,10 +48,10 @@ pair_compared(read: function, compare: list<int>) as list<int> := read(0) + read
 
 # Two cases: one tag and, for a case with fields, equal fields. Tags count the cases of every enum, so one helper
 # serves them all. Its locals: 0 and 1 the cases.
-cases_compared(p: Program) as function := () => Compared([], pair_compared(local => tag_in(local, p), I32_EQ) + p.records.items.flat_map(record => cases_of(record).filter(case => case_fields(case) is not empty).flat_map(case => fields_compared(record, case, p))))
-tag_in(local: int, p: Program) as list<int> := local_get(local) + tagged(p.m)
+cases_compared(p: Emission) as function := () => Compared([], pair_compared(local => tag_in(local, p), I32_EQ) + p.records.items.flat_map(record => cases_of(record).filter(case => case_fields(case) is not empty).flat_map(case => fields_compared(record, case, p))))
+tag_in(local: int, p: Emission) as list<int> := local_get(local) + tagged(p.m)
 # When both cases are this one, each of its fields of the two compared by the field's equality
-fields_compared(record: Record, case: Node, p: Program) as list<int> := {
+fields_compared(record: Record, case: Node, p: Emission) as list<int> := {
 	cast = case_struct_of(record, case, p.m, p.records)
 	field = (local, at) => local_get(local) + case_field_read(cast, record, at)
 	fields = case_fields(case)
@@ -59,18 +59,18 @@ fields_compared(record: Record, case: Node, p: Program) as list<int> := {
 	tag_in(0, p) + i32_const(declared_tag(case, p)) + I32_EQ + if_block(compared)
 }
 # Two instances of a class: each field equal. Its locals: 0 and 1 the instances.
-records_compared(record: Record, p: Program) as function := () => {
+records_compared(record: Record, p: Emission) as function := () => {
 	at = [struct_of(record, p.m, p.records)]
 	# field 0 the class's tag: two classes of one shape share a struct type
 	Compared([], (0 to #fields_of(record)).flat_map(field => pair_compared(local => local_get(local) + instruction(STRUCT_GET, at + [field]), if field == 0 then I32_EQ else type_equality(field_declared(fields_of(record)#field), p))))
 }
 # Two lists: one count and equal items in order. Its locals: 0 and 1 the lists, 2 a count.
-lists_compared(type: Term, p: Program) as function := () => {
+lists_compared(type: Term, p: Emission) as function := () => {
 	item = local => item_read(type, local, local_get(2), p)
 	Compared([I32], pair_compared(local => count_in(type, local, p), I32_EQ) + counted(2, count_in(type, 0, p), pair_compared(item, type_equality(list_item(type), p))))
 }
 # Two optionals: both ø, or both there and their values equal. Its locals: 0 and 1 the optionals.
-optionals_compared(type: Term, p: Program) as function := () => {
+optionals_compared(type: Term, p: Emission) as function := () => {
 	base = base_of_optional(type) ?? refused_type(type, "this is no optional type")
 	boxed = type_text(base) in BOXED_WORDS
 	held = local => local_get(local) + (if boxed then box_opened(type_text(base), p) else [])
@@ -83,7 +83,7 @@ missing_compared(m: WasmModule) as list<int> := local_get(0) + missing_tested(m)
 # The helper of equality of two values of `any` or `number`: two ø are equal; two plain values of one type in their
 # boxes and two texts by their values; any other two references only when they are the same one. Its locals: 0 and 1
 # the values.
-any_equality_function(p: Program) as int := {
+any_equality_function(p: Emission) as int := {
 	boxed = BOXED_WORDS.flat_map(word => compared_as(box_index(p.m, word), instruction(STRUCT_GET, [box_index(p.m, word), 0]), equality(WORD_LAYOUTS[word], p)))
 	texts = compared_as(text_type(p.m), [], equality(text_layout(p.m), p))
 	instances = p.records.items.filter(record => cases_of(record) is empty).flat_map(record => compared_as(struct_of(record, p.m, p.records), [], type_equality(record_term(record), p)))

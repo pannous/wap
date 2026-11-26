@@ -18,12 +18,12 @@ META_CASE = "Meta"
 # A choice by patterns: the subject kept in a slot of its own, then each arm tested in order, an If each, until one
 # fits; a name binds the subject. Typing gave the Case a value only when its last arm fits any.
 #   subject, local.set held;  held == p1, if  r1  else  held == p2, if  r2  else …  end  end
-case_code(form: Node, subject: Code, arms: list<Node>, p: Program, f: Frame) as Code := {
+case_code(form: Node, subject: Code, arms: list<Node>, p: Emission, f: Frame) as Code := {
 	held = slotted(f, "subject held in slot ${#f.slots}", subject.type)
 	chosen = arms_code(form, arms, held, p, f)
 	Code(chosen.type, subject.instructions + local_set(held.index) + chosen.instructions)
 }
-arms_code(form: Node, arms: list<Node>, held: Placed, p: Program, f: Frame) as Code := {
+arms_code(form: Node, arms: list<Node>, held: Placed, p: Emission, f: Frame) as Code := {
 	if arms is empty { return if fact_of(form, TYPE) == ø then Code() else Code(NEVER, UNREACHABLE) }
 	match arms#1 {
 		Arm(pattern, result) => {
@@ -36,14 +36,14 @@ arms_code(form: Node, arms: list<Node>, held: Placed, p: Program, f: Frame) as C
 }
 # an arm's result, after the names of its pattern are given their parts of the subject, made to fit the Case's type. The last arm of a Case that
 # names every case always fits when its fields are only names, untested
-arm_taken(form: Node, pattern: Node, result: Node, held: Placed, p: Program, f: Frame) as Code := {
+arm_taken(form: Node, pattern: Node, result: Node, held: Placed, p: Emission, f: Frame) as Code := {
 	named = names_held(pattern, fetched(held), held.type, p, f)
 	given = choice_fitted(form, code(result, p, f), result, p)
 	Code(given.type, named + given.instructions)
 }
 # a pattern that fits any value: a name, or _
 names_any(pattern: Node) as bool := pattern is symbol and not is_case(pattern)
-only_names(pattern: Node, p: Program) as bool := field_parts(pattern, [], p).all(part => names_any(part.pattern))
+only_names(pattern: Node, p: Emission) as bool := field_parts(pattern, [], p).all(part => names_any(part.pattern))
 
 # A part of a value a pattern takes apart: the field's pattern, the code that gives the field's value, its layout
 class Part {
@@ -53,7 +53,7 @@ class Part {
 }
 # the parts of a case pattern, `Circle(r)`, each field of the value cast to the case, or of a list pattern, each item
 # and the rest; none for any other pattern
-field_parts(pattern: Node, value: list<int>, p: Program) as list<Part> := match pattern {
+field_parts(pattern: Node, value: list<int>, p: Emission) as list<Part> := match pattern {
 	List(items, Bracket.Square, separator) => item_parts(items, value, type_of(pattern), p)
 	Call(called, patterns) => {
 		record = enum_declaring(p.records, called)
@@ -64,13 +64,13 @@ field_parts(pattern: Node, value: list<int>, p: Program) as list<Part> := match 
 	_ => []
 }
 # A list pattern's parts: its items by their places, the rest the items the others leave as a new list
-item_parts(items: list<Node>, value: list<int>, type: Term, p: Program) as list<Part> := {
+item_parts(items: list<Node>, value: list<int>, type: Term, p: Emission) as list<Part> := {
 	fixed = #fixed_items(items)
 	rest_at = (1 to #items).find(at => rest_named(items#at) != ø) ?? #items + 1
 	(1 to #items).map(at => item_part(items#at, at, fixed, rest_at, #items, value, type, p))
 }
 # an item by its place, counted from the end after the rest; or the rest, the items between those before and after it
-item_part(item: Node, at: int, fixed: int, rest_at: int, count: int, value: list<int>, type: Term, p: Program) as Part := {
+item_part(item: Node, at: int, fixed: int, rest_at: int, count: int, value: list<int>, type: Term, p: Emission) as Part := {
 	rest = rest_named(item)
 	place = if at < rest_at then i32_const(at - 1) else value + count_in(type, ø, p) + i32_const(count - at + 1) + I32_SUB
 	if rest == ø then Part(item, value + item_read(type, ø, place, p), item_layout(type, p)) else Part(rest, value + i64_const(rest_at - 1) + value + count_in(type, ø, p) + i32_const(fixed) + I32_SUB + I64_EXTEND_I32_U + typed_helper_called(LIST_SLICE, type, p), list_layout(type, p))
@@ -78,7 +78,7 @@ item_part(item: Node, at: int, fixed: int, rest_at: int, count: int, value: list
 # Whether the value fits a pattern, yes or no: a case by its tag, a list by its count, then each part by its own
 # pattern, tested only once the shape fits; a literal by equality. `value` is the code that gives the value, of the
 # layout `type`.
-pattern_test(pattern: Node, written: list<int>, type: list<int>, p: Program, f: Frame) as list<int> := {
+pattern_test(pattern: Node, written: list<int>, type: list<int>, p: Emission, f: Frame) as list<int> := {
 	seeing = seen(pattern, written, p, f)
 	value = seeing.value
 	shape = shape_test(pattern, value, p)
@@ -90,7 +90,7 @@ pattern_test(pattern: Node, written: list<int>, type: list<int>, p: Program, f: 
 	value + given.instructions + equality(type, p)
 }
 # the test of a case pattern's tag or a list pattern's count, ø for any other pattern
-shape_test(pattern: Node, value: list<int>, p: Program) as list<int>? := {
+shape_test(pattern: Node, value: list<int>, p: Emission) as list<int>? := {
 	# a missing value, an optional's ø, is no case
 	if is_case(case_name(pattern)) {
 		tag_test = value + tagged(p.m) + i32_const(tag_of(case_name(pattern), p)) + I32_EQ
@@ -101,7 +101,7 @@ shape_test(pattern: Node, value: list<int>, p: Program) as list<int>? := {
 	value + count_in(type_of(pattern), ø, p) + i32_const(fixed) + (if fixed < #items then I32_GE_U else I32_EQ)
 }
 # the names of a pattern given their parts of the value, after every test fit; code that leaves nothing. _ gives none.
-names_held(pattern: Node, value: list<int>, type: list<int>, p: Program, f: Frame) as list<int> := {
+names_held(pattern: Node, value: list<int>, type: list<int>, p: Emission, f: Frame) as list<int> := {
 	if text(pattern) == WILDCARD { return [] }
 	if names_any(pattern) { return value + kept(added_variable(pattern, type, p, f)) + DROP }
 	seeing = seen(pattern, value, p, f)
@@ -111,7 +111,7 @@ names_held(pattern: Node, value: list<int>, type: list<int>, p: Program, f: Fram
 # inside the Meta wrappers, so a pattern written for one stage matches in the next (notes/backbone.md). The node is
 # taken out once, into a local of its own, which every test and part of the pattern then reads
 class Seen { before: list<int>; value: list<int> }
-seen(pattern: Node, value: list<int>, p: Program, f: Frame) as Seen := {
+seen(pattern: Node, value: list<int>, p: Emission, f: Frame) as Seen := {
 	if not is_case(case_name(pattern)) or text(case_name(pattern)) == META_CASE or record_name(enum_declaring(p.records, case_name(pattern))) != NODE_TYPE { return Seen([], value) }
 	slot = slotted(f, "node seen in slot ${#f.slots}", known_layout(NODE_TERM, p)).index
 	node = local_get(slot)
@@ -120,7 +120,7 @@ seen(pattern: Node, value: list<int>, p: Program, f: Frame) as Seen := {
 	Seen(value + local_set(slot) + unwrapped, node)
 }
 # The helper taking a node out of its Meta wrappers, ø as it is. Its local: 0 the node.
-meta_unwrapped_function(p: Program) as int := {
+meta_unwrapped_function(p: Emission) as int := {
 	node = node_record(p, "a Node pattern looks through Meta")
 	meta = case_struct_of(node, node_case(node, META_CASE), p.m, p.records)
 	not_meta = meta_left(local_get(0), 1, p)
@@ -129,13 +129,13 @@ meta_unwrapped_function(p: Program) as int := {
 	added_function(p.m, [layout], [layout], [], looped(not_meta + inner + instruction(BRANCH, [0])) + local_get(0))
 }
 # the branch out of the block `depth` levels up unless the node is in a Meta: ø or any other case leaves
-meta_left(node: list<int>, depth: int, p: Program) as list<int> := {
+meta_left(node: list<int>, depth: int, p: Emission) as list<int> := {
 	record = node_record(p, "a Node pattern looks through Meta")
 	node + REF_IS_NULL + instruction(BRANCH_IF, [depth]) + node + tagged(p.m) + i32_const(declared_tag(node_case(record, META_CASE), p)) + I32_NE + instruction(BRANCH_IF, [depth])
 }
 # A case's value, `Dime` or `Circle(3)`: its tag and its fields' values in a new struct of its case, of its enum's type;
 # a case of constant values, `Symbol("int")`, is built once, the global it starts
-case_value_code(form: Node, called: Node, arguments: list<Node>, p: Program, f: Frame) as Code := {
+case_value_code(form: Node, called: Node, arguments: list<Node>, p: Emission, f: Frame) as Code := {
 	record = enum_declaring(p.records, called)
 	named = case_declaring(p.records, called)
 	if plain_enums(p.m) and case_fields(named) is empty { return Code(I32, i32_const(tag_of(called, p))) }
@@ -145,28 +145,28 @@ case_value_code(form: Node, called: Node, arguments: list<Node>, p: Program, f: 
 	if fixed.all(value => value != ø) then constant_global(built(fixed.map(value => value!)), p) else built((1 to #arguments).map(at => field_filled(case_fields(named)#at, arguments#at, p, f)))
 }
 # a field's constant instructions, ø for a value that is no constant or needs fitting
-fixed_filled(field: Node, value: Node, p: Program) as list<int>? := {
+fixed_filled(field: Node, value: Node, p: Emission) as list<int>? := {
 	given = constant(value, p.m) ?? fixed_text(value, p.m) ?? return ø
 	if fitted(given, known_layout(field_declared(field), p), value, p).instructions == given.instructions then given.instructions else ø
 }
 # The helper turning a raise's text into the Node a Try's handler takes, Error(Text(text)), as case_value_code builds
 # a case. Its local: 0 the text.
-error_node_function(p: Program) as int := {
+error_node_function(p: Emission) as int := {
 	node = node_record(p, "a Try's handler takes the raise as a Node")
 	tag = word => i32_const(declared_tag(node_case(node, word), p))
 	made = word => instruction(STRUCT_NEW, [case_struct_of(node, node_case(node, word), p.m, p.records)])
 	added_function(p.m, [text_layout(p.m)], [known_layout(NODE_TERM, p)], [], tag(ERROR_CASE) + tag(TEXT_CASE) + local_get(0) + made(TEXT_CASE) + made(ERROR_CASE))
 }
 # the program's Node record, which what `why` names needs
-node_record(p: Program, why: text) as Record := record_named(p.records, NODE_TERM) ?? refused(Text(NODE_TYPE), why + ", and the program declares no Node")
+node_record(p: Emission, why: text) as Record := record_named(p.records, NODE_TERM) ?? refused(Text(NODE_TYPE), why + ", and the program declares no Node")
 node_case(node: Record, word: text) as Node := {
 	named = cases_of(node).filter(case => text(case_name(case)) == word)
 	if named is empty then refused(Text(word), "the Node enum has no case of this name") else named#1
 }
 # A bound case's tag: its place among the cases of every enum the program declares, found by the case that defined
 # it by its declaration's place, so cases of two enums never share a tag, not even two of one name and shape
-tag_of(case: Node, p: Program) as int := declared_tag(case_declaring(p.records, case), p)
-declared_tag(declared: Node, p: Program) as int := {
+tag_of(case: Node, p: Emission) as int := declared_tag(case_declaring(p.records, case), p)
+declared_tag(declared: Node, p: Emission) as int := {
 	key = place_key(case_name(declared))
 	index_where(p.records.items.flat_map(cases_of), each => place_key(case_name(each)) == key) - 1
 }
