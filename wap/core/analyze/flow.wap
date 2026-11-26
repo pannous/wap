@@ -1,0 +1,138 @@
+# A name's bindings along the paths of a function (wiki/type.md "Writing a type", notes/coc-plan.md 9.5): an
+# assignment of another type is a binding of its own from there on, its place the definer the name's later reads and
+# sets name (REBOUND, by which the emitter keys their storage); where paths meet with a name on unlike bindings, each
+# path ends by giving one binding, of the type they join in, its value. A name a let, a const or a written type
+# declares keeps its type.
+
+use folder
+use "../errors.wap"
+use "../stage.wap"
+use "../bindings.wap"
+use "../type_notation.wap"
+use "../../kernel/forms.wap"
+
+# a name given a binding of its own on this path: a bound name of it (its first definer `defined_at(name)`), and the
+# place of its binding now
+class Bound { name: Node; definer: Node }
+# what a name holding unlike types where paths meet says
+HOLDS_ANY = "so it holds any from here on: write `let` for a name that keeps its type"
+
+# the definer of the binding a name holds on this path: its own first one unless an assignment made another
+binding_definer(name: Node, f: TypeFrame) as Node := definer_in(name, f.bound)
+definer_in(name: Node, bindings: list<Bound>) as Node := (bindings.find(bound => one_variable(bound.name, name)) ?? Bound(name, defined_at(name))).definer
+# whether two bound names are of one variable
+one_variable(a: Node, b: Node) as bool := place_key(defined_at(a)) == place_key(defined_at(b))
+# a name read or set as the binding it holds: marked with that binding's definer where it is not its first
+bound_named(name: Node, definer: Node) as Node := if place_key(definer) == place_key(defined_at(name)) then name else with_fact(name, REBOUND, definer)
+# a place set as the binding its name holds, `x` or `x: int`
+bound_place(place: Node, name: Node, f: TypeFrame) as Node := {
+	definer = binding_definer(name, f)
+	if place_key(definer) == place_key(defined_at(name)) then place else with_name_fact(place, REBOUND, definer)
+}
+# a name on this path held by the binding of this definer from here on
+bound_to(name: Node, definer: Node, f: TypeFrame) := {
+	others = f.bound.filter(bound => not one_variable(bound.name, name))
+	f.bound = if place_key(definer) == place_key(defined_at(name)) then others else others + [Bound(name, definer)]
+}
+# an assignment of another type: a binding of its own from here on, the name set its definer; a global is one storage
+# every function reads, so only the program's own statements give it another type, and no function may read it
+rebound(name: Node, s: TypingState, f: TypeFrame) := {
+	if is_bound(name, DefinitionKind.Global) {
+		if f.function != ø { refused(name, "a function gives ${name} a value of another type than the program gives it: write `${name}: any` where the program first gives it one") }
+		s.rebound_globals += [place_key(defined_at(name))]
+	}
+	bound_to(name, name, f)
+}
+# the functions' reads of a global the program gives values of other types, refused: they read one storage of one
+# type, which differs at their calls
+global_reads_checked(s: TypingState) := for read in s.function_globals { if place_key(defined_at(read)) in s.rebound_globals { refused(read, "a function reads ${read}, which the program gives values of other types: write `${read}: any` where the program first gives it one") } }
+
+# The parts of a choice, typed one after the other from the bindings before it, then met: each part whose binding of a
+# name differs from the others' ends by giving the one binding they meet in its value; a part that never finishes
+# leaves no binding (an If's arms, a match's)
+parts_met(n: Node, count: int, typing: (int) -> Node, s: TypingState, f: TypeFrame, expected: Term?) as list := {
+	entry = f.bound
+	typed: list = []
+	ends: list<list<Bound>> = []
+	for at in 1 to count {
+		f.bound = entry
+		typed += [typing(at)]
+		ends += [f.bound]
+	}
+	met(n, typed, ends, entry, s, f, expected)
+}
+met(n: Node, typed: list, ends: list<list<Bound>>, entry: list<Bound>, s: TypingState, f: TypeFrame, expected: Term?) as list := {
+	finishing = (1 to #typed).filter(at => not jumps(typed#at))
+	f.bound = entry
+	if finishing is empty { return typed }
+	if #finishing == 1 { f.bound = ends#(finishing#1); return typed }
+	for name in finishing.flat_map(at => ends#at.map(bound => bound.name)) {
+		definers = finishing.map(at => definer_in(name, ends#at))
+		if definers.all(definer => place_key(definer) == place_key(definers#1)) { bound_to(name, definers#1, f) } else {
+			types = definers.map(definer => definer_type(name, definer, s, f))
+			joined = joined_all(types, s) ?? any_joined(name, types, n, s)
+			target = definers.find(definer => definer_type(name, definer, s, f) == joined) ?? met_definer(name, n, joined, s, f)
+			for at in finishing.filter(at => place_key(definer_in(name, ends#at)) != place_key(target)) { typed#at = ended(typed#at, copied(name, definer_in(name, ends#at), target, joined, s, f, n), s, expected) }
+			bound_to(name, target, f)
+		}
+	}
+	typed
+}
+# the type of a name's binding
+definer_type(name: Node, definer: Node, s: TypingState, f: TypeFrame) as Term := type_keyed(place_key(definer), variables_of(name, s, f)) ?? refused(definer, "a binding met without its type")
+# unlike types where paths meet: any, said once typing is done
+any_joined(name: Node, types: list<Term>, n: Node, s: TypingState) as Term := {
+	s.retypings.add(place_of(n) + "${name} holds ${types.map(type => type_text(type)).join(" or ")} where these paths meet, ${HOLDS_ANY}")
+	ANY_TERM
+}
+# a binding of its own for where paths meet, of the type they join in
+met_definer(name: Node, n: Node, joined: Term, s: TypingState, f: TypeFrame) as Node := {
+	definer = identified(placed_like(with_fact(with_fact(symbol(text(name)), BINDING, fact_of(name, BINDING) ?? refused(name, "a name without its binding")), DEFINED_AT, defined_at(name)), n), s.ids)
+	variables_added(name, Binding(place_key(definer), joined), s, f)
+	definer
+}
+# the statement giving a name's binding the value of another of its bindings, converted to its type
+copied(name: Node, from: Node, to: Node, type: Term, s: TypingState, f: TypeFrame, at: Node) as Node := {
+	read = with_type_of(bound_named(name, from), definer_type(name, from, s, f))
+	place = with_name_fact(bound_named(name, to), TYPE, type_fact(type))
+	with_type_of(placed_like(Set(place, converted(read, type, s, at, NAME_HOLDS)), at), type)
+}
+# a part ended by a statement, its value kept: an arm's result where it is an Arm, held while the statement runs where
+# its value may be wanted
+ended(part: Node, statement: Node, s: TypingState, expected: Term?) as Node := match part {
+	Arm(pattern, result) => refitted(Arm(pattern, ended(result, statement, s, expected)), part)
+	_ => {
+		if expected == EMPTY_TERM or not gives_value(part) { return with_type_of(placed_like(Block([part, statement]), part), EMPTY_TERM) }
+		held = identified(with_binding(placed_like(symbol(HELD_PART), part), DefinitionKind.Local), s.ids)
+		held = with_fact(held, DEFINED_AT, held)
+		type = value_type(part)!
+		holding = with_type_of(placed_like(Set(with_name_fact(held, TYPE, type_fact(type)), part), part), type)
+		typed_like(placed_like(Block([holding, statement, with_type_of(held, type)]), part), with_type_of(held, type))
+	}
+}
+HELD_PART = "held_part"
+
+# A loop's body, typed from the bindings before the loop: a name it gives a binding of its own of the same type gives
+# the one before the loop its value at the body's end, so the next round reads it; a name it gives another type, or a
+# break or continue after such a binding, is refused for now
+looped(body: Node, typing: (Node) -> Node, s: TypingState, f: TypeFrame) as Node := {
+	entry = f.bound
+	outer = f.loop_entry
+	f.loop_entry = entry
+	typed = typing(body)
+	ends = f.bound
+	f.loop_entry = outer
+	f.bound = entry
+	for bound in ends.filter(bound => place_key(definer_in(bound.name, entry)) != place_key(bound.definer)) {
+		before = definer_in(bound.name, entry)
+		type = definer_type(bound.name, before, s, f)
+		if definer_type(bound.name, bound.definer, s, f) != type { refused(bound.definer, "${bound.name} is given a value of another type in this loop than it holds before it: give it that type before the loop, or use another name") }
+		typed = ended(typed, copied(bound.name, bound.definer, before, type, s, f, bound.definer), s, EMPTY_TERM)
+	}
+	typed
+}
+# a break or continue leaves the round with the bindings the loop began it with
+jump_checked(n: Node, f: TypeFrame) := bindings_kept(n, f.loop_entry, f, "before this jump out of the loop's round")
+# a try's body raises anywhere, so its handler and the code after it read the bindings it began with
+try_checked(n: Node, entry: list<Bound>, f: TypeFrame) := bindings_kept(n, entry, f, "inside this try")
+bindings_kept(n: Node, entry: list<Bound>, f: TypeFrame, place: text) := for bound in f.bound { if place_key(definer_in(bound.name, entry)) != place_key(bound.definer) { refused(n, "${bound.name} is given a value of another type ${place}: give it that type before, or use another name") } }
