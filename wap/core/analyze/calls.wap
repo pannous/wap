@@ -20,6 +20,8 @@ use "../parse/operator_table.wap"
 PLACE_WORD = "#"
 # the word that gives a list's item or a map's entry its value, `set(v, of: xs, at: i)`: the value is worked out first, then the subject and the place, as written right to left
 SET_WORD = "set"
+# the word a class reads its value through where no definition takes the value itself, `get(of: Signal): any`
+GETTER_WORD = "get"
 # the word of an optional value known present, `x!` (named required): its value, raising when it is missing
 REQUIRED_WORD = "!"
 # the fact of a call of a function whose result is not known yet, its body calling itself: what to write instead
@@ -80,12 +82,18 @@ call_shown(n: Node) as text := match n { Call(called, arguments) => "${called}($
 # A call of the definition chosen among these scopes for typed arguments, each fitted as its parameter takes it, a
 # left-out one given its default; a call made without a frame, word_called, types its defaults on their own
 call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s: TypingState, f: TypeFrame?) as Node := {
+	# where no definition takes the arguments, one whose class has a get is read through it, `x > 5` of a signal
+	if given.any(argument => got_from(argument, s)) and not (try { chosen_definition(n, called, scopes, given, expected, s); yes } catch e { no }) { given = given.map(argument => got(argument, s)) }
 	meant = chosen_definition(n, called, scopes, given, expected, s)
 	taken = arguments_fitted(meant, given, s) + defaults_given(meant, #given, s, f ?? TypeFrame())
 	chosen = function_typed(meant, taken.map(argument => value_type(argument)), s, n)
 	if f != ø { called_reads(chosen, n, s, f!) }
 	result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
 }
+# whether a value is of a record its class reads through `get(of: Signal)`
+got_from(argument: Node, s: TypingState) as bool := record_named(s.records, value_type(argument)) != ø and definitions_named(GETTER_WORD, s).any(definition => #definition.parameters == 1 and (definition.parameters#1 ?? ANY_TERM) == value_type(argument)!)
+# a value read through its class's get where it has one, `get(of: x)`, else as it is
+got(argument: Node, s: TypingState) as Node := if got_from(argument, s) then word_called(argument, GETTER_WORD, [argument], ø, s) else argument
 # a list literal given alone where no definition takes one argument, its items the arguments: `no_comma (1, 2)` is
 # no_comma(1, 2) (wiki/function.md); a map `{…}` stays one argument, as does a form, `(Call f 3)`, which is no list
 spread_alone(arguments: list, candidates: list<Signature>, s: TypingState) as list := if #arguments != 1 or candidates.any(definition => takes_count(definition, 1, s)) then arguments else match arguments#1 { List(items, bracket, separator) => if bracket == Bracket.Square or bracket == Bracket.Round and separator == Separator.Comma then items else arguments; _ => arguments }
@@ -209,7 +217,7 @@ arguments_fitted(definition: Signature, given: list, s: TypingState) as list := 
 word_called(n: Node, word: text, given: list, expected: Term?, s: TypingState) as Node := call_chosen(n, symbol(word), word_scopes(word, s), given, expected, s, ø)
 # a word's definitions layer by layer, as a call written at the program's top finds them, the program's hiding the
 # library's; then those typing wrote itself
-word_scopes(word: text, s: TypingState) as list := {
+word_scopes(word: text, s: TypingState) as list<list<Signature>> := {
 	layers = (if s.kind_rules == ø then Scope() else s.kind_rules!.scope).layers.map(layer => named_in(Scope([layer]), word).filter(definition => is_function(definition)).map(definition => definition_at(definition.definer, s)))
 	with_last_scope(layers.filter(layer => not layer is empty), definitions_named(word, s))
 }

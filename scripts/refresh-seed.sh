@@ -29,29 +29,19 @@ seed=$(dirname "$(readlink -f "$installed")")/wap-seed/wap.wasm
 mkdir -p "$tree/data" && scratch=$(cd -P "$(mktemp -d "$tree/data/refresh-seed.XXXXXX")" && pwd -P) || exit 2
 trap 'rm -rf "$scratch"' EXIT
 source "$(dirname "$0")/lib/wap-beside.sh"
-source "$(dirname "$0")/lib/wap-host.sh"
 # every stage after A reads the tree's types module and kernel beside itself
 wap_beside_copied "$tree" "$scratch" || exit 2
 
 echo 'print "Hello"' >"$scratch/hello.wap"
-# prepared <compiler>: what a compiler built from the tree reads beside it, written first: the library and the warm
-# state the compiler it builds holds (its own warm state is the stage's before); the seed's holds no library, as the
-# seed may write an older one
-prepared() {
-	[ -f "$tree/$WAP_WARM" ] || : >"$tree/$WAP_WARM"
-	: >"$tree/$WAP_LIBRARY_MODULE"
-	[ "$1" != "$seed" ] || return 0
-	wap_ran "$1" --sources "$scratch/types/types.wap" "$scratch/types.wasm" >"$scratch/stage.log" 2>&1 && cp "$scratch/types.wasm" "$tree/$WAP_LIBRARY_MODULE" || { echo "refresh-seed: no library: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
-	wap_ran "$1" --sources warm "$tree/$WAP_WARM" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: no warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
-}
-# timed <compiler> <output>: the prepared compiler compiling wap's source, a compiler built from the tree reading the
-# tree's sources; its cost in user + system CPU seconds in $cost, timed warm: a first hello lets the host compile a new
-# module's machine code before the clock starts, else a new compiler pays for it
+# prepared <compiler>: what the compiler built from the tree holds, written beside the tree's source first
+# (scripts/lib/wap-beside.sh wap_stage_prepared)
+prepared() { wap_stage_prepared "$1" "$seed" "$tree/wap" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: $(basename "$1" .wasm) wrote no library or warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }; }
+# timed <compiler> <output>: the prepared compiler compiling wap's source; its cost in user + system CPU seconds in
+# $cost, timed warm: a first hello lets the host compile a new module's machine code before the clock starts, else a
+# new compiler pays for it
 timed() {
-	local sources=()
-	[ "$1" = "$seed" ] || sources=(--sources)
 	wap_ran "$1" "$scratch/hello.wap" "$scratch/warm.wasm" >/dev/null 2>&1
-	cost=$( { TIMEFORMAT="%U %S"; time wap_ran "$1" ${sources[@]+"${sources[@]}"} "$tree/wap/compiler.wap" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
+	cost=$( { TIMEFORMAT="%U %S"; time wap_stage_compiled "$1" "$seed" "$tree/wap" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
 	[ -f "$2" ] || { echo "refresh-seed: $(basename "$2" .wasm) FAILED: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
 }
 # stage <compiler> <output>: the compiler compiling wap's source, prepared and timed
