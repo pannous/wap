@@ -33,10 +33,9 @@ compiler_built() {
 }
 folder_built() {
 	local building=$1.$$
-	mkdir -p "$building" && wap_beside_copied "$tree" "$building" && (cd "$tree/wap" && cp -R "${WAP_SOURCE[@]}" "$building/") || return 1
 	# each step run in the folder on relative paths, as a module names the files it was compiled from: two builds of one
-	# source are the same bytes wherever they ran
-	(cd "$building" && steps_built "$2") || return 1
+	# source are the same bytes wherever they ran; a failed build takes its own folder away
+	mkdir -p "$building" && wap_beside_copied "$tree" "$building" && (cd "$tree/wap" && cp -R "${WAP_SOURCE[@]}" "$building/") && (cd "$building" && steps_built "$2") || { rm -rf "$building"; return 1; }
 	# another script may have put the same folder in place meanwhile: the first one stays
 	[ -f "$1/wap$2.wasm" ] && { rm -rf "$building"; return; }
 	rm -rf "$1" && mv "$building" "$1" || return 1
