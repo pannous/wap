@@ -17,8 +17,8 @@
 set -euo pipefail
 C_COMPILER=cc
 # -std=gnu23: wasm2c writes C23 (static asserts without a message), and glibc shows POSIX (sigaction, sigaltstack) only
-# to a GNU dialect; -rdynamic: the executable's own C functions (main.c native_call, wap_host_callback) are found by name as libc's are
-C_FLAGS="-O2 -rdynamic -std=gnu23"
+# to a GNU dialect
+C_FLAGS="-O2 -std=gnu23"
 MODULE_NAME=program
 WASM2C_RUNTIME=share/wabt/wasm2c
 WABT_HEADERS=include
@@ -36,6 +36,15 @@ whole_archive() {
 	case $(uname -s) in
 		Darwin) echo "-Wl,-force_load,$1" ;;
 		*) echo "-Wl,--whole-archive,$1,--no-whole-archive" ;;
+	esac
+}
+# the linker's arguments each system spells its own way: the executable's own C functions (main.c native_call,
+# wap_host_callback) exported, found by name as libc's are; on Windows its threads (winpthreads, linked in, so no
+# DLL of the compiler's goes with it) and a main thread's stack as deep as the others give it (Windows gives 1 MB)
+system_linked() {
+	case $(uname -s) in
+		MINGW* | MSYS*) echo "-Wl,--export-all-symbols -Wl,-Bstatic -lpthread -Wl,-Bdynamic -Wl,--stack,0x10000000" ;;
+		*) echo "-rdynamic" ;;
 	esac
 }
 # the C compiler's arguments of a standalone build: each -l<name> with a lib<name>.a in a -L folder replaced by it whole
@@ -77,6 +86,6 @@ if [ -n "$standalone" ]; then
 	seed=(-DWAP_SEED="\"$building/seed.tar\"" -DWAP_SEED_NAME="\"$seed_name\"")
 fi
 awk -f "$here/glue.awk" "$building/$MODULE_NAME.h" >"$building/glue.c"
-"$C_COMPILER" $C_FLAGS ${seed[@]+"${seed[@]}"} -I"$building" -I"$wabt/$WASM2C_RUNTIME" -I"$wabt/$WABT_HEADERS" -I"$library" -o "$executable" \
+"$C_COMPILER" $C_FLAGS $(system_linked) ${seed[@]+"${seed[@]}"} -I"$building" -I"$wabt/$WASM2C_RUNTIME" -I"$wabt/$WABT_HEADERS" -I"$library" -o "$executable" \
 	"$building/$MODULE_NAME.c" "$here/main.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-impl.c" "$wabt/$WASM2C_RUNTIME/wasm-rt-mem-impl.c" -lm "$@"
 rm -rf "$building"
