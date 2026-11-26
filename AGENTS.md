@@ -31,7 +31,9 @@ https://github.com/pannous/wap
   into wap/extensions/ (first case: the native binary).
 - Standing OK: a core, kernel or sugar bug fix of at most 3 net lines, or any pure shrink, that adds
   no form and makes the compiler do what the wiki or a test already says, lands after wap-reviewer's "sound" without a
-  user question; its card notes "standing OK small fix". Anything bigger, or a new form, goes to the user.
+  user question; its card notes "standing OK small fix". So does a speedup of at least 1%, measured, that adds no net
+  lines, no form and no mechanism (its card notes "standing OK speed", user 2026-11-26). Anything bigger, or a new
+  form, goes to the user.
 - A library feature starts as idiomatic wap (functions, classes, enums, block parameters, operator overloads). A
   compiler change it asks for (core, kernel, sugar/, extensions/, or a rewrite rule in a library file) goes to
   warp-interviewer with: the idiomatic attempt and where it fails, the general mechanism, three different libraries
