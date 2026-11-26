@@ -86,6 +86,18 @@ TYPE fact holds `Number(place)` in that table.
   of the phrase it rewrote, because the output keeps that position.
 - The dispatcher's restart (`dispatches_completed`) stays until T6, the restart for a standard module until TM4.
 
+### Parked and refused at T3d
+
+A name's bindings live in core/analyze/flow.wap. These forms are refused with a fix-it, each until what brings it back:
+
+| form | refusal | brought back by |
+|---|---|---|
+| a loop body giving a carried name another type, `y = 1; for … { y = "c" }` (parked; test_type_wanted's loop line) | give it that type before the loop | the body typed with the join at its head, once a typing can be discarded; or the union at E7 |
+| a break or continue after a rebinding in the round | give it that type before the loop | the jump's bindings met with the loop's exit |
+| a rebinding inside a try body | give it that type before the try | the handler met with every point the body may raise from |
+| a function giving a global another type | write `x: any` where the program first gives it one | globals as bindings a function takes (T5 statements as terms) |
+| a function reading a global the program gives other types | write `x: any` where the program first gives it one | as above |
+
 ## Numbers through the kernel
 
 - **A numeral has the type its place wants, else `int`:** `x: float = 3` is a float, with no int-to-float
