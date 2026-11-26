@@ -31,6 +31,8 @@ job_slot="$here/../../scripts/job-slot.sh"
 # a _wanted program compiles without at most this many of its statements, each red, and how much of one names its red
 WANTED_REFUSALS=60
 RED_NAME_LENGTH=120
+# a statement starts at the margin; an indented line, a closing bracket or a comment there is none
+STATEMENT_START='^[^] \t})#]'
 
 # the outputs of the tests run, each data/wap-tests/<test key>.txt
 outputs() { for test in "$@"; do echo "$results/$(test_key "$test").txt"; done; }
@@ -104,9 +106,10 @@ wanted_compiled() {
 	until $wap "$compiler" "$program" "$stage/test.wasm" >"$stage/refused.txt" 2>&1; do
 		line=$(sed -n "s|^$program line \([0-9]*\):.*|\1|p" "$stage/refused.txt" | head -1)
 		[ -n "$line" ] && [ $((refusals += 1)) -le $WANTED_REFUSALS ] || { cat "$stage/refused.txt"; return 1; }
-		start=$(awk -v refused="$line" 'NR <= refused && /^[^ \t})\]]/ { start = NR } END { print start }' "$program")
+		start=$(awk -v refused="$line" -v statement="$STATEMENT_START" 'NR <= refused && $0 ~ statement { start = NR } END { print start }' "$program")
+		[ -n "$start" ] && [ -n "$(sed -n "${start}p" "$program")" ] || { cat "$stage/refused.txt"; return 1; }
 		echo "✗ $(sed -n "${start}p" "$program" | sed 's/^check("\([^"]*\)".*/\1/' | cut -c1-$RED_NAME_LENGTH): got $(head -1 "$stage/refused.txt" | sed "s|^$program ||"), expected it compiles"
-		awk -v start="$start" 'NR > start && /^[^ \t})\]]/ { start = 0 } start { $0 = "" } 1' "$program" >"$program.blanked" && mv "$program.blanked" "$program"
+		awk -v start="$start" -v statement="$STATEMENT_START" 'NR > start && $0 ~ statement { start = 0 } start { $0 = "" } 1' "$program" >"$program.blanked" && mv "$program.blanked" "$program"
 	done
 }
 one_run() {
