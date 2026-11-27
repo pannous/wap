@@ -106,6 +106,8 @@ check "wap's compiler run from its source uses a library module" "$(cd "$stage" 
 # a compiler with no lib beside it nor one folder above it refuses a program that uses the library, saying so
 printf '%s\n' 'use version' >"$stage/uses_library.wap"
 check "a compiler with no library beside it nor above it says so where a program uses it" "$(rm -rf "$stage/lonely" && mkdir -p "$stage/lonely" && cp -R "$tree/wap" "$stage/lonely/" && : >"$stage/lonely/wap/warm.packed" && : >"$stage/lonely/wap/types.wasm" && cd "$stage" && "$native_wap" "$stage/lonely/wap/compiler.wap" uses_library.wap uses_library.wasm 2>&1 | grep -c 'no standard library: no folder lib beside .*/lonely/wap or above it')" "1"
+# the provers (wap/extensions/proof) are no part of the compiler: a tree without them compiles and runs a hello
+check "a tree without extensions/proof compiles a hello" "$(rm -rf "$stage/proofless" && mkdir -p "$stage/proofless" && cp -R "$tree/wap" "$stage/proofless/" && rm -rf "$stage/proofless/wap/extensions/proof" && cd "$stage" && "$native_wap" "$stage/proofless/wap/compiler.wap" hello.wap proofless.wasm && "$native_wap" proofless.wasm 2>&1)" "Hello"
 # C calling back a function of the program run (lib/native/callbacks.h, extensions/native/host_words.wap): qsort
 # compares by the program's c_callback_fired
 cat >"$stage/sorted.wap" <<'PROGRAM'
