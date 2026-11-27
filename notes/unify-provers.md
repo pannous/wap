@@ -3,12 +3,39 @@
 A program's whole numbers reach the kernel as int, and int is the only number structure the provers work in. nat is
 `int where it >= 0`, so no law reaches them over nat.
 
-wap/types declares `enum int { of_nat(n: nat); negative_successor(n: nat) }`. A numeral is `of_nat(k)` or
-`negative_successor(k)` (kernel/numbers.wap `integer_numeral`). An operator is a row constant,
+int is `enum int { of_count(n: count); below_zero(n: count) }`, its payload the kernel's count (next section). A
+numeral is `of_count(k)` or `below_zero(k)`, k a count literal. An operator is a row constant,
 `prim i64.add int -> int -> int`, whose Defined value is its meaning in wap/types: sum, minus, times,
-equal_integers, not_above, and the other comparisons. The kernel's nat inductive is only the carrier of int's two
-cases. The provers never state anything over it. Only the reader of an int numeral and the int lemmas' own proofs
-use it. A law is `Π binders, Equal(bool, body, yes)` (typed_laws.wap `law_statement`).
+equal_integers, not_above, and the other comparisons. The count is only the payload of int's two cases. The
+provers never state a program's law over it; only the reader of an int numeral and the int lemmas' own proofs use it.
+
+## int's payload: the kernel's count, not nat
+
+nat is `int where it >= 0`, a refinement of int, so int's cases cannot carry nat: that would be circular. Their
+payload is a kernel object of its own with no wap name, the **count**:
+
+```
+count: Type            the kernel block   enum count { none; one_more(c: count) }
+                       its literals the kernel's Numeral (a count literal k is one_more applied k times to none,
+                       computed by the numbers binding's shortcuts, kernel/numbers.wap, so 10^12 costs nothing)
+count_add, count_subtract, count_equals, count_at_most     by count's recursor
+count_equals_sound, count_equals_itself, count_add_zero …  theorems by count's recursor
+```
+
+- **Where it is declared.** core_environment declares it, as it declares Equal (type_notation.wap
+  `equality_declared` beside it, a `count_declared`). The kernel code to bind it, `numbers_declared` and the
+  shortcuts, already exists. It was bound by the deleted prelude's `numbers(nat, bool.yes, Equal)`. Now core binds
+  it to the count block: kernel +about 40 lines of declarations, no new kernel mechanism. wap/types never names it.
+  `enum int` in wap/types writes its cases' payload with the word `count`, a core word (CORE_WORDS), seen from every
+  scope as the Choice is. It is not a type a program uses: a program writing `count` meets the list's `count` word,
+  so the kernel word needs a name no program can write. Recommended: core keys it with a mark, as row constants are
+  keyed `prim …`, e.g. `·count`.
+- **Not a second number type.** A program's numerals, its operators and its laws are int. nat is the refinement with
+  its condition. The count is to int what the bits of a machine word are to i64: its representation, which only the
+  kernel and the int lemmas' proofs see.
+- **nat's induction.** A theorem over `int where it >= 0`: from `0 <= x`, x is `of_count(k)`. The case
+  `below_zero(k)` computes `0 <= x` to no, ruled out by apart over bool. P(of_count(k)) then follows by count's
+  recursor. It is stated and proved once, and induction.wap uses it for a nat binder. A law is `Π binders, Equal(bool, body, yes)` (typed_laws.wap `law_statement`).
 
 The provers are 9 files, 937 lines. Only linear.wap (416) reads a number structure, today nat's through
 kernel/numbers.wap's Numbers record. apart, induction, rewriting, facts, introduction and computing take any enum by
@@ -23,8 +50,8 @@ The nat structure and the nat LAWS list go. `Sums` holds int's functions, found 
 `i64.add`, `i64.le_s` and `i64.eq` at `int -> int -> int` (core/analyze/terms.wap `row_name`), so no function name is
 written twice.
 
-- **Numbers read.** `of_nat(k)` is k and `negative_successor(k)` is −k−1, k a nat literal or built from nat's zero and
-  successor. This is the one place nat appears in linear.wap, and only because it is of_nat's argument. Numbers are
+- **Numbers read.** `of_count(k)` is k and `below_zero(k)` is −k−1, k a count literal or built from count's none and
+  one_more. This is the one place the count appears in linear.wap, and only because it is int's payload. Numbers are
   written by `integer_numeral`. `Normal.number` may be negative.
 - **Subtraction is `sum(a, minus(b))` everywhere.** `subtracted` unfolds to it. `with_differences`, the difference
   atoms and the Subtract shortcut go. `minus` over a sum is pushed inward by `minus_sum`, and a literal is computed.
@@ -35,7 +62,7 @@ written twice.
   condition `0 <= x` as one, and any `a <= b` in scope is another, each read by `bounds_of` as a row. No flag on the
   structure says an atom is at least 0.
 - **A hypothesis `a <= b`.** It is `Bound(a, d, b)`, with `d = sum(b, minus(a))` and two proofs:
-  `a + d == b` (`sum_difference`) and `0 <= d` (`difference_nonnegative`). An equation's d is `of_nat(0)`.
+  `a + d == b` (`sum_difference`) and `0 <= d` (`difference_nonnegative`). An equation's d is `of_count(0)`.
 - **The gap.** `eliminated` returns `t + gap == u` as today, the gap a sum of the used bounds' d's and a literal
   of at least 0. With it comes `0 <= gap`, built by `nonnegative_sum` from each d's proof and the literal's
   computation. `at_most_from` uses `not_above_add(t, g, h: 0 <= g): t <= t + g`.
@@ -50,8 +77,8 @@ The law names stay one list (LAWS), checked present by `sums_of` as today.
 
 ```
 not_above(a, b)   by int's cases on a and b, the way equal_integers is:
-                  of_nat m, of_nat n → at_most(m, n);   of_nat m, neg n → no;
-                  neg m, of_nat n → yes;                neg m, neg n → at_most(n, m)
+                  of_count m, of_count n → count_at_most(m, n);   of_count m, below_zero n → no;
+                  below_zero m, of_count n → yes;   below_zero m, below_zero n → count_at_most(n, m)
 below(a, b)       := not_above(a + 1, b)
 above(a, b)       := below(b, a)
 not_below(a, b)   := not_above(b, a)
@@ -59,7 +86,7 @@ not_below(a, b)   := not_above(b, a)
 
 Each row keeps its meaning (`i64.le_s` is not_above, `i64.lt_s` below, and so on). Every comparison is then the one
 `<=` the prover reads. A `<` goal or hypothesis is a `<=` of `a + 1`, which makes `lt` (`x < x + 1`) a gap of 0. The
-nat-side at_most inside the cases is part of the carrier: it appears only in the proofs of the int lemmas below.
+count_at_most inside the cases is part of the payload: it appears only in the proofs of the int lemmas below.
 
 ## The int lemmas (wap/types, wap-unify-provers')
 
@@ -83,15 +110,15 @@ nat-side at_most inside the cases is part of the carrier: it appears only in the
 The laws the proofs are glued with, `equal_symmetric`, `equal_transitive`, `equal_congruent`, `chosen_decided` and
 `chosen_at_yes`, are about any type and stay as they are.
 
-Recommended proof route: an int is a difference of the carrier's nats.
-- `of_nat m == difference(m, 0)` and `negative_successor m == difference(0, m + 1)`, by computation.
+Recommended proof route: an int is a difference of two counts.
+- `of_count m == difference(m, none)` and `below_zero m == difference(none, one_more(m))`, by computation.
 - `difference_shift`: `difference(a + k, b + k) == difference(a, b)`, by induction on k.
 - `difference_sum`: `difference(a, b) + difference(c, d) == difference(a + c, b + d)`.
 - `difference_equal`: `difference(a, b) == difference(c, d)` where `a + d == c + b`.
 
 Then the sum laws become: rewrite each binder by its cases into differences, apply `difference_sum`, and finish with
-the carrier's add laws. The comparison laws are case splits on a and b, ending in the carrier's at_most laws. These
-carrier lemmas are proved by computing and induction, not by linear, which no longer reads nat. Never let the
+the count's add laws. The comparison laws are case splits on a and b, ending in the count's at_most laws. These
+count lemmas are proved by computing and induction, not by linear, which never reads the count. Never let the
 linear prover prove a lemma it uses itself.
 
 ## Between bool laws and Equal, hypotheses, and the binders' conditions
@@ -114,16 +141,16 @@ are checked theorems, never axioms. The same function serves any enum whose `==`
 included), so it is written once over the type and its equality function.
 
 - **complete** is Equal's recursor: rewrite b to a in the goal (`rewritten`), leaving `equal_integers(a, a) == yes`,
-  which is `equal_integers_itself`. That law is proved by int's cases and nat's `equals_itself` (induction).
+  which is `equal_integers_itself`. That law is proved by int's cases and `count_equals_itself` (count's recursor).
 - **sound** is induction on a, then on b, over int's cases:
-  - In the two mixed cases (`of_nat m` against `negative_successor n`), `equal_integers` computes to no. The
+  - In the two mixed cases (`of_count m` against `below_zero n`), `equal_integers` computes to no. The
     hypothesis becomes `Equal(bool, no, yes)`, and apart.wap proves the goal from it. This is the step that needs bool
     as a block (t5b-enums): apart's chooser is the recursor of the equation's type, `case_recursor(bool)`, choosing
     the goal at no and anything at yes. While bool is the kernel's Choice, it has no recursor, and `no == yes`
     cannot be told apart.
-  - In the two like cases, `equal_integers` computes to nat's `equals(m, n)`. nat's `equals_sound` (induction on m
-    and n, the mismatched cases again by apart over bool) gives `Equal(nat, m, n)`. `equal_congruent` with `of_nat`,
-    or with `negative_successor`, carries it to `Equal(int, …)`.
+  - In the two like cases, `equal_integers` computes to `count_equals(m, n)`. `count_equals_sound` (count's recursor on m
+    and n, the mismatched cases again by apart over bool) gives `Equal(count, m, n)`. `equal_congruent` with `of_count`,
+    or with `below_zero`, carries it to `Equal(int, …)`.
 
 Where the prover reads a hypothesis `h: (a == b) == yes`, `equal_bounds` gets `equals_sound(a, b, h)`. Where a law
 it calls takes an int equation (add_cancel's h, gap_bound's k), it passes `equals_complete(…, proof)`.
@@ -180,7 +207,7 @@ needs these 7 laws to prove anything with a bound.
    instance and LAWS out. Gate: `regrouped` proves, law_runs 11–15 hold, and test_theory_arithmetic, test_induction
    and test_verify show no line that was green going red.
 4. **Bool equality goals.** Gate: test_connectives and a `==` law over int.
-5. **Induction and apart over int.** The recursor gives two cases, each with a carrier field. A law over one int binder
+5. **Induction and apart over int.** The recursor gives two cases, each with a count field. A law over one int binder
    that needs induction under a case takes depth 2, which INDUCTION_DEPTH allows. Check one such law, and raise the
    depth only if a target line needs it.
 
