@@ -40,6 +40,28 @@ wap_tools_built() {
 		(cd "$(dirname "$2")" && wap "${2##*/}" "$tree/${tool#*:}" "${tool%%:*}" >&2) || { echo "wap-beside: ${tool#*:} did not compile" >&2; return 1; }
 	done
 }
+# wap_seed_linked <seed> <folder>: the seed linked into the folder as its wap.wasm, its machine code beside it, so run
+# from there it reads the library and anything its warm state lacks in that folder, the tree's copy, never the seed
+# folder, which holds no source; prints the link's path
+wap_seed_linked() {
+	local code
+	ln -sf "$1" "$2/wap.wasm" || return 1
+	for code in "$(dirname "$1")"/wap-*.cwasm; do [ ! -e "$code" ] || ln -sf "$code" "$2/"; done
+	echo "$(cd "$2" && pwd)/wap.wasm"
+}
+# wap_library_compiled <seed>: each module of the library beside the seed compiled once by the seed, by its full path,
+# beside its source, and then every source in the seed's folder gone: the seed reads the files it uses from its warm
+# state, and `use name` finds name.wasm (core/analyze/declarations.wap MODULE_ENDINGS). An example (examples/) is no
+# module; lib's unported warp files compile in no wap. A module that does not compile is named and refused
+wap_library_compiled() {
+	local folder module failed=""
+	folder=$(cd "$(dirname "$1")" && pwd -P)
+	for module in $(cd "$folder" && find "$WAP_LIBRARY" -name '*.wap' -not -path '*/examples/*'); do
+		(cd "$folder" && wap "${1##*/}" "$folder/$module" "$folder/${module%.wap}.wasm" >/dev/null 2>&1) || failed="$failed $module"
+	done
+	[ -z "$failed" ] || { echo "wap-beside: these library modules do not compile alone:$failed" >&2; return 1; }
+	find "$folder" \( -name '*.wap' -o -name '*.warp' \) -delete
+}
 # wap_beside_copied <tree> <folder>: all of it copied from the tree into the folder
 wap_beside_copied() {
 	(cd "$1/wap" && cp -R "${WAP_BESIDE[@]}" "$2/") && cp -R "$1/$WAP_LIBRARY" "$2/"

@@ -44,9 +44,10 @@ folder_built() {
 # the compilers of folder_built, in the folder: wap0 is the seed's, holding no library and no warm state; each next one
 # is the one before's, holding the library and warm state that one writes beside the source (scripts/lib/wap-beside.sh)
 steps_built() {
-	local n compiler=$seed
+	local n seeded compiler
+	seeded=$(wap_seed_linked "$seed" .) && compiler=$seeded || return 1
 	for ((n = 0; n <= $1; n++)); do
-		{ wap_stage_prepared "$compiler" "$seed" . && wap_stage_compiled "$compiler" "$seed" . "wap$n.wasm"; } 2>&1 || return 1
+		{ wap_stage_prepared "$compiler" "$seeded" . && wap_stage_compiled "$compiler" "$seeded" . "wap$n.wasm"; } 2>&1 || return 1
 		compiler=wap$n.wasm
 	done
 }

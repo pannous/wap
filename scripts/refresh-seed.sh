@@ -31,11 +31,13 @@ trap 'rm -rf "$scratch"' EXIT
 source "$(dirname "$0")/lib/wap-beside.sh"
 # every stage after A reads the tree's types module and kernel beside itself
 wap_beside_copied "$tree" "$scratch" || exit 2
+# the seed runs from the scratch folder, reading the tree's library there (scripts/lib/wap-beside.sh wap_seed_linked)
+seed_run=$(wap_seed_linked "$seed" "$scratch") || exit 2
 
 echo 'print "Hello"' >"$scratch/hello.wap"
 # prepared <compiler>: what the compiler built from the tree holds, written beside the tree's source first
 # (scripts/lib/wap-beside.sh wap_stage_prepared)
-prepared() { wap_stage_prepared "$1" "$seed" "$tree/wap" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: $(basename "$1" .wasm) wrote no library or warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }; }
+prepared() { wap_stage_prepared "$1" "$seed_run" "$tree/wap" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: $(basename "$1" .wasm) wrote no library or warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }; }
 # timed <compiler> <output> <seed>: the prepared compiler compiling wap's source, as a program where it is the seed,
 # else as sources (none: every compiler reads it as sources); its cost in user + system CPU seconds in
 # $cost, timed warm: a first hello lets the host compile a new module's machine code before the clock starts, else a
@@ -49,16 +51,16 @@ timed() {
 stage() {
 	local start=$SECONDS
 	prepared "$1"
-	timed "$1" "$2" "$seed"
+	timed "$1" "$2" "$seed_run"
 	echo "refresh-seed: $(basename "$2" .wasm) $(wc -c <"$2" | tr -d ' ') B in $((SECONDS - start)) s, $cost s CPU, sha256 $(shasum -a 256 "$2" | cut -c1-16)"
 }
 # the lesser of two costs, the first when the second is empty
 least() { awk -v a="$1" -v b="${2:-$1}" 'BEGIN { printf "%.1f", (a < b ? a : b) }'; }
-runner=$seed
-previous=$seed
+runner=$seed_run
+previous=$seed_run
 for name in $STAGES; do
 	stage "$previous" "$scratch/$name.wasm"
-	if [ "$previous" != "$seed" ] && cmp -s "$previous" "$scratch/$name.wasm"; then echo "refresh-seed: $name is the same bytes as the stage before: a fixpoint"; fi
+	if [ "$previous" != "$seed_run" ] && cmp -s "$previous" "$scratch/$name.wasm"; then echo "refresh-seed: $name is the same bytes as the stage before: a fixpoint"; fi
 	runner=$previous
 	previous=$scratch/$name.wasm
 done
@@ -70,7 +72,7 @@ round_timed() { prepared "$1" && timed "$1" "$scratch/timed.wasm" ""; }
 old_cost=
 new_cost=
 for round in $(seq "$TIMING_ROUNDS"); do
-	round_timed "$seed"
+	round_timed "$seed_run"
 	old_cost=$(least "$cost" "$old_cost")
 	round_timed "$runner"
 	new_cost=$(least "$cost" "$new_cost")
@@ -105,7 +107,7 @@ PY
 }
 source_commit=$(git -C "$tree" rev-parse HEAD)
 # the seed and what it reads beside it, installed and published
-cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && wap_tools_built "$tree" "$seed" && echo "refresh-seed: replaced $seed"
+cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && wap_tools_built "$tree" "$seed" && wap_library_compiled "$seed" && echo "refresh-seed: replaced $seed, its folder holding no source"
 # (the old compiler's machine code goes with it, and every program's it compiled: the native wap writes the new
 # compiler's at its first run, below)
 rm -f "$(dirname "$seed")"/*.cwasm
@@ -117,7 +119,7 @@ wap_linked "$native"
 # its first run, so the first one anyone makes finds the compiler's machine code written
 "$native/wap" '1+1' >/dev/null || echo "refresh-seed: the installed $native/wap fails to run 1+1" >&2
 beside=$scratch/wap-seed-beside.tar.gz
-COPYFILE_DISABLE=1 tar -czf "$beside" -C "$tree/wap" "${WAP_BESIDE[@]}" -C "$tree" "$WAP_LIBRARY" -C "$(dirname "$seed")" "${WAP_TOOLS[@]%%:*}" || { echo "refresh-seed: the types module and kernel were not packed" >&2; exit 1; }
+COPYFILE_DISABLE=1 tar -czf "$beside" -C "$(dirname "$seed")" "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "${WAP_TOOLS[@]%%:*}" || { echo "refresh-seed: what the seed reads beside itself was not packed" >&2; exit 1; }
 release=wap-seed-$(date +%Y-%m-%d)-$(shasum -a 256 "$seed" | cut -c1-8)
 gh release create "$release" "$seed" "$beside" --repo "$REPOSITORY" --prerelease --title "$release" --target "$source_commit" \
 	--notes "wap's seed compiler: wap/compiler.wap of ${source_commit:0:10}, compiled by the stages A B C." &&
