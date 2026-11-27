@@ -29,22 +29,23 @@ seed=$(dirname "$(readlink -f "$installed")")/wap-seed/wap.wasm
 mkdir -p "$tree/data" && scratch=$(cd -P "$(mktemp -d "$tree/data/refresh-seed.XXXXXX")" && pwd -P) || exit 2
 trap 'rm -rf "$scratch"' EXIT
 source "$(dirname "$0")/lib/wap-beside.sh"
-# every stage after A reads the tree's types module and kernel beside itself
-wap_beside_copied "$tree" "$scratch" || exit 2
+# every stage runs in the scratch folder on its own copy of the tree, the compiler's source included, as the tests build
+# it (test/wap/compile.sh folder_built): the warm state written there names the files its compiler reads
+wap_beside_copied "$tree" "$scratch" && (cd "$tree/wap" && cp -R "${WAP_SOURCE[@]}" "$scratch/") || exit 2
 # the seed runs from the scratch folder, reading the tree's library there (scripts/lib/wap-beside.sh wap_seed_linked)
 seed_run=$(wap_seed_linked "$seed" "$scratch") || exit 2
 
 echo 'print "Hello"' >"$scratch/hello.wap"
 # prepared <compiler>: what the compiler built from the tree holds, written beside the tree's source first
 # (scripts/lib/wap-beside.sh wap_stage_prepared)
-prepared() { wap_stage_prepared "$1" "$seed_run" "$tree/wap" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: $(basename "$1" .wasm) wrote no library or warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }; }
+prepared() { wap_stage_prepared "$1" "$seed_run" "$scratch" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: $(basename "$1" .wasm) wrote no library or warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }; }
 # timed <compiler> <output> <seed>: the prepared compiler compiling wap's source, as a program where it is the seed,
 # else as sources (none: every compiler reads it as sources); its cost in user + system CPU seconds in
 # $cost, timed warm: a first hello lets the host compile a new module's machine code before the clock starts, else a
 # new compiler pays for it
 timed() {
 	wap_ran "$1" "$scratch/hello.wap" "$scratch/warm.wasm" >/dev/null 2>&1
-	cost=$( { TIMEFORMAT="%U %S"; time wap_stage_compiled "$1" "$3" "$tree/wap" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
+	cost=$( { TIMEFORMAT="%U %S"; time wap_stage_compiled "$1" "$3" "$scratch" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
 	[ -f "$2" ] || { echo "refresh-seed: $(basename "$2" .wasm) FAILED: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
 }
 # stage <compiler> <output>: the compiler compiling wap's source, prepared and timed
@@ -66,9 +67,9 @@ for name in $STAGES; do
 done
 chosen=$previous
 
-# the seed and the compiler that built the last stage, timed in turns, each by its best round, both reading wap's
-# source as sources, so both do the same work
-round_timed() { prepared "$1" && timed "$1" "$scratch/timed.wasm" ""; }
+# the seed and the compiler that built the last stage, timed in turns, each by its best round, both warm, as the tests
+# run them: a seed holds no source to read wap's types module from, and the tree's may use forms only the new one knows
+round_timed() { prepared "$1" && timed "$1" "$scratch/timed.wasm" "$1"; }
 old_cost=
 new_cost=
 for round in $(seq "$TIMING_ROUNDS"); do
@@ -83,6 +84,8 @@ hello=$(wap_ran "$chosen" "$scratch/hello.wap" "$scratch/hello.wasm" 2>&1 && wap
 echo "$hello" | grep -q Hello || { echo "refresh-seed: $(basename "$chosen" .wasm) runs no hello ($(echo "$hello" | tail -1 | cut -c1-200)); the seed stays" >&2; exit 1; }
 echo "refresh-seed: wap's source took $new_cost s CPU with the new compiler, $old_cost s with the seed it replaces"
 awk -v new="$new_cost" -v old="$old_cost" -v most="$SLOWER_PERCENT" 'BEGIN { exit !(new * 100 <= old * most) }' || { echo "refresh-seed: the new compiler is over ${SLOWER_PERCENT}% of the seed's time; the seed stays" >&2; exit 1; }
+# every library module compiles alone with it, as with the seed it becomes (scripts/lib/wap-beside.sh), before it replaces one
+wap_library_compiled "$chosen" || { echo "refresh-seed: the seed stays" >&2; exit 1; }
 if [ -n "$check" ]; then
 	cmp -s "$chosen" "$seed" && echo "refresh-seed: the seed is that stage" || echo "refresh-seed: the seed differs from that stage (--check: kept)"
 	exit 0
@@ -107,7 +110,7 @@ PY
 }
 source_commit=$(git -C "$tree" rev-parse HEAD)
 # the seed and what it reads beside it, installed and published
-cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && wap_tools_built "$tree" "$seed" && wap_library_compiled "$seed" && echo "refresh-seed: replaced $seed, its folder holding no source"
+cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && wap_tools_built "$tree" "$seed" && wap_library_compiled "$seed" && echo "refresh-seed: replaced $seed, its folder holding no source" || { echo "refresh-seed: the new seed is installed but not published: restore the release wap-seed.lock names" >&2; exit 1; }
 # (the old compiler's machine code goes with it, and every program's it compiled: the native wap writes the new
 # compiler's at its first run, below)
 rm -f "$(dirname "$seed")"/*.cwasm
