@@ -16,6 +16,7 @@ use "../kernel/forms.wap"
 use "../kernel/primitives.wap"
 use "../kernel/terms.wap"
 use "../kernel/environment.wap"
+use "../kernel/equality.wap"
 
 # a written `block`: code run by its call, a function of no parameters (wiki/block.md)
 BLOCK_WORD = "block"
@@ -76,8 +77,9 @@ FUNCTION_WORD = "function"
 ARRAY_TIMES = "*"
 # the universe of data types, the type of every type word without parts and of every hole a type stands for
 DATA_TERM = type_at(Zero)
-# the words of the truths and of the choice, the terms the kernel forms True, False and If stand for (literals_declared)
-TRUTH_WORDS = ["yes", "no"]
+# the words of the truths and of the choice, the terms the kernel forms True, False and If stand for (literals_declared):
+# the truths are bool's cases by their names, so an enum bool declaring them fills them
+TRUTH_WORDS = ["yes", "no"].map(case => "${BOOL_TYPE}.${case}")
 CHOICE_WORD = "if"
 # the words core builds types of and the number of parts each takes, each declared at its place here, its id
 class CoreWord { word: text; parts: int = 0 }
@@ -119,32 +121,36 @@ TYPE_WORDS = ATOM_TYPES + [BOOL_TYPE, ANY_TYPE, LIST_TYPE, MAP_TYPE, ENUM_TYPE, 
 # (core/analyze/terms.wap). It is the compile's own, as a
 # symbol table is: every stage reads a type fact through it, so it is one value for the whole run, not handed down
 # every call
-class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; shared: map<int, bool> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {}; conditions: map<int, Node> = {}; subsets: list<Term> = []; assumed: int = 0; defined: int = 0 }
+# (refused: where a compile keeps what it typed beside the functions it refuses, each refusal's message by the
+# function's key, as wap verify's laws do; ø where a refusal ends the compile)
+class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; shared: map<int, bool> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {}; conditions: map<int, Node> = {}; subsets: list<Term> = []; assumed: int = 0; defined: int = 0; refused: map<text, text>? = ø }
 TYPES: TypeTerms = TypeTerms()
 core_environment() as Environment := {
 	e = Environment()
 	for core in CORE_WORDS { word_declared(e, core.word, core.parts) }
 	literals_declared(e)
+	equality_declared(e)
 	e
 }
 # the truths and the choice the kernel forms True, False and If stand for as terms (core/analyze/terms.wap), and the
 # types of the literals: a whole number an int, a text a text, a truth a bool
 literals_declared(e: Environment) := {
-	truths = TRUTH_WORDS.map(word => constant(axiom_added(e, word, BOOL_TERM), word, []))
+	truths = TRUTH_WORDS.map(word => constant(axiom_added(e, word, BOOL_TERM, yes), word, []))
 	# the choice of a type T: a bool, the arm where it is yes, the arm where it is no, a T
-	added(e, Declaration(CHOICE_WORD, [], pi("T", DATA_TERM, pi("_", BOOL_TERM, pi("_", bound(1), pi("_", bound(2), bound(3))))), DeclarationKind.Choice))
+	added(e, Declaration(CHOICE_WORD, [], pi("T", DATA_TERM, pi("_", BOOL_TERM, pi("_", bound(1), pi("_", bound(2), bound(3))))), DeclarationKind.Choice), yes)
 	e.literals = Literals(INT_TERM, TEXT_TERM, BOOL_TERM, truths#1, truths#2)
 }
 # a type word declared, an opaque type of its parts' types; its id, its place in the environment. Its type is a
 # type by construction, so it is added unchecked
-word_declared(e: Environment, key: text, parts: int) as int := axiom_added(e, key, (1 to parts).fold(DATA_TERM, (kind, at) => pi("_", DATA_TERM, kind)))
-axiom_added(e: Environment, name: text, type: Term) as int := {
-	added(e, Declaration(name, [], type, DeclarationKind.Axiom))
+word_declared(e: Environment, key: text, parts: int) as int := axiom_added(e, key, (1 to parts).fold(DATA_TERM, (kind, at) => pi("_", DATA_TERM, kind)), yes)
+# an axiom added, in core's scope for a word of core's own, seen from every scope (word_keyed)
+axiom_added(e: Environment, name: text, type: Term, core: bool = no) as int := {
+	added(e, Declaration(name, [], type, DeclarationKind.Axiom), core)
 	size(e)
 }
 # a type word's term, the word declared by its key the first time
 word_term(word: text) as Term := word_keyed(word, word)
-word_keyed(word: text, key: text, parts: int = 0) as Term := constant(named_id(TYPES.environment, key) ?? word_declared(TYPES.environment, key, parts), word, [])
+word_keyed(word: text, key: text, parts: int = 0) as Term := constant(TYPES.environment.core.get(key) ?? word_declared(TYPES.environment, key, parts), word, [])
 # a written word's term: a record's own by its declaration, a shape's with the type it narrows known
 word_named(n: Node) as Term := {
 	declared = fact_of(n, DECLARED_BY)

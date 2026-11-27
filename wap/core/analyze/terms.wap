@@ -15,14 +15,17 @@ use "../../kernel/environment.wap"
 use "../../kernel/typing.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/primitives.wap"
+use "../../kernel/show.wap"
 
 ROW_MARK = "prim"
 
 # the typed functions entered, callees before their callers: each by its key, once
 instances_entered(functions: list<TypedFunction>, s: TypingState) := {
+	# a function value, a subtype's condition among them, is no declaration of its own
+	declared = functions.filter(typed => typed.define is Define)
 	by_key: map<text, TypedFunction> = {}
-	for typed in functions { by_key[instance_key(typed)] = typed }
-	for typed in functions { instance_entered(typed, by_key, s) }
+	for typed in declared { by_key[instance_key(typed)] = typed }
+	for typed in declared { instance_entered(typed, by_key, s) }
 }
 instance_key(typed: TypedFunction) as text := function_key(typed.define)
 # a typed function's constant, entered the first time: defined where its body is pure and the kernel takes it, else
@@ -33,7 +36,7 @@ instance_entered(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 	if known != ø { return constant(known!, name, []) }
 	if s.entering.has(name) { return ø }
 	s.entering[name] = yes
-	type = settled_type(instance_type(typed), s)
+	type = kernel_settled(instance_type(typed), s)
 	value = definition_of(typed, by_key, s)
 	kind = if value == ø then DeclarationKind.Axiom else Defined(value!)
 	signature = kernel_signature(typed, s)
@@ -50,8 +53,8 @@ instance_entered(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 # returns
 kernel_signature(typed: TypedFunction, s: TypingState) as Term? := {
 	if typed.jumps { return ø }
-	parameters = typed.arguments.map(type => settled_type(type, s))
-	result = settled_type(typed.result ?? return ø, s)
+	parameters = typed.arguments.map(type => kernel_settled(type, s))
+	result = kernel_settled(typed.result ?? return ø, s)
 	if (parameters + [result]).any(type => has_letters(type) or has_unknowns(type)) { return ø }
 	parameters.reverse.fold(result, (body, parameter) => pi("_", parameter, body))
 }
@@ -59,10 +62,10 @@ kernel_signature(typed: TypedFunction, s: TypingState) as Term? := {
 definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := match typed.define {
 	Define(name, parameters, body) => {
 		# a body converted to the result, an int given where an int? is, is no term yet
-		if value_type(body) != settled_type(typed.result ?? return ø, s) { return ø }
+		if kernel_value(body) != kernel_settled(typed.result ?? return ø, s) { return ø }
 		names = items_of(parameters).map(parameter => declared_name(parameter))
 		value = term_of(body, Entering(names.map(place_key), by_key, s)) ?? return ø
-		(1 to #names).reverse.fold(value, (inner, at) => lambda(text(names#at), settled_type(typed.arguments#at, s), inner))
+		(1 to #names).reverse.fold(value, (inner, at) => lambda(text(names#at), kernel_settled(typed.arguments#at, s), inner))
 	}
 	_ => ø
 }
@@ -70,7 +73,7 @@ definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 class Entering { binders: list<text>; by_key: map<text, TypedFunction>; s: TypingState }
 # a typed node's term, ø where it is not pure
 term_of(n: Node, x: Entering) as Term? := match n {
-	Number(value) => if value is int and value_type(n) == INT_TERM then numeral(value) else ø
+	Number(value) => if value is int and kernel_value(n) == INT_TERM then numeral(value) else ø
 	Text(value) => quoted(value)
 	True => TYPES.environment.literals!.yes_case
 	False => TYPES.environment.literals!.no_case
@@ -91,24 +94,31 @@ binder_term(n: Node, x: Entering) as Term? := {
 called_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
 	definer = fact_of(called, DEFINED_AT) ?? return ø
 	typed = x.by_key.get(place_key(definer)) ?? return ø
-	if value_type(n) != settled_type(typed.result ?? return ø, x.s) or #arguments != #typed.arguments or (1 to #arguments).any(at => value_type(arguments#at) != settled_type(typed.arguments#at, x.s)) { return ø }
+	if kernel_value(n) != kernel_settled(typed.result ?? return ø, x.s) or #arguments != #typed.arguments or (1 to #arguments).any(at => kernel_value(arguments#at) != kernel_settled(typed.arguments#at, x.s)) { return ø }
 	function = instance_entered(typed, x.by_key, x.s) ?? return ø
 	terms_applied(function, arguments, x)
 }
 # a host operation on whole numbers, its row's constant of the operands' types
 row_term(n: Node, operation: text, arguments: list, x: Entering) as Term? := {
 	if not FOLDED_ROWS.contains(operation) { return ø }
-	types = (arguments + [n]).map(part => value_type(part))
+	types = (arguments + [n]).map(part => kernel_value(part))
 	if types.any(type => type == ø) { return ø }
 	type = types.take(#types - 1).reverse.fold(types.last!, (body, parameter) => pi("_", parameter!, body))
-	name = "${ROW_MARK} ${operation} ${type_text(type)}"
+	name = row_name(operation, type)
 	if named_id(TYPES.environment, name) == ø { added(TYPES.environment, Declaration(name, [], type, Row(operation))) }
 	terms_applied(constant(named_id(TYPES.environment, name)!, name, []), arguments, x)
 }
+# the name a row's constant takes: its operation and the types it takes and gives, `prim i64.add int -> int -> int`
+row_name(operation: text, type: Term) as text := "${ROW_MARK} ${operation} ${arrow_parts(type).map(part => shown(part)).join(" -> ")}"
+# a function type's parameter types and its result
+arrow_parts(type: Term) as list<Term> := match type.shape {
+	Pi(binder, domain, body) => [domain] + arrow_parts(body)
+	_ => [type]
+}
 # an `if` on a bool: the choice of the type both arms give
 choice_term(n: Node, condition: Node, then_part: Node, else_part: Node, x: Entering) as Term? := {
-	type = value_type(n) ?? return ø
-	if value_type(condition) != BOOL_TERM or value_type(then_part) != type or value_type(else_part) != type { return ø }
+	type = kernel_value(n) ?? return ø
+	if kernel_value(condition) != BOOL_TERM or kernel_value(then_part) != type or kernel_value(else_part) != type { return ø }
 	choice = constant(named_id(TYPES.environment, CHOICE_WORD)!, CHOICE_WORD, [])
 	terms_applied(apply(choice, type), [condition, then_part, else_part], x)
 }
@@ -118,7 +128,7 @@ lets_term(statements: list, x: Entering) as Term? := {
 	match statements#1 {
 		Set(place, value) => {
 			if #statements == 1 or not place is Symbol or fact_of(place, DEFINER) == ø or x.binders.contains(place_key(place)) { return ø }
-			type = value_type(value) ?? return ø
+			type = kernel_value(value) ?? return ø
 			given = term_of(value, x) ?? return ø
 			rest = lets_term(statements.drop(1), Entering(x.binders + [place_key(place)], x.by_key, x.s)) ?? return ø
 			let_in(text(place), type, given, rest)
@@ -130,3 +140,8 @@ terms_applied(function: Term, arguments: list, x: Entering) as Term? := {
 	terms = arguments.map(argument => term_of(argument, x))
 	if terms.any(term => term == ø) then ø else apply_all(function, terms.map(term => term!))
 }
+# a type as the kernel reads it: a subtype by condition is its parent's, the condition a law's hypothesis
+# (extensions/verify/laws.wap)
+kernel_type(type: Term?) as Term? := if type != ø and subset_condition(type) != ø then kernel_type(narrowed_type(type)) else type
+kernel_settled(type: Term, s: TypingState) as Term := kernel_type(settled_type(type, s))!
+kernel_value(n: Node) as Term? := kernel_type(value_type(n))
