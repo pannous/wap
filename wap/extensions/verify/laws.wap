@@ -38,6 +38,7 @@ CONDITION_HOLDS_BINDER := "_holds"
 PROOF_MARK := "law proof"
 REFL_WORD := "refl"
 BY_WORD := "by"
+ASSUME_WORD := "assume"
 # the refusal of a proof of no form verify reads
 PROOF_REFUSED := "proof"
 
@@ -96,9 +97,9 @@ proof_apart(statement: Node, split: Split) as Node := {
 	name = law_function(statement) ?? return statement
 	match statement {
 		Call(defines, parts) => match unwrapped(parts#2) {
-			Call(mark, sides) => if text(mark) != PROOF_MARK then statement else {
-				split.proofs[name] = sides#2
-				refitted(Call(defines, [parts#1, sides#1]), statement)
+			Key(mark, applied, sides) => if text(mark) != PROOF_MARK then statement else {
+				split.proofs[name] = items_of(sides)#2
+				refitted(Call(defines, [parts#1, items_of(sides)#1]), statement)
 			}
 			_ => statement
 		}
@@ -153,7 +154,7 @@ is_hypothesis(binder: Node, binders: list<text>, language: Language) as bool := 
 # where it computes to no; one with binders holds where the provers prove its statement yes for every value of them,
 # the proof checked by the kernel; any other is left open, for the run to test. Refused where its function is only
 # assumed, naming the first function its body calls that the kernel only assumes
-enum TypedVerdict { Holds, Breaks, Open }
+enum TypedVerdict { Holds, Breaks, Open, Assumed }
 typed_verdict(law: TypedLaw): TypedVerdict := {
 	e = TYPES.environment
 	id = law.id ?? refused(ASSUMED_NAMED, "law ${law.name} is not typed")
@@ -172,16 +173,33 @@ law_proved(e: Environment, law: TypedLaw, d: Declaration): bool := {
 	yes
 }
 # a law's written proof made the term of its statement, declared as its theorem, which the kernel checks: a wrong one
-# is refused by value type, naming the statement it proves and the one it should
+# is refused by value type, naming the statement it proves and the one it should; `assume` declares the statement an
+# axiom of the law's name, which every law resting on it names (wiki/proof.md "What a proof rests on")
 proof_checked(e: Environment, law: TypedLaw, d: Declaration, proof: Node): TypedVerdict := {
 	statement = law_statement(e, d.type, unfolding(d)!, law.given)
+	if text(unwrapped(proof)) == ASSUME_WORD {
+		declared(e, Declaration(law.name, [], statement, DeclarationKind.Axiom))
+		return Assumed
+	}
 	term = proof_term(e, statement, proof) ?? refused(PROOF_REFUSED, "law ${law.name} := ${proof}: a law's proof is ${REFL_WORD}, its statement computed, or ${BY_WORD} the laws it follows from")
 	declared(e, Declaration(law.name, [], statement, Theorem(term)))
 	Holds
 }
 proof_term(e: Environment, statement: Term, proof: Node): Term? := match unwrapped(proof) {
 	Symbol(name) => if name == REFL_WORD then reflexive_under(e, statement) else ø
-	Call(called, names) => if text(called) == BY_WORD then proof_found(elaboration(e, []), statement, names.map(law => declaration(e, text(law)) ?? refused(PROOF_REFUSED, "by ${law}: ${law} names no law proved before"))) else ø
+	_ => {
+		named = by_named(proof) ?? return ø
+		laws = named.map(law => declaration(e, text(law)) ?? refused(PROOF_REFUSED, "by ${law}: ${law} names no law proved before"))
+		proof_found(elaboration(e, []), statement, laws) ?? refused(PROOF_REFUSED, "by ${named.join(", ")}: the provers find no proof of ${shown(statement)} from ${named.join(", ")}")
+	}
+}
+# the laws a `by` names, as the reader wrote them: `by a`, `by a, b`, `by(a, b)`; ø for another proof
+by_named(proof: Node) as list<Node>? := match unwrapped(proof) {
+	Key(called, applied, arguments) => if text(called) == BY_WORD then items_of(arguments) else ø
+	List(items, bracket, separator) => match unwrapped(items#1) {
+		Symbol(word) => if word == BY_WORD then items.drop(1) else ø
+		_ => (by_named(items#1) ?? return ø) + items.drop(1)
+	}
 	_ => ø
 }
 # `Equal.refl` of a statement's left side, under each of its binders
