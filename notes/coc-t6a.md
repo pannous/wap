@@ -315,3 +315,28 @@ T6a is done when:
   `sum_*`; notes/unify-provers.md's table follows.
 - **test_theory_second:** its laws check the second checker (extensions/theory/second). If the deletion removes that
   checker, its three T6a1 statements leave with it as unpinned, not red.
+
+## T6a3, T6a5 and T6a6 re-read on unify-typers 2b0e87be
+
+- **T6a3 indexed families.**
+  - analyze/inductives.wap (T5b2) declares an enum's block with no indices: every case's result is the enum
+    itself. T6a3's header and cases with indices (+50), the found fields (+20) and constructor typing by unifying
+    their result (+30) are all still to do.
+  - Two parts of the row are gone:
+    - "int as an enum over nat in wap/types": core declares int on unify-typers, in Lean's shape on int-takes.
+    - "Equal as a family, replacing T6a1's core declaration (kernel −20)": Equal is kernel/equality.wap's, beside
+      refl and its laws, and a program's family would be a second Equal. Equal stays the kernel's.
+  - Estimate: core +100, kernel 0.
+- **T6a5 False, Exists, undecidable.**
+  - kernel/logic.wap has `·False`, `·True`, `·True.intro` and `·false_elim`, marked as the kernel's. `False` for
+    programs is the types word naming it (T6a6's types/logic.wap), so it costs +2 here, not +8.
+  - The effect check reads T5b1's EFFECTS fact (+12).
+  - Exists is a family with one case (+15, on T6a3's indices).
+  - Estimate: core about +29, types +2. Lands after T5b1 and T6a3.
+- **T6a6 the logic in wap/types.** The prelude is gone, and the kernel's logic is internal (`·`).
+  - types/logic.wap declares False and True (the kernel's), And, Or, Not, Exists (T6a5), Decidable, and the axiom
+    proposition_extensionality.
+  - A comparison is a proposition where a type is wanted, and is decided to a bool where a bool is wanted
+    (proposition.md:55): T6a3a's `proposition_of`, read the other way at `type of`.
+  - T6a2's Not, And and Or rows over propositions land here (coc-t6a12.md).
+  - Estimate: core +30 (types as values +20, Prop binders +10), types +38 (+35, and T6a2's +3).
