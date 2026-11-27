@@ -83,9 +83,10 @@ such as T5c3's `leaves`. Read on unify-typers 2b0e87be, with T4d1 (notes/coc-t4d
 - `type index(xs: list<T>) = nat where 1 <= it and it <= #xs`;
 - `*(n: nat, T: Type): Type := vector(T, n)`, an overload, so `3 * char` is `vector(char, 3)`.
 
-`3·char` is the same `*`, if `·` is its alias in the operator table; the builder checks that. `char[3]` is no
-T4e form: test_type_wanted:20-21 reads `letters = char[3]` as a value with `#letters` 3. That differs from type.md:99,
-so it goes to warp-interviewer.
+`3·char` is the same `*`, if `·` is its alias in the operator table; the builder checks that. `char[3]` is the type
+`vector(char, 3)` as well (decided: type.md:99; a value reading would cost about +10 core for one phrase). It reads
+through the same `vector`, at 0 core beyond T4e. test_type_wanted:20-21, which reads `letters = char[3]` as a value
+with `#letters` 3, is rewritten to `check("…", char[3], vector(char, 3))` in its own commit, giving that reason.
 
 **A condition over a program's function** (T5c3's `t: Tree where leaves(it) == 4 = node(…)`) needs nothing here.
 `conditions_entered` runs after `instances_entered`, so `leaves` is a kernel definition by then (T5c3). T4d1 then
@@ -121,7 +122,6 @@ So T4e lands after T4d1, T4d2 and T4d3, and after unify-typers. It needs T5b1 on
 | wap/test_type_wanted:8 | `vector(int, read_number())` refused by effect | 8, after T5b1 |
 
 **Not T4e's:**
-- test_type_wanted:20-21 `char[3]`: to the interviewer, as above.
 - wap/test_type_wanted:7, `3m + 2s` refused: the units library's quantity type with its unit as an argument. It rides
   on (1)-(4) but is the library's own work.
 
