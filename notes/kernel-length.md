@@ -2,7 +2,7 @@
 
 Card kernel-length takes the counts route (decided; the case route was measured at +85 and rejected). It is built
 after unify-typers and int-takes land. These shrinks were read on int-takes 22c1211b. Code lines, comments and blanks
-left out: integer_laws.wap 360, counting.wap 202, equality.wap 89, logic.wap 68, extensions/prove/linear.wap 320.
+left out: integer_laws.wap 360, counting.wap 202, equality.wap 89, logic.wap 68, extensions/proof/prove/linear.wap 320.
 The estimates are code lines.
 
 int-takes has already removed what the two cases made removable: the zero and positive arms went in fdb551e0. One

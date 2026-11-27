@@ -7,7 +7,7 @@ kernel checked: its declarations as terms, written by lean4export. wap's kernel 
 (notes/coc-plan.md section 6), so those terms mean the same in both, and wap's kernel checks each one again:
 nothing is believed on Lean's word.
 
-The format is already wap's: the second opinion (wap/extensions/theory/export.wap, coc-plan K7) writes every accepted
+The format is already wap's: the second opinion (wap/extensions/proof/second/export.wap, coc-plan K7) writes every accepted
 declaration in lean4export's shape. The importer is that writer read backwards.
 
 ## What it gives

@@ -2,8 +2,9 @@
 
 The kernel of notes/coc-plan.md (sections 6 and 7) lies in `wap/kernel/` (terms.wap to integer_laws.wap below);
 core typing writes a program's terms into it (`wap/core/analyze/terms.wap`), the verify door
-(`wap/extensions/verify/`) judges a program's laws with it, and the export and the second checker lie in
-`wap/extensions/theory/`. This note is the contract between its files: what each holds, the functions the others call, and the rules
+(`wap/extensions/proof/verify/`) judges a program's laws with it, and the export and the second checker lie in
+`wap/extensions/proof/second/` and the provers in `wap/extensions/proof/prove/`: one folder, which only `wap verify`,
+`wap check` and proofs load. This note is the contract between its files: what each holds, the functions the others call, and the rules
 all of them keep. The plan says what the rules are; this note says where they live.
 
 ## Files
@@ -28,10 +29,10 @@ all of them keep. The plan says what the rules are; this note says where they li
 | `integer_laws.wap` | int's laws the linear prover builds its proofs of, declared before the first goal | T5 |
 | `core/analyze/courses.wap` | core's products, Pair and Unit, and each enum's below and course | 8, T5c |
 | `core/analyze/holes.wap`, `unify.wap` | holes and unification, which are not trusted: notes/elaborate.md | 8 |
-| `extensions/verify/` | the door: a program's laws judged by the kernel (below) | P1 |
-| `extensions/prove/` | the provers, whose proofs the kernel checks | P2 |
-| `extensions/theory/export.wap` | what the environment accepted written as an export, one record a line | K7 |
-| `extensions/theory/second/` | the second checker: an export checked again by rules of its own | K7 |
+| `extensions/proof/verify/` | the door: a program's laws judged by the kernel (below) | P1 |
+| `extensions/proof/prove/` | the provers, whose proofs the kernel checks | P2 |
+| `extensions/proof/second/export.wap` | what the environment accepted written as an export, one record a line | K7 |
+| `extensions/proof/second/` | the second checker: an export checked again by rules of its own | K7 |
 
 The files use each other freely: computing, equality and typing call one another.
 
@@ -259,7 +260,7 @@ axiom rested on, a function bound already or needed and not bound).
 
 ## The door
 
-`wap verify program.wap` (wap/extensions/verify/verify.wap, run as `verify.wasm --seed <seed folder> program.wap` by
+`wap verify program.wap` (wap/extensions/proof/verify/verify.wap, run as `verify.wasm --seed <seed folder> program.wap` by
 the native wap, or with `--tree <root>`, options.wap) reads a program in plain wap. The program goes through the
 compile's front and core typing (laws.wap `laws_typed`): each law becomes the bool function of its binders
 (extensions/law_statements.wap), and core enters each pure function into the compile's environment as a kernel
@@ -290,7 +291,7 @@ joined only by these beliefs, kept small:
 | a text literal | its code points | wap's text | |
 
 A function the kernel only assumes (it writes, raises or acts) is an axiom, and a law naming it is refused
-(extensions/verify/laws.wap), so no belief about its effects enters a proof.
+(extensions/proof/verify/laws.wap), so no belief about its effects enters a proof.
 
 The compiler adds one outside the theory: its warm state (extensions/warm.wap). The rules it brings in were checked
 to terminate when the state was written, and `rules_checked` marks them checked without checking them again, so the

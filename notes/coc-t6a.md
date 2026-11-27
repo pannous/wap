@@ -69,7 +69,7 @@ provers (above).
 | statement | rule | what else it needs |
 |---|---|---|
 | elaborate 121 `nine: 3 * 4 - 3 == 9 := refl` | C | nothing: green with T6a1 |
-| second 21, 36 `four: 2 + 2 == 4 := refl` | C | nothing; they stand or fall with extensions/theory/second, which is the second checker under test |
+| second 21, 36 `four: 2 + 2 == 4 := refl` | C | nothing; they stand or fall with extensions/proof/second, which is the second checker under test |
 | elaborate 96 `divided: 7 ÷ 2 == 3 := refl` | C | a division by a literal other than 0 brings no Fail (core/analyze/effects.wap: the divisor's value read), else the law's function is not pure and enters only as an axiom |
 | second 23 `divided: 1000001 % (1000 ÷ 7) == 37 := refl` | C | the same Fail rule; second as above |
 | elaborate 150 `counted: #[1, 2, 3] == 3 := refl` | C | a list literal and `#` as terms (T5c2) |
@@ -152,7 +152,7 @@ bridge's own spelling, needing no new word.
 - **No special case.** `==` is not singled out in core by name: its row's Defined value is the type's equality
   function, and the bridge is found as `e.integers.equals_sound` is, by the row's type. The `implies` row already
   exists (types/operators.wap). `and`, `or` and `not` of propositions stay T6a2's sort-chosen rows.
-- **law_statement uses it.** `law_statement` (extensions/verify/laws.wap) builds `Π binders, proposition_of(body)`
+- **law_statement uses it.** `law_statement` (extensions/proof/verify/laws.wap) builds `Π binders, proposition_of(body)`
   in place of `truth_stated(body)`. The law's bool function stays what the run computes, and the bridge joins the
   two. The subtype hypotheses (2af0a649) are bools in a proposition's place and stay `Equal(bool, c(x), yes)`.
 
@@ -313,5 +313,5 @@ T6a is done when:
 - **The int laws' names:** verify 36, 37 and 40 name `add_commutative` and `add_zero`. Recommended: wap/types names
   int's laws by the words the tests and wiki/proof.md use (`add_zero`, `add_commutative`, `add_associative`), not
   `sum_*`; notes/unify-provers.md's table follows.
-- **test_theory_second:** its laws check the second checker (extensions/theory/second). If the deletion removes that
+- **test_theory_second:** its laws check the second checker (extensions/proof/second). If the deletion removes that
   checker, its three T6a1 statements leave with it as unpinned, not red.

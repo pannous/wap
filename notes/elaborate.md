@@ -3,8 +3,8 @@
 Core typing finds what a program leaves out by holes of the kernel and unification: `wap/core/analyze/holes.wap`
 (the `Elaboration`, its holes and answers) and `wap/core/analyze/unify.wap` (`unified`). Typing keeps one
 `Elaboration` for a compile (core/analyze/types.wap `el`): a generic letter's value at a call and an empty list's
-item type are its holes (core/analyze/letters.wap). The verify door (wap/extensions/verify/laws.wap) and the provers
-(wap/extensions/prove/) make one of their own for each goal. Nothing here is trusted: a filled term is handed to the
+item type are its holes (core/analyze/letters.wap). The verify door (wap/extensions/proof/verify/laws.wap) and the provers
+(wap/extensions/proof/prove/) make one of their own for each goal. Nothing here is trusted: a filled term is handed to the
 kernel, which judges it whole (notes/theory.md).
 
 ## Holes

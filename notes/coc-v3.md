@@ -21,7 +21,7 @@ provers prove under `wap check` loses its run check and its Fail. Read on unify-
   - the induction along fact's recursion: there, test_theory_induction:14.
 - **A law's call** is T6a1's (notes/coc-t6a12.md).
 - **Obligations never meet the provers.** `wap check` is a compiler command, and the compiler never loads
-  extensions/prove.
+  extensions/proof/prove.
 
 ## The plan
 
@@ -29,7 +29,7 @@ provers prove under `wap check` loses its run check and its Fail. Read on unify-
    holds. A law that is only Tested or Untested is the bool function of its binders, and its call proves nothing.
    It is refused: `refused by unproved law: guess is Tested, so it proves nothing`. verify +4.
 2. **`wap check` through the proof door.** check moves from a compiler command to a door beside verify.wap. It shares
-   `door_arguments` and the typed front (`laws_typed`'s first half), and loads extensions/prove.
+   `door_arguments` and the typed front (`laws_typed`'s first half), and loads extensions/proof/prove.
    - It types the program, proves its laws as verify does, so proved laws are facts, then makes each obligation left
      a Goal: the narrowing's condition at its value, under the facts at its place (T4b's findings, the parameter's
      condition).

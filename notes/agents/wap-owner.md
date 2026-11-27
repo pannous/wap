@@ -247,7 +247,7 @@ deletions, nothing rewritten; the handoff names what was trimmed.
 
 | stage | owner | files (under wap/) |
 |---|---|---|
-| lead: the queue, the contracts, the self-build | wap-supervisor | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp, compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/, extensions/theory/, extensions/prove/; the test/wap/ scripts no other row names |
+| lead: the queue, the contracts, the self-build | wap-supervisor | test/wap/test_self.sh, test/wap/ratchet_census.sh, scripts/wap-census.warp, compiler.wap, core/pipeline.wap, core/stage.wap, core/bindings.wap, core/type_notation.wap, core/errors.wap, kernel/, extensions/proof/; the test/wap/ scripts no other row names |
 | front: read, operators, rules, lowering | wap-reader | core/parse/, core/rules/, core/format.wap, core/language.wap, types/, sugar/, nodes.wap, extensions/packed.wap, extensions/warm.wap |
 | types: declare, bind, type | wap-binding | core/analyze/, core/paths.wap |
 | back: emitter, runtime, native | wap-emitter | core/emit/, extensions/wasm/, extensions/c/, extensions/native/; test/wap/test_native.sh, test/wap/test_guardrails.wap, test/wap/guardrail_shapes.awk, test/wap/guardrails_allowed.txt |

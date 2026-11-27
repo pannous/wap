@@ -42,7 +42,7 @@ unaffected (see "The seed rule").
   keeps its own unbounded numbers, because its job is to be independent of the kernel.
 - **elaborate/ (3,700), run/ (410) and prelude/ (668).** They are deleted step by step from T3 to T7 (5.2), and
   until then they use wap/kernel.
-- **wap/extensions/prove (951).** The provers use wap/kernel, and move to wap/extensions/proof at T7.
+- **wap/extensions/proof/prove (951).** The provers use wap/kernel.
 
 ## The persistent environment by id
 
@@ -193,7 +193,7 @@ The kernel stops using lib/magnitude (`use magnitude` in terms, typing, show and
   refresh for T2 (coc-plan 11, "T1 and T2 change the kernel the seed reads") is not needed, so each sub-step lands
   on the normal path plus the census.
 - The moved files enter the census's and the size ratchet's scope automatically, because test/wap/compile.sh's
-  `compiler_sources` excludes only extensions/theory and extensions/prove. This is theory-switch's census note:
+  `compiler_sources` excludes only extensions/proof. This is theory-switch's census note:
   the size ceiling (SIZE_NODES, 143,077 today) rises by the kernel's measured nodes (21,312 as moved) in the same
   commit as the move, and the typing census covers the kernel from then on. Every later sub-step measures again
   (scripts/wap-size.warp over `compiler_sources`) and sets SIZE_NODES to what it measured, in its own commit.

@@ -1182,8 +1182,8 @@ example stays red. C2 needs T5's classes with type arguments (the trait's struct
 
 **Beside the dedup and the exact-big-literals landing.**
 - The dedup (unify-dedup: the equation toolkit and the regrouper shared by kernel/counting.wap,
-  kernel/integer_laws.wap and extensions/prove/linear.wap) touches none of T6a7, V1, V2, C1, C2, C4 or Q1's
-  files, so these run in parallel with it. V3 touches extensions/prove (goals.wap, facts.wap), so it starts after the dedup lands. Of
+  kernel/integer_laws.wap and extensions/proof/prove/linear.wap) touches none of T6a7, V1, V2, C1, C2, C4 or Q1's
+  files, so these run in parallel with it. V3 touches extensions/proof/prove (goals.wap, facts.wap), so it starts after the dedup lands. Of
   T6a, T6a4 starts after it (a nat subject goes through int's case split in counting.wap); T6a3, T6a5 and T6a6 run
   beside it.
 - exact-big-literals touches the reader, kernel/numbers.wap, kernel/show.wap and lib/magnitude.wap; no T6 step does.
