@@ -32,3 +32,14 @@ read (effect_words), turned into cases by effects_named.
 Open: `Effect(word)` and `Effect(at)` are the enum's generated constructors (sugar/records.wap), `map<Effect, list<text>>`
 keyed by enum cases is untried, and types.wap does not include effects.wap (a program naming `Effect.IO` would need it,
 then check core's `use` of the same file declares nothing twice).
+
+# Commas in a claim
+
+`f(x) := … ! IO, FFI` and `t := nat ! IO, FFI` read as a definition whose value row is `[(… ! IO), FFI]`: the comma is a
+row separator, not an operator of the table, so no precedence entry can bind it. core/parse/operators.wap
+definition_row already puts the bare items after a definition into its last value; `last_joined` now also puts them
+into a claim at the end of that value (`claim_joined`: the claim becomes `IO FFI` in round brackets, as `! (IO FFI)`
+reads). The claim group's name is `claim_group` beside compound_assignment_group in types/operators.wap.
+Should turn green (unbuilt): test/wap/test_effects.wap "several effects claimed are written with commas", and in
+test/wap/test_theory_effects.wap "several effects are written with commas" and "a bound of several effects is written
+with commas".
