@@ -1049,10 +1049,10 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | TM | landed (TM1 to TM3); TM4, the restart after a standard module, folded into T5 | 10bd563b (TM1), f9c06b41 (TM2, TM3) | |
 | T3 | landed, closed with machine-words | 896823f3 (T3a), 551ffd93 and 471a8882 (T3e), e0dea1d8 (T3f), d3791cd3, f5d9d5a8 | |
 | T4a, T4b | landed | 3410aa94 | |
-| T4d computed obligations | planned (notes/coc-t4d.md: T4d1 decided, T4d2 no check, T4d3 texts), no branch | | unify-typers (`conditions_entered`); T4d3 the user's answer on text rows |
+| T4d computed obligations | planned (notes/coc-t4d.md: T4d1 decided, T4d2 no check, T4d3 texts), no branch | | unify-typers (`conditions_entered`) |
 | T4c char | waits, no branch | | T4d1 to T4d3 |
 | T5u | landed | 3410aa94, d0b3c9e8 (failable values, `T??`) | |
-| T5a | A1 landed; A2 (a typed law's verdict from analyze's environment) in progress | 4112fe55, c43b08e3; t5a-pure-definitions-a2 b5442eea, wap-theory-reads-types | |
+| T5a | A1 landed; A2 (a typed law's verdict from analyze's environment) lands with unify-typers, which holds both its commits | 4112fe55, c43b08e3 | unify-typers |
 | unify-typers (M2, M2b) | in progress: core declares count, int and logic, the theory reader and prelude go, int's kernel laws in; unify-dedup 77e07344 merged into it | unify-typers bf69c6b8; wap-theory-reads-types | |
 | exact-big-literals | in progress: the kernel's counts past 2^63 exact as `Large` (decision 13) | exact-big-literals df289030; wap-native-no-layout-any | merging onto unify-typers |
 | T5b1 effects | in progress | t5b-effects 9e6cf1d2; wap-primitive-lookup-tables | |
@@ -1065,6 +1065,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T5d statements | parked (plan f3594c8f, notes/coc-t5d.md) | | |
 | T5e classes, extends | landed | 25c7e387, 9b8169cd | |
 | T5f erasure, T5g compiled libraries | wait | | T5b to T5d |
+| kernel-length: the kernel's theory files shrunk, about −55 plus 38 dead (notes/kernel-length.md) | waits | | unify-typers, int-takes |
 | int-takes: int in Lean's shape, `natural(n) \| negative(n)` (notes/unify-provers.md) | waits; card int-takes, wap-theory-reads-types | | unify-typers |
 | T6a1 proofs of bool laws, T6a2 hypotheses | wait | | unify-typers (the deletion commit, the int enum) |
 | T6a3a propositions in wap spelling | in progress | t6a3a ad022f23; wap-native-no-layout-any | M2b step 1, T6a1 |
