@@ -1079,11 +1079,11 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | V2 `wap check`, V3 proved laws as facts | planned (notes/coc-v2.md, notes/coc-v3.md) | | V1 (V3 also T6a2 and unify-dedup) |
 | C1 traits | planned (notes/coc-c1.md: C1a now, the structures with C2); builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
 | C2 instances passed, C4 generic dispatch | planned (notes/coc-c2.md: B decided, a trait value as the union of its conformers, core +15; A, instances, with C4 at T5g) | | C1 (C2 also T5e's type arguments) |
-| Q1 quotients | waits | | C1, T6a3, T6a4 |
-| T7 the theory extension retires | waits | | T6 |
-| T8a the reader | waits; its first commit is whole()'s sign | | exact-big-literals |
-| T8b the machine words | waits | | Q1, T4d |
-| T8c exact int on the run | waits | | T8a, T5f |
+| Q1 quotients | planned (notes/coc-q1.md; also after T4e and V3) | | C1, T6a3, T6a4 |
+| T7 the theory extension retires | planned (notes/coc-t7.md) | | T6 |
+| T8a the reader | planned (notes/coc-t8.md); its first commit is whole()'s sign | | exact-big-literals |
+| T8b the machine words | planned (notes/coc-t8.md) | | Q1, T4d |
+| T8c exact int on the run | planned (notes/coc-t8.md) | | T8a, T5f |
 
 ### T6 after T6a3a: laws everywhere, traits and instances
 
