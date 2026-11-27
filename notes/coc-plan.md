@@ -1070,7 +1070,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T6a1 proofs of bool laws, T6a2 hypotheses | wait | | unify-typers (the deletion commit, the int enum) |
 | T6a3a propositions in wap spelling | in progress | t6a3a ad022f23; wap-native-no-layout-any | M2b step 1, T6a1 |
 | T6a3 indexed families | waits | | T6a3a, T5b2 |
-| T6a4 proofs by cases and induction | waits | | T5c3, unify-dedup landed |
+| T6a4 proofs by cases and induction | planned (notes/coc-t6a4.md) | | T5c3, T5c4, unify-dedup landed; kernel move of apart's builder (interviewer) |
 | T6a5 False, Exists, undecidable | waits | | T5b1 |
 | T6a6 the logic in wap/types | waits | | T6a1 to T6a5 |
 | T6a7 universes | waits | | T6a6 |
