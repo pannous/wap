@@ -1051,33 +1051,34 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T4a, T4b | landed | 3410aa94 | |
 | T4d computed obligations | planned (notes/coc-t4d.md: T4d1 decided, T4d2 no check, T4d3 texts), no branch | | unify-typers (`conditions_entered`) |
 | T4c char | waits, no branch | | T4d1 to T4d3 |
+| T4e types that take values | planned (notes/coc-t4e.md) | | T4d1 to T4d3, unify-typers; its (8) T5b1 |
 | T5u | landed | 3410aa94, d0b3c9e8 (failable values, `T??`) | |
 | T5a | A1 landed; A2 (a typed law's verdict from analyze's environment) lands with unify-typers, which holds both its commits | 4112fe55, c43b08e3 | unify-typers |
 | unify-typers (M2, M2b) | in progress: core declares count, int and logic, the theory reader and prelude go, int's kernel laws in; unify-dedup 77e07344 merged into it | unify-typers bf69c6b8; wap-theory-reads-types | |
 | exact-big-literals | in progress: the kernel's counts past 2^63 exact as `Large` (decision 13) | exact-big-literals df289030; wap-native-no-layout-any | merging onto unify-typers |
 | T5b1 effects | in progress | t5b-effects 9e6cf1d2; wap-primitive-lookup-tables | |
 | T5b2 enums, T5b3 bool | in progress | t5b-enums 547f33e5; wap-annotation-attachment-fix | |
-| T5b4 match, T5b5 the recursor | waits | | T5b2 |
+| T5b4 match, T5b5 the recursor | planned (notes/coc-t5b4.md) | | T5b4: unify-typers; T5b5: its lookup half now, its enum half after unify-typers |
 | T5c1 ending as an effect | waits | | T5b1 |
 | T5c2 products and courses | landed | e86988d2 | |
-| T5c3 structural terms | waits | | T5b4 |
-| T5c4 guarded bounds as terms | waits | | int the numerals' type (unify-typers) |
+| T5c3 structural terms | planned (notes/coc-t5c3.md) | | T5b4, unify-typers, fix-core-name-shadowing |
+| T5c4 recursion over whole numbers | planned (notes/coc-t5c4.md) | | T5c3, int-takes, T5b4, T5b5 |
 | T5d statements | parked (plan f3594c8f, notes/coc-t5d.md) | | |
 | T5e classes, extends | landed | 25c7e387, 9b8169cd | |
 | T5f erasure, T5g compiled libraries | wait | | T5b to T5d |
 | kernel-length: the kernel's theory files shrunk, about −55 plus 38 dead (notes/kernel-length.md) | waits | | unify-typers, int-takes |
 | int-takes: int in Lean's shape, `natural(n) \| negative(n)` (notes/unify-provers.md) | waits; card int-takes, wap-theory-reads-types | | unify-typers |
-| T6a1 proofs of bool laws, T6a2 hypotheses | wait | | unify-typers (the deletion commit, the int enum) |
+| T6a1 proofs of bool laws, T6a2 hypotheses | re-read on unify (notes/coc-t6a12.md: T6a1 in verify, core +10; T6a2's binders landed, its run skip and implies left) | | unify-typers (the deletion commit, the int enum) |
 | T6a3a propositions in wap spelling | in progress | t6a3a ad022f23; wap-native-no-layout-any | M2b step 1, T6a1 |
 | T6a3 indexed families | waits | | T6a3a, T5b2 |
-| T6a4 proofs by cases and induction | waits | | T5c3, unify-dedup landed |
+| T6a4 proofs by cases and induction | planned (notes/coc-t6a4.md) | | T5c3, T5c4, unify-dedup landed |
 | T6a5 False, Exists, undecidable | waits | | T5b1 |
 | T6a6 the logic in wap/types | waits | | T6a1 to T6a5 |
-| T6a7 universes | waits | | T6a6 |
-| V1 one verdict per law | waits; builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
-| V2 `wap check`, V3 proved laws as facts | wait | | V1 (V3 also T6a2 and unify-dedup) |
-| C1 traits are structures | open; builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
-| C2 instances passed, C4 generic dispatch | wait | | C1 (C2 also T5e's type arguments) |
+| T6a7 universes | planned (notes/coc-t6a7.md) | | T6a6 |
+| V1 one verdict per law | planned (notes/coc-v1.md; the plain-compile report cut, no wiki passage); builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
+| V2 `wap check`, V3 proved laws as facts | planned (notes/coc-v2.md, notes/coc-v3.md) | | V1 (V3 also T6a2 and unify-dedup) |
+| C1 traits | planned (notes/coc-c1.md: C1a now, the structures with C2); builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
+| C2 instances passed, C4 generic dispatch | planned (notes/coc-c2.md: B decided, a trait value as the union of its conformers, core +15; A, instances, with C4 at T5g) | | C1 (C2 also T5e's type arguments) |
 | Q1 quotients | waits | | C1, T6a3, T6a4 |
 | T7 the theory extension retires | waits | | T6 |
 | T8a the reader | waits; its first commit is whole()'s sign | | exact-big-literals |
