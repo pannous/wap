@@ -1019,6 +1019,58 @@ near 17,700 if T5 keeps the analyze files, about 17,100 with the four deleted as
 needs more lines takes them and reports its measured lines; only a jump far above the ballpark goes to the
 interviewer.
 
+### T6 after T6a3a: laws everywhere, traits and instances
+
+T6a3, T6a4, T6a5 and T6a6 are planned in notes/coc-t6a.md. The rest of T6 is two tracks, L (laws) and C (traits),
+which share no file. Each step is one builder, on the careful path when it changes a value layout (C2) and on the
+normal path otherwise. Line estimates are for the compiler (core, kernel, types, sugar); the proof extension's lines
+are counted apart, since a plain compile does not load them.
+
+| step | what works after it | core / kernel / types (estimate) | extension | wiki pages it serves | outcome tests |
+|---|---|---|---|---|---|
+| L1 one verdict per law | A plain compile computes each law. Without binders, it is Proved by computing or reported as FAILED, and it never stops the program. With binders, the run tries it and it is Tested. `wap verify` adds the provers and prints proof.md's six verdicts: Proved (with "rests on" its axioms, from the kernel's `axioms_of`), Tested, FAILED with the counterexample, Untested, Assumed (an `assume` it uses) and Axiom | core +25 (analyze/laws.wap: the statement computed to yes or no, its notice), kernel 0 | verify +30 (Tested, Assumed and Axiom beside today's three) | proof.md "Checking proofs", law.md "Checking a law" | `law double(3) == 6` Proved on a plain compile; `hard: Assumed`; `uses_choice: Proved, rests on choice`; an `axiom` line `Axiom` |
+| L2 `wap check` | `wap check` lists the obligations left to the run, `--strict` refuses each one not proved, and the laws' verdicts are printed as `wap verify` prints them. Both commands load the proof extension through one door; a plain compile never loads it. dispatch.wap's global `obligations` list becomes a fact the door reads | core −5 (the global list goes), kernel 0 | check +40 (a door beside verify.wap, sharing door_arguments and the verdicts) | type.md "Proved or checked", effects.md (`wap check --strict` refuses an impure function), cli.md | `wap check` on `xs#i` with nothing proving `i` in range lists "is checked when the program runs"; `--strict` exits 1 naming it; a program with every obligation proved lists none |
+| L3 proved laws are facts | A law proved earlier is a fact for the laws after it (law.md's `fact(n) > 0` with its helper law first) and for obligations (3.9 step 2: an obligation matched against the conclusions of proved laws by unification, with no search, so a plain compile needs no provers). An obligation the provers prove under `wap check` loses its run check and its Fail | core +30 (an obligation instantiated from a proved law's conclusion), kernel 0 | prove +15 (an obligation as a Goal) | law.md (the helper-law example), type.md "Proved or checked" | law.md's pair both Proved; `#xs > 0` discharged by a proved law, so `effects of` the function has no Fail |
+| C1 traits are structures | `trait shape { area(); perimeter() }` (today a class annotated `@protocol`, sugar/types.wap) is a structure over the type that conforms: one field per word, the word's type with that type in the trait's place. A type's instance is the record of its overloads found by `does_word`. `square(1) is shape` and `3 is Comparable` compute at compile time. The built-in traits that wap has words for (Equatable, Orderable, Comparable, Printable, Iterable, Sized, Addable) are declared in wap/types as traits, so the vocabulary stays library | core +30 (the structure from the record, `is` against a trait), kernel 0, types +25 (the traits), sugar 0 | 0 | trait.md "Built-in traits", "Conforming", "Declaring a trait" | `square(1) is shape` yes; `3 is Comparable` yes; `sort [dot(2) dot(1)]` refused with "dot is not Comparable: sort needs compare(a:dot, b:dot)"; `class dot: Comparable {x:int}` refused until `compare` is defined |
+| C2 instances passed | A value whose type is not known at the call (a list of mixed shapes, a value through `any`, a function value) carries its instance. The instance is the record of its type's function references, built where the value is boxed into the trait (`x as shape`, a `list<shape>` literal); a word called on it reads its field (call_ref). Where the type is known statically, the call is specialised as today, with no change to the emitted code. This pays off calls.wap's protocol DEBT (mixed lists, `x is shape` at run time) | core +90 (the instance built at boxing +40, a word called through it +30, the trait value's layout as a row of T1's table +20), emit +20 (a record of function references), kernel 0 | 0 | trait.md "Dispatch", "Constraints", "Declaring a trait" (each type its own `area`) | `[square(2), circle(1)].map(area)` gives each its own; `smallest([person("Ann", 3), person("Bo", 1)])` through `Comparable list`; careful path (value layout) |
+| C3 default bodies | A trait's word with a body is the default of every instance; a type's own definition wins | core +20 | 0 | trait.md ("A trait may give an operation a default body") | `describe(square(3))` is 18 by the default; a type that defines `describe` gets its own |
+| C4 generic dispatch through instances | A generic definition (`f(x: T)` with a trait word in its body) called on a boxed value takes the value's instance, instead of a dispatcher retyped round by round for each boxed type. dispatch.wap's rounds go (generic_choices, generic_results, taken, dispatches_completed, deeper_type, fits_generic, boxed_known, dispatcher_retyped: about 90 lines); its `is` chains over the definitions of a word called on an `any` stay, because an `any` is the trait of no words and carries no instance | core −90 (measured at the gate) | 0 | trait.md "Dispatch" | every dispatch test as before; a generic `describe(x: T)` called on mixed boxed values picks each type's `area`; the rounds' "nests without end" refusal is never reached |
+
+Net: core about +100 (L +50, C +50), types +25, emit +20, kernel 0; the proof extension +85.
+Against the cost table's T6 row: the 500 analyze for "effects, instances, laws, tested" are T6a's +355 plus these
++100; the 30 for protocols is C1. The table's 227 deleted for "dispatch.wap: overloads become instances" is about
+90: an `any` keeps its `is` chain, which is the dispatch of a union, not of an overload.
+
+**Order.** L1, then L2, then L3. C1, then C2, then C3 and C4 in either order. L and C run side by side, one builder
+each. L3 needs T6a2 (hypotheses), and the law.md example needs the provers to prove `x > 0 and y > 0 implies
+x * y > 0`, which they do once a product law joins int's kernel laws (T6a2's positive_product); until then that
+example stays red. C2 needs T5's classes with type arguments (the trait's structure takes the conforming type as one).
+
+**Beside the dedup and the exact-big-literals landing.**
+- The dedup (unify-dedup: the equation toolkit and the regrouper shared by kernel/counting.wap,
+  kernel/integer_laws.wap and extensions/prove/linear.wap) touches none of L1, L2, C1, C2, C3 or C4's files, so these
+  run in parallel with it. L3 touches extensions/prove (goals.wap, facts.wap), so it starts after the dedup lands. Of
+  T6a, T6a4 starts after it (a nat subject goes through int's case split in counting.wap); T6a3, T6a5 and T6a6 run
+  beside it.
+- exact-big-literals touches the reader, kernel/numbers.wap, kernel/show.wap and lib/magnitude.wap; no T6 step does.
+  The one meeting point is L1's FAILED line, which prints the counterexample through show, so L1 lands after it or
+  merges show.wap. C2 is a careful landing, and no other careful landing (a seed refresh, T6a3's families) may share
+  its run.
+
+**Wiki before building.** law.md "Checking a law" and cli.md:108 still say `wap verify` proves "with Lean" and list
+Lean's tactics. L1 rewrites that text to wap's own provers. As a rewrite of what a page says, it goes to the user
+through wap-interviewer first, with the old and the new text. C3's default bodies and C1's built-in traits are on
+trait.md already; a trait carrying laws ("a structure of operations and their laws", section 2) has no wiki line, so
+it is not built in T6.
+
+**Not in T6.**
+- Effects as computation types (`B ! IO` as `Eff(IO, B)`, section 2). Every wiki line about effects (effects.md: a
+  claim checked, `effects of`, a proof refusing an impure function) is met by the effect facts (T5b1) and T6a5's
+  check, so the computation types add core lines that no line needs. Recommended: cut, and section 2's row reads "a
+  function with its effects as facts".
+- `map default ListMap` (trait.md "Protocol and default class"): a declaration rule, not an instance.
+- A trait with laws (above).
+
 K7 any time after K2, in the proof extension.
 
 After T3:
