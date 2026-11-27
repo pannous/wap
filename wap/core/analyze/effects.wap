@@ -40,11 +40,16 @@ class Joining {
 	found: map<text, list<text>> = {}
 }
 
-# every typed function's effects, written on its Define, and its claim checked
+# every typed function's effects, written on its Define and counted (TYPES.effects), and its claim checked
 effects_written(s: TypingState) := {
 	joining = effects_joined(s)
 	claims_checked(s, joining)
-	for typed in s.functions { if typed.define != ø { typed.define = with_fact(typed.define, EFFECTS, data_list((joining.found.get(instance_key(typed)) ?? []).map(effect => symbol(effect)))) } }
+	for typed in s.functions.filter(typed => typed.define != ø and fact_of(typed.define, EFFECTS) == ø) {
+		found = joining.found.get(instance_key(typed)) ?? []
+		typed.define = with_fact(typed.define, EFFECTS, data_list(found.map(effect => symbol(effect))))
+		counted = if found is empty then [PURE_WORD] else found
+		for effect in counted { TYPES.effects[effect] = (TYPES.effects.get(effect) ?? 0) + 1 }
+	}
 }
 # the effects of every typed function so far
 effects_joined(s: TypingState) as Joining := {
@@ -109,10 +114,12 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 }
 # the typed functions a name means: the one a call chose, or every one of a function named as a value
 instances_named(key: text, x: Joining) as list<text> := if x.by_key.has(key) then [key] else instances_of(key, x.s).filter(typed => typed.define != ø).map(typed => instance_key(typed))
-# the effects a node brings itself: its operation's, a loop's, a global variable's
+# the effects a node brings itself: its operation's, a loop's, a global variable's, a block's sharing the program's
+# variables, `global y`
 effects_of_node(n: Node) as list<text> := match n {
 	Prim(operation, arguments) => if text(operation) == FOREIGN then [if text(arguments#1) == WASI then IO_EFFECT else FOREIGN_EFFECT] else OPERATION_EFFECTS.keys.filter(effect => OPERATION_EFFECTS[effect].contains(text(operation)))
 	While(condition, body) => [DIVERGING_EFFECT]
+	Block(statements) => if globals_named(n) is empty then [] else [STATE_EFFECT]
 	Symbol(name) => if is_kind_word(fact_of(fact_of(n, DEFINED_AT) ?? Empty, ASSIGNS), DefinitionKind.Global) then [STATE_EFFECT] else []
 	_ => []
 }
@@ -139,7 +146,8 @@ effects_text(found: list<text>) as text := {
 
 # `f(x) := … ! IO`: the body, which f's effects are checked against the effects written after it
 claim_typed(n: Node, arguments: list, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
-	if f.function == ø { refused(n, "a misplaced effect constraint: `! ${arguments#2}` claims a function's effects, after its body, `f(x) := … ! ${arguments#2}`") }
+	written = if f.function == ø then ø else s.defines.get(place_key(f.function!))
+	if not (match written ?? Empty { Define(name, List(items, Bracket.Round, separator), body) => yes; _ => no }) { refused(n, "a misplaced effect constraint: `! ${arguments#2}` claims a function's effects, after its body, `f(x) := … ! ${arguments#2}`") }
 	strays = effect_words(arguments#2).filter(word => not (EFFECT_ORDER + [PURE_WORD]).contains(word))
 	if strays is not empty { refused(arguments#2, "! ${strays#1} names no effect: a claim names ${PURE_WORD} or ${EFFECT_ORDER.join(", ")}") }
 	with_fact(typed_form(arguments#1, s, f, expected), CLAIMED, arguments#2)
