@@ -29,6 +29,7 @@ alike, type safe but not verbose, universal and fast (compiled ahead of time to 
 expressive. Agents benefit from clean abstractions too.  
 - **Data is code.** Like Lisp, but with types and maps. JSON/ecma superset.
 - **Wasm GC first.** A `class Person{name:String age:i64}` becomes a real `(struct …)` type
+- Age of **proofs**: Has own prover kernel and adaptors to lean.  
 - **No [Footguns](https://github.com/pannous/wap/wiki/Footguns)** When code could mean two things, the compiler warns
 - **Beauty and batteries** inferred types, Unicode operators, and English words for operators where they read better:
   ```wap
