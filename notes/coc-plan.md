@@ -1040,6 +1040,84 @@ are counted apart, since a plain compile does not load them.
 | C3 default bodies | A trait's word with a body is the default of every instance; a type's own definition wins | core +20 | 0 | trait.md ("A trait may give an operation a default body") | `describe(square(3))` is 18 by the default; a type that defines `describe` gets its own |
 | C4 generic dispatch through instances | A generic definition (`f(x: T)` with a trait word in its body) called on a boxed value takes the value's instance, instead of a dispatcher retyped round by round for each boxed type. dispatch.wap's rounds go (generic_choices, generic_results, taken, dispatches_completed, deeper_type, fits_generic, boxed_known, dispatcher_retyped: about 90 lines); its `is` chains over the definitions of a word called on an `any` stay, because an `any` is the trait of no words and carries no instance | core −90 (measured at the gate) | 0 | trait.md "Dispatch" | every dispatch test as before; a generic `describe(x: T)` called on mixed boxed values picks each type's `area`; the rounds' "nests without end" refusal is never reached |
 
+#### Each step's wiki lines and the tests that pin them
+
+A builder starts from these lines red. "red" is the last recorded full run (test/reds.txt); `_wanted` files are
+red by design until their step lands. A **gap** is a wiki line no test pins, with the line to add first, in the
+page's own test file (test/test_<page>_wanted.wap, or test/wap/test_<page>_wanted.wap where it needs a command).
+
+- **T6a3 indexed families.** proposition.md:74-80 (`Even`, `Even(4)` proved, `Even(3)` has no proof), :82-86 (Even
+  with Odd), enum.md:94-95. Pinned: test_proposition_wanted "an enum of proofs proves its cases", `four_is_even`;
+  wap/test_proposition_wanted "Even(3) has no proof", "two propositions defined together" (all red). No gap.
+- **T6a4 cases and induction.** proof.md:17-18, :42-45 (`double_even`, the theorem's own call), enum.md:100-114 (the
+  recursor). Pinned: test_proof_wanted "a law's proof is a function giving a proof for each value", "a recursor
+  computes like the match it makes", "a function by its recursor"; wap/test_proof_wanted "a match that misses a case
+  proves nothing", "wap verify: a law with its proof is Proved" (all red). No gap.
+- **T6a5 False, Exists, effects.** proof.md:111-117 (a loop or a raise is no proof), proposition.md:24-28 (`False`,
+  `exists`), :66 (an undecidable `if`), effects.md:81 (a proof refuses an impure function, naming the chain).
+  Pinned: wap/test_proof_wanted "a loop is no proof", "a raise is no proof"; wap/test_proposition_wanted "an if on a
+  proposition nobody can decide is refused" (red). Gaps:
+  - effects.md:81's chain: `loop(): False := loop()` with `law oops: False := loop()` → the refusal says `via oops →
+    loop`;
+  - proposition.md:28: `wap verify` of `law some_sum: exists n: nat where n + n == 4` → `some_sum: Proved` (the
+    witness 2, computed). test_proposition_wanted states the law but checks no verdict.
+- **T6a6 propositions as values, the logic in wap/types.** proposition.md:6-7, :16-24 (the table), :99-105 (`use
+  classical`). Pinned: test_proposition_wanted "an equation is a proposition", "a false equation is a proposition
+  too", "True has its proof"; wap/test_proposition_wanted "a proof decides no data", "excluded middle comes with use
+  classical" (red). Its expected `either: Proved, resting on excluded_middle` differs from proof.md:77's `rests on`
+  (canonical output); the test's wording goes to wap-interviewer.
+- **T6a7 universes.** universe.md, all of it. Pinned: test_universe_wanted, 16 lines (red); wap/test_universe_wanted
+  "levels do not include each other", "a universe never holds itself" (red); test_universe_page "one definition
+  serves a value" (green). Gap: universe.md:20-21 → `[Type(1), Type(2)] == [Sort(2), Sort(3)]` is yes.
+- **V1 one verdict per law.** proof.md:74-84 (the six verdicts, :84 the exit status), law.md:6-7 (a law never stops the
+  program), law.md "Checking a law". Pinned: wap/test_law_runs, 5 lines (green: closed laws Proved or FAILED, Tested,
+  the counterexample); test_theory_verify "a proof that uses an axiom is Proved and names what it rests on", with
+  `Axiom` (green); wap/test_proof_wanted "a law nobody proved is Tested", "a broken law shows its counterexample", "an
+  assume shows as Assumed", "an axiom is reported" (red); test_laws_page "a law with written binders leaves the
+  program's value alone" (green); test_theory_layouts, a program's own `runs(…)` (red). Gaps:
+  - proof.md:84: the exit status of `wap verify` on `law two: 2 + 2 == 5` → 1, and on `law both: 1 < 2` → 0;
+  - proof.md:80: `wap verify` of `law any_even(n: nat): Even(n * 2)` with nothing to try it on → `any_even:
+    Untested` (test_theory_verify's line reads the theory door's spelling).
+- **V2 `wap check`.** type.md:188-189, effects.md:81, cli.md "Proofs". Pinned: wap/test_check, 4 lines (green: an
+  obligation listed, an `if`'s condition, an assignment ending it, a parameter's own). Gaps:
+  - type.md:189: `wap check --strict` of `n = 3\nx: int where it > 0 = n\nprint x` → exit 1, the line naming `it > 0`;
+  - effects.md:81: `wap check --strict` of `log(): int := { print "a"; 1 }\nlaw one: log() == 1 := refl` → refused,
+    naming `one → log` and IO.
+- **V3 proved laws are facts.** law.md:36-44 (a proved law a lemma of the later ones), type.md:183 (an obligation
+  found from a proved law). Pinned: test_laws_wanted checks only the program's value (red), no verdict. Gaps:
+  - law.md:36-44: `wap verify` of the three lines → both laws Proved (red until the provers have a product law);
+  - type.md:183: `law up(n: int where it >= 0): n + 1 > 0` and `h(n: int where it >= 0) := g(n + 1)` beside
+    `g(x: int where it > 0) := x` → `effects of h` is Pure on a plain compile, and `wap check` lists nothing.
+- **C1 traits are structures.** trait.md "Built-in traits", "Conforming", "Declaring a trait". Pinned:
+  test_trait_page "sort orders Comparable values", a type's own text (green); test_trait_wanted "a number is
+  Comparable", "sort uses a class's compare", "> uses a class's compare", "== uses a class's equals", "a class
+  defining a trait's words is of the trait", "for walks what iterate gives" (red); test_protocols, the structural
+  fit and a class's claim (green). Gaps:
+  - trait.md:74-76: `class dot{x:int}\nsort [dot(2) dot(1)]` → refused with `dot is not Comparable: sort needs
+    compare(a:dot, b:dot)`;
+  - trait.md:83: `class dot: Comparable {x:int}` with no `compare` → refused naming `compare(a:dot, b:dot)`.
+- **C2 instances passed.** trait.md "Dispatch", "Constraints", "Declaring a trait" ("a call picks the one of its
+  argument's type"). Pinned: test_protocols "a class fits a protocol by having its words" (green, known types only).
+  Gaps:
+  - trait.md:97: `[square(2), circle(1)].map(area)` with `circle(r: int)` and `area(c: circle) := 3 * c.r * c.r` →
+    `[4, 3]`;
+  - trait.md:109-111: `smallest(xs: Comparable list) := (sort xs)#1` on `[person("Ann", 3) person("Bo", 1)]` →
+    `person("Bo", 1)`, and on `[dot(3) dot(1)]` refused naming `compare(a:dot, b:dot)`.
+- **C3 default bodies.** trait.md:114. Pinned: test_protocols "a protocol's default body is the word of a class
+  without its own", "a class's own word replaces the protocol's default" (green for statically known types). What is
+  left is a default through an instance, which is C2's: gap `measure(m: measured)` over `[tile(3), slab(3)]` mapped →
+  `[11, 103]`. With that line, C3 is part of C2's gate.
+- **C4 generic dispatch through instances.** trait.md "Dispatch". Pinned: test_dynamic, the dispatch of a known and
+  an unknown value (green), which must stay green. No wiki line beyond C2's; C4 is a shrink measured by its gate.
+- **D1 lists as an enum.** enum.md:93 (`enum list<T> { empty, item(first: T, rest: list<T>) }`, a program's own enum,
+  which works without D1). No wiki line proves a law over the built-in list. test_theory_prelude_data's lines come
+  from this plan's L3, not from a page. **D1 has no wiki line of its own**: it waits until a page states a law over
+  lists, and prelude_data's lines are unpinned.
+- **Q1 quotients.** quotient.md, all of it. Pinned: test_quotient_wanted, 9 lines (red: the relation, `quotient.of`,
+  `lift`, `lift_of` by `refl`, a set, function extensionality, i64's wrap, which is T8's);
+  wap/test_quotient_wanted "a function that tells joined values apart is refused" (red); test_quotient_page (green).
+  No gap.
+
 Net: core about +255 (T6a7 +45, V +50, C +50, D1 +60, Q1 +50), types +105, emit +20, kernel 0; the proof extension
 +85. Against the cost table's T6 row: the 500 analyze for "effects, instances, laws, tested" are T6a's +355 plus
 V's and C's +100; the 30 for protocols is C1; the 90 deleted are C4's. T6a7, D1 and Q1 (+155 core, +80 types) are
