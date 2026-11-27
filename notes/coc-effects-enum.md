@@ -17,10 +17,18 @@ module; `use "../../types/effects.wap"` does the same for Effect. The enum needs
 
 ## Plan
 
-Step 1 (done): wap/types/effects.wap holds `enum Effect`, read by nobody.
+Step 1 (done): wap/types/effects.wap holds `enum Effect`.
 
 Step 2, all together: the table OPERATION_EFFECTS moves from kernel/primitives.wap into types/effects.wap, keyed by
 Effect (a host operation's effect is vocabulary); the kernel keeps only the operations. Then core/analyze/effects.wap
 drops EFFECT_ORDER, PURE_WORD's list use and the five effect constants for `Effect` cases (the order is the enum's
 order; the claim words are the case names), extensions/wasm/modules.wap and extensions/theory/elaborate/effects.wap
 (if it survives unify) read the enum the same way. Checks: test_effects and test_hello.
+
+Step 2 (done, unbuilt): the table and EFFECT_ORDER live in types/effects.wap, effects.wap reads Effect, and
+kernel/primitives.wap keeps the operations. extensions/wasm/modules.wap names no effect (it moves the EFFECTS text fact
+as is), so it needs no change; theory/elaborate/effects.wap stays for unify. A claim's words stay text where they are
+read (effect_words), turned into cases by effects_named.
+Open: `Effect(word)` and `Effect(at)` are the enum's generated constructors (sugar/records.wap), `map<Effect, list<text>>`
+keyed by enum cases is untried, and types.wap does not include effects.wap (a program naming `Effect.IO` would need it,
+then check core's `use` of the same file declares nothing twice).
