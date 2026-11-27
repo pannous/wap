@@ -13,7 +13,8 @@ source "$(dirname "$0")/lib/slots.sh"
 [ $# -gt 0 ] || { echo "usage: job-slot.sh [--alone] <command…>" >&2; exit 2; }
 # a runaway command, past the memory or time cap, is killed and named (scripts/guarded.sh)
 guarded="$(dirname "$0")/guarded.sh"
-command -v lockf >/dev/null || exec nice -n 19 "$guarded" "$@"
+# without lockf there are no slots: every command runs at once, an --alone one too
+command -v lockf >/dev/null || { [ "$1" = --alone ] && shift; exec nice -n 19 "$guarded" "$@"; }
 slots=$(job_slots)
 for tree in "${INTEGRATION_TREES[@]}"; do [[ " $PWD/ $*/" == *" $tree/"* ]] && { slots=$((slots + 1)); break; }; done
 waited=
