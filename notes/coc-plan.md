@@ -1157,6 +1157,10 @@ neither.
 - The kernel and the elaborator each have an owner (notes/agents/wap-owner.md "Owners"); a change to the kernel
   passes a second reader, since it is the one trusted part. The elaborator's owner also owns the closed sum of
   `extends` (T5) and protocols as traits (T6), with the class rules of sugar/records.wap.
+- A track T step lands with no OK for its core lines, census rise or speed: its card and merge message report the
+  measured numbers, and the integrator raises the ceilings at landing. The self-build's memory and speed are
+  reported as soundness checks, never as limits. Core counts and the standing OKs bound only sugar and syntax forms
+  (user 2026-11-27).
 
 ## Sources
 
