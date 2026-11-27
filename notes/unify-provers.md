@@ -213,7 +213,7 @@ written twice.
   condition `0 <= x` as one, and any `a <= b` in scope is another, each read by `bounds_of` as a row. No flag on the
   structure says an atom is at least 0.
 - **A hypothesis `a <= b`.** It is `Bound(a, d, b)`, with `d = sum(b, minus(a))` and two proofs:
-  `a + d == b` (`sum_difference`) and `0 <= d` (`difference_nonnegative`). An equation's d is `int.zero`.
+  `a + d == b` (`sum_difference`) and `0 <= d` (`difference_nonnegative`). An equation's d is `int.natural(0)`.
 - **The gap.** `eliminated` returns `t + gap == u` as today, the gap a sum of the used bounds' d's and a literal
   of at least 0. With it comes `0 <= gap`, built by `nonnegative_sum` from each d's proof and the literal's
   computation. `at_most_from` uses `not_above_add(t, g, h: 0 <= g): t <= t + g`.
