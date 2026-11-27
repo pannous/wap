@@ -49,6 +49,9 @@ KERNEL := "wap/kernel/forms.wap"
 EMITTER := "wap/core/emit/emitter.wap"
 ALLOWED := "test/wap/guardrails_allowed.txt"
 RELATION := "conversion"
+# the one word core orders definitions by, and what sorting looks like
+RANKER := "ranked"
+SORTS := "sorted|min_by|max_by"
 LONGEST := 300
 SHAPE_FLOOR := 20
 SHOWN_TEXT := 100
@@ -104,7 +107,15 @@ emit_infers_type(): list<Spot> := {
 	filed_all("emit-infers-type", wap_files_in("wap/core/emit").flat_map(file => lines_of(file)).filter(line => called(line.text).any(word => word in words)))
 }
 dynamic_prim(): list<Spot> := filed_all("dynamic-prim", grepped_lines("prim dispatched\\b", tracked("wap/*.wap")) + grepped_lines("prim cast\\b", wap_files_in("wap/types")))
-one_ranking(): list<Spot> := filed_all("one-ranking", grepped_lines("sorted|min_by|max_by", wap_files_in("wap/core/analyze") + wap_files_in("wap/core/emit")).filter(line => not line.text.starts_with("ranked(")))
+one_ranking(): list<Spot> := filed_all("one-ranking", (wap_files_in("wap/core/analyze") + wap_files_in("wap/core/emit")).flat_map(file => unranked(lines_of(file))))
+# a file's lines that sort outside the ranker's definition
+unranked(lines: list<Line>): list<Line> := outside_definition(RANKER, lines).filter(line => first_match(line.text, SORTS) != ø)
+# a file's lines outside a word's definition, which runs from the line `word(` starts to the next line at the margin
+outside_definition(word: text, lines: list<Line>): list<Line> := {
+	start = (0 upto #lines).find(i => lines[i].text.starts_with(word + "(")) ?? #lines
+	end = ((start + 1) upto #lines).find(i => first_match(lines[i].text, "^[^ \t]") != ø) ?? #lines
+	lines.take(start) + lines.drop(end)
+}
 # a file and a count of it
 class Counted { file: text, count: int }
 long_file(): list<Spot> := tracked("wap/*.wap").map(file => Counted(file, #lines_of(file))).filter(counted => counted.count > LONGEST).map(counted => Spot("long-file", counted.file, "${counted.file}:${counted.count}", "${counted.count} lines"))
@@ -222,3 +233,6 @@ for each in RULES {
 	if rule in UNLISTED and allowed.any(line => line[0] == rule) { said.add("  ${rule} takes no allowlist lines: remove them from ${ALLOWED}") }
 	print(if said is empty then "✓ ${rule}" else "✗ ${rule}\n" + said.join("\n"))
 }
+# one-ranking still finds a sort outside the ranker: one in ranked's body is the ranking, one after it is not
+ranking_sample = [Line("sample.wap", 1, "ranked(xs: list) := {"), Line("sample.wap", 2, "\txs.sorted"), Line("sample.wap", 3, "}"), Line("sample.wap", 4, "other(ys: list) := ys.sorted")]
+print(if unranked(ranking_sample).map(line => line.number) == [4] then "✓ one-ranking finds a sort outside ranked" else "✗ one-ranking finds a sort outside ranked")

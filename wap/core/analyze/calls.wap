@@ -13,6 +13,7 @@ use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
 use "../type_notation.wap"
+use "../../kernel/environment.wap"
 use "../../kernel/forms.wap"
 use "../parse/operator_table.wap"
 
@@ -52,7 +53,7 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	# a word whose parameterless definition gives a function, called with arguments, calls that function: `double := n =>
 	# n*2; double(3)`, `root_sum := sum | sqrt` (wiki/charged.md)
 	if by_count is empty and candidates.any(definition => takes_count(definition, 0, s)) { return value_call_typed(n, called, arguments, s, f, expected) }
-	hints = if #by_count == 1 then by_count#1.parameters.map(type => if has_letters(type, s.records) then ø else type) else (1 to #placed).map(at => result_wanted(placed#at, at, by_count, s))
+	hints = if #by_count == 1 then by_count#1.parameters.map(type => if has_letters(type) then ø else type) else (1 to #placed).map(at => result_wanted(placed#at, at, by_count, s))
 	given = (1 to #placed).map(at => empty_given(typed_form(placed#at, s, f, hints#at)))
 	# an argument that never finishes ends the call there, the code after it never runs: `pick(a, return 7)` is
 	# `{ a; return 7 }`
@@ -134,9 +135,10 @@ arranged_arguments(n: Node, called: Node, arguments: list, candidates: list<Sign
 	if arrangements.any(each => each != arrangements#1) { refused(n, "the names put the arguments in different places for ${candidates_text(candidates, s)}; give them in order") }
 	arrangements#1
 }
-# the arguments in a definition's parameter order, ø when a name is none of its parameters or a parameter gets none
-arranged(definition: Signature, arguments: list, s: TypingState) as list? := {
-	parameters = parameters_in(definition, s)
+# the arguments in a definition's parameter order, or a case's field order, ø when a name is none of its parameters
+# or a parameter gets none
+arranged(definition: Signature, arguments: list, s: TypingState) as list? := arranged_in(parameters_in(definition, s), arguments)
+arranged_in(parameters: list<Node>, arguments: list) as list? := {
 	positional = arguments.filter(argument => not is_named(argument))
 	named = arguments.filter(is_named)
 	if #positional > #parameters or not named.all(argument => parameters.drop(#positional).any(parameter => same_name(parameter, argument))) { return ø }
@@ -301,7 +303,7 @@ chosen_definition(n: Node, called: Node, scopes: list, given: list, expected: Te
 takes(definition: Signature, given: list, s: TypingState, fit: function) as bool := {
 	parameters = parameters_in(definition, s)
 	if not takes_count(definition, #given, s) { return no }
-	plain = (1 to #given).filter(at => not has_letters(definition.parameters#at, s.records) and not has_unknowns(value_type(given#at)))
+	plain = (1 to #given).filter(at => not has_letters(definition.parameters#at) and not has_unknowns(value_type(given#at)))
 	if not plain.all(at => argument_taken(given#at, parameters#at, NOTHING_CALLED, s, fit)) { return no }
 	called = letters_bound(definition, given.map(value_type), s) ?? return no
 	(1 to #given).all(at => argument_taken(given#at, parameters#at, called, s, fit))
@@ -342,7 +344,7 @@ converted_at(written: Term?, called: Called, given: Term?, s: TypingState) as bo
 	if wraps(written, given) { return yes }
 	wanted = substituted(written, called.letters) ?? return no
 	if function_parts(wanted) != ø { return no }
-	if has_letters(wanted, s.records) or has_unknowns(wanted) then wraps(wanted, given) else conversion(given, wanted, s) != Conversion.Same
+	if has_letters(wanted) or has_unknowns(wanted) then wraps(wanted, given) else conversion(given, wanted, s) != Conversion.Same
 }
 more_specific(one: Candidate, other: Candidate, s: TypingState) as bool := {
 	mine = one.definition.parameters
@@ -358,9 +360,9 @@ converts_into(given: list<Term?>, wanted: list<Term?>, s: TypingState) as bool :
 # read as such where they read so (a Range as a list<int>), an optional the type of its value too
 type_converts(given: Term?, wanted: Term?, s: TypingState) as bool := {
 	if wanted == ø or given == ø { return wanted == ø }
-	if is_letter(wanted, s.records) or is_unknown(wanted) or protocol_named(s.records, wanted) != ø { return yes }
-	if is_letter(given, s.records) or is_unknown(given) { return no }
-	if not has_letters(wanted, s.records) and not has_unknowns(wanted) { return conversion(given, wanted, s) in STATIC_CONVERSIONS }
+	if is_letter(wanted) or is_unknown(wanted) or protocol_named(s.records, wanted) != ø { return yes }
+	if is_letter(given) or is_unknown(given) { return no }
+	if not has_letters(wanted) and not has_unknowns(wanted) { return conversion(given, wanted, s) in STATIC_CONVERSIONS }
 	if wraps(wanted, given) { return type_converts(given, base_of_optional(wanted), s) }
 	given_parts = type_parts(read_type(given, wanted, s.records) ?? given) ?? return no
 	wanted_parts = type_parts(wanted) ?? return no
@@ -587,9 +589,17 @@ parameter_typed(parameter: Node, type: Term, frame: TypeFrame) as Node := {
 }
 # a typed function's name with its signature, `(int, text) -> int`: its argument types and its result, `()` for no
 # parameters or no value known, `never` for one that never returns, as a built-in writes it, which the emitter lays out
-signed_name(typed: TypedFunction, s: TypingState) as Node := {
-	result = if typed.jumps then NEVER_TERM else typed.result ?? EMPTY_TERM
-	with_name_fact(written_name(define_of(typed.function, s)), SIGNATURE, type_fact(function_type_of(typed.arguments, result)))
+signed_name(typed: TypedFunction, s: TypingState) as Node := with_name_fact(written_name(define_of(typed.function, s)), SIGNATURE, type_fact(instance_type(typed)))
+instance_type(typed: TypedFunction) as Term := function_type_of(typed.arguments, if typed.jumps then NEVER_TERM else typed.result ?? EMPTY_TERM)
+# a typed function in the compile's kernel environment: an opaque constant of its signature, its body not yet a term
+# the kernel reads, so what rests on it rests on an assumption
+function_assumed(typed: TypedFunction, s: TypingState) := {
+	type = settled_type(instance_type(typed), s)
+	name = "${typed.function.key} ${type_text(type)}"
+	if named_id(TYPES.environment, name) == ø {
+		axiom_added(TYPES.environment, name, type)
+		TYPES.assumed += 1
+	}
 }
 
 # the parts of a Define, its parameters as a list of none or more
@@ -601,4 +611,4 @@ function_of(definition: Define) as Signature := match definition { Define(name, 
 # values each type it anew: typed even when nothing calls it
 all_typed(definition: Signature, records: Records) as bool := definition.parameters.all(type => once_typed(type, records))
 # a written type that types its parameter once for every call: none missing, no generic letter, none typed anew
-once_typed(type: Term?, records: Records) as bool := type != ø and not has_letters(type, records) and not takes_own_type(type, records)
+once_typed(type: Term?, records: Records) as bool := type != ø and not has_letters(type) and not takes_own_type(type, records)

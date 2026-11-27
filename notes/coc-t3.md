@@ -76,7 +76,9 @@ TYPE fact holds `Number(place)` in that table.
 ## One pass
 
 - **Headers first:** a recursive function's header is typed before its body, so a call of the function in its own
-  body reads the written or found result type. The body is typed once.
+  body reads the written result type. A call of itself without a written result takes none at first, and the body
+  is typed again once its other arm gives the type (calls.wap function_typed); a body no other arm gives a type is
+  refused with the fix-it naming the result to write.
 - **An assignment of another type is a new binding:** `x = 1; x = "a"`, and from there on x holds a text. The
   retyping round goes: typed_among's restart, TypingState `retyped`, `retypings` and `fixed`, and `retyped(…)` in
   types.wap. A `let`, a `const` or a written type still fixes the type
@@ -105,21 +107,28 @@ A name's bindings live in core/analyze/flow.wap. These forms are refused with a 
   (theory/prelude/numbers.wap 197, checked.wap 43) moves into wap/types in the explicit spelling. Compiler source does
   not use its words, so no seed refresh is needed. `int` keeps today's storage until T8.
 - **Overloads: the most specific by conversion order** (coc-plan 4). Of the definitions that fit, one is more
-  specific than another when each of its parameter types converts into the other's. Ties go to the innermost scope.
-  This one rule replaces `fewest_conversions`, `most_specific` with its `rank`, `typing_weight`, `type_weight` and
-  `written_structure`, and the exact-fit prefilter in `chosen_definition`. `ranked` in dispatch.wap uses the same
-  order. A derived definition (`DERIVED`, a class's `show` that a rule wrote) is declared in the scope around the
-  class, so the program's own `show` wins as the innermost. If the census shows a case that needs `derived` still, it
-  goes to the interviewer.
+  specific than another by the first of three steps that decides:
+  1. it takes the arguments as they are where the other converts one, compared as sets of places and read as the call
+     binds the letters: `text(c: char)` before `text(t: text)` for a char, `contains(xs: list<T>, item: T)` before
+     `contains(xs: list<T>, item: T?)` for an item that is no optional, and after it for one that is;
+  2. each of its parameter types converts into the other's and not all of the other's back: `empty(xs: list)` before
+     `empty(x: T)`, `==(a: T?, b: T?)` before `==(a: T, b: T)`, a written type before a letter or none;
+  3. the program wrote it and a rule wrote the other (`DERIVED`, a class's `show`).
+  Ties go to the innermost scope. This one order replaces `fewest_conversions`, `most_specific`'s `rank`,
+  `typing_weight`, `type_weight` and `written_structure`, and the exact-fit prefilter in `chosen_definition`; `ranked`
+  in dispatch.wap sorts by it, so a dynamic call tests the definitions as the static choice would pick them.
 - **An argument is read at its parameter's type when every fitting definition wants the same type there,** else alone,
   where a numeral is an `int`. `abs(0 - 3)` subtracts ints, and `1.5 + 2` adds floats through the declared
   int-to-float conversion.
 - **No weights are ported** (audit finding 5). read.wap's `nearest` (five weights), TRIAL_LIMIT and the numeral
   special cases (`numeral_in_cases`, `declares_case`, the `literals` and `result` counts of Trial) are not copied
-  into analyze. T3g replaces them in read.wap with analyze's choice, so the two typers choose alike and the weights
-  are gone from the tree.
-- **The readings typing chose travel as facts:** `typed_readings` (calls.wap:76, read by format.wap:21) becomes a
-  READING fact on the call node.
+  into analyze. T5 replaces them in read.wap with analyze's choice, so the two typers choose alike and the weights
+  are gone from the tree: the theory's doors read a program as written and lower it themselves, so no fact analyze
+  writes reaches the elaborator until it reads analyze's typed nodes, and the overloads it chooses among are the
+  theory environment's declarations, not the compile's signatures.
+- **The readings typing chose stay the compile's table:** `typed_readings` (calls.wap, read by format.wap) is keyed
+  by the source place, as TYPES is one table for the run: `format` prints the code as parsed, which a fact on the
+  typed call never reaches.
 
 ## Functions in the kernel until T5
 
@@ -138,12 +147,11 @@ The whole suite runs at T3b, T3d and T3e, compared line by line with main's last
 | T3b terms | the table; TYPE facts hold its places; signatures hold terms; type_notation.wap's readers read terms; one notation door; `type_shown` for messages and format; emit through the readers | about +300 (the table +30, the door +40, `type_shown` +30, the readers on terms, about 200 call sites edited and about 120 comparisons by `==` or `text()` rewritten; the user decides the size) | careful; the whole suite as before; `--stage 2` time and warm hello measured against the baseline |
 | T3c holes | letters.wap goes: letters, `_` and α are holes of the unifier, `settles`/`deferred` are answers; fits.wap's remaining comparisons go to kernel equality (`bare_fit`, `joined_settling`'s settling) | −169 letters, −45 fits, +60 | careful; `identity(3)` and `identity(int)`; the census |
 | T3c3 holes by id | a definition's letters are holes made once in a table by its key (letters.wap letter_holes), the signature's holes in all but where they are kept, so declare stays apart from the typing state; a call's answers, `s.unknowns` and `s.members` keyed by the hole's id (`variable_id`), a letter's name only in the types the definition writes; `hole_text` and its cache in TypeTerms go | about −10 type_notation, +20 letters (the call's letters and answers apart) | careful; two calls of one generic, a generic calling itself (test_letters) |
-| T3d one pass | headers first, assignment as a new binding, the retyping round goes; kind rules typed in place, the refiring goes | −40 analyze, −20 rules, +40 | careful; a recursive function's result found from its body; a kind rule's error names the line of its phrase |
-| T3e numbers | numerals at the wanted type, else `int`, and an empty `{}` or `[]` at the type its place wants, the right of `??` wanting the left's (`m.get(k) ?? {}`; core/pipeline.wap line_told's `has` test goes); i32 and i64; `#xs` int; the numbers prelude in wap/types; overloads by conversion order; READING fact | −40 analyze (typed_readings, the ranking's 5 words), +170 analyze, +200 types | careful; `0 - 3` is -3; `m.get(k) ?? {}` of a map<text, map<text, text>> is a map<text, text>; `#xs - 1` is -1 on an empty list; `type of 3` is `int` |
+| T3d one pass | headers first, assignment as a new binding, the retyping round goes; kind rules typed in place, the refiring goes | −40 analyze, −20 rules, +40 | careful; a recursive function's result is written, or found once its other arm gives the type, else refused with the fix-it naming it; a kind rule's error names the line of its phrase |
+| T3e numbers | numerals at the wanted type, else `int`, and an empty `{}` or `[]` at the type its place wants, the right of `??` wanting the left's (`m.get(k) ?? {}`; core/pipeline.wap line_told's `has` test goes); i32 and i64; `#xs` int; the numbers prelude in wap/types; overloads by conversion order| −40 analyze (the ranking's 5 words), +170 analyze, +200 types | careful; `0 - 3` is -3; `m.get(k) ?? {}` of a map<text, map<text, text>> is a map<text, text>; `#xs - 1` is -1 on an empty list; `type of 3` is `int` |
 | T3f functions | each typed function an opaque constant of its signature in the kernel environment; the census counts them as assumed | +20 | normal plus the census |
-| T3g theory follows | read.wap's `nearest`, TRIAL_LIMIT and the numeral special cases replaced by analyze's choice | 0 core; extension −40 | theory areas; the theory census script compared per program with main (no floor) |
 
-T3a and T3g change no core behaviour. T3b is the largest diff: about 200 places edited, mechanically, plus
+T3a changes no core behaviour. T3b is the largest diff: about 200 places edited, mechanically, plus
 type_notation.wap.
 
 ## The estimate
@@ -158,7 +166,7 @@ type_notation.wap.
 | the numbers prelude (types) | +200 | +240 (numbers 197, checked 43), moved from the extension |
 | functions as opaque constants | | +20 |
 | the holes wired into analyze | | +60 |
-| deleted | letters 235, fits 189, typed_readings and numerals 40 | letters 169, fits 45, ranking and typed_readings 40 |
+| deleted | letters 235, fits 189, typed_readings and numerals 40 | letters 169, fits 45, ranking 40 |
 | **net** | **+186** | **about +584 in the compiler, −548 in the extension** |
 
 Two budget differences:
@@ -172,16 +180,29 @@ Two budget differences:
 
 T3 is done when all of these hold:
 - the T3 row's test lines are green: `0 - 3` is -3; `#xs - 1` is -1 on an empty list; `type of 3` is `int`;
-  `identity(3)` and `identity(int)`; a recursive function whose result type is found from its body; a kind rule's
+  `identity(3)` and `identity(int)`; a recursive function's result is written, or found once its other arm gives the type, else refused with the fix-it naming it; a kind rule's
   error names the line of the phrase it rewrote;
 - the whole suite has no new red;
-- the census types every function, with 0 places typed any beyond today's 4;
+- the census types every function, with 0 places typed any beyond the language's 5 dynamic words (`show` four times in types/prelude.wap, `text` once in nodes.wap);
 - `--stage 2` is a fixed point;
 - typing stays fast: T3 as a whole adds at most 25% to `--stage 2` (84 s on the integrator's last run) and to a
   warm `print "Hello"`, each measured against its time before T3a on the same machine. That is a ceiling for the
   whole step, shared out below, not slack for the first sub-step;
-- letters.wap, typed_readings, ROUNDS_LIMIT and the retyping round are gone, and so are the five ranking words in
-  calls.wap and `nearest`'s weights in read.wap.
+- typed_among's retyping round is gone (typed_readings stays the compile's table), and so are the five ranking words
+  in calls.wap; letters.wap, ROUNDS_LIMIT and `nearest`'s weights in read.wap go in T5.
+
+What the gate still lacks, and the step that brings each:
+- `type of 3` is `int`, and `identity(int)`: red. `type of` is no word of the compile, and `int` in a value's place
+  names its conversion functions, so `identity(int)` is refused as several functions. Both wait for the user's
+  answer on `type of` (types as values in an expression's place).
+- `i32` and `i64` as the wrapping words: e3, waiting for the user's answer (core +8, kernel +2). `0 - 3` and
+  `#xs - 1` are green already.
+- the loop red (test_type_wanted, a loop that gives a carried name another type): a typing that can be discarded,
+  listed after T3 in coc-plan, measured before building.
+- a kind rule's error naming the line of its phrase: no test line holds it yet.
+- letters.wap (its letter holes) and ROUNDS_LIMIT (shape rules refiring on their own output, core/rules/stages.wap)
+  go in T5.
+- speed: the self-compile takes 12.5 s CPU and a warm hello 0.11 to 0.13 s, against 18.3 s and 130 ms before T3a.
 
 ## The speed budget
 
@@ -197,7 +218,6 @@ carries over to the next one, and one that needs more goes to the supervisor bef
 | T3d | 0 | one pass in place of the retyping rounds and the refiring: expected to be faster, and a gain is credited |
 | T3e | 7 | numerals typed through the kernel, the prelude's declarations read |
 | T3f | 3 | one opaque constant per typed function |
-| T3g | 0 | extension only |
 
 ## Open for the user (through the supervisor)
 

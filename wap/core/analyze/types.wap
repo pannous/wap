@@ -66,8 +66,8 @@ class TypingState {
 	unset: list<text> = []
 	# the types the library's globals are declared with, `c_handles: map<int, int> = {}`, which a function reads before
 	declared: list<Binding> = []
-	# the functions of the function values met, and the keys of the variables they capture
-	lambdas: list<Node> = []
+	# the functions of the function values met, by their keys, and the keys of the variables they capture
+	lambdas: map<text, Node> = {}
 	# the functions dynamic calls dispatch through (core/analyze/dispatch.wap)
 	dispatchers: list<Node> = []
 	captured: list<text> = []
@@ -194,19 +194,22 @@ typed_among(program: Block, library: list, rules: KindRules, library_scope: Scop
 	globals_declared(library, s)
 	overloads_checked(defined, declared, words, s)
 	runtime_typed(defines, s)
-	values = library_values(library).map(value => typed_form(value, s, TypeFrame(), ø))
+	library_typed = library_values(library).map(value => typed_form(value, s, TypeFrame(), ø))
 	typed = try typed_form(program, s, TypeFrame(), ø) catch e { refused_all(s, [e.message]) }
 	global_reads_checked(s)
 	if s.refusals { refused_all(s, []) }
 	for retyping in s.retypings { hint(retyping) }
-	statements = values + statements_in(typed)
+	statements = library_typed + statements_in(typed)
 	if memory_of(s) == ø { exported_dispatchers(defined, s) }
 	if s.unknowns is not empty { all_settled(s) }
 	if dispatches_completed(s) { return typed_among(program, library, rules, library_scope, signatures, s) }
 	s.functions = distinct_instances(s.functions, s)
 	s.instances = {}
-	for instance in s.functions { instance_indexed(instance, s) }
-	written = defines + s.lambdas + s.dispatchers
+	for instance in s.functions {
+		instance_indexed(instance, s)
+		function_assumed(instance, s)
+	}
+	written = defines + s.lambdas.values() + s.dispatchers
 	# the records stand first, shaped: the program's own leave the statements
 	placed = statements_in(instances_placed(refitted(Block(statements), typed), s)).filter(statement => not statement is Record)
 	whole = refitted(Block(s.records.items + functions_typed_from(written, s) + placed), typed)
@@ -547,8 +550,8 @@ is_definer(name: Node) as bool := place_key(name) == place_key(defined_at(name))
 # A case of an enum, `Dime`, or a case given its fields' values, `Circle(3)`: a value of the enum's type
 case_call_typed(n: Node, called: Node, arguments: list<Node>, s: TypingState, f: TypeFrame) as Node := {
 	fields = case_fields(case_declaring(s.records, called))
-	if #arguments != #fields { refused(n, "${called} takes a value for each of its fields: ${field_names(fields)}") }
-	given = (1 to #arguments).map(at => field_checked(typed_form(arguments#at, s, f, written_type(declared_type(fields#at))), fields#at, arguments#at, s))
+	values = arranged_in(fields, arguments) ?? refused(n, "${called} takes a value for each of its fields: ${field_names(fields)}")
+	given = (1 to #values).map(at => field_checked(typed_form(values#at, s, f, written_type(declared_type(fields#at))), fields#at, values#at, s))
 	case_typed_as(n, called, given, s)
 }
 case_typed_as(n: Node, called: Node, given: list, s: TypingState) as Node := {
