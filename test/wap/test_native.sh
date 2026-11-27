@@ -382,4 +382,12 @@ print "${Color.Green} ${Wide(2.5).x}"')" "Green 2.5"
 # an error in a used module names that module by its full path, as it names the program (core/errors.wap place_of)
 mkdir -p "$stage/erring" && printf '%s\n' 'broken(): int := "ab"' >"$stage/erring/part.wap" && printf '%s\n' 'use "part.wap"' 'print broken()' >"$stage/erring/main.wap"
 check "an error in a used module names its full path" "$("$native_wap" "$stage/erring/main.wap" 2>&1 | grep -c "^$stage/erring/part.wap line 1:")" "1"
+# `wap build --wasm app.wap` links the program and the modules it uses, its own compiled ones too, into one module that
+# plain wasmtime runs without wap's loader: app.full.wasm as linked, app.wasm trimmed (wiki/cli.md)
+WASMTIME_RUN="wasmtime -W gc,exceptions,function-references --invoke main"
+mkdir -p "$stage/linked" && printf '%s\n' 'add(a: int, b: int) as int := a + b' >"$stage/linked/adding.wap" && $wap "$compiler" "$stage/linked/adding.wap" "$stage/linked/adding.wasm" >/dev/null 2>&1
+printf '%s\n' 'use "adding.wasm"' 'print "Hello ${add(1, 2)}"' >"$stage/linked/app.wap" && (cd "$stage/linked" && "$native_wap" build --wasm app.wap >/dev/null 2>&1)
+for linked in app.full.wasm app.wasm; do
+	check "wap build --wasm links a program and its modules into $linked, which runs alone" "$(cd "$stage" && $WASMTIME_RUN "linked/$linked" 2>&1)" "Hello 3"
+done
 exit $((failures > 0))

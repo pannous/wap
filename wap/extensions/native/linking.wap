@@ -27,6 +27,19 @@ LEB_PAYLOAD := 128
 # the custom section of a module naming the folder of the library it imports by file name (extensions/wasm/modules.wap)
 LIBRARY_SECTION := "wap.library"
 
+# `wap build --wasm app.wap` (wiki/cli.md): app.mod.wasm the program as compiled, app.full.wasm it and every module it
+# imports by a .wasm name linked into one by Binaryen's wasm-merge, which needs no loader, app.wasm that one trimmed
+WASM_OPTION := "--wasm"
+MOD_ENDING := ".mod.wasm"
+FULL_ENDING := ".full.wasm"
+# Binaryen's features; its compact import section and custom descriptors left out, which wasmtime does not read yet
+# (drop each once it does)
+BINARYEN_FEATURES := "--all-features --disable-compact-imports --disable-custom-descriptors"
+TRIMMED := "-O2"
+# the name the program itself is merged under, which nothing imports
+PROGRAM_NAME := "program"
+BINARYEN_MISSING := "wap build --wasm: linking or trimming failed; it runs Binaryen's wasm-merge and wasm-opt (brew install binaryen)"
+
 # the path of the module a name names, beside the importing module unless it starts at the root, else the file of
 # its name beside the importer (a seed's tools and its modules move together), else in the folder of the library a
 # compiled importer records, else in the seed folder, whose compiler compiled a program run from its source; "" where
@@ -106,3 +119,29 @@ seed_part(name: text): text := seed_folder + name
 executable_path = executable_found()
 seed_folder = seed_folder_found()
 compiler_path = seed_part(COMPILER_PART)
+
+# the program compiled into app.mod.wasm, linked with the modules it uses into app.full.wasm, trimmed into app.wasm
+wasm_built(program: text, base: text) := {
+	module = base + MOD_ENDING
+	if not module_ran(module_loaded(compiler_path), [compiler_path, program, module], compiler_path) { exit(1) }
+	# the program first, so its exports (main, warp/start, memory) keep their names; a module's clashing ones are renamed
+	merged = linked_modules(module, [Linked(module, PROGRAM_NAME)]).map(linked => "'${linked.path}' '${linked.name}'").join(" ")
+	full = base + FULL_ENDING
+	if system("wasm-merge ${BINARYEN_FEATURES} -g ${merged} --rename-export-conflicts -o '${full}'") != 0 or system("wasm-opt ${BINARYEN_FEATURES} ${TRIMMED} '${full}' -o '${base}${MODULE_SUFFIX}'") != 0 {
+		eprint(BINARYEN_MISSING)
+		exit(1)
+	}
+}
+# a module linked, by the name its importer imports it under
+class Linked { path: text, name: text }
+# the modules a module imports by a .wasm name, found as the loader finds them, then theirs, each once after those held
+linked_modules(importer: text, held: list<Linked>): list<Linked> := {
+	imports = host_block(VECTOR_BYTES)
+	wasmtime_module_imports(module_compiled(importer), imports)
+	for i in 0 upto long_at(imports) {
+		name = vector_text(wasm_importtype_module(vector_item(imports, i)))
+		path = if name.ends_with(MODULE_SUFFIX) then module_path(name, importer) else ""
+		if path != "" and not held.any(linked => linked.path == path) { held = linked_modules(path, held + [Linked(path, name)]) }
+	}
+	held
+}
