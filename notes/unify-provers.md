@@ -3,11 +3,12 @@
 A program's whole numbers reach the kernel as int, and int is the only number structure the provers work in. nat is
 `int where it >= 0`, so no law reaches them over nat.
 
-int is `enum int { of_count(n: count); below_zero(n: count) }`, its payload the kernel's count (next section). A
-numeral is `of_count(k)` or `below_zero(k)`, k a count literal. An operator is a row constant,
-`prim i64.add int -> int -> int`, whose Defined value is its meaning in wap/types: sum, minus, times,
-equal_integers, not_above, and the other comparisons. The count is only the payload of int's two cases. The
-provers never state a program's law over it; only the reader of an int numeral and the int lemmas' own proofs use it.
+int is `enum int { zero; positive(n: count); negative(n: count) }`, where `positive(n)` is n + 1 and `negative(n)`
+is −(n + 1), so each number has one form. Its payload is the kernel's count (next section). A numeral is `zero`,
+`positive(k)` or `negative(k)`, k a count literal. An operator is a row constant, `prim i64.add int -> int -> int`,
+whose Defined value is its meaning: sum, minus, times, equal_integers, not_above, and the other comparisons. The count
+is only the payload of int's two signed cases. The provers never state a program's law over it; only the reader of an
+int numeral and the int lemmas' own proofs use it.
 
 ## int's payload: the kernel's count, not nat
 
@@ -35,13 +36,19 @@ count_equals_sound, count_equals_itself, count_add_zero …  theorems by count's
 - **Not a second number type.** A program's numerals, its operators and its laws are int. nat is the refinement with
   its condition. The count is to int what the bits of a machine word are to i64: its representation, which only the
   kernel and the int lemmas' proofs see.
-- **nat's induction.** A theorem over `int where it >= 0`: from `0 <= x`, x is `of_count(k)`. The case
-  `below_zero(k)` computes `0 <= x` to no, ruled out by apart over bool. P(of_count(k)) then follows by count's
-  recursor. It is stated and proved once, and induction.wap uses it for a nat binder. A law is `Π binders, Equal(bool, body, yes)` (typed_laws.wap `law_statement`).
+- **nat's induction.** A theorem over `int where it >= 0`: from P(zero), from P(x) → P(x + 1) for each `0 <= x`, and
+  from `0 <= x`, P(x). It goes by int's cases on x:
+  - `negative(k)` computes `0 <= x` to no, ruled out by apart over bool.
+  - `zero` is the base.
+  - `positive(k)` goes by count's recursor on k. At `·count.zero`, `positive(·count.zero)` is `zero + 1`, so the step
+    from the base gives it. At `·count.successor(k)`, the step from `positive(k)` gives it, carried by the lemma
+    `positive_next: positive(k) + 1 == positive(·count.successor(k))`.
+
+  It is stated and proved once, and induction.wap uses it for a nat binder. A law is `Π binders, Equal(bool, body, yes)` (typed_laws.wap `law_statement`).
 
 The provers are 9 files, 937 lines. Only linear.wap (416) reads a number structure, today nat's through
 kernel/numbers.wap's Numbers record. apart, induction, rewriting, facts, introduction and computing take any enum by
-its recursor (`case_recursor`), so int's two cases reach them unchanged.
+its recursor (`case_recursor`), so int's three cases reach them unchanged.
 
 Proved today: small, neg, square_minus. Open: `law regrouped(a: int, b: int): a + 1 + b == b + a + 1` and
 `law lt(x: int): x < x + 1`.
@@ -99,13 +106,20 @@ theorems. All are checked as declared, and none is an axiom.
 
 | name | kind | by |
 |---|---|---|
-| `int` | fills core's `int` word (A1's fill in place) with `enum int { of_count(n: ·count); below_zero(n: ·count) }` | block |
-| `·difference` (N191), `·minus` (N193), `·sum` (N197), `·size` (N206), `·negative` (N207), `·turned` (N209), `·times` (N210), `·equal_integers` (N213), `·subtracted` (N218), `·unequal` (N220) | definitions | int's recursor at level 1, the count's functions, `·negated` |
-| `·not_above` | definition, new: by int's cases (section "The comparisons") | int's recursor twice, `·at_most` |
+| `int` | fills core's `int` word (A1's fill in place) with `enum int { zero; positive(n: ·count); negative(n: ·count) }`; its cases are core's, named `int.zero`, `int.positive`, `int.negative` (not bare as bool's truths, so no program's `zero` or `negative` meets them) | block |
+| `·ups`, `·downs` | definitions, new: an int's two counts, `x == ups(x) − downs(x)`: zero → 0, 0; positive(n) → successor(n), 0; negative(n) → 0, successor(n) | int's recursor at level 1, three arms each |
+| `·difference` (N191, rewritten) | definition: m − n of two counts in its one form: `subtract(n, m)` is successor(k) → negative(k); else `subtract(m, n)` is zero → zero, successor(k) → positive(k) | count's recursor twice |
+| `·minus` (N193, rewritten) | definition: zero → zero, positive(n) → negative(n), negative(n) → positive(n), a swap | int's recursor, three arms, no count function |
+| `·sum`, `·times` (N197, N210, rewritten) | definitions by the two counts: `sum(a, b) := difference(ups(a) + ups(b), downs(a) + downs(b))`, `times(a, b) := difference(ups(a)·ups(b) + downs(a)·downs(b), ups(a)·downs(b) + downs(a)·ups(b))` | `·add`, `·multiply`; no case arms. `·size`, `·negative`, `·turned` (N206–209) are not needed and go |
+| `·equal_integers` (N213, rewritten), `·not_above` (new) | definitions: `count_equals(ups(a) + downs(b), ups(b) + downs(a))` and `count_at_most(` the same two `)` | no case arms (section "The comparisons") |
+| `·subtracted` (N218), `·unequal` (N220) | definitions, as in the prelude | `·sum`, `·minus`, `·negated` |
 | `·below`, `·above`, `·not_below` | definitions, new: `not_above(a + 1, b)`, `below(b, a)`, `not_above(b, a)` | `·not_above` |
 | the rows' meanings | each row constant `prim i64.<op> int -> … ` declared Defined as its function: add ·sum, sub ·subtracted, mul ·times, sub(0, x) ·minus, eq ·equal_integers, ne ·unequal, le_s ·not_above, lt_s ·below, gt_s ·above, ge_s ·not_below | core/analyze/terms.wap's `row_term` then finds them declared |
-| a numeral | `term_of` writes k ≥ 0 as `of_count(k)` and k < 0 as `below_zero(−1 − k)`, k a count literal | replaces today's bare `numeral(value)` |
-| `·equal_integers_itself` (N230) | theorem | int's recursor at level 0, `·equals_itself` |
+| a numeral | `term_of` writes 0 as `int.zero`, k > 0 as `int.positive(k − 1)` and k < 0 as `int.negative(−1 − k)`, the payload a count literal | replaces today's bare `numeral(value)` |
+| `·parts_back` (new) | theorem: `difference(ups(x), downs(x)) == x` | int's recursor at level 0, three arms, each by computation |
+| `·difference_equal` (new) | theorem: `m + q == p + n → difference(m, n) == difference(p, q)` | count's recursor, `·zero_subtract`, `·subtract_successors`, `·add_cancel` |
+| `·equal_integers_itself` (N230, rewritten) | theorem | `·equals_itself(ups(x) + downs(x))`, no case split |
+| `·positive_next` (new) | theorem: `positive(k) + 1 == positive(·count.successor(k))` | `·add_zero`, `·zero_subtract`, by computation |
 | `·equals_sound`, `·equals_complete` for int | theorems (section "The bridge") | as there |
 
 Division on int (`i64.div_s`, `rem_s`) gets no meaning yet: the prelude had none for int. Those rows stay opaque,
@@ -113,8 +127,43 @@ so a law dividing an int computes only on literals, which `row_step` folds.
 
 **One change to the decided placement.** int cannot be declared in wap/types: its cases' payload `·count` has no
 name wap can write. So int, its functions and the rows' meanings are core_environment's (int_declared), and wap/types
-keeps only types/integers.wap's laws, stated in wap over int's operators. Cost: kernel and core about +60 lines of
-declarations (count_declared about 45, int_declared about 15, the proofs copied rather than new). No new mechanism.
+keeps only types/integers.wap's laws, stated in wap over int's operators. Cost: kernel and core about +80 lines of
+declarations (count_declared about 45, copied; int_declared about 35, rewritten for the three cases). No new
+mechanism.
+
+### Three cases against two: the honest cost
+
+The deleted prelude's int had two cases, Lean's `of_nat(n) | negative_successor(n)`, and its functions could be
+copied. With `zero | positive | negative` they cannot. Written **by cases**, as the prelude's were, each binary
+function goes from 2×2 to 3×3 arms:
+
+| | two cases, by cases | three cases, by cases | three cases, by the two counts (recommended) |
+|---|---|---|---|
+| `sum` | 4 arms, 2 through `difference` | 9 arms, 4 through `difference` | 1 line, no arms |
+| `times` | `size`, `negative`, `turned` (6 arms) | the same, 9 arms | 1 line, no arms |
+| `minus` | 2 arms, one a nested count recursor | 3 arms, a plain swap | 3 arms, a plain swap |
+| `difference` | one count recursor | two | two |
+| `equal_integers`, `not_above` | 4 arms each | 9 arms each | 1 line each, no arms |
+| `ups`, `downs` | — | — | 3 arms each (new) |
+| equals_sound's proof | 4 cases: 2 apart, 2 congruence | 9 cases: 6 apart, 1 refl, 2 congruence | no cases: count_equals_sound, then `difference_equal` and `parts_back` twice |
+| `equal_integers_itself` | 2 cases | 3 cases | none |
+| nat's induction | of_nat(k) by count's recursor, the step by computation | + the zero case and `positive_next` | the same |
+| linear.wap's numerals | 2 arms read, 2 written | 3 read, 3 written | 3 read, 3 written |
+
+- **By cases** costs about +25 lines over the two-case shape: int_declared's functions about +18, the proofs about +7.
+  Every binary function, and every proof by cases, has 9 arms where it had 4.
+- **By the two counts**, every binary function is one line over `ups` and `downs`, and only `ups`, `downs`, `minus`,
+  `difference` and `parts_back` see the three cases. That is about the same size as the copied two-case prelude
+  (about 25 lines each): the definitions are shorter by about 7, which the new `difference_equal` (about 8) takes
+  back. The same route would serve two cases too, so the shape itself
+  costs about +4 lines there: one arm each in ups, downs, minus and parts_back. The gain of the shape is `minus` as a
+  plain swap, and linear.wap pushes minus everywhere (`a − b` is `sum(a, minus(b))`).
+- **What it costs in computing.** A sum of two literals computes through `difference` and the count's shortcuts.
+  That is as fast as before, since the payloads are count literals. A sum over a variable does not compute to a case
+  by itself: `positive(k) + 1` needs `positive_next`, where the two-case `of_nat(k) + of_nat(1)` computed to
+  `of_nat(k + 1)` directly. This is the one lemma the count route adds for induction.
+- **What does not change.** linear.wap reads `sum`, `minus`, `not_above` and `equal_integers` as opaque Defined
+  constants and never their arms. The provers' cost is the same in every shape; only the int lemmas' proofs see it.
 
 ## linear.wap over int only
 
@@ -122,8 +171,8 @@ The nat structure and the nat LAWS list go. `Sums` holds int's functions, found 
 `i64.add`, `i64.le_s` and `i64.eq` at `int -> int -> int` (core/analyze/terms.wap `row_name`), so no function name is
 written twice.
 
-- **Numbers read.** `of_count(k)` is k and `below_zero(k)` is −k−1, k a count literal or built from count's zero and
-  successor. This is the one place the count appears in linear.wap, and only because it is int's payload. Numbers are
+- **Numbers read.** `int.zero` is 0, `positive(k)` is k+1 and `negative(k)` is −k−1, k a count literal or built
+  from count's zero and successor. This is the one place the count appears in linear.wap, and only because it is int's payload. Numbers are
   written by `integer_numeral`. `Normal.number` may be negative.
 - **Subtraction is `sum(a, minus(b))` everywhere.** `subtracted` unfolds to it. `with_differences`, the difference
   atoms and the Subtract shortcut go. `minus` over a sum is pushed inward by `minus_sum`, and a literal is computed.
@@ -134,7 +183,7 @@ written twice.
   condition `0 <= x` as one, and any `a <= b` in scope is another, each read by `bounds_of` as a row. No flag on the
   structure says an atom is at least 0.
 - **A hypothesis `a <= b`.** It is `Bound(a, d, b)`, with `d = sum(b, minus(a))` and two proofs:
-  `a + d == b` (`sum_difference`) and `0 <= d` (`difference_nonnegative`). An equation's d is `of_count(0)`.
+  `a + d == b` (`sum_difference`) and `0 <= d` (`difference_nonnegative`). An equation's d is `int.zero`.
 - **The gap.** `eliminated` returns `t + gap == u` as today, the gap a sum of the used bounds' d's and a literal
   of at least 0. With it comes `0 <= gap`, built by `nonnegative_sum` from each d's proof and the literal's
   computation. `at_most_from` uses `not_above_add(t, g, h: 0 <= g): t <= t + g`.
@@ -145,12 +194,11 @@ written twice.
 
 The law names stay one list (LAWS), checked present by `sums_of` as today.
 
-## The comparisons, one function by cases (wap/types)
+## The comparisons, one function over the two counts (int_declared)
 
 ```
-not_above(a, b)   by int's cases on a and b, the way equal_integers is:
-                  of_count m, of_count n → count_at_most(m, n);   of_count m, below_zero n → no;
-                  below_zero m, of_count n → yes;   below_zero m, below_zero n → count_at_most(n, m)
+not_above(a, b)   := count_at_most(ups(a) + downs(b), ups(b) + downs(a))      a − b <= 0, over the two counts
+equal_integers(a, b) := count_equals(ups(a) + downs(b), ups(b) + downs(a))
 below(a, b)       := not_above(a + 1, b)
 above(a, b)       := below(b, a)
 not_below(a, b)   := not_above(b, a)
@@ -158,7 +206,8 @@ not_below(a, b)   := not_above(b, a)
 
 Each row keeps its meaning (`i64.le_s` is not_above, `i64.lt_s` below, and so on). Every comparison is then the one
 `<=` the prover reads. A `<` goal or hypothesis is a `<=` of `a + 1`, which makes `lt` (`x < x + 1`) a gap of 0. The
-count_at_most inside the cases is part of the payload: it appears only in the proofs of the int lemmas below.
+count_at_most and count_equals inside are part of the payload: they appear only in the proofs of the int lemmas
+below. On literals both compute through the count's shortcuts, the same as a case split would.
 
 ## The int lemmas (wap/types, wap-unify-provers')
 
@@ -182,14 +231,15 @@ count_at_most inside the cases is part of the payload: it appears only in the pr
 The laws the proofs are glued with, `equal_symmetric`, `equal_transitive`, `equal_congruent`, `chosen_decided` and
 `chosen_at_yes`, are about any type and stay as they are.
 
-Recommended proof route: an int is a difference of two counts.
-- `of_count m == difference(m, zero)` and `below_zero m == difference(zero, successor(m))`, by computation.
-- `difference_shift`: `difference(a + k, b + k) == difference(a, b)`, by induction on k.
-- `difference_sum`: `difference(a, b) + difference(c, d) == difference(a + c, b + d)`.
-- `difference_equal`: `difference(a, b) == difference(c, d)` where `a + d == c + b`.
+Recommended proof route: an int is a difference of its two counts, which is how the functions are defined.
+- `parts_back`: `difference(ups(x), downs(x)) == x`, by int's cases, each by computation.
+- `difference_parts`: `ups(difference(m, n)) + n == downs(difference(m, n)) + m`, by count's recursor.
+- `difference_equal`: `m + q == p + n → difference(m, n) == difference(p, q)`.
 
-Then the sum laws become: rewrite each binder by its cases into differences, apply `difference_sum`, and finish with
-the count's add laws. The comparison laws are case splits on a and b, ending in the count's at_most laws. These
+Then the sum laws become: unfold sum to `difference(ups … , downs …)` and rewrite the inner sums' counts by
+`difference_parts`. A goal `difference(m, n) == difference(p, q)` then goes by `difference_equal` to a count
+equation, which the count's add laws finish. The comparison laws go the same way to the count's at_most laws, with no
+case split on a or b. These
 count lemmas are proved by computing and induction, not by linear, which never reads the count. Never let the
 linear prover prove a lemma it uses itself.
 
@@ -213,16 +263,17 @@ are checked theorems, never axioms. The same function serves any enum whose `==`
 included), so it is written once over the type and its equality function.
 
 - **complete** is Equal's recursor: rewrite b to a in the goal (`rewritten`), leaving `equal_integers(a, a) == yes`,
-  which is `equal_integers_itself`. That law is proved by int's cases and `count_equals_itself` (count's recursor).
-- **sound** is induction on a, then on b, over int's cases:
-  - In the two mixed cases (`of_count m` against `below_zero n`), `equal_integers` computes to no. The
-    hypothesis becomes `Equal(bool, no, yes)`, and apart.wap proves the goal from it. This is the step that needs bool
-    as a block (t5b-enums): apart's chooser is the recursor of the equation's type, `case_recursor(bool)`, choosing
-    the goal at no and anything at yes. While bool is the kernel's Choice, it has no recursor, and `no == yes`
-    cannot be told apart.
-  - In the two like cases, `equal_integers` computes to `count_equals(m, n)`. `count_equals_sound` (count's recursor on m
-    and n, the mismatched cases again by apart over bool) gives `Equal(count, m, n)`. `equal_congruent` with `of_count`,
-    or with `below_zero`, carries it to `Equal(int, …)`.
+  which is `equal_integers_itself`. That law is `count_equals_itself(ups(x) + downs(x))`, with no case split.
+- **sound** needs no case split on a or b. `equal_integers(a, b)` is `count_equals(ups(a) + downs(b), ups(b) + downs(a))`.
+  `count_equals_sound` (count's recursor on both, the mismatched cases by apart over bool) gives the count
+  equation. `difference_equal` turns it into `difference(ups(a), downs(a)) == difference(ups(b), downs(b))`, and
+  `parts_back` on each side gives `Equal(int, a, b)`.
+  - The mismatched cases inside count_equals_sound are the step that needs bool as a block (t5b-enums). There the
+    hypothesis is `Equal(bool, no, yes)`, and apart's chooser is the recursor of the equation's type,
+    `case_recursor(bool)`, choosing the goal at no and anything at yes.
+  - By int's cases instead, sound would take 9 cases: 6 mixed by apart, zero against zero by refl, and the two like
+    signed cases by `count_equals_sound` and `equal_congruent` with `int.positive` or `int.negative`. See "Three cases
+    against two".
 
 Where the prover reads a hypothesis `h: (a == b) == yes`, `equal_bounds` gets `equals_sound(a, b, h)`. Where a law
 it calls takes an int equation (add_cancel's h, gap_bound's k), it passes `equals_complete(…, proof)`.
@@ -240,7 +291,7 @@ kernel function of int is what runs. The condition must therefore be put back in
   Equal(bool, law_p(n), yes)`. The law's function still takes only n: `beta` gets frees for the value binders only,
   and the hypotheses' frees are abstracted in place. A later binder's condition may name an earlier binder; the order
   Π x, Π x_holds, Π y, Π y_holds keeps that.
-- The provers read `n_holds` like any hypothesis. With the comparisons by cases, `n >= 0` is `not_above(0, n)`, so
+- The provers read `n_holds` like any hypothesis. With the comparisons as one function, `n >= 0` is `not_above(0, n)`, so
   `bounds_of` gives it one row, `n - 0 >= 0`. That is the "atom at least 0 from a hypothesis" of the int-only design.
 - The run gives a conditioned binder only trial values its condition holds for (law_runs already does this for a
   `where` type; no change).
@@ -278,7 +329,7 @@ core's int_declared (section "count_declared and int_declared").
 ### What replaces e.numbers
 
 int_declared sets `e.integers`, a kernel record beside `e.literals`, as numbers_declared set `e.numbers`:
-`Integers { type; of_count; below_zero; sum; minus; not_above; equal_integers; equals_sound; equals_complete }`,
+`Integers { type; zero; positive; negative; sum; minus; not_above; equal_integers; equals_sound; equals_complete }`,
 each a constant (kernel +about 8 lines). `sums_of` builds Sums from it:
 
 ```
@@ -291,10 +342,10 @@ The row constants a law's body holds (`prim i64.add int -> int -> int`) are Defi
 | linear.wap today | after |
 |---|---|
 | `s.nat` (11 places: hypotheses' types, equations, congruences) | `s.i.type` |
-| `s.n.zero`, `zero_of(s)` | `of_count(·count.zero)`, written by `int_numeral(s, 0)` |
+| `s.n.zero`, `zero_of(s)` | `s.i.zero`, the case itself, with no count in it |
 | `s.n.successor` (normal :303, beyond :147) | gone: `b + 1` is `added(s, b, int_numeral(s, 1))` |
-| `numeral(v)` (:252, :345–349, :383) | `int_numeral(s, v)`: `of_count(k)` for v ≥ 0, else `below_zero(−1 − v)` |
-| `normal`'s Numeral, zero and successor cases, `is_sum_part` (:300–303, :326–327) | `of_count(lit)` → lit, `below_zero(lit)` → −lit−1, a sum, and `minus(t)` → t's Normal with each atom's minus and the number negated, by `minus_add` and computing |
+| `numeral(v)` (:252, :345–349, :383) | `int_numeral(s, v)`: `s.i.zero` for v = 0, `positive(v − 1)` for v > 0, else `negative(−1 − v)` |
+| `normal`'s Numeral, zero and successor cases, `is_sum_part` (:300–303, :326–327) | `int.zero` → 0, `positive(lit)` → lit+1, `negative(lit)` → −lit−1, a sum, and `minus(t)` → t's Normal with each atom's minus and the number negated, by `minus_add` and computing |
 | `s.subtract`, `with_differences`, `differences_in`, `difference_bounds`, `linked`'s difference branch (:180–205, :316) | gone: `a - b` unfolds to `sum(a, minus(b))` |
 | the unit rows `0 <= atom` in `eliminated` (:248) | gone: an atom's lower bound comes from a hypothesis only |
 | `s.n.truth`, `yes_case`, `no_case`, `equality`, `equation()`, `truth_stated()` | `e.literals` and core's `equated` (kernel/equality.wap) |
@@ -337,7 +388,7 @@ not prove is no theorem, and the linear prover's `sums_of` refuses with the miss
 
 | step | what | lines | gate |
 |---|---|---|---|
-| 1 | bool's block, count_declared, int_declared with `e.integers` (wap-theory-reads-types) | core and kernel +about 70 | test_hello, test_law_runs unchanged |
+| 1 | bool's block, count_declared, int_declared with `e.integers` (wap-theory-reads-types) | core and kernel +about 90 | test_hello, test_law_runs unchanged |
 | 2 | hypothesis Π and binder conditions in law_statement; integers.wap's laws proved first, declared by name | laws.wap +about 25 | the 14 laws Proved by verify on integers.wap alone |
 | 3 | Sums over int: reading, writing, minus atoms, no differences, no unit rows | linear.wap about −40 +35 | `regrouped` Proved |
 | 4 | bounds: the role table, the Bound's nonnegative proof, gap_bound, both_* | linear.wap about −15 +30 | `lt` Proved; test_theory_arithmetic's five with `h:`; law_runs 11–15 |
@@ -365,7 +416,7 @@ kernel"). The second checker still reads magnitude, and magnitude's header still
 
 ### The kernel's part
 
-- **A numeral holds a count, so it is never negative.** A program's negative int is `below_zero(k)` with k ≥ 0
+- **A numeral holds a count, so it is never negative.** A program's negative int is `int.negative(k)` with k ≥ 0
   (int_declared). So the unbounded value needs no sign: lib/magnitude.wap's `Magnitude` (limbs of 10^9, one spelling
   per number; sum, difference of a ≥ b, product, divided, compared, digits) is exactly what a count literal needs.
 - **The representation, recommended: small stays small.** `Numeral(value: int)` stays the shape for every count below
@@ -409,7 +460,8 @@ kernel"). The second checker still reads magnitude, and magnitude's header still
    instance and LAWS out. Gate: `regrouped` proves, law_runs 11–15 hold, and test_theory_arithmetic, test_induction
    and test_verify show no line that was green going red.
 4. **Bool equality goals.** Gate: test_connectives and a `==` law over int.
-5. **Induction and apart over int.** The recursor gives two cases, each with a count field. A law over one int binder
+5. **Induction and apart over int.** The recursor gives three cases: zero with no field, and positive and negative,
+   each with a count field. A law over one int binder
    that needs induction under a case takes depth 2, which INDUCTION_DEPTH allows. Check one such law, and raise the
    depth only if a target line needs it.
 
