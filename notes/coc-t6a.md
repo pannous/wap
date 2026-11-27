@@ -269,7 +269,7 @@ last column says what the unification already gives.
 
 | step | what | core / kernel / types lines (estimate) | turns green (statements) | given by the unification |
 |---|---|---|---|---|
-| T6a1 proofs of bool laws | `law … := proof` and `theorem` typed by analyze: Prop, the statement's proposition, `refl`, `assume`, `by`, `chain`, a law's call (a fact for the provers where its type is not the statement); the glue laws (`equal_symmetric`, `equal_transitive`, `equal_congruent`, `chosen_decided`, `chosen_at_yes`) in wap/types; `type of` a law shows its statement | core +80 (analyze/laws.wap: the declaration +35, the proofs +35, PROP_TERM and the shown statement +10), kernel +20 (Equal and refl in core_environment, unless the deletion commit gives them a home), types +20 (the glue laws) | the 19 of the table above: 3 at once, 5 with the Fail rule, 9 with the provers over int; hard and uses_hard's `assume` lines once T6a3 has Even | the statement as `Π binders, Equal(bool, body, yes)` (`law_statement`), the provers' call and the theorem's declaration (`law_proved`), the per-law refusal, the run's verdict where none proves it: about 30 of the 90 lines planned here |
+| T6a1 proofs of bool laws | `law … := proof` and `theorem` typed by analyze: Prop, the statement's proposition, `refl`, `assume`, `by`, `chain`, a law's call (a fact for the provers where its type is not the statement); the glue laws (`equal_symmetric`, `equal_transitive`, `equal_congruent`, `chosen_decided`, `chosen_at_yes`) in wap/types; `type of` a law shows its statement | core +80 (analyze/laws.wap: the declaration +35, the proofs +35, PROP_TERM and the shown statement +10), kernel +20 (Equal and refl are declared in core beside int; the glue laws are in kernel/equality.wap), types +20 (the glue laws) | the 19 of the table above: 3 at once, 5 with the Fail rule, 9 with the provers over int; hard and uses_hard's `assume` lines once T6a3 has Even | the statement as `Π binders, Equal(bool, body, yes)` (`law_statement`), the provers' call and the theorem's declaration (`law_proved`), the per-law refusal, the run's verdict where none proves it: about 30 of the 90 lines planned here |
 | T6a2 hypotheses and connectives | bool-statement binders as hypotheses; `not`/`and`/`or` of propositions by the operands' sort | core +40 (hypothesis binders +25, the law run's skip +5, the sort-chosen rows +10), types +3 (Not, And, Or rows) | 13: connectives 16 implied, 20 smaller, 21 no_is_no_yes, 22, 23; connectives_wanted positive_product; induction 12 positive_product; arithmetic 12 to 16 (five laws with `h:`); verify 32 same_as_given. The arithmetic five with the provers over int | `implies` is a row already (types/operators.wap); hypothesis binders are not M2b's, so they are this step's whole |
 | T6a3a propositions in wap spelling | `proposition_of`: `==` of a type with a bridge is `Equal(T, l, r)`, `implies` a Π, any other bool `b == yes`; law_statement through it; bool's bridge (section "How wap source states a proposition") | core +18 | test_theory_connectives' `==` laws (M2b step 5's gate); every `theorem … : a == b` reads as Equal | Equal in core_environment, int's bridge in int_declared, T6a2's hypothesis binders |
 | T6a3 indexed families | enums over indices with a result per case, letters found as fields, mutual families one block; constructor calls typed by unifying their result; Equal as a family, replacing T6a1's core declaration (`==`'s place is T6a3a's) | core +100 (header and cases with indices +50, found fields +20, constructor typing +30), kernel −20 (T6a1's Equal declaration) | 9: proposition_wanted 15 four_is_even, wap proposition_wanted 10 and 12 (two, mutual), proof_wanted wrong, verify 13 hard, 17 uses_hard, 20 wrong, 26 any_even (Untested), connectives 18, 19 (And, Or as families) | int as an enum over nat in wap/types is the first two-case block analyze declares for the kernel; the found fields are written in analyze |
@@ -278,7 +278,7 @@ last column says what the unification already gives.
 | T6a6 propositions as values, the logic in wap/types | a type in a value's place compared at Type; Prop binders; False, True, And, Or, Not, Exists, Decidable and the axiom proposition_extensionality in types/logic.wap | core +30 (types as values +20, Prop binders +10), types +35 (the rest of the logic in wap spelling) | 4: elaborate 107, 108, 153 (unions at Type); logic 18 anything; and logic's own checks (10 to 17) read on wap/types | the prelude is gone already (the deletion commit); the glue laws moved in T6a1, Equal in T6a3 |
 
 Order: T6a1 first (it holds most of the laws, and every later step reads a law's declaration through it), then T6a2,
-T6a3, then T6a4 after T5c3, T6a5 after T5b1, T6a6 last. T6a1 needs the deletion commit and the int enum; T6a1's
+T6a3, then T6a4 after T5c3, T6a5 after T5b1, T6a6 last. T6a1 needs the int enum; T6a1's
 nine prover statements need M2b (notes/unify-provers.md); T6a3 needs T5b2's blocks.
 
 ## The estimate
@@ -298,10 +298,6 @@ T6a is done when:
 
 ## Open for the supervisor
 
-- **Equal and the glue laws after the deletion:** who declares `Equal`, `Equal.refl` and the five glue laws from the
-  deletion commit on, before any family exists? Recommended: the deletion commit (wap-theory-reads-types) declares
-  Equal and refl in core_environment, as the Choice is, and the glue laws in wap/types with their proofs; T6a1 then
-  only reads them. Without them the provers and every bool law's proposition have no Equal.
 - **Test programs in the prelude's spelling:** measures' FACT and FIB, statements' SUM_TO, SUM_BEFORE and SUM_SKIPPING
   (with their `operator +(a: nat, b: nat)`), and subtypes' ONE_ONLY call prelude functions or write a proposition
   where wap writes a bool. Recommended: rewrite them in wap spelling, beside the 40 granted rewrites, through
@@ -309,8 +305,7 @@ T6a is done when:
 - **The int laws' names:** verify 36, 37 and 40 name `add_commutative` and `add_zero`. Recommended: wap/types names
   int's laws by the words the tests and wiki/proof.md use (`add_zero`, `add_commutative`, `add_associative`), not
   `sum_*`; notes/unify-provers.md's table follows.
-- **test_theory_second:** its laws check the second checker (extensions/theory/second). If the deletion removes that
-  checker, its three T6a1 statements leave with it as unpinned, not red.
+- **test_theory_second:** its laws check the second checker (extensions/theory/second).
 
 ## T6a3, T6a5 and T6a6 re-read on unify-typers 2b0e87be
 
