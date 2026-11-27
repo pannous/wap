@@ -9,6 +9,7 @@ use "../../core/bindings.wap"
 use "../../core/stage.wap"
 use "../../core/rules/stages.wap"
 use "../../core/parse/cascade.wap"
+use "../../core/parse/operator_table.wap"
 use "../../core/analyze/declarations.wap"
 use "../../core/errors.wap"
 use "../../core/language.wap"
@@ -30,14 +31,14 @@ LAW_STATEMENT_RULES := "extensions/law_statements.wap"
 LAW_FUNCTION := "law_"
 # the refusal of a law that names what the kernel only assumes
 ASSUMED_NAMED := "assumed function"
-# the level of the truths' type, Type
-TRUTH_LEVEL := Successor(Zero)
 # the name of the hypothesis a subtype's binder brings, after the binder's
 CONDITION_HOLDS_BINDER := "_holds"
 
 # a law analyze typed: its name, its function's key and id in the environment, the first function its body calls
 # that the kernel only assumes, all found while analyze's names are in scope, and the ids of its hypotheses' functions
-class TypedLaw { name: text; key: text; id: int?; assumed: text?; given: list<int> = [] }
+class TypedLaw { name: text; key: text; id: int?; assumed: text?; given: list<Premise> = [] }
+# a law's hypothesis: its binder's name and the id of its function
+class Premise { binder: text; id: int }
 # the laws of a program, in the order they are stated; a law analyze refuses, or one a hypothesis of which it refuses,
 # says why on standard error
 laws_typed(wap_folder: text, program: text): list<TypedLaw> := {
@@ -46,7 +47,7 @@ laws_typed(wap_folder: text, program: text): list<TypedLaw> := {
 	rules_files_loaded(front, wap_folder)
 	based(front, in_folder(wap_folder, LAW_STATEMENT_RULES))
 	types = types_declared(front, wap_folder)
-	split = hypotheses_split(shaped_program(front, program_operated(front, program)))
+	split = hypotheses_split(shaped_program(front, program_operated(front, program)), front)
 	TYPES.refused = {}
 	typed = typed_modules(front, [module_declared(declared_program(split.code))], types, program)
 	refusals = TYPES.refused!
@@ -56,13 +57,15 @@ laws_typed(wap_folder: text, program: text): list<TypedLaw> := {
 	laws: list<TypedLaw> = []
 	for function in split.laws {
 		name = function[#LAW_FUNCTION ..]
-		parts = [function] + (split.given.get(function) ?? [])
+		given = split.given.get(function) ?? []
+		parts = [function] + given.map(each => each.function)
 		why = parts.map(part => if keys.has(part) then refusals.get(keys[part]) else "typing left ${part} out").find(reason => reason != ø)
 		if why != ø { eprint "law ${name}: ${why!}"; continue }
 		key = keys[function]
 		statement = statements_in(typed).find(statement => statement is Define and function_key(statement) == key)!
-		given = (split.given.get(function) ?? []).map(given => named_id(TYPES.environment, keys[given]) ?? refused(ASSUMED_NAMED, "law ${name}: its hypothesis ${given[#function + #LAW_GIVEN ..]} is no statement the kernel holds"))
-		laws += [TypedLaw(name, key, named_id(TYPES.environment, key), assumed_callee(TYPES.environment, statement), given)]
+		held = given.filter(each => named_id(TYPES.environment, keys[each.function]) == ø)
+		if held is not empty { eprint "law ${name}: its hypothesis ${held#1.binder} is no statement the kernel holds"; continue }
+		laws += [TypedLaw(name, key, named_id(TYPES.environment, key), assumed_callee(TYPES.environment, statement), given.map(each => Premise(each.binder, named_id(TYPES.environment, keys[each.function])!)))]
 	}
 	laws
 }
@@ -71,9 +74,11 @@ laws_typed(wap_folder: text, program: text): list<TypedLaw> := {
 # shape rules wrote the law's function, before its names are declared: the code, the laws' functions in their order and
 # each one's hypotheses' functions
 LAW_GIVEN := " given "
-class Split { code: Node; laws: list<text> = []; given: map<text, list<text>> = {} }
-hypotheses_split(code: Node) as Split := {
-	split = Split(code)
+class Split { code: Node; language: Language; laws: list<text> = []; given: map<text, list<Given>> = {} }
+# a hypothesis as written: its binder's name and the name of its function
+class Given { binder: text; function: text }
+hypotheses_split(code: Node, language: Language) as Split := {
+	split = Split(code, language)
 	statements = top_level_statements(code).flat_map(statement => hypotheses_apart(statement, split))
 	split.code = refitted(rebuilt_statements(code, statements), code)
 	split
@@ -86,11 +91,11 @@ hypotheses_apart(statement: Node, split: Split) as list := match statement {
 				split.laws += [text(name)]
 				binders = items_of(arguments)
 				names = binders.map(binder => text(declared_name(binder)))
-				given = binders.filter(binder => is_hypothesis(binder, names))
+				given = binders.filter(binder => is_hypothesis(binder, names, split.language))
 				if given is empty { return [statement] }
-				values = with_items(arguments, binders.filter(binder => not is_hypothesis(binder, names)))
+				values = with_items(arguments, binders.filter(binder => not is_hypothesis(binder, names, split.language)))
 				function = (called: text, value: Node) => refitted(Call(defines, [Key(refitted(Key(symbol(called), applied, values), head), colon, result), value]), statement)
-				split.given[text(name)] = given.map(binder => "${name}${LAW_GIVEN}${declared_name(binder)}")
+				split.given[text(name)] = given.map(binder => Given(text(declared_name(binder)), "${name}${LAW_GIVEN}${declared_name(binder)}"))
 				[function(text(name), parts#2)] + given.map(binder => function("${name}${LAW_GIVEN}${declared_name(binder)}", declared_type(binder)!))
 			}
 			_ => [statement]
@@ -99,9 +104,17 @@ hypotheses_apart(statement: Node, split: Split) as list := match statement {
 	}
 	_ => [statement]
 }
-# whether a binder's annotation is a statement about the law's binders, a truth of them, `h: a <= b`; a type names
-# none of them
-is_hypothesis(binder: Node, binders: list<text>) as bool := nodes_in(declared_type(binder) ?? return no).any(part => unwrapped(part) is Symbol and binders.contains(text(part)))
+# whether a binder's annotation is a statement about the law's binders, a truth of them written with an operator of
+# the language, `h: a <= b`, `h: not (a <= b)`, `h: a and b`; a type, `x: T` or `e: Even(n)`, is a word or a call of
+# one, and a statement typing then finds no truth of is refused with its law
+is_hypothesis(binder: Node, binders: list<text>, language: Language) as bool := {
+	type = declared_type(binder) ?? return no
+	nodes_in(type).any(part => unwrapped(part) is Symbol and binders.contains(text(part))) and match unwrapped(type) {
+		Call(called, items) => operator_spelled(language, text(called)) != ø
+		Symbol(name) => no
+		_ => yes
+	}
+}
 
 # A typed law's verdict, the kernel's: a law without binders holds where its function computes to yes and breaks
 # where it computes to no; one with binders holds where the provers prove its statement yes for every value of them,
@@ -128,16 +141,14 @@ law_proved(e: Environment, law: TypedLaw, d: Declaration): bool := {
 # at a variable for each binder, under its hypotheses, each the same of its function; each variable then bound by its
 # binder, and a binder of a subtype followed by its condition's hypothesis, `Π n: nat, Π n_holds: (n >= 0) == yes`.
 # The variables' ids are 1 up, as a definition's value is closed
-law_statement(e: Environment, type: Term, value: Term, given: list<int>): Term := {
+law_statement(e: Environment, type: Term, value: Term, given: list<Premise>): Term := {
 	parts = arrow_parts(type)
 	names = binder_names(type)
 	count = #parts - 1
 	variables = (1 to count).map(at => free(at))
-	holds = given.reverse.fold(truth_stated(e, beta(value, variables)), (body, id) => pi(declared_at(e, id)!.name.split(LAW_GIVEN).last!, truth_stated(e, apply_all(constant(id, declared_at(e, id)!.name, []), variables)), body))
+	holds = given.reverse.fold(truth_stated(e, beta(value, variables)), (body, each) => pi(each.binder, truth_stated(e, apply_all(constant(each.id, declared_at(e, each.id)!.name, []), variables)), body))
 	(1 to count).reverse.fold(holds, (body, at) => pi(names#at, parts#at, abstracted(hypothesized(e, parts#at, free(at), names#at, body), at)))
 }
-# `value == yes`, of a truth
-truth_stated(e: Environment, value: Term): Term := equated(e, TRUTH_LEVEL, e.literals!.truth, value, e.literals!.yes_case)
 # a statement under the hypothesis that a binder of a subtype holds its condition; as it is for any other binder
 hypothesized(e: Environment, domain: Term, variable: Term, name: text, body: Term): Term := {
 	if subset_condition(domain) == ø { return body }
