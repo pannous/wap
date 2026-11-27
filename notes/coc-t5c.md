@@ -84,7 +84,7 @@ T5c is done when:
 - the outcome lines of T5c1 to T5c3 are green (T5c4's lines with T6c);
 - the census counts every recursion of wap's source as defined, Div with a reason, or assumed waiting for T6c (a
   guarded whole-number bound), each counted, and the defined instances ratchet does not fall;
-- below.wap and the reading of a program's recursion exist once, in core, and the theory imports them;
+- the courses (core/analyze/courses.wap) and the reading of a program's recursion (core/analyze/recursion.wap) exist once, in core;
 - the whole suite has no new red, `--stage 2` is a fixed point; the self-compile and memory are measured and reported.
 
 ## Open for the supervisor

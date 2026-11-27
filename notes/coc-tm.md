@@ -56,9 +56,8 @@ grammar(file) = base, then each used file's grammar merged in written order, the
 - **A warm module** (extensions/warm.wap) brings its operated code. Its grammar is folded from the declaration
   statements in that code (operators, rules, patterns, aliases are all statements), once per compile. So the warm
   state carries nothing new: the compiled module carries its environment, as R1 asks.
-- **The seam with T2d stage 3** (wap-theory-reads-types, agreed 2026-11-25): the theory's scopes are its own
-  `map<text, map<text, int>>` in wap/extensions/theory/elaborate, keyed by the same module_key. From core they read
-  only `grammar.uses`, the keys of a module's direct uses in written order. Core declares no field for them.
+- **The seam with T2d stage 3:** a module's direct uses in written order are `grammar.uses`, keyed by module_key
+  (core/pipeline.wap). Core declares no other field for a reader's scopes.
 
 ## Reading a file: one scan, declarations in order
 
