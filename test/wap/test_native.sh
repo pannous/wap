@@ -402,4 +402,11 @@ unformatted.wap:2: layout: f(a) = a * 2
 1"
 # a word before the program picks the build mode (wiki/cli.md "Build modes")
 check "wap release runs the program" "$(cd "$stage" && "$native_wap" release hello.wap 2>&1)" "Hello"
+# wap format reads a program in its own grammar, the operators of the modules it uses known (wiki/operator.md), and a
+# used module's refusal leaves it reading the same (card refusal-partway)
+for refused in no yes; do
+	mkdir -p "$stage/format_$refused" && printf '%s\n' 'infix operator ⊕ := left + right' "$([ $refused = yes ] && echo 'to move piece from a to b := piece + a - b')" >"$stage/format_$refused/m.wap" && printf '%s\n' 'use "m.wap"' 'x = 1⊕2' >"$stage/format_$refused/p.wap"
+	check "wap format spaces an operator of a used module$([ $refused = yes ] && echo ' that refuses a form')" "$(cd "$stage/format_$refused" && "$native_wap" format p.wap 2>&1)" 'use "m.wap"
+x = 1 ⊕ 2'
+done
 exit $((failures > 0))
