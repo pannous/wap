@@ -8,4 +8,4 @@ An entry goes once decided (its decision then lives on its card, in the wiki or 
 
 ## Pending questions
 
-(none)
+- After track T: a general property setter (writing `x.f` calls a declared `f=(x, value)`), so `canvas.width = 320` resizes as wiki/graphics.md "Sizes" says. Core ~10-20 (estimate); against: a new mechanism; no library does it without a quiet compensation. Recommend: build it after T.
