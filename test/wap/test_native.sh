@@ -101,6 +101,8 @@ done"
 check "a link to the native wap runs a program" "$(ln -sf "$native_wap" "$stage/linked-wap" && "$stage/linked-wap" 'print "linked"' 2>&1)" "linked"
 # a program's folder is its source's, wherever its module was written: wap's compiler run from source finds its types
 check "the native wap runs wap's compiler from its source" "$(cd "$stage" && printf '%s\n' 'print "Hello"' >hello_source.wap && "$native_wap" "$tree/wap/compiler.wap" hello_source.wap hello_source.wasm && "$native_wap" hello_source.wasm 2>&1)" "Hello"
+# and it finds the tree's standard library, the nearest folder lib at or above its own (core/paths.wap library_of)
+check "wap's compiler run from its source uses a library module" "$(cd "$stage" && printf '%s\n' 'use version' 'print version 1.9 < version 1.10.0' >library_source.wap && "$native_wap" "$tree/wap/compiler.wap" library_source.wap library_source.wasm && "$native_wap" library_source.wasm 2>&1)" "yes"
 # C calling back a function of the program run (lib/native/callbacks.h, extensions/native/host_words.wap): qsort
 # compares by the program's c_callback_fired
 cat >"$stage/sorted.wap" <<'PROGRAM'
