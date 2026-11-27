@@ -9,6 +9,7 @@
 # Later: the readings a phrase allows, a fix-it, and the rule that expanded the form.
 
 use "stage.wap"
+use "parse/layout.wap"
 
 # what a compiler-made form of one shape is, said when another reaches the place that takes it
 NOT_A_FIELD = "a field is written name: value"
@@ -16,6 +17,8 @@ NOT_AN_ENTRY = "a map's entry is written key: value"
 # how much of the refused code a message quotes: its place says where the rest is, a whole definition is a wall
 QUOTED_LENGTH = 80
 QUOTE_CUT = " …"
+# the mark a written span's texts are quoted in, inside which its brackets are text
+QUOTE_MARK = "\""
 
 refused(code: Node, why: text) := raise warning_of(code, why)
 # code that calls a function wap refuses; one of the library, whose own refusal no one sees, repeats the first reason
@@ -41,6 +44,51 @@ written_line(code: Node) as text? := {
 	if source is empty { return ø }
 	source.split("\n")#(at.line).trim()
 }
+# code as the program wrote it: from the first of its words to the end of its last, the brackets cut off on either side
+# closed, `(it > 0` as `(it > 0)`, `it in [1, 2` as `it in [1, 2]`; ø for code no file holds
+written_span(code: Node) as text? := {
+	source = sources_read.get(file_of(code) ?? return ø) ?? return ø
+	lines = source.split("\n")
+	# the words spelled where they stand: a kernel form's head stands at its operator, the words a rule's template
+	# spells where the rewritten code was
+	words = nodes_in(code).filter(n => spelled_at(n, source, lines))
+	if words is empty { return ø }
+	starts = words.map(word => offset_in(lines, position_of(word)!))
+	balanced(source[starts.min .. (1 to #words).map(at => starts#at + #spelled(words#at)!).max])
+}
+# whether a word is spelled in its source where its position says
+spelled_at(word: Node, source: text, lines: list<text>) as bool := {
+	spelling = spelled(word) ?? return no
+	source[offset_in(lines, position_of(word) ?? return no) ..].starts_with(spelling)
+}
+# where a position is in its source, counted from 0
+offset_in(lines: list<text>, at: Position) as int := lines.take(at.line - 1).map(line => #line + 1).sum + at.column - 1
+# a word as written, a text with its quotes, a bracketed list by its opener; ø for code that is no word
+spelled(word: Node) as text? := match word {
+	Symbol(name) => name
+	List(items, bracket, separator) => if bracket == Bracket.None then ø else opening(bracket)
+	Number(value) => word_written(word)
+	Text(value) => word_written(word)
+	Char(value) => word_written(word)
+	True => code(word)
+	False => code(word)
+	_ => ø
+}
+word_written(word: Node) as text := match fact_of(word, WRITTEN) { Text(spelling) => spelling; _ => code(word) }
+# a span with the openers its closers miss put before it and the closers its openers miss after it, outside quotes
+balanced(span: text) as text := {
+	open: list<text> = []
+	missing: list<text> = []
+	quoted = no
+	for c in characters(span) {
+		if c == QUOTE_MARK { quoted = not quoted }
+		else if not quoted and OPENERS.contains(c) { open.add(c) }
+		else if not quoted and CLOSERS.contains(c) { if open is empty then missing.add(partner(c, CLOSERS, OPENERS)) else open = open.take(#open - 1) }
+	}
+	missing.reverse.join("") + span + open.reverse.map(c => partner(c, OPENERS, CLOSERS)).join("")
+}
+# the bracket that pairs with one, `)` of `(`: the one at its place in the other row
+partner(bracket: text, row: text, other: text) as text := characters(other)#(row.find(bracket))
 # `hello.wap line 2:1: `, `line 2:1: ` for code no file holds or read from standard input, or nothing for code without
 # a position
 place_of(code: Node) as text := {
