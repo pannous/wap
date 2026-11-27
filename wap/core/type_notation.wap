@@ -29,11 +29,14 @@ NO_PARAMETERS_WORD = "none"
 # the values of its parent that meet the condition, the function of `it`
 WHERE_WORD = "where"
 # A union, `int or text` (also `int | text`, the reader's bit_or): a value of any of its parts, flat, each part once and
-# in no order, `int or ø` an int?; the or rule writes it as a choice, If(int, yes, text) (sugar/conditions.wap)
+# in no order, `int or ø` an int?; the or rule writes it as a choice, `{ held = int; If(held, held, text) }`
+# (sugar/conditions.wap)
 UNION_WORD = "or"
 UNION_ALIAS = "|"
 # An optional type, `int?`, as the reader reads it: the type glued to `?`; it holds a value of the type or ø
 OPTIONAL_MARK = "?"
+# A failable type, `int??`: a value of the type, ø or an Error, which `int or Error` writes precisely (wiki/Error.md)
+FAILABLE_MARK = "??"
 # the dynamic type, which holds any value, ø too: an any? is an any
 ANY_TYPE = "any"
 # a type still unknown, a hole of the typing (core/analyze/letters.wap), shown by its id: α3
@@ -196,6 +199,7 @@ spine(type: Term) as list<Term> := match type.shape {
 type_built(word: Term, parts: list<Term>) as Term := {
 	spelled = word_of(word)
 	if spelled == OPTIONAL_MARK and #parts == 1 { return optional_type(parts#1) }
+	if spelled == FAILABLE_MARK and #parts == 1 { return union_type([parts#1, EMPTY_TERM, word_named(symbol(ERROR_CASE))]) }
 	if spelled == FUNCTION_ARROW and not parts is empty { return function_type_of(parts.take(#parts - 1), parts.last) }
 	applied(word, parts)
 }
@@ -252,7 +256,8 @@ union_parts(type: Term) as list<Term> := {
 	if base != ø { return union_parts(base!) + [EMPTY_TERM] }
 	(parts_of_type(UNION_WORD, type) ?? return [type]).flat_map(union_parts)
 }
-is_union(type: Term?) as bool := parts_of_type(UNION_WORD, type) != ø
+# whether a type is a union, an optional one too, `(int or text)?`
+is_union(type: Term?) as bool := parts_of_type(UNION_WORD, base_or_self(type)) != ø
 only_term(parts: list<Term>?) as Term? := if parts != ø and #parts == 1 then parts#1 else ø
 # a function as the kernel's runtime words name it, `write(text, int, bool)`, when it is one of them
 # (kernel/primitives.wap RUNTIME_WORDS), its types spelled only for a name among theirs
@@ -268,11 +273,17 @@ type_text(type: Term?, whole: bool = no) as text := {
 	if is_word(type) { return if whole or TYPES.shared.has(word_id(type!)) then declared_at(TYPES.environment, word_id(type!))!.name else if TYPES.functions.has(word_id(type!)) then FUNCTION_WORD else word_of(type)! }
 	if function_value_key(type) != ø and not whole { return FUNCTION_WORD }
 	base = base_of_optional(type)
-	if base != ø { return if is_union(base) then "(${type_text(base, whole)})${OPTIONAL_MARK}" else type_text(base, whole) + OPTIONAL_MARK }
+	if base != ø { return if is_union(base) then failable_text(base!, whole) ?? "(${type_text(base, whole)})${OPTIONAL_MARK}" else type_text(base, whole) + OPTIONAL_MARK }
 	if is_union(type) { return union_parts(type!).map(part => type_text(part, whole)).join(" ${UNION_WORD} ") }
 	function = function_parts(type)
 	if function != ø { return "(${types_text(function.parameters, whole)}) ${FUNCTION_ARROW} ${type_text(function.result, whole)}" }
 	"${type_text(head_of(type!), whole)}<${types_text(parts_of(type!), whole)}>"
+}
+# an optional's union of an Error and one other type, shown as that type failable, `int??`; ø for any other
+failable_text(base: Term, whole: bool) as text? := {
+	parts = union_parts(base)
+	others = parts.filter(part => type_text(part) != ERROR_CASE)
+	if #parts == 2 and #others == 1 then type_text(others#1, whole) + FAILABLE_MARK else ø
 }
 types_text(types: list<Term>, whole: bool = no) as text := types.map(type => type_text(type, whole)).join(", ")
 # a value of a type read as another where that one is wanted: a char as its text, a range as its list
@@ -373,7 +384,7 @@ subset_written(n: Node) as list<Node>? := match n {
 # alone and any other code
 written_parts(n: Node) as list<Node>? := match n {
 	Key(name, Op.None, List(items, Bracket.Less, separator)) => [name] + items
-	List(items, Bracket.None, separator) => if #items == 2 and text(items#2) == OPTIONAL_MARK then [items#2, items#1] else ø
+	List(items, Bracket.None, separator) => if #items == 2 and [OPTIONAL_MARK, FAILABLE_MARK].contains(text(items#2)) then [items#2, items#1] else ø
 	Call(called, items) => if text(called) == FUNCTION_ARROW and #items == 2 then [called] + items_or_one(items#1) + [items#2] else ø
 	List(items, Bracket.Round, separator) => if #items == 1 then written_parts(items#1) else ø
 	_ => ø
