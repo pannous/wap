@@ -88,8 +88,10 @@ definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 # each the free variable of the checker c it was entered with; a term read under them is closed over them with `lambdas`
 class Entering { binders: list<text>; variables: list<Term>; c: Checker; by_key: map<text, TypedFunction>; s: TypingState; recursion: Recursion? = ø }
 # the same reading under more binders, entered as locals under these keys
-# (a course's case names the keys of the fields its values below hold hypotheses of)
-under(x: Entering, locals: list<Local>, keys: list<text>, fields: list<text> = []) as Entering := Entering(x.binders + keys, x.variables + variables(locals), x.c, x.by_key, x.s, if fields is empty or x.recursion == ø then x.recursion else Recursion(x.recursion!.key, x.recursion!.place, fields))
+# (a course's case names the values of the parameter at the fields its values below hold hypotheses of)
+under(x: Entering, locals: list<Local>, keys: list<text>, fields: list<Term> = []) as Entering := if #keys != #locals then raise "a reading's binders and their variables go out of step" else Entering(x.binders + keys, x.variables + variables(locals), x.c, x.by_key, x.s, if fields is empty or x.recursion == ø then x.recursion else Recursion(x.recursion!.key, x.recursion!.place, x.recursion!.held, x.recursion!.of, fields))
+# the same reading with a free variable taken for a value, in every binder's term
+valued(x: Entering, of: Term, value: Term) as Entering := Entering(x.binders, x.variables.map(variable => replaced_by(variable, variable_id(of), value)), x.c, x.by_key, x.s, x.recursion)
 # a let of a name: its body read with the name a free variable of the type, closed over it again
 let_read(x: Entering, name: Node, type: Term, given: Term, body: (Entering) -> Term?) as Term? := {
 	local = entered(x.c, text(name), type)
@@ -149,6 +151,8 @@ arrow_parts(type: Term) as list<Term> := match type.shape {
 # an `if` on a bool: bool's recursor into the type both arms give, the arm at no before the arm at yes
 choice_term(n: Node, condition: Node, then_part: Node, else_part: Node, x: Entering) as Term? := {
 	type = kernel_value(n) ?? return ø
+	guarded = if x.recursion == ø then ø else guard_read(n, condition, then_part, else_part, x)
+	if guarded != ø { return guarded }
 	if kernel_value(condition) != BOOL_TERM or kernel_value(then_part) != type or kernel_value(else_part) != type { return ø }
 	terms = [else_part, then_part, condition].map(part => term_of(part, x))
 	if terms.any(term => term == ø) then ø else recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, type), terms.map(term => term!))
@@ -169,7 +173,7 @@ match_term(n: Node, subject: Node, arms: list, x: Entering) as Term? := {
 	block = block_of(TYPES.environment, domain, "match").block
 	if #block.types != 1 { return ø }
 	motive = lambda("_", domain, type)
-	minors = block.types#1.cases.map(case => case_minor(named_id(TYPES.environment, case.name)!, arms, domain, motive, value => ø, x))
+	minors = block.types#1.cases.map(case => arm_minor(named_id(TYPES.environment, case.name)!, arms, domain, motive, value => ø, x))
 	major = term_of(subject, x) ?? return ø
 	if minors.any(minor => minor == ø) then ø else recursor_applied(domain, motive, minors.map(minor => minor!) + [major])
 }
@@ -177,17 +181,22 @@ arm_result(arm: Node) as Node := match arm { Arm(pattern, result) => result }
 arm_pattern(arm: Node) as Node := match arm { Arm(pattern, result) => pattern }
 # the constructor a pattern names, ø for a name or `_`
 pattern_constructor(pattern: Node) as int? := TYPES.constructors.get(place_key(fact_of(case_name(pattern), DEFINED_AT) ?? return ø))
-# a case's minor premise: the fields, then a hypothesis for each field of the enum itself, the motive at it, then what
-# riding gives for the case's value (a course's values below), under the first arm that names the case or fits any
-# value, a name there holding the case's value
-NO_BINDER = "·unnamed"
-case_minor(id: int, arms: list, domain: Term, motive: Term, riding: (Term) -> Term?, x: Entering) as Term? := {
-	constructor = declared_at(TYPES.environment, id)!
-	fields = arrow_parts(constructor.type).take(#arrow_parts(constructor.type) - 1)
+# a case's minor premise from the arm that names the case or fits any value, a name there holding the case's value
+arm_minor(id: int, arms: list, domain: Term, motive: Term, riding: (Term) -> Term?, x: Entering) as Term? := {
 	arm = arms.find(arm => [id, ø].contains(pattern_constructor(arm_pattern(arm)))) ?? return ø
 	pattern = arm_pattern(arm)
 	named = pattern_constructor(pattern) == id
-	names = if named then case_fields(pattern) else fields.map(field => symbol(NO_BINDER))
+	minor_of(id, if named then case_fields(pattern) else ø, domain, motive, riding, x, (inside, value) => if named or pattern == symbol(WILDCARD) then term_of(arm_result(arm), inside) else let_read(inside, pattern, domain, value, bound_in => term_of(arm_result(arm), bound_in)))
+}
+# a case's minor premise: the fields (named by the pattern, else unnamed), then a hypothesis for each field of the enum
+# itself, the motive at it, then what riding gives for the case's value (a course's values below); what body reads is
+# the minor's result, given the case's value
+NO_BINDER = "·unnamed"
+field_types(constructor_type: Term) as list<Term> := arrow_parts(constructor_type).take(#arrow_parts(constructor_type) - 1)
+minor_of(id: int, given_names: list?, domain: Term, motive: Term, riding: (Term) -> Term?, x: Entering, body: (Entering, Term) -> Term?) as Term? := {
+	constructor = declared_at(TYPES.environment, id)!
+	fields = field_types(constructor.type)
+	names = given_names ?? fields.map(field => symbol(NO_BINDER))
 	if #names != #fields or names.any(name => not name is symbol) { return ø }
 	recursive = (1 to #fields).list().filter(at => fields#at == domain)
 	field_locals = (1 to #fields).list().map(at => entered(x.c, text(names#at), fields#at))
@@ -197,9 +206,9 @@ case_minor(id: int, arms: list, domain: Term, motive: Term, riding: (Term) -> Te
 	below_locals = if below == ø then [] else [entered(x.c, NO_BINDER, below!)]
 	locals = field_locals + hypothesis_locals + below_locals
 	keys = names.map(name => place_key(name)) + recursive.map(at => NO_BINDER) + (if below == ø then [] else [BELOW_BINDER])
-	inside = x.under(locals, keys, recursive.map(at => place_key(names#at)))
-	body = if named or pattern == symbol(WILDCARD) then term_of(arm_result(arm), inside) else let_read(inside, pattern, domain, value, bound_in => term_of(arm_result(arm), bound_in))
-	if body == ø then ø else lambdas(locals, body!)
+	subjects = if x.recursion == ø or x.recursion!.of == ø then [] else recursive.map(at => replaced_by(x.recursion!.held!, variable_id(x.recursion!.of!), (field_locals#at).variable))
+	result = body(x.under(locals, keys, subjects), value) ?? return ø
+	lambdas(locals, result)
 }
 # whole-number arms, `0 => a; 1 => b; _ => c`, as chained choices on their equality, the last arm fitting any value
 literals_term(subject: Node, arms: list, type: Term, x: Entering) as Term? := {
