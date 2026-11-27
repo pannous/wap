@@ -15,8 +15,8 @@ nat is `int where it >= 0`, a refinement of int, so int's cases cannot carry nat
 payload is a kernel object of its own with no wap name, the **count**:
 
 ```
-count: Type            the kernel block   enum count { none; one_more(c: count) }
-                       its literals the kernel's Numeral (a count literal k is one_more applied k times to none,
+count: Type            the kernel block   enum count { zero; successor(c: count) }
+                       its literals the kernel's Numeral (a count literal k is successor applied k times to zero,
                        computed by the numbers binding's shortcuts, kernel/numbers.wap, so 10^12 costs nothing)
                        — below 2^63 only: the shortcuts and row_step refuse a result past it (LARGEST,
                        ROW_OVERFLOW), so exact int past 2^63 needs the kernel's literals exact, a step of its own
@@ -53,8 +53,10 @@ carries the mark `·`, so no program can write it or meet it. The proofs are tho
 a rename. Source: `git show 384b1e4e:wap/extensions/theory/prelude/numbers.wap` (N) and `…/prelude/logic.wap` (L),
 line numbers as cited.
 
-Rename: `nat` → `·count`, `nat.zero` → `·count.none`, `nat.successor` → `·count.one_more`,
-`nat.recursor` → `·count.recursor`, and every function and law `f` → `·f`. bool, Equal and their recursors keep their
+Rename: `nat` → `·count`, `nat.zero` → `·count.zero`, `nat.successor` → `·count.successor`,
+`nat.recursor` → `·count.recursor`, and every function and law `f` → `·f`. The prelude's case names stay, as
+the user chose (Lean's): `zero | successor(count)`, and its inverse `·predecessor`, where `·predecessor(·successor(n))`
+computes to n by count's recursor, so it needs no theorem. bool, Equal and their recursors keep their
 names, which are core's.
 
 **Needs first:** bool as a block (T5b3, t5b-enums), because numbers_declared refuses a yes case that is no case of a
@@ -75,7 +77,7 @@ block, and the proofs use `bool.recursor`. Also `False` and `True` as blocks. Un
 
 | name | kind | by |
 |---|---|---|
-| `·count` | `enum count: Type { none; one_more(c: count) }` (N6) | block, then `numbers_declared(e, ·count, bool.yes, Equal)` (N10) |
+| `·count` | `enum count: Type { zero; successor(c: count) }` (N6) | block, then `numbers_declared(e, ·count, bool.yes, Equal)` (N10) |
 | `·predecessor`, `·is_zero` (N13–14), `·add` (N16), `·subtract` (N23), `·multiply` (N33), `·compared` (N42), `·equals` (N46), `·at_most` (N57), `·remainder`, `·divide` (N156–157) | definitions | `·count.recursor` at level 1 |
 | `·chosen` (N154), `·wraps` (N155) | definitions | bool's recursor; `·equals` |
 | `·add_zero`, `·add_successor` (N18–19); `·subtract_zero` (N24); `·multiply_zero`, `·multiply_successor` (N35–36); `·equals_zeros`, `·equals_successor_zero`, `·equals_zero_successor`, `·equals_successors` (N48–51); `·zero_at_most`, `·successor_at_most_zero`, `·at_most_successors` (N58–60) | theorems | `Equal.refl` (computing) |
@@ -84,7 +86,7 @@ block, and the proofs use `bool.recursor`. Also `False` and `True` as blocks. Un
 | `·equals_itself` (N54) | theorem | `·count.recursor` at level 0 |
 | `·equals_sound` (N74, helper `·sound_at` N73) | theorem | `·count.recursor` at level 0 twice, nested; mismatched cases by `·false_elim` and `·no_is_not_yes` |
 | `·at_most_step` (N84, `·steps_up` N83), `·beyond_at_most` (N95, `·beyond` N94) | theorems | `·count.recursor` at level 0 twice; `·false_elim`, `·no_is_not_yes`, `·yes_is_not_no` |
-| `·zero_add` (N103), `·successor_add` (N106), `·add_associative` (N113), `·zero_multiply` (N143) | theorems | `·count.recursor` at level 0, `equal_congruent` with `·count.one_more` |
+| `·zero_add` (N103), `·successor_add` (N106), `·add_associative` (N113), `·zero_multiply` (N143) | theorems | `·count.recursor` at level 0, `equal_congruent` with `·count.successor` |
 | `·add_commutative` (N109), `·add_swapped` (N116), `·successor_multiply` (N146) | theorems | `·count.recursor` at level 0 and the glue laws; add_swapped from add_associative and add_commutative alone |
 | `·at_most_add` (N123), `·at_most_difference` (N129, `·difference_at` N128), `·add_cancel` (N139) | theorems | `·count.recursor` at level 0; at_most_add rewrites by Equal's recursor, add_cancel by `·predecessor` |
 | `·divide_and_remainder` (N160, `·divides_back` N159), `·divide_by_zero` (N171), `·remainder_below` (N174) | theorems | `·count.recursor` at level 0, `·bool_cases`, `·equals_sound`, `·at_most_step` |
@@ -120,8 +122,8 @@ The nat structure and the nat LAWS list go. `Sums` holds int's functions, found 
 `i64.add`, `i64.le_s` and `i64.eq` at `int -> int -> int` (core/analyze/terms.wap `row_name`), so no function name is
 written twice.
 
-- **Numbers read.** `of_count(k)` is k and `below_zero(k)` is −k−1, k a count literal or built from count's none and
-  one_more. This is the one place the count appears in linear.wap, and only because it is int's payload. Numbers are
+- **Numbers read.** `of_count(k)` is k and `below_zero(k)` is −k−1, k a count literal or built from count's zero and
+  successor. This is the one place the count appears in linear.wap, and only because it is int's payload. Numbers are
   written by `integer_numeral`. `Normal.number` may be negative.
 - **Subtraction is `sum(a, minus(b))` everywhere.** `subtracted` unfolds to it. `with_differences`, the difference
   atoms and the Subtract shortcut go. `minus` over a sum is pushed inward by `minus_sum`, and a literal is computed.
@@ -181,7 +183,7 @@ The laws the proofs are glued with, `equal_symmetric`, `equal_transitive`, `equa
 `chosen_at_yes`, are about any type and stay as they are.
 
 Recommended proof route: an int is a difference of two counts.
-- `of_count m == difference(m, none)` and `below_zero m == difference(none, one_more(m))`, by computation.
+- `of_count m == difference(m, zero)` and `below_zero m == difference(zero, successor(m))`, by computation.
 - `difference_shift`: `difference(a + k, b + k) == difference(a, b)`, by induction on k.
 - `difference_sum`: `difference(a, b) + difference(c, d) == difference(a + c, b + d)`.
 - `difference_equal`: `difference(a, b) == difference(c, d)` where `a + d == c + b`.
@@ -289,7 +291,7 @@ The row constants a law's body holds (`prim i64.add int -> int -> int`) are Defi
 | linear.wap today | after |
 |---|---|
 | `s.nat` (11 places: hypotheses' types, equations, congruences) | `s.i.type` |
-| `s.n.zero`, `zero_of(s)` | `of_count(·count.none)`, written by `int_numeral(s, 0)` |
+| `s.n.zero`, `zero_of(s)` | `of_count(·count.zero)`, written by `int_numeral(s, 0)` |
 | `s.n.successor` (normal :303, beyond :147) | gone: `b + 1` is `added(s, b, int_numeral(s, 1))` |
 | `numeral(v)` (:252, :345–349, :383) | `int_numeral(s, v)`: `of_count(k)` for v ≥ 0, else `below_zero(−1 − v)` |
 | `normal`'s Numeral, zero and successor cases, `is_sum_part` (:300–303, :326–327) | `of_count(lit)` → lit, `below_zero(lit)` → −lit−1, a sum, and `minus(t)` → t's Normal with each atom's minus and the number negated, by `minus_add` and computing |
