@@ -17,6 +17,7 @@ use "../../kernel/environment.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/surface.wap"
 use "../../kernel/levels.wap"
+use "../../kernel/terms.wap"
 use "../parse/operator_table.wap"
 
 # the word an item taken by its place calls on a value that is no list, `r#2` is `#(r, 2)`
@@ -81,30 +82,26 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	written = fact_of(called, LEVEL_WRITTEN)
 	if written == ø { return call_chosen(n, called, scopes, given, expected, s, f) }
 	# the level the call writes is its definitions' level letters' (letters.wap level_letters) while the call chooses
-	# among them, and no other call's; where none has one level letter, the brackets read two ways
-	if not candidates.any(definition => #level_names(definition) == 1) { return implicit_typed(n, called, given, written!, candidates, s, f, expected) ?? refused(n, "${called}[${written!}](…) reads as a level written to ${called}, which has no level letter like the u of Sort(u), or as the item of a list ${called}, which is a function: give ${called} a level letter, or write the item's call as (${called}[${written!}])(…)") }
-	s.levels_written[text(called)] = [level_written(written!, 0) ?? refused(written!, "a level is a whole number from 0, Sort(0) Prop")]
-	chosen = call_chosen(n, called, scopes, given, expected, s, f)
-	s.levels_written.remove(text(called))
-	chosen
+	# among them, and no other call's; where none has a level letter, the brackets read two ways
+	if candidates.all(definition => level_names(definition) is empty) { return implicit_typed(n, called, given, written!, candidates, s, f, expected) ?? refused(n, "${called}[${written!}](…) reads as a level written to ${called}, which has no level letter like the u of Sort(u), or as the item of a list ${called}, which is a function: give ${called} a level letter, or write the item's call as (${called}[${written!}])(…)") }
+	call_chosen(n, called, scopes, given, expected, s, f, [level_written(written!, 0) ?? refused(written!, "a level is a whole number from 0, Sort(0) Prop")])
 }
 # A call at a written level giving the types of a definition's letters first, `identity[1](int, 3)` of `identity(a:
 # T)`: each letter an implicit parameter `T: Sort(u)` in front (wiki/universe.md), given a type at that level, and the
 # call that of the rest with each letter bound to its type; ø where no definition has letters and these arguments
 implicit_typed(n: Node, called: Node, given: list, written: Node, candidates: list<Signature>, s: TypingState, f: TypeFrame, expected: Term?) as Node? := {
 	level = level_written(written, 0) ?? return ø
-	definition = candidates.find(one => not letters_written(one) is empty and takes_count(one, #given - #letters_written(one), s)) ?? return ø
+	fitting = candidates.filter(one => not letters_written(one) is empty and takes_count(one, #given - #letters_written(one), s))
+	if fitting is empty { return ø }
+	if #fitting > 1 { refused(n, "${called}[${written}](…) gives the types of the letters of each of ${candidates_text(fitting, s)}; write the arguments' types") }
+	definition = fitting#1
 	letters = letters_written(definition)
 	types = (1 to #letters).map(at => fact_type(fact_of(given#at, DENOTES)) ?? refused(given#at, "${called}[${written}] takes the type of ${letters#at} here, and this is no type"))
 	for at in 1 to #letters {
 		universe = universe_of(types#at!)
 		if not levels_equal(universe_level(universe)!, level) { refused(given#at, "${called}[${written}] takes ${letters#at} at level ${written}, and ${type_text(types#at!)} is a ${type_text(universe)}") }
 	}
-	# the letters bound to these types while the call chooses its definition (letters.wap letters_bound)
-	s.letters_given[text(called)] = (1 to #letters).map(at => Binding(letters#at, types#at!))
-	chosen = call_chosen(n, called, [[definition]], given.drop(#letters), expected, s, f)
-	s.letters_given.remove(text(called))
-	chosen
+	call_chosen(n, called, [[definition]], given.drop(#letters), expected, s, f, [], (1 to #letters).map(at => Binding(letters#at, types#at!)))
 }
 # the letters a definition's parameters write, each once, in the order they first appear
 letters_written(definition: Signature) as list<text> := definition.parameters.flat_map(type => letters_in(type)).unique()
@@ -122,11 +119,17 @@ reading_key(head: Node) as text := place_of(head) + "${head}"
 call_shown(n: Node) as text := match n { Call(called, arguments) => "${called}(${arguments.map(call_shown).join(", ")})"; _ => "${n}" }
 # A call of the definition chosen among these scopes for typed arguments, each fitted as its parameter takes it, a
 # left-out one given its default; a call made without a frame, word_called, types its defaults on their own
-call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s: TypingState, f: TypeFrame?) as Node := {
+# (the levels the call writes and the types it gives its letters, `identity[1](text, "a")`, are its definitions' only
+# while it chooses among them and fits its arguments, never the body's calls: letters.wap letters_bound)
+call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s: TypingState, f: TypeFrame?, levels: list<Level> = [], letters: list<Binding> = []) as Node := {
+	s.levels_written[text(called)] = levels
+	s.letters_given[text(called)] = letters
 	# where no definition takes the arguments, one whose class has a get is read through it, `x > 5` of a signal
 	if given.any(argument => got_from(argument, s)) and not (try { chosen_definition(n, called, scopes, given, expected, s); yes } catch e { no }) { given = given.map(argument => got(argument, s)) }
 	meant = chosen_definition(n, called, scopes, given, expected, s)
 	taken = arguments_fitted(meant, given, s) + defaults_given(meant, #given, s, f ?? TypeFrame())
+	s.levels_written.remove(text(called))
+	s.letters_given.remove(text(called))
 	chosen = function_typed(meant, taken.map(argument => value_type(argument)), s, n)
 	if f != ø { called_reads(chosen, n, s, f!) }
 	result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
@@ -652,5 +655,29 @@ function_of(definition: Define) as Signature := match definition { Define(name, 
 all_typed(definition: Signature, records: Records) as bool := definition.parameters.all(type => once_typed(type, records))
 # a written type that types its parameter once for every call: none missing, no generic letter, none typed anew
 once_typed(type: Term?, records: Records) as bool := type != ø and not has_letters(type) and not takes_own_type(type, records)
-# `type of x`: x's static type as a value, x itself never run; a type's type is its universe
-type_of_typed(n: Node, of: Node, s: TypingState, f: TypeFrame) as Node := type_value(if names_type(of, s) then universe_of(type_term(of)) else value_type(typed_form(of, s, f, ø))!, n)
+# `type of x`: x's static type as a value, x itself never run; a type's type is its universe; a function at a
+# written level, `type of identity[1]`, is its definition's type at that level
+type_of_typed(n: Node, of: Node, s: TypingState, f: TypeFrame) as Node := {
+	levelled = level_written_call(of)
+	if levelled != ø { return type_value(levelled_type(levelled!, s) ?? refused(of, "no ${levelled} has the levels ${fact_of(levelled!, LEVEL_WRITTEN)}"), n) }
+	type_value(if names_type(of, s) then universe_of(type_term(of)) else value_type(typed_form(of, s, f, ø))!, n)
+}
+# A definition's type at the level written to its name, `(T: Type) -> T -> T` of `identity[1]` with identity(T:
+# Sort(u), a: T): T: each parameter a binder the ones after it may name, each letter no parameter names an implicit
+# parameter in front at that level (wiki/universe.md); ø where no definition has as many level letters
+levelled_type(called: Node, s: TypingState) as Term? := {
+	written = [level_written(fact_of(called, LEVEL_WRITTEN)!, 0) ?? return ø]
+	definition = scoped_definitions(called, s).flat_map(scope => scope).find(one => #level_names(one) == #written or level_names(one) is empty and not letters_written(one) is empty) ?? return ø
+	names = level_names(definition)
+	bound = levels_bound(names, written)
+	if definition.parameters.any(type => type == ø) { return ø }
+	named = parameters_in(definition, s).map(parameter => text(declared_name(parameter)))
+	binders = letters_written(definition).filter(letter => not named.has(letter)).map(letter => Binding(letter, universe(written#1))) + (1 to #named).map(at => Binding(named#at, definition.parameters#at!))
+	c = checker(TYPES.environment, [])
+	variables: list<Term> = []
+	for binder in binders {
+		variables.add(hypothesis(c, binder.key, type_substituted(binder.type, bound)))
+		bound.add(Binding(binder.key, variables.last!))
+	}
+	closed_over(c, type_substituted(definition.result ?? return ø, bound), variables, no)
+}
