@@ -69,66 +69,70 @@ applied(b: Building, type: Term, name: text, given: list<Term>, left: Term, righ
 # a proof of `value == yes`, as an equation
 yes_known(b: Building, value: Term, proof: Term): Identity := Identity(b.e.literals!.truth, value, b.e.literals!.yes_case, proof)
 
-# --- the count's sums regrouped
+# --- a commutative monoid's sums regrouped
+
+# A commutative monoid: its type, zero and addition, and its laws as equations, `0 + t == t`,
+# `(a + b) + c == a + (b + c)` and `a + b == b + a`
+class Monoid { c: Checker; type: Term; zero: Term; plus: Term; zero_added: (Term) -> Identity; associated: (Term, Term, Term) -> Identity; commuted: (Term, Term) -> Identity }
+# terms in one order, and the proof that a sum is their sum in it
+class Ordered { atoms: list<Term>; identity: Identity }
+plus(m: Monoid, left: Term, right: Term): Term := apply_all(m.plus, [left, right])
+# the sum of atoms in one order, `((0 + x1) + …) + xk`
+total(m: Monoid, atoms: list<Term>): Term := atoms.fold(m.zero, (sum, atom) => plus(m, sum, atom))
+# t as the sum of its atoms in order: each part that is no sum and does not compute to zero
+ordered(m: Monoid, t: Term): Ordered := {
+	if equal(m.c, t, m.zero) { return Ordered([], Identity(m.type, t, m.zero, reflexive(m.c.environment, TYPE_LEVEL, m.type, t))) }
+	if #arguments(t) != 2 or not is_constant(head(t), m.plus) { return Ordered([t], flipped(m.c, m.zero_added(t))) }
+	left = ordered(m, arguments(t)#1)
+	right = ordered(m, arguments(t)#2)
+	both = merged(m, left.atoms, right.atoms)
+	Ordered(both.atoms, followed(m.c, [mapped_both(m.c, m.type, (x, y) => plus(m, x, y), left.identity, right.identity), both.identity]))
+}
+# `total(xs) + total(ys) == total(both in order)`, xs in order
+merged(m: Monoid, xs: list<Term>, ys: list<Term>): Ordered := {
+	if ys is empty { return Ordered(xs, followed(m.c, [m.commuted(total(m, xs), m.zero), m.zero_added(total(m, xs))])) }
+	rest = ys.take(#ys - 1)
+	top = ys.last()
+	regrouped = flipped(m.c, m.associated(total(m, xs), total(m, rest), top))
+	further = appended(m, merged(m, xs, rest), top)
+	Ordered(further.atoms, followed(m.c, [regrouped, further.identity]))
+}
+# a sum in order plus one more atom, in order
+appended(m: Monoid, inner: Ordered, atom: Term): Ordered := {
+	further = inserted(m, inner.atoms, atom)
+	Ordered(further.atoms, followed(m.c, [mapped(m.c, m.type, z => plus(m, z, atom), inner.identity), further.identity]))
+}
+# `total(xs) + atom` in order: the atom swapped down past each that goes after it
+inserted(m: Monoid, xs: list<Term>, atom: Term): Ordered := {
+	if xs is empty or xs.last().hash <= atom.hash { return Ordered(xs + [atom], itself(m.c, m.type, plus(m, total(m, xs), atom))) }
+	rest = xs.take(#xs - 1)
+	top = xs.last()
+	inner = inserted(m, rest, atom)
+	Ordered(inner.atoms + [top], followed(m.c, [swapped(m, total(m, rest), top, atom), mapped(m.c, m.type, z => plus(m, z, top), inner.identity)]))
+}
+# `(x + a) + c == (x + c) + a`
+swapped(m: Monoid, x: Term, a: Term, c: Term): Identity := followed(m.c, [m.associated(x, a, c), mapped(m.c, m.type, z => plus(m, x, z), m.commuted(a, c)), flipped(m.c, m.associated(x, c, a))])
+# `from == to`, two sums of the same atoms; refused for any other
+rearranged(m: Monoid, from: Term, to: Term): Identity := {
+	one = ordered(m, from)
+	other = ordered(m, to)
+	if not same(one.identity.right, other.identity.right) { raise "the sums ${shown(from)} and ${shown(to)} are not of the same atoms" }
+	followed(m.c, [one.identity, flipped(m.c, other.identity)])
+}
+
+# --- the count's sums
 
 count_of(b: Building): Term := named(b, COUNT)
 add(b: Building, left: Term, right: Term): Term := called(b, ADD, [left, right])
-# the sum of counts in one order, `((0 + x1) + …) + xk`
-total(b: Building, atoms: list<Term>): Term := atoms.fold(named(b, COUNT_ZERO), (sum, atom) => add(b, sum, atom))
-# the counts a sum adds, a count that computes to zero none
-atoms_of(b: Building, t: Term): list<Term> := {
-	if equal(b.c, t, named(b, COUNT_ZERO)) { return [] }
-	if #arguments(t) == 2 and is_constant(head(t), named(b, ADD)) then atoms_of(b, arguments(t)#1) + atoms_of(b, arguments(t)#2) else [t]
-}
-# `t == total(atoms_of(t))`
-normal(b: Building, t: Term): Identity := {
-	zero = named(b, COUNT_ZERO)
-	if equal(b.c, t, zero) { return Identity(count_of(b), t, zero, reflexive(b.e, TYPE_LEVEL, count_of(b), t)) }
-	if #arguments(t) == 2 and is_constant(head(t), named(b, ADD)) {
-		parts = arguments(t)
-		both = mapped_both(b.c, count_of(b), (x, y) => add(b, x, y), normal(b, parts#1), normal(b, parts#2))
-		return followed(b.c, [both, appended(b, atoms_of(b, parts#1), atoms_of(b, parts#2))])
-	}
-	flipped(b.c, zero_added(b, t))
-}
-# `total(a) + total(c) == total(a + c)`, c taken from its end
-appended(b: Building, first: list<Term>, second: list<Term>): Identity := {
-	if second is empty { return itself(b.c, count_of(b), total(b, first)) }
-	rest = second.take(#second - 1)
-	last = second.last!
-	regrouped = flipped(b.c, applied(b, count_of(b), COUNT_ASSOCIATIVE, [total(b, first), total(b, rest), last], add(b, add(b, total(b, first), total(b, rest)), last), add(b, total(b, first), add(b, total(b, rest), last))))
-	followed(b.c, [regrouped, mapped(b.c, count_of(b), z => add(b, z, last), appended(b, first, rest))])
-}
-# `(x + a) + c == (x + c) + a`
-swapped(b: Building, x: Term, a: Term, c: Term): Identity := {
+# the counts with their add laws
+count_sums(b: Building): Monoid := {
 	count = count_of(b)
-	associated = (l: Term, r: Term) => applied(b, count, COUNT_ASSOCIATIVE, [x, l, r], add(b, add(b, x, l), r), add(b, x, add(b, l, r)))
-	followed(b.c, [associated(a, c), mapped(b.c, count, z => add(b, x, z), applied(b, count, COUNT_COMMUTATIVE, [a, c], add(b, a, c), add(b, c, a))), flipped(b.c, associated(c, a))])
+	Monoid(b.c, count, named(b, COUNT_ZERO), named(b, ADD), t => zero_added(b, t), (x, y, z) => applied(b, count, COUNT_ASSOCIATIVE, [x, y, z], add(b, add(b, x, y), z), add(b, x, add(b, y, z))), (x, y) => applied(b, count, COUNT_COMMUTATIVE, [x, y], add(b, x, y), add(b, y, x)))
 }
-# `total(atoms) == total(atoms without the one at, then it)`
-moved_last(b: Building, atoms: list<Term>, at: int): Identity := {
-	if at == #atoms { return itself(b.c, count_of(b), total(b, atoms)) }
-	rest = atoms.take(#atoms - 1)
-	last = atoms.last!
-	moved = moved_last(b, rest, at)
-	others = rest.take(at - 1) + rest.drop(at)
-	followed(b.c, [mapped(b.c, count_of(b), z => add(b, z, last), moved), swapped(b, total(b, others), atoms#at, last)])
-}
-# `total(atoms) == total(order)`, the same counts in another order; refused for any other
-permuted(b: Building, atoms: list<Term>, order: list<Term>): Identity := {
-	if order is empty and atoms is empty { return itself(b.c, count_of(b), named(b, COUNT_ZERO)) }
-	last = order.last ?? raise "the counts ${atoms.map(shown).join(", ")} are more than their regrouping's"
-	at = atoms.index_where(atom => equal(b.c, atom, last))
-	if at <= 0 { raise "the count ${shown(last)} is no count of the sum regrouped" }
-	others = atoms.take(at - 1) + atoms.drop(at)
-	followed(b.c, [moved_last(b, atoms, at), mapped(b.c, count_of(b), z => add(b, z, atoms#at), permuted(b, others, order.take(#order - 1)))])
-}
-# `from == to`, two sums of the same counts
-rearranged(b: Building, from: Term, to: Term): Identity := followed(b.c, [normal(b, from), permuted(b, atoms_of(b, from), atoms_of(b, to)), flipped(b.c, normal(b, to))])
 # `from == to` through two known equations: from regrouped to their left sides' sum, then to their right sides'
 through(b: Building, from: Term, first: Identity, second: Identity, to: Term): Identity := {
 	known = mapped_both(b.c, count_of(b), (x, y) => add(b, x, y), first, second)
-	followed(b.c, [rearranged(b, from, known.left), known, rearranged(b, known.right, to)])
+	followed(b.c, [rearranged(count_sums(b), from, known.left), known, rearranged(count_sums(b), known.right, to)])
 }
 
 # --- the count's laws
@@ -165,7 +169,7 @@ at_most_laws_declared(b: Building, m: Local, n: Local, k: Local) := {
 	proved_over(b, AT_MOST_SHIFTED, [m, n, k], shifted(k.variable), induced(b, shifted, reflexive(b.e, TYPE_LEVEL, truth, at_most(b, m.variable, n.variable)), (j, h) => h, k.variable))
 	shift = (l: Term, r: Term, j: Term) => applied(b, truth, AT_MOST_SHIFTED, [l, r, j], at_most(b, add(b, l, j), add(b, r, j)), at_most(b, l, r))
 	# at_most(m, m + k) == yes: as at_most(0 + m, k + m), which is at_most(0, k)
-	widened = mapped_both(b.c, truth, (l, r) => at_most(b, l, r), flipped(b.c, zero_added(b, m.variable)), applied(b, count, COUNT_COMMUTATIVE, [m.variable, k.variable], add(b, m.variable, k.variable), add(b, k.variable, m.variable)))
+	widened = mapped_both(b.c, truth, (l, r) => at_most(b, l, r), flipped(b.c, zero_added(b, m.variable)), count_sums(b).commuted(m.variable, k.variable))
 	proved_over(b, AT_MOST_ADD, [m, k], truth_stated(b.e, at_most(b, m.variable, add(b, m.variable, k.variable))), followed(b.c, [widened, shift(zero, k.variable, m.variable)]).proof)
 	# at_most(m, n) == yes -> n == m + (n - m), by m for every n, each by n's cases
 	split_at = (i: Term, j: Term) => pis([entered(b.c, "h", truth_stated(b.e, at_most(b, i, j)))], counts_equal(b, j, add(b, i, called(b, SUBTRACT, [j, i]))))
@@ -236,7 +240,7 @@ difference_laws_declared(b: Building) := {
 	# m + q == p + n -> difference(m, n) == difference(p, q)
 	h = entered(b.c, "h", counts_equal(b, add(b, m.variable, q.variable), add(b, p.variable, n.variable)))
 	known = Identity(count, add(b, m.variable, q.variable), add(b, p.variable, n.variable), h.variable)
-	commuted = applied(b, count, COUNT_COMMUTATIVE, [n.variable, q.variable], add(b, n.variable, q.variable), add(b, q.variable, n.variable))
+	commuted = count_sums(b).commuted(n.variable, q.variable)
 	equal_chain = followed(b.c, [flipped(b.c, shift(m.variable, n.variable, q.variable)), mapped_both(b.c, int, (l, r) => difference(b, l, r), known, commuted), shift(p.variable, q.variable, n.variable)])
 	proved_over(b, DIFFERENCE_EQUAL, [m, n, p, q, h], ints_equal(difference(b, m.variable, n.variable), difference(b, p.variable, q.variable)), equal_chain.proof)
 	differences_laws_declared(b, m, n, p, q)
@@ -260,7 +264,7 @@ differences_laws_declared(b: Building, m: Local, n: Local, p: Local, q: Local) :
 	sum_law = differences_equal(b, add(b, ups_of(first), ups_of(second)), add(b, downs_of(first), downs_of(second)), add(b, m.variable, p.variable), add(b, n.variable, q.variable), summed)
 	proved_over(b, SUM_DIFFERENCE, [m, n, p, q], equated(b.e, TYPE_LEVEL, int, sum(b, first, second), sum_law.right), sum_law.proof)
 	# -difference(m, n) == difference(n, m)
-	turned = followed(b.c, [flipped(b.c, parts(b, m.variable, n.variable)), rearranged(b, add(b, ups_of(first), n.variable), add(b, n.variable, ups_of(first)))])
+	turned = followed(b.c, [flipped(b.c, parts(b, m.variable, n.variable)), rearranged(count_sums(b), add(b, ups_of(first), n.variable), add(b, n.variable, ups_of(first)))])
 	minus_law = followed(b.c, [applied(b, int, MINUS_PARTS, [first], minus(b, first), difference(b, downs_of(first), ups_of(first))), differences_equal(b, downs_of(first), ups_of(first), n.variable, m.variable, turned)])
 	proved_over(b, MINUS_DIFFERENCE, [m, n], equated(b.e, TYPE_LEVEL, int, minus_law.left, minus_law.right), minus_law.proof)
 	# not_above(difference(m, n), difference(p, q)) == at_most(m + q, p + n): both sides shifted by n + q, then
@@ -306,7 +310,7 @@ sound(b: Building, left: Term, right: Term, proof: Term): Identity := Identity(i
 regrouped(b: Building, left: Term, right: Term): Identity := {
 	l = counts_of(b, left)
 	r = counts_of(b, right)
-	crossed = rearranged(b, add(b, l.up, r.down), add(b, r.up, l.down))
+	crossed = rearranged(count_sums(b), add(b, l.up, r.down), add(b, r.up, l.down))
 	followed(b.c, [l.identity, differences_equal(b, l.up, l.down, r.up, r.down, crossed), flipped(b.c, r.identity)])
 }
 # `not_above(left, right) == at_most(up(left) + down(right), up(right) + down(left))`
@@ -321,7 +325,7 @@ counts_known(b: Building, left: Term, right: Term, proof: Term): Identity := fol
 # `at_most(x, y) == yes` from a known `at_most(x', y') == yes`, x and x', y and y' sums of the same counts
 moved(b: Building, known: Identity, x: Term, y: Term): Identity := {
 	sides = arguments(known.left)
-	followed(b.c, [mapped_both(b.c, b.e.literals!.truth, (l, r) => at_most(b, l, r), rearranged(b, x, sides#1), rearranged(b, y, sides#2)), known])
+	followed(b.c, [mapped_both(b.c, b.e.literals!.truth, (l, r) => at_most(b, l, r), rearranged(count_sums(b), x, sides#1), rearranged(count_sums(b), y, sides#2)), known])
 }
 # `not_above(left, right) == yes` from a known comparison of the same counts made yes
 comparison_from(b: Building, left: Term, right: Term, known: Identity): Identity := {
@@ -388,7 +392,7 @@ order_laws_declared(b: Building) := {
 	sides = arguments(counted.right)
 	by_t = add(b, ups(b, t.variable), downs(b, t.variable))
 	gap_counts = [downs(b, g.variable), ups(b, g.variable)]
-	regroup = mapped_both(b.c, truth, (l, r) => at_most(b, l, r), rearranged(b, sides#1, add(b, gap_counts#1, by_t)), rearranged(b, sides#2, add(b, gap_counts#2, by_t)))
+	regroup = mapped_both(b.c, truth, (l, r) => at_most(b, l, r), rearranged(count_sums(b), sides#1, add(b, gap_counts#1, by_t)), rearranged(count_sums(b), sides#2, add(b, gap_counts#2, by_t)))
 	shifted = applied(b, truth, AT_MOST_SHIFTED, gap_counts + [by_t], regroup.right, at_most(b, gap_counts#1, gap_counts#2))
 	gap_known = moved(b, counts_known(b, zero, g.variable, gap.variable), gap_counts#1, gap_counts#2)
 	proved_over(b, GAP_BOUND, [t, g, u, gap, reached], truth_stated(b.e, not_above(b, t.variable, u.variable)), followed(b.c, [widened, counted, regroup, shifted, gap_known]).proof)
@@ -414,7 +418,7 @@ at_most_summed(b: Building, first: Identity, second: Identity): Identity := {
 	splits = [split(first), split(second)]
 	parts = mapped_both(b.c, count, (x, y) => add(b, x, y), splits#1, splits#2)
 	differences = add(b, arguments(splits#1.right)#2, arguments(splits#2.right)#2)
-	upper = followed(b.c, [parts, rearranged(b, parts.right, add(b, lower, differences))])
+	upper = followed(b.c, [parts, rearranged(count_sums(b), parts.right, add(b, lower, differences))])
 	widened = mapped(b.c, b.e.literals!.truth, x => at_most(b, lower, x), upper)
 	followed(b.c, [widened, yes_known(b, widened.right, called(b, AT_MOST_ADD, [lower, differences]))])
 }

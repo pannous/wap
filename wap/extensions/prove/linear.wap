@@ -33,8 +33,6 @@ NO_TERMS: list<Term> := []
 
 # the checker the sums are read and proved with, int and its functions, the count int's cases carry, and the truths
 class Sums { c: Checker; i: Integers; n: Numbers; truths: Literals }
-# unknowns in one order with the proof that a sum of them equals their sum in that order
-class Ordered { unknowns: list<Term>; equated: Identity }
 # a sum in one order, `((0 + x1) + … + xk) + number`, the number of any sign, and the proof that the sum read equals it
 class Normal { unknowns: list<Term>; number: int; equated: Identity }
 # a hypothesis read as `left + difference == right` and `0 <= difference`, with their proofs
@@ -95,7 +93,7 @@ equal_proof(s: Sums, bounds: list<Bound>, t: Term, u: Term): Term? := {
 	closed = normal(s, gap.gap)
 	if closed.unknowns is not empty or closed.number != 0 { return ø }
 	widened = flipped(s.c, mapped(s.c, s.i.type, place => added(s, t, place), closed.equated))
-	followed(s.c, [flipped(s.c, zero_added(s, t)), widened, gap.equated]).proof
+	followed(s.c, [flipped(s.c, added_zero(s, t)), widened, gap.equated]).proof
 }
 # A goal choosing by a truth value (`a and b` is the choice of b at a's yes): proved where the truth value is proved
 # yes and the choice at yes is proved, the proof of that carried back along the truth value's equation
@@ -160,7 +158,7 @@ chosen_bounds(s: Sums, t: Term, proof: Term): list<Bound> := {
 }
 # `a == b` read both ways, each a bound whose difference is 0
 equal_bounds(s: Sums, e: Identity): list<Bound> := [exact_bound(s, e), exact_bound(s, flipped(s.c, e))]
-exact_bound(s: Sums, e: Identity): Bound := Bound(e.left, zero_of(s), e.right, followed(s.c, [zero_added(s, e.left), e]).proof, truth_computed(s))
+exact_bound(s: Sums, e: Identity): Bound := Bound(e.left, zero_of(s), e.right, followed(s.c, [added_zero(s, e.left), e]).proof, truth_computed(s))
 # the bounds `x + -x == 0` for each unknown's minus among the sides' unknowns
 minus_bounds(s: Sums, sides: list<Term>): list<Bound> := {
 	negated = sides.flat_map(side => normal(s, side).unknowns).filter(atom => negated_of(s, atom) is not ø).fold(NO_TERMS, with_new)
@@ -326,7 +324,7 @@ negated_of(s: Sums, t: Term): Term? := if #arguments(t) == 1 and is_constant(hea
 unknown_normal(s: Sums, t: Term, atom: Term): Normal := {
 	once = added(s, zero_of(s), atom)
 	started = flipped(s.c, law_equated(s, ZERO_ADD, [atom], once, atom))
-	Normal([atom], 0, Identity(s.i.type, t, normal_term(s, [atom], 0), followed(s.c, [started, flipped(s.c, zero_added(s, once))]).proof))
+	Normal([atom], 0, Identity(s.i.type, t, normal_term(s, [atom], 0), followed(s.c, [started, flipped(s.c, added_zero(s, once))]).proof))
 }
 number_normal(s: Sums, t: Term, number: int): Normal := Normal([], number, Identity(s.i.type, t, normal_term(s, [], number), itself(s.c, s.i.type, t).proof))
 # `-x`, x in order: `-(F + c) == -F + -c`, -F spread over its unknowns and -c computed
@@ -335,8 +333,8 @@ minus_normal(s: Sums, t: Term, inner: Normal): Normal := {
 	value = -inner.number
 	spread = law_equated(s, MINUS_ADD, [inner_sum, int_numeral(s.c.environment, inner.number)], minus_of(s, inner.equated.right), added(s, minus_of(s, inner_sum), int_numeral(s.c.environment, value)))
 	negated = negated_sum(s, inner.unknowns)
-	both = followed(s.c, [mapped(s.c, s.i.type, place => minus_of(s, place), inner.equated), spread, mapped(s.c, s.i.type, place => added(s, place, int_numeral(s.c.environment, value)), negated.equated)])
-	Normal(negated.unknowns, value, Identity(s.i.type, t, normal_term(s, negated.unknowns, value), both.proof))
+	both = followed(s.c, [mapped(s.c, s.i.type, place => minus_of(s, place), inner.equated), spread, mapped(s.c, s.i.type, place => added(s, place, int_numeral(s.c.environment, value)), negated.identity)])
+	Normal(negated.atoms, value, Identity(s.i.type, t, normal_term(s, negated.atoms, value), both.proof))
 }
 # `-(x1 + … + xk)` spread to the sum of each unknown's minus, in order; `-0` computes to 0
 negated_sum(s: Sums, xs: list<Term>): Ordered := {
@@ -344,8 +342,8 @@ negated_sum(s: Sums, xs: list<Term>): Ordered := {
 	rest = xs.take(#xs - 1)
 	top = xs.last()
 	spread = law_equated(s, MINUS_ADD, [sum_term(s, rest), top], minus_of(s, sum_term(s, xs)), added(s, minus_of(s, sum_term(s, rest)), minus_of(s, top)))
-	further = appended(s, negated_sum(s, rest), minus_of(s, top))
-	Ordered(further.unknowns, followed(s.c, [spread, further.equated]))
+	further = appended(int_sums(s), negated_sum(s, rest), minus_of(s, top))
+	Ordered(further.atoms, followed(s.c, [spread, further.identity]))
 }
 # `x + y`, each in order: `(F + c) + (G + d)` regrouped to `((F + c) + G) + d`, swapped to `((F + G) + c) + d`,
 # regrouped to `(F + G) + (c + d)` with c + d computed, and F + G merged
@@ -355,31 +353,10 @@ sum_normal(s: Sums, t: Term, x: Normal, y: Normal): Normal := {
 	c = int_numeral(s.c.environment, x.number)
 	d = int_numeral(s.c.environment, y.number)
 	value = x.number + y.number
-	merged_sum = merged(s, x.unknowns, y.unknowns)
-	both = followed(s.c, [mapped_both(s.c, s.i.type, (l, r) => added(s, l, r), x.equated, y.equated), flipped(s.c, associated(s, added(s, left_sum, c), right_sum, d)), mapped(s.c, s.i.type, place => added(s, place, d), swapped(s, left_sum, c, right_sum)), associated(s, added(s, left_sum, right_sum), c, d), mapped(s.c, s.i.type, place => added(s, place, int_numeral(s.c.environment, value)), merged_sum.equated)])
-	Normal(merged_sum.unknowns, value, Identity(s.i.type, t, normal_term(s, merged_sum.unknowns, value), both.proof))
-}
-# the sum of two sums in order, in order
-merged(s: Sums, xs: list<Term>, ys: list<Term>): Ordered := {
-	if ys is empty { return Ordered(xs, zero_added(s, sum_term(s, xs))) }
-	rest = ys.take(#ys - 1)
-	top = ys.last()
-	regrouped = flipped(s.c, associated(s, sum_term(s, xs), sum_term(s, rest), top))
-	further = appended(s, merged(s, xs, rest), top)
-	Ordered(further.unknowns, followed(s.c, [regrouped, further.equated]))
-}
-# a sum in order plus one more atom, in order
-appended(s: Sums, inner: Ordered, atom: Term): Ordered := {
-	further = inserted(s, inner.unknowns, atom)
-	Ordered(further.unknowns, followed(s.c, [mapped(s.c, s.i.type, place => added(s, place, atom), inner.equated), further.equated]))
-}
-# the sum of unknowns in order plus one more atom, in order: the atom swapped down past each that goes after it
-inserted(s: Sums, xs: list<Term>, atom: Term): Ordered := {
-	if xs is empty or xs.last().hash <= atom.hash { return Ordered(xs + [atom], itself(s.c, s.i.type, added(s, sum_term(s, xs), atom))) }
-	rest = xs.take(#xs - 1)
-	top = xs.last()
-	inner = inserted(s, rest, atom)
-	Ordered(inner.unknowns + [top], followed(s.c, [swapped(s, sum_term(s, rest), top, atom), mapped(s.c, s.i.type, place => added(s, place, top), inner.equated)]))
+	sums = int_sums(s)
+	merged_sum = merged(sums, x.unknowns, y.unknowns)
+	both = followed(s.c, [mapped_both(s.c, s.i.type, (l, r) => added(s, l, r), x.equated, y.equated), flipped(s.c, associated(s, added(s, left_sum, c), right_sum, d)), mapped(s.c, s.i.type, place => added(s, place, d), swapped(sums, left_sum, c, right_sum)), associated(s, added(s, left_sum, right_sum), c, d), mapped(s.c, s.i.type, place => added(s, place, int_numeral(s.c.environment, value)), merged_sum.identity)])
+	Normal(merged_sum.atoms, value, Identity(s.i.type, t, normal_term(s, merged_sum.atoms, value), both.proof))
 }
 # the proof that two sums are equal where each part is
 sums_equal(s: Sums, parts: list<Identity>): Identity := parts.fold(itself(s.c, s.i.type, zero_of(s)), (sum, part) => mapped_both(s.c, s.i.type, (l, r) => added(s, l, r), sum, part))
@@ -387,11 +364,11 @@ sums_equal(s: Sums, parts: list<Identity>): Identity := parts.fold(itself(s.c, s
 # --- int's laws of sums, each statement written once
 
 # `a + 0 == a`
-zero_added(s: Sums, a: Term): Identity := law_equated(s, ADD_ZERO, [a], added(s, a, zero_of(s)), a)
+added_zero(s: Sums, a: Term): Identity := law_equated(s, ADD_ZERO, [a], added(s, a, zero_of(s)), a)
 # `(a + b) + c == a + (b + c)`
 associated(s: Sums, a: Term, b: Term, c: Term): Identity := law_equated(s, ADD_ASSOCIATIVE, [a, b, c], added(s, added(s, a, b), c), added(s, a, added(s, b, c)))
-# `(x + a) + b == (x + b) + a`
-swapped(s: Sums, x: Term, a: Term, b: Term): Identity := law_equated(s, ADD_SWAPPED, [x, a, b], added(s, added(s, x, a), b), added(s, added(s, x, b), a))
+# int's sums with the laws that regroup them
+int_sums(s: Sums): Monoid := Monoid(s.c, s.i.type, zero_of(s), s.i.sum, t => law_equated(s, ZERO_ADD, [t], added(s, zero_of(s), t), t), (a, b, c) => associated(s, a, b, c), (a, b) => law_equated(s, ADD_COMMUTATIVE, [a, b], added(s, a, b), added(s, b, a)))
 # `x + -x == 0`
 minus_cancelled(s: Sums, x: Term): Identity := law_equated(s, ADD_MINUS, [x], added(s, x, minus_of(s, x)), zero_of(s))
 
