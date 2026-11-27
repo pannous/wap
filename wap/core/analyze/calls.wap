@@ -34,19 +34,11 @@ SYMBOL_CASE = "Symbol"
 # the annotation the class rule writes on a protocol's record (sugar/records.wap)
 PROTOCOL_ANNOTATION = "protocol"
 
-# a call at levels written in brackets glued to the function's name, `identity[1](int, 3)` (wiki/universe.md): the
-# name and the levels; ø for other code, a list's item called among it, `fs[1](3)`
-level_written_call(called: Node) as list<Node>? := match called {
-	Item(subject, key) => if names_function(subject) and key is number then [subject, key] else ø
+# a call at a level written in brackets glued to the function's name, `identity[1](int, 3)` (wiki/universe.md): the
+# name, the level its fact; ø for other code, a list's item called among it, `fs[1](3)`
+level_written_call(called: Node) as Node? := match called {
+	Item(subject, key) => if names_function(subject) and key is number then with_fact(subject, LEVEL_WRITTEN, key) else ø
 	_ => ø
-}
-# the call of the name at the levels written, its level letters theirs
-levelled_call_typed(n: Node, at_levels: list<Node>, arguments: list, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
-	name = text(at_levels#1)
-	s.levels_written[name] = at_levels.drop(1).map(level => level_written(level, 0)!)
-	typed = call_typed(n, at_levels#1, arguments, s, f, expected)
-	s.levels_written.remove(name)
-	typed
 }
 # A call: its arguments typed, each expecting its parameter's written type when only one definition takes that many
 # arguments; then the function it means, typed for these argument types
@@ -55,8 +47,8 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	if called is symbol and text(called) == TYPE_TEST_WORD and fact_of(called, BINDING) == ø { return type_test_typed(n, arguments, s, f) }
 	if called is symbol and text(called) == TYPE_OF_WORD and fact_of(called, BINDING) == ø { return type_of_typed(n, arguments#1, s, f) }
 	if rest_named(n) != ø { refused(n, "a list's items spread, `...xs`, stand only in a list, `[...xs, 4]`") }
-	at_levels = level_written_call(called)
-	if at_levels != ø { return levelled_call_typed(n, at_levels!, arguments, s, f, expected) }
+	levelled = level_written_call(called)
+	if levelled != ø { return call_typed(n, levelled!, arguments, s, f, expected) }
 	if holds_value(called) { return value_call_typed(n, called, arguments, s, f, expected) }
 	scopes = scoped_definitions(called, s)
 	candidates = scopes.flat_map(scope => scope)
@@ -73,6 +65,10 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	if by_count is empty and candidates.any(definition => takes_count(definition, 0, s)) { return value_call_typed(n, called, arguments, s, f, expected) }
 	hints = if #by_count == 1 then by_count#1.parameters.map(type => if has_letters(type) then ø else type) else (1 to #placed).map(at => result_wanted(placed#at, at, by_count, s))
 	given = (1 to #placed).map(at => empty_given(typed_form(placed#at, s, f, hints#at)))
+	# the level the call writes is its definitions' level letters' (letters.wap level_letters), set once its arguments'
+	# calls have set theirs
+	written = fact_of(called, LEVEL_WRITTEN)
+	if written == ø { s.levels_written.remove(text(called)) } else { s.levels_written[text(called)] = [level_written(written!, 0) ?? refused(written!, "a level is a whole number from 0, Sort(0) Prop")] }
 	# an argument that never finishes ends the call there, the code after it never runs: `pick(a, return 7)` is
 	# `{ a; return 7 }`
 	jumped = (1 to #given).filter(at => jumps(given#at))
@@ -234,7 +230,7 @@ char_text(character: Node) as Node := with_type(refitted(Text(text(character)), 
 # a call's typed arguments as their parameters (their letters bound by the call) have them: a char read as its text,
 # a plain value boxed for an any or an optional
 arguments_fitted(definition: Signature, given: list, s: TypingState) as list := {
-	letters = (letters_bound(definition, given.map(value_type), s) ?? NOTHING_CALLED).letters
+	letters = (letters_bound(definition, given.map(value_type), s, denoted_types(given)) ?? NOTHING_CALLED).letters
 	wanted = definition.parameters.map(type => substituted(type, letters))
 	(1 to #given).map(at => if counted(value_type(given#at), wanted#at) then with_type_of(placed_like(Prim(symbol(COUNTING), [given#at]), given#at), wanted#at) else as_wanted(given#at, wanted#at, s))
 }
@@ -321,6 +317,8 @@ chosen_definition(n: Node, called: Node, scopes: list, given: list, expected: Te
 	if #fitting > 1 { refused(n, "this reads as a call of each of ${candidates_text(fitting, s)}; write the arguments' types or the type wanted") }
 	fitting#1
 }
+# the types the arguments are where they are types, `int` of `identity(int, 3)`; ø for other values
+denoted_types(given: list) as list<Term?> := given.map(argument => fact_type(fact_of(argument, DENOTES)))
 # whether a definition takes these arguments, each one fitting its parameter
 # (a parameter typed by generic letters takes an argument whose type binds them alike, and one of a function type a
 # function value whose function gives that type's result for its parameters, see letters_bound); the arguments known
@@ -331,7 +329,7 @@ takes(definition: Signature, given: list, s: TypingState, fit: function) as bool
 	if not takes_count(definition, #given, s) { return no }
 	plain = (1 to #given).filter(at => not has_letters(definition.parameters#at) and not has_unknowns(value_type(given#at)))
 	if not plain.all(at => argument_taken(given#at, parameters#at, NOTHING_CALLED, s, fit)) { return no }
-	called = letters_bound(definition, given.map(value_type), s) ?? return no
+	called = letters_bound(definition, given.map(value_type), s, denoted_types(given)) ?? return no
 	(1 to #given).all(at => argument_taken(given#at, parameters#at, called, s, fit))
 }
 # whether a definition takes these arguments, each one fitting its parameter by fits
