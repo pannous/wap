@@ -1054,16 +1054,11 @@ page's own test file (test/test_<page>_wanted.wap, or test/wap/test_<page>_wante
 - **T6a5 False, Exists, effects.** proof.md:111-117 (a loop or a raise is no proof), proposition.md:24-28 (`False`,
   `exists`), :66 (an undecidable `if`), effects.md:81 (a proof refuses an impure function, naming the chain).
   Pinned: wap/test_proof_wanted "a loop is no proof", "a raise is no proof"; wap/test_proposition_wanted "an if on a
-  proposition nobody can decide is refused" (red). Gaps:
-  - effects.md:81's chain: `loop(): False := loop()` with `law oops: False := loop()` → the refusal says `via oops →
-    loop`;
-  - proposition.md:28: `wap verify` of `law some_sum: exists n: nat where n + n == 4` → `some_sum: Proved` (the
-    witness 2, computed). test_proposition_wanted states the law but checks no verdict.
+  proposition nobody can decide is refused" (red). The chain a refusal names is V2's line. No gap.
 - **T6a6 propositions as values, the logic in wap/types.** proposition.md:6-7, :16-24 (the table), :99-105 (`use
   classical`). Pinned: test_proposition_wanted "an equation is a proposition", "a false equation is a proposition
   too", "True has its proof"; wap/test_proposition_wanted "a proof decides no data", "excluded middle comes with use
-  classical" (red). Its expected `either: Proved, resting on excluded_middle` differs from proof.md:77's `rests on`
-  (canonical output); the test's wording goes to wap-interviewer.
+  classical" (red), its verdict in proof.md:77's words, `rests on`.
 - **T6a7 universes.** universe.md, all of it. Pinned: test_universe_wanted, 16 lines (red); wap/test_universe_wanted
   "levels do not include each other", "a universe never holds itself" (red); test_universe_page "one definition
   serves a value" (green). Gap: universe.md:20-21 → `[Type(1), Type(2)] == [Sort(2), Sort(3)]` is yes.
@@ -1073,19 +1068,18 @@ page's own test file (test/test_<page>_wanted.wap, or test/wap/test_<page>_wante
   `Axiom` (green); wap/test_proof_wanted "a law nobody proved is Tested", "a broken law shows its counterexample", "an
   assume shows as Assumed", "an axiom is reported" (red); test_laws_page "a law with written binders leaves the
   program's value alone" (green); test_theory_layouts, a program's own `runs(…)` (red). Gaps:
-  - proof.md:84: the exit status of `wap verify` on `law two: 2 + 2 == 5` → 1, and on `law both: 1 < 2` → 0;
-  - proof.md:80: `wap verify` of `law any_even(n: nat): Even(n * 2)` with nothing to try it on → `any_even:
-    Untested` (test_theory_verify's line reads the theory door's spelling).
+  - proof.md:84: the exit status of `wap verify` on `law two: 2 + 2 == 5` → 1, and on `law both: 1 < 2` → 0.
 - **V2 `wap check`.** type.md:188-189, effects.md:81, cli.md "Proofs". Pinned: wap/test_check, 4 lines (green: an
   obligation listed, an `if`'s condition, an assignment ending it, a parameter's own). Gaps:
-  - type.md:189: `wap check --strict` of `n = 3\nx: int where it > 0 = n\nprint x` → exit 1, the line naming `it > 0`;
+  - type.md:189: `wap check --strict` of `n = 3\nx: int where it > 0 = n\nprint x` → refused, naming `it > 0` (its
+    exit status 1 by cli.md:87, a failed run);
   - effects.md:81: `wap check --strict` of `log(): int := { print "a"; 1 }\nlaw one: log() == 1 := refl` → refused,
     naming `one → log` and IO.
-- **V3 proved laws are facts.** law.md:36-44 (a proved law a lemma of the later ones), type.md:183 (an obligation
-  found from a proved law). Pinned: test_laws_wanted checks only the program's value (red), no verdict. Gaps:
+- **V3 proved laws are facts.** law.md:36-44 (a proved law a lemma of the later ones), type.md:181-182 (an
+  obligation found from a proved law). Pinned: test_laws_wanted checks only the program's value (red), no verdict. Gaps:
   - law.md:36-44: `wap verify` of the three lines → both laws Proved (red until the provers have a product law);
-  - type.md:183: `law up(n: int where it >= 0): n + 1 > 0` and `h(n: int where it >= 0) := g(n + 1)` beside
-    `g(x: int where it > 0) := x` → `effects of h` is Pure on a plain compile, and `wap check` lists nothing.
+  - type.md:181-182: `law up(n: int where it >= 0): n + 1 > 0` and `h(n: int where it >= 0) := g(n + 1)` beside
+    `g(x: int where it > 0) := x` → `wap check` lists nothing.
 - **C1 traits are structures.** trait.md "Built-in traits", "Conforming", "Declaring a trait". Pinned:
   test_trait_page "sort orders Comparable values", a type's own text (green); test_trait_wanted "a number is
   Comparable", "sort uses a class's compare", "> uses a class's compare", "== uses a class's equals", "a class
@@ -1096,14 +1090,12 @@ page's own test file (test/test_<page>_wanted.wap, or test/wap/test_<page>_wante
   - trait.md:83: `class dot: Comparable {x:int}` with no `compare` → refused naming `compare(a:dot, b:dot)`.
 - **C2 instances passed.** trait.md "Dispatch", "Constraints", "Declaring a trait" ("a call picks the one of its
   argument's type"). Pinned: test_protocols "a class fits a protocol by having its words" (green, known types only).
-  Gaps:
-  - trait.md:97: `[square(2), circle(1)].map(area)` with `circle(r: int)` and `area(c: circle) := 3 * c.r * c.r` →
-    `[4, 3]`;
+  Gap:
   - trait.md:109-111: `smallest(xs: Comparable list) := (sort xs)#1` on `[person("Ann", 3) person("Bo", 1)]` →
     `person("Bo", 1)`, and on `[dot(3) dot(1)]` refused naming `compare(a:dot, b:dot)`.
-  - trait.md:114, a default through an instance: `measure(m: measured)` mapped over `[tile(3), slab(3)]` held as
-    `list<measured>` → `[11, 103]`. For known types test_protocols pins it already: "a protocol's default body is the
-    word of a class without its own", "a class's own word replaces the protocol's default" (green).
+  trait.md:114's default body is pinned for known types by test_protocols: "a protocol's default body is the word of
+  a class without its own", "a class's own word replaces the protocol's default" (green). No page shows a default
+  reached through an instance, so C2 adds no line for it.
 - **C4 generic dispatch through instances.** trait.md "Dispatch". Pinned: test_dynamic, the dispatch of a known and
   an unknown value (green), which must stay green. No wiki line beyond C2's; C4 is a shrink measured by its gate.
 - **Q1 quotients.** quotient.md, all of it. Pinned: test_quotient_wanted, 9 lines (red: the relation, `quotient.of`,
