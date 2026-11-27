@@ -1075,9 +1075,9 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T6a5 False, Exists, undecidable | waits | | T5b1 |
 | T6a6 the logic in wap/types | waits | | T6a1 to T6a5 |
 | T6a7 universes | waits | | T6a6 |
-| V1 one verdict per law | waits; builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
+| V1 one verdict per law | planned (notes/coc-v1.md; the plain-compile report cut, no wiki passage); builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
 | V2 `wap check`, V3 proved laws as facts | wait | | V1 (V3 also T6a2 and unify-dedup) |
-| C1 traits are structures | open; builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
+| C1 traits | planned (notes/coc-c1.md: C1a now, the structures with C2); builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
 | C2 instances passed, C4 generic dispatch | wait | | C1 (C2 also T5e's type arguments) |
 | Q1 quotients | waits | | C1, T6a3, T6a4 |
 | T7 the theory extension retires | waits | | T6 |
