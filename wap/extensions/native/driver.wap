@@ -76,6 +76,24 @@ verified(words: list<text>) := script_ran([executable_path, seed_part(VERIFY_PAR
 FORMAT_COMMAND := "format"
 CHECK_COMMAND := "check"
 compiler_ran(command: text, words: list<text>) := module_file_ran([words#1, compiler_path, command, words#2])
+# `wap format check <file.wap>` lists the lines the format would change, the file formatted into a temporary file of
+# this template
+FORMATTED_TEMPLATE := "/wap-formatted-XXXXXX.wap"
+formatted(words: list<text>) := if words#2 == CHECK_COMMAND then format_checked(words#3) else compiler_ran(FORMAT_COMMAND, words)
+# each line of the file the format would change, `app.wap:3: layout: <the line formatted>`; the run exits 1 if any
+# would, else 0
+format_checked(file: text) := {
+	canonical = temporary_made(FORMATTED_TEMPLATE, WAP_SUFFIX)
+	if system("'${executable_path}' '${compiler_path}' ${FORMAT_COMMAND} '${file}' >'${canonical}'") != 0 { exit(1) }
+	written = file_text(file).split("\n")
+	wanted = file_text(canonical).split("\n")
+	unlink(canonical)
+	changed = (0 upto max(#written, #wanted)).filter(at => line_at(written, at) != line_at(wanted, at))
+	for at in changed { print "${file}:${at + 1}: layout: ${line_at(wanted, at)}" }
+	exit(if changed is empty then 0 else 1)
+}
+# the line at the place, "" past the last
+line_at(lines: list<text>, at: int): text := if at < #lines then lines[at] else ""
 # the program built by the compiler this wap runs
 built(words: list<text>) := {
 	program = words#2
@@ -95,7 +113,8 @@ options_taken(given: list<text>): list<text> := {
 	words = given
 	told = ""
 	while (#words > 1 and is_told_option(words#2)) or (#words > 2 and is_cap_option(words#2)) {
-		option = words#2
+		option = canonical_option(words#2)
+		if option != words#2 { eprint("got it: ${words#2} is ${option}") }
 		if option == MEMORY_OPTION { memory_cap_gb = cap_given(words) }
 		else if option == SECONDS_OPTION { time_cap_seconds = cap_given(words) }
 		else {
@@ -122,7 +141,7 @@ ran(action: Action, words: list<text>) := match action {
 	Action.Build => built(words)
 	Action.Test => tested(words)
 	Action.Verify => verified(words)
-	Action.Format => compiler_ran(FORMAT_COMMAND, words)
+	Action.Format => formatted(words)
 	Action.Check => compiler_ran(CHECK_COMMAND, words)
 	Action.Module => module_file_ran(words)
 	Action.Program => program_ran(words)

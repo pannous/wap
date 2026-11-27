@@ -9,6 +9,8 @@ CONTINUATION_FROM := 128
 CONTINUATION_UNTIL := 192
 # the decimal digits, each one byte, at the place of its value
 DIGITS := "0123456789"
+# a text this long keeps its count and its last place found; a shorter one is read from its start, as cheap as the check
+LONG_TEXT_BYTES := 64
 # the blanks trim takes off: space, tab, line feed, carriage return
 BLANK_BYTES := [32, 9, 10, 13]
 # what a character's lead byte keeps of its code, by the character's byte count: all of 0xxxxxxx, five bits of
@@ -102,19 +104,47 @@ character_end(t: text, at: int): int := {
 	while end < byte_count(t) and is_continuation_byte(byte_at(t, end)) { end += 1 }
 	end
 }
+# whether a character starts at a byte offset: every byte but a continuation byte starts one
+starts_character(t: text, at: int): bool := not is_continuation_byte(byte_at(t, at))
+# the byte offset before the character that ends at offset `at`
+character_start_before(t: text, at: int): int := {
+	start = at - 1
+	while start > 0 and is_continuation_byte(byte_at(t, start)) { start -= 1 }
+	start
+}
+# the long text a character was last found in, its place and its byte offset: the next place asked of the same text is
+# counted from there, forward or back, so a walk over a text's places, peeks back included, reads each byte about once
+# (held, the text is never freed while kept, so no other text can stand at its place; texts are not changed once made)
+found_text = ""
+found_place = 1
+found_at = 0
 # the byte offset of t's index-th character, counted from 1; past the last, the byte count
 character_offset(t: text, index: int): int := {
-	at = 0
-	counted = 1
-	while counted < index and at < byte_count(t) {
+	global found_text
+	global found_place
+	global found_at
+	long = byte_count(t) >= LONG_TEXT_BYTES
+	resumed = long and one_text(t, found_text) and index * 2 >= found_place
+	place = if resumed then found_place else 1
+	at = if resumed then found_at else 0
+	while place > index and at > 0 {
+		at = character_start_before(t, at)
+		place -= 1
+	}
+	while place < index and at < byte_count(t) {
 		at = character_end(t, at)
-		counted += 1
+		place += 1
+	}
+	if long {
+		found_text = t
+		found_place = place
+		found_at = at
 	}
 	at
 }
 
 # the characters from one place to another, counted from 0 as a list's: `"warp"[1 .. 3]` is "ar"
-slice(t: text, r: Range): text := bytes_between(t, character_offset(t, r.from + 1), character_offset(t, min(r.last, #t) + 2))
+slice(t: text, r: Range): text := bytes_between(t, character_offset(t, r.from + 1), character_offset(t, min(r.last, byte_count(t)) + 2))
 # a text repeated: `"ab" * 3` is "ababab", none for 0 times
 *(t: text, times: int): text := {
 	out = ""
@@ -184,8 +214,24 @@ empty(t: text): bool := t == ""
 # an int's decimal digits, `-` before a negative one's; counted on the int made negative, so the smallest int has its
 # digits too
 text(n: int): text := if n < 0 then "-" + negated_digits(n) else negated_digits(0 - n)
-# the digits of a negative int's size, or of 0
-negated_digits(n: int): text := if n > -10 then bytes_between(DIGITS, 0 - n, 1 - n) else negated_digits((n - n rem 10) ÷ 10) + negated_digits(n rem 10)
+# the digits of a negative int's size, or of 0: counted, then written into one text from the last
+negated_digits(n: int): text := {
+	count = 1
+	shorter = n
+	while shorter <= -10 {
+		shorter = tens_of(shorter)
+		count += 1
+	}
+	digits = text_made(count)
+	rest = n
+	for at in 1 to count {
+		set_text_byte(digits, count - at, byte_at(DIGITS, 0 - rest rem 10))
+		rest = tens_of(rest)
+	}
+	digits
+}
+# a negative int without its last digit: `tens_of(-123)` is -12
+tens_of(n: int): int := (n - n rem 10) ÷ 10
 # a text and an int's digits joined, in either order: `"a" + 3` is "a3", `1 + "x"` is "1x" (wiki/string.md); a text
 # that spells a number joins too, with a hint that it does, since `"5" + 3` might have meant 8: once a run, so a loop
 # joining such texts says it once
@@ -201,17 +247,29 @@ number_spelled_noted(t: text): text := {
 	t
 }
 # how many characters t holds: `#"héllo"` is 5
+# the long text counted last and its count, so a loop that asks a text's count at every step counts it once
+counted_text = ""
+counted = 0
 #(t: text): int := {
-	count = 0
-	at = 0
-	while at < byte_count(t) {
-		at = character_end(t, at)
-		count += 1
+	global counted_text
+	global counted
+	if byte_count(t) < LONG_TEXT_BYTES { return characters_counted(t) }
+	if not one_text(t, counted_text) {
+		counted_text = t
+		counted = characters_counted(t)
 	}
+	counted
+}
+characters_counted(t: text): int := {
+	count = 0
+	for at in 0 upto byte_count(t) { if starts_character(t, at) { count += 1 } }
 	count
 }
 # t's character at a place, counted from 1: `"abc"#2` is "b"
-#(t: text, place: int): text := bytes_between(t, character_offset(t, place), character_offset(t, place + 1))
+#(t: text, place: int): text := {
+	start = character_offset(t, place)
+	bytes_between(t, start, if start < byte_count(t) then character_end(t, start) else start)
+}
 
 # part's bytes stand in t from byte offset at on
 bytes_match_at(t: text, part: text, at: int): bool := {
@@ -226,9 +284,11 @@ bytes_match_at(t: text, part: text, at: int): bool := {
 starts_with(t: text, start: text): bool := bytes_match_at(t, start, 0)
 ends_with(t: text, end: text): bool := bytes_match_at(t, end, byte_count(t) - byte_count(end))
 # the character position of part's first place in t, counted from 1; 0 when t holds no part
-find(t: text, part: text): int := {
-	at = 0
-	position = 1
+find(t: text, part: text): int := find(t, part, 1)
+# part's first place in t at or after the position `from`, read in place: `find("abab", "b", 3)` is 4
+find(t: text, part: text, from: int): int := {
+	at = character_offset(t, from)
+	position = from
 	while at <= byte_count(t) - byte_count(part) {
 		if bytes_match_at(t, part, at) { return position }
 		at = character_end(t, at)

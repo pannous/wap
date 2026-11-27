@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The sound words that play compile, beep to the MIDI words, each typed with the host words under it (wiki/sound.md).
-# Compiled only, never run, so nothing sounds. Run it with bash test/wap/test_sound.sh
+# Compiled, then run muted (wiki/sound.md "muted"): nothing sounds and nothing waits, and what played is still
+# rendered, saved and read back. Run it with bash test/wap/test_sound.sh
 source "$(dirname "$0")/compile.sh"
 
 # a program of every playing word, compiled: the compiler says nothing and the module is written
@@ -37,4 +38,17 @@ printf '%s\n' 'use sound' 'use units' \
 	'print midi_outputs()' \
 	>"$stage/playing.wap"
 check "every playing word compiles" "$($wap "$compiler" "$stage/playing.wap" "$stage/playing.wasm" 2>&1; [ -f "$stage/playing.wasm" ] && echo written)" "written"
+# muted runs of the native wap: a tone played is rendered all the same, so a saved file holds its samples
+muted() { printf '%s\n' "$2" >"$stage/$1.wap" && (cd "$stage" && $wap --mute --no-window "$1.wap" 2>&1); }
+check "a tone played muted is saved: half a second at 22050 Hz, mono, 16-bit" "$(muted saving 'use sound
+use units
+play(440Hz, 0.5s)
+save(sound(), "tone.wav")' >/dev/null; wc -c <"$stage/tone.wav" | tr -d ' ')" "22094"
+check "a saved sound reads back as a sample of its rate, channels and frames" "$(muted reading 'use sound
+tone = sample("tone.wav")
+print "${tone.rate} ${tone.channels} ${#tone.frames}"')" "22050 1 11025"
+check "the MIDI outputs are listed, none sounding" "$(muted ports 'use sound
+print #midi_outputs() >= 0')" "yes"
+check "--muted is --mute, said" "$(cd "$stage" && $wap --muted --no-window ports.wap 2>&1)" "got it: --muted is --mute
+yes"
 exit $((failures > 0))
