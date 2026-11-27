@@ -152,7 +152,8 @@ built). It closes the stale comment on terms.wap:145.
 ### integers.wap's laws that need hypothesis binders (T6a2)
 
 A binder whose type is a bool statement is a proof of `Equal(bool, statement, yes)`. Until T6a2 builds that, analyze
-reads it as a plain parameter, so these 7 of the 15 laws can neither be stated nor proved as meant:
+reads it as a plain parameter, so these 7 of the file's 14 laws (at 3a0742ef) can neither be stated nor proved as
+meant:
 
 | law | hypotheses |
 |---|---|
@@ -164,8 +165,8 @@ reads it as a plain parameter, so these 7 of the 15 laws can neither be stated n
 | `both_first(a, b: bool)` | `h: a and b` |
 | `both_second(a, b: bool)` | `h: a and b` |
 
-The other 8 (zero_add, add_commutative, add_associative, add_swapped, add_minus, minus_add, add_difference, and
-`equal_integers_itself` once added) have value binders only and wait for nothing but int's cases. A hypothesis binder
+The other 7 (zero_add, add_commutative, add_associative, add_swapped, add_minus, minus_add, add_difference), and
+`equal_integers_itself` once it is added, have value binders only and wait for nothing but int's cases. A hypothesis binder
 is the same Π that a nat binder's condition gets above. So T6a2's first part is that function in law_statement: one
 Π per hypothesis, built once for both uses. Recommended: build it in M2b, beside the conditions, since the prover
 needs these 7 laws to prove anything with a bound.
