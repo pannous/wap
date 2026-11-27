@@ -39,9 +39,9 @@ letters as its parameters.
    `fitted` boxes on writing and reads it back at the use's type. Structs per instance (`Boxed<int>` its own) are a
    later speed step, measured.
 
-7. The kernel: a field naming a letter is an open type (inductives.wap closed_type), so a generic enum stays the axiom
-   it is, counted open, with no hint, until T6a3's parameters make the letters the block's parameters; that line is
-   T6a3's parameters' to-do, not this step's.
+7. The kernel: this step lands with T6a3's parameters, on one branch, the typer's commits first and then the kernel
+   block's: a generic enum's letters are its block's parameters (notes/coc-t6a3-header.md), never a record left out
+   of the blocks. One careful run covers both, with the measures.
 
 ## Tests that pin it
 test_type_wanted's `class Pair<A, B> { first: A; second: B }`, test_theory_elaborate's "a numeral in a case's field is
