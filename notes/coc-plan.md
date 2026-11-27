@@ -980,14 +980,15 @@ step, measured against the step before; more goes to the user.
 | TM one environment per module | each module is read with its own environment, built from the modules it `use`s: the language record splits into the language, the tables kept per file, one compile's caches and the build; an operator, alias, rule or phrase word declared in a file applies from its declaration on, in that file and in the files that use it, never in a file read later that does not; a file's text is scanned once, not three times for its uses; the restart after a standard module is brought in goes (notes/audit/2026-11-25-2.md R1) | a rule declared in one file does not fire in a file that does not use it; an operator used above its declaration in the same file is refused; `--stage 2` a fixed point |
 | T3 numbers and arguments found | the typer's types are kernel terms, one representation, compared by computing and shown as notation only in messages and `format`; analyze's readers of the notation read terms. analyze types each function once: a recursive function's header is typed first, an assignment of another type is a new binding, and the retypings and the fresh start on a retype go, since a discarded round would leave checked judgements behind (the dispatcher's restart goes with T6, the restart for a standard module brought in with TM4). A kind rule's output is typed in place, at the node's position, as that node, and never fires on its own output. analyze types numbers through the kernel: a numeral has the type its place wants, else `int`; `i32` and `i64` the wrapping words; `#xs` an `int`; letters and `_` found by unification (E1); the readings typing chose stay the compile's table, keyed by the source place `format` prints. Until T5 a function analyze typed enters the kernel as an opaque constant by its signature, counted by the census as assumed; the numbers prelude is read in the explicit spelling | `0 - 3` is -3; `#xs - 1` is -1 on an empty list; `type of 3` is `int`; `identity(3)` and `identity(int)`; a recursive function's result is written, or found once its other arm gives the type, else refused with the fix-it naming it; a kind rule's error names the line of the phrase it rewrote |
 | T4 subtypes | `where`, `type X < T`, the declared conversions; `nat` is `int where it >= 0`; an obligation proved by computing or by facts in scope, else a check with the effect Fail (E4, 3.2, 3.3, 3.9) | `d: char = "a"` accepted and `d: char = "ab"` refused by `condition`; `char` is `text where #it == 1` and nothing else; `effects of` a function with a check left is Fail |
-| T5 definitions, statements and inductive types | enums, classes, functions, `match`, blocks, variables, loops and exits become kernel declarations and terms as analyze types them: inductive blocks, recursors, structural recursion, a measure, else Div; unions, optional values and `any`; classes with type arguments, `class Pair<A, B> { first: A; second: B }` (wiki/type.md), as inductive types with parameters: each use an instance of the record, as T3f instances functions (about 40–80 lines in types, fits and declarations, the letters handed on by a records.wap rule); `extends` as the closed sum, built by analyze from the class declarations while the `inherited` rule keeps copying the fields; a compiled library carries, beside its signatures, the bodies that may unfold (definitions a type or a proof computes with), as a Lean module does, which replaces the signatures-only format of notes/compile_inputs.md; a compiled library's declarations are; the theory's doors read analyze's typed nodes, so read.wap takes analyze's choice in place of `nearest`, TRIAL_LIMIT and the numeral special cases (extension −40); letters.wap, fits.wap, conditions.wap and ROUNDS_LIMIT go
+| T5u unions (before T5a) | `A or B` (also `A \| B`, written `or`) is a sum type, flat, without order or repeats, `T or ø` being `T?`; its value is boxed as an `any`'s, so a part converts into the union as into any (Boxed) and the union narrows to a part by its `is` test (Narrowed, T4's check); unlike types join to their union; a call on a union picks each case's definition when the program runs, a case with none refused; `T or Error` is a failable value: `failed` is `is Error`, and narrowing an Error out raises it. Steps T5u1 types, T5u2 calls, T5u3 failable; T5a (definitions and pure expressions as kernel terms) follows, and T4d waits for T5a | the lines of wiki/type.md "Optional values and unions"; `type of [1, "a"]` is `list<int or text>`; `describe(s)` picks by the case; `r failed` of a `T or Error` |
+| T5 definitions, statements and inductive types (steps: notes/coc-t5.md) | enums, classes, functions, `match`, blocks, variables, loops and exits become kernel declarations and terms as analyze types them: inductive blocks, recursors, structural recursion, a measure, else Div; unions, optional values and `any`; classes with type arguments, `class Pair<A, B> { first: A; second: B }` (wiki/type.md), as inductive types with parameters: each use an instance of the record, as T3f instances functions (about 40–80 lines in types, fits and declarations, the letters handed on by a records.wap rule); `extends` as the closed sum, built by analyze from the class declarations while the `inherited` rule keeps copying the fields; a compiled library carries, beside its signatures, the bodies that may unfold (definitions a type or a proof computes with), as a Lean module does, which replaces the signatures-only format of notes/compile_inputs.md; a compiled library's declarations are; the theory's doors read analyze's typed nodes, so read.wap takes analyze's choice in place of `nearest`, TRIAL_LIMIT and the numeral special cases (extension −40); letters.wap, fits.wap, conditions.wap and ROUNDS_LIMIT go
 carried once, as the kernel accepted them when it was built (13); the emitter reads the statements and their checked facts, types, levels and proofs left out (E2, E5's statements, E6, E7), and the erasure stage chooses the build's strategies, the emitter's branches on a build that keeps its values in the memory (GC structs or C structs, call_ref or a table, struct.get or a load) | a `match` that misses a case is refused by `covering`; `effects of fact` is Pure; `effects of` a `while` without a measure is Div and it still runs; `speak` over a list of an animal and a dog picks each one's method |
 | T6 laws, effects and instances | a law is a theorem; a plain compile proves by computing, else the law is Tested; effects are computation types and a proof refuses an impure function; traits are structures and instances come from overloads, a protocol (a class with a required word) is such a trait (E3, E5's effects, P1, P2); `wap check` loads the proof extension | `law double(3) == 6` Proved; `wap check` proves a law from two earlier laws; a proof using an impure function refused naming the chain; `sort` on a class without `compare` refused naming the trait |
 | T7 the theory extension retires | what is left of wap/extensions/theory goes: its run door and its prelude, whose words now live once in wap/types; the provers (P3, P4), the second opinion (K7), the export, the arithmetic proofs and the door `wap check` live in wap/extensions/proof, which only `wap check` and proofs load | every test as before; `wap check` and the second opinion from wap/extensions/proof; the trust base listed by a command |
 | T8 storage by context (cuttable) | an `int` is stored as i32 or i64 where computing or a fact in scope shows it fits (the plain compile loads no provers), else as a big number; the big numbers come from a library only the programs that need them load; `int` no longer wraps | `2 ^ 62 * 4` prints 18446744073709551616; a loop counter stays an i64 and the benchmarks keep their guardrails; the compiler's build holds no big numbers (13) |
 
 Order: K1, then K2 to K6 in a row, with K3 right after K2 since every program is full of numbers. L follows K as
-its table says. P1 and P2 follow K4; P3 and P4 follow P2, in the proof extension. T1 to T8 follow one another, T1b right after T1, TM between T2 and T3, each
+its table says. P1 and P2 follow K4; P3 and P4 follow P2, in the proof extension. T1 to T8 follow one another, T1b right after T1, T5u before T5a (held work waits on unions: possessive-dynamic, record-fields-loop, refusal-partway's finally, emit-literals' K), TM between T2 and T3, each
 landing before the next begins. T1 changes the kernel the seed reads beside it, so it takes the careful
 path: the new kernel added, the seed refreshed, then the old code deleted. T2 changes nothing the seed reads (the
 compiler reads only kernel/forms.wap and links no moved file until T3), so its sub-steps land on the normal path
@@ -1174,6 +1175,57 @@ neither.
   measured numbers, and the integrator raises the ceilings at landing. The self-build's memory and speed are
   reported as soundness checks, never as limits. Core counts and the standing OKs bound only sugar and syntax forms
   (user 2026-11-27).
+
+## 15 Modules without source
+
+The goal (card modules-without-source): a compiled module ships without its source, its types entirely in the wasm,
+and the seed runs with no .wap file beside it.
+
+What a module reads back from source today:
+- its wap section is wap text: the module's files with the definitions it compiled cut out (extensions/wasm/modules.wap
+  header_source, kept_lines), parsed again by every use (wasm_source, through core/pipeline.wap source_of and
+  notation_of);
+- each export's name is a header line, `add(a: int, b: int = 1) → int`, parsed into a foreign definition
+  (foreign_definition);
+- the files it uses travel as text in sections of their own, `types.wasm/host.wap` (carried_files, part_source);
+- the seed folder holds the types module's sources, the kernel, the extensions' rule files and lib/ as .wap
+  (scripts/lib/wap-beside.sh WAP_BESIDE), read where no warm state covers them, and lib/'s modules on every `use`.
+
+What it carries in their place: the code as read, never text. The warm state (extensions/warm.wap) already holds
+every file the compiler reads before a program operated once, packed (extensions/packed.wap), and a compile takes a
+file from it with no parse: core/pipeline.wap operated_once finds the file in `language.operated` and reads nothing.
+A module's wap section becomes that same thing for its own files: one packed list of file entries, each the file's
+operated code (its rules, records, enums, the bodies that travel along: generic and inlinable functions), its words
+and its declared code, its exports' declarations as declared code built from their signatures, and one entry for
+each file it carries. The header line stays as the export's name for other languages and the dispatcher; wap itself
+reads the entry.
+
+| step | what works after it | core | extension | outcome lines |
+|---|---|---|---|---|
+| M1 packed section | a `use "m.wasm"` brings m's entries in operated, as the warm state brings the compiler's own files: no reader, no shape rules, no header parse on it; header_source, kept_lines, carried_files, part_source and foreign_definition's parse go | +3 (pipeline.wap: a file's reader may bring it operated) | about −70, +30 (warm.wap's file_entry, shared) | a program using a module whose .wap files are deleted after its build runs and prints as before; a carried file's rule works in the program |
+| M2 seed without source | the seed folder holds wap.wasm, types.wasm, lib/'s modules compiled once each, and the tools; no .wap; the standard words name the modules (warm.wap standard_entry) | 0 | wap-beside.sh copies modules, not sources; refresh-seed.sh builds lib/ | test_hello and a `use math` program run from a seed folder holding no .wap file |
+| M3 kernel terms (with T5g) | the entries hold the declarations as the kernel accepted them: signatures and records as kernel terms, the bodies of pure definitions erased (T5a); the compiler's warm state is the types module's own section, so warm.wap goes | 0 | −100 (warm.wap), +60 (T5g's reader) | T5g's line |
+
+Messages: a refusal inside a module's code quotes it as the compiler holds it (core/errors.wap quoted, which already
+does so for code no file holds), with the module's file and line, which the places in the entry keep.
+
+Cost: +3 core in all, the extension about −80 net; the seed folder smaller by the sources. Order: M1 and M2 need no
+T step and can land beside T5a; M3 lands with T5g.
+
+The wiki: wiki/wasm-representation.md:39, old: "Format: The wap section is a header file in wap format, plain wap
+text: the module's rules, enums and the bodies that travel as source. Its exports' declarations need no lines there,
+since each export's name is its header line, `add(a: int, b: int = 1) → int`. The reader then runs the normal reader
+and declare stages on it. That needs no new binary format and no second schema, and reading a .wasm reuses about 90%
+of reading a .wap". New: "Format: the wap section holds the module's code as the compiler read it: its rules, enums,
+records, declarations and the bodies that travel along, already read and declared, in wap's packed notation. A use
+reads no source and parses nothing, so a module needs no source beside it. Each export's name stays its header line,
+`add(a: int, b: int = 1) → int`, for other languages and the dispatcher." Line 32, "Generic or inlinable functions as
+source", reads "Generic or inlinable functions, their bodies read: … its body goes along and the importer compiles a
+copy for its own types".
+
+Open for the user: the decision of 2026-11-25 lets templates, rules and class hierarchies "still travel as source";
+this plan carries them read, as packed code. Recommended: packed, since the warm state shows it works and it is what
+lets a module ship without source.
 
 ## Sources
 

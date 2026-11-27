@@ -11,6 +11,7 @@
 # its term, type_text writes a term back as a program writes it, for messages and `format` only.
 
 use "stage.wap"
+use "errors.wap"
 use "../kernel/forms.wap"
 use "../kernel/primitives.wap"
 use "../kernel/terms.wap"
@@ -24,8 +25,18 @@ BLOCK_WORD = "block"
 FUNCTION_ARROW = "->"
 PARAMETERS_WORD = "and"
 NO_PARAMETERS_WORD = "none"
+# A subtype by condition, `int where it > 0` (wiki/subtype.md), as sugar/data.wap writes it: where(int, it => it > 0),
+# the values of its parent that meet the condition, the function of `it`
+WHERE_WORD = "where"
+# A union, `int or text` (also `int | text`, the reader's bit_or): a value of any of its parts, flat, each part once and
+# in no order, `int or ø` an int?; the or rule writes it as a choice, `{ held = int; If(held, held, text) }`
+# (sugar/conditions.wap)
+UNION_WORD = "or"
+UNION_ALIAS = "|"
 # An optional type, `int?`, as the reader reads it: the type glued to `?`; it holds a value of the type or ø
 OPTIONAL_MARK = "?"
+# A failable type, `int??`: a value of the type, ø or an Error, which `int or Error` writes precisely (wiki/Error.md)
+FAILABLE_MARK = "??"
 # the dynamic type, which holds any value, ø too: an any? is an any
 ANY_TYPE = "any"
 # a type still unknown, a hole of the typing (core/analyze/letters.wap), shown by its id: α3
@@ -52,6 +63,8 @@ CHAR_TYPE = "char"
 NUMBER_TYPE = "number"
 BOOL_TYPE = "bool"
 MAP_TYPE = "map"
+# the words of the types whose values hold others, typed by their parts
+COLLECTION_WORDS = [LIST_TYPE, MAP_TYPE]
 # the bare type of an enum's values, which every enum fits
 ENUM_TYPE = "enum"
 # A function value's type, its own for each `x => …` the program writes: the word of the function it calls, `fn` and
@@ -66,7 +79,7 @@ DATA_TERM = type_at(Zero)
 # the words core builds types of and the number of parts each takes, each declared at its place here, its id
 class CoreWord { word: text; parts: int = 0 }
 // todo turn all of these into Enum(s) AFTER The theory is done. This is a big refactoring for all files to replace all magic keywords with enums!
-CORE_WORDS = [CoreWord(ANY_TYPE), CoreWord(EMPTY_TYPE), CoreWord(NEVER_TYPE), CoreWord(NODE_TYPE), CoreWord(LIST_TYPE, 1), CoreWord(RANGE_TYPE), CoreWord(INT_TYPE), CoreWord(FLOAT_TYPE), CoreWord(TEXT_TYPE), CoreWord(CHAR_TYPE), CoreWord(NUMBER_TYPE), CoreWord(BOOL_TYPE), CoreWord(MAP_TYPE, 2), CoreWord(ENUM_TYPE), CoreWord(FUNCTION_WORD), CoreWord(BLOCK_WORD), CoreWord(OPTIONAL_MARK, 1), CoreWord(FUNCTION_ARROW), CoreWord(PARAMETERS_WORD, 2), CoreWord(NO_PARAMETERS_WORD)]
+CORE_WORDS = [CoreWord(ANY_TYPE), CoreWord(EMPTY_TYPE), CoreWord(NEVER_TYPE), CoreWord(NODE_TYPE), CoreWord(LIST_TYPE, 1), CoreWord(RANGE_TYPE), CoreWord(INT_TYPE), CoreWord(FLOAT_TYPE), CoreWord(TEXT_TYPE), CoreWord(CHAR_TYPE), CoreWord(NUMBER_TYPE), CoreWord(BOOL_TYPE), CoreWord(MAP_TYPE, 2), CoreWord(ENUM_TYPE), CoreWord(FUNCTION_WORD), CoreWord(BLOCK_WORD), CoreWord(OPTIONAL_MARK, 1), CoreWord(UNION_WORD, 2), CoreWord(FUNCTION_ARROW), CoreWord(PARAMETERS_WORD, 2), CoreWord(NO_PARAMETERS_WORD)]
 core_word(word: text) as Term := constant(core_place(word) ?? raise("${word} is no word core builds types of"), word, [])
 core_place(word: text) as int? := (1 to #CORE_WORDS).find(at => CORE_WORDS#at.word == word)
 ANY_TERM = core_word(ANY_TYPE)
@@ -85,6 +98,7 @@ MAP_TERM = core_word(MAP_TYPE)
 FUNCTION_TERM = core_word(FUNCTION_WORD)
 BLOCK_TERM = core_word(BLOCK_WORD)
 OPTIONAL_TERM = core_word(OPTIONAL_MARK)
+UNION_TERM = core_word(UNION_WORD)
 ARROW_TERM = core_word(FUNCTION_ARROW)
 PARAMETERS_TERM = core_word(PARAMETERS_WORD)
 NO_PARAMETERS_TERM = core_word(NO_PARAMETERS_WORD)
@@ -97,11 +111,12 @@ TYPE_WORDS = ATOM_TYPES + [BOOL_TYPE, ANY_TYPE, LIST_TYPE, MAP_TYPE, ENUM_TYPE, 
 # The table of the types a compile met: the terms by place, the places by hash, the environment declaring their words
 # by key, the declaration a record's own word names (two records of one name are two words, the first word of each
 # name kept and the words sharing one marked, so their texts tell them apart), the type a shape's word narrows
-# (core/analyze/shapes.wap), the key of the function a function value's word calls and how many typed functions the
-# environment holds as assumptions (core/analyze/calls.wap function_assumed). It is the compile's own, as a
+# (core/analyze/shapes.wap), the condition a subtype's word holds, the subtypes met so far, the key of the function a
+# function value's word calls and how many typed functions the environment holds as assumptions (core/analyze/calls.wap
+# function_assumed). It is the compile's own, as a
 # symbol table is: every stage reads a type fact through it, so it is one value for the whole run, not handed down
 # every call
-class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; shared: map<int, bool> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {}; assumed: int = 0 }
+class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; shared: map<int, bool> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {}; conditions: map<int, Node> = {}; subsets: list<Term> = []; assumed: int = 0 }
 TYPES: TypeTerms = TypeTerms()
 core_environment() as Environment := {
 	e = Environment()
@@ -144,6 +159,25 @@ narrowing(word: Term, type: Term) as Term := {
 	TYPES.narrows[word_id(word)] = type
 	word
 }
+# a subtype by condition: a word narrowing its parent, named by the condition as written, the function of `it` it holds
+subset_term(parent: Term, condition: Node) as Term := {
+	# shown as the program wrote it, `int where it > 0`, keyed by its code, so two spacings of a condition are one type
+	shown = "${type_text(parent)} ${WHERE_WORD} ${condition_shown(condition)}"
+	word = word_keyed(shown, "${type_text(parent)} ${WHERE_WORD} ${text(condition_of(condition))}")
+	if not TYPES.conditions.has(word_id(word)) { TYPES.subsets.add(narrowing(word, parent)) }
+	TYPES.conditions[word_id(word)] = condition
+	narrowing(word, parent)
+}
+# a condition as written, or as the compiler holds one it made
+condition_shown(condition: Node) as text := written_span(condition_of(condition)) ?? text(condition_of(condition))
+# what a condition's function gives, as written or lowered: `it > 0` of `it => it > 0`
+condition_of(condition: Node) as Node := match condition {
+	Fn(parameters, body) => body
+	Call(arrow, parts) => parts.last
+	_ => condition
+}
+# the condition a subtype holds, the function of `it`; ø for any other type
+subset_condition(type: Term?) as Node? := if is_word(type) then TYPES.conditions.get(word_id(type!)) else ø
 # the type a shape's word narrows, `Node` of Define, ø for any other type
 narrowed_type(type: Term?) as Term? := if is_word(type) then TYPES.narrows.get(word_id(type!)) else ø
 # the place of a type in the table, entered the first time it is met
@@ -168,6 +202,7 @@ spine(type: Term) as list<Term> := match type.shape {
 type_built(word: Term, parts: list<Term>) as Term := {
 	spelled = word_of(word)
 	if spelled == OPTIONAL_MARK and #parts == 1 { return optional_type(parts#1) }
+	if spelled == FAILABLE_MARK and #parts == 1 { return union_type([parts#1, EMPTY_TERM, word_named(symbol(ERROR_CASE))]) }
 	if spelled == FUNCTION_ARROW and not parts is empty { return function_type_of(parts.take(#parts - 1), parts.last) }
 	applied(word, parts)
 }
@@ -208,6 +243,24 @@ base_of(type: Term) as Term := base_of_optional(type) ?? type
 base_or_self(type: Term?) as Term? := if type == ø then ø else base_of(type!)
 optional_type(base: Term) as Term := if base_of_optional(base) != ø or same(base, ANY_TERM) then base else applied(OPTIONAL_TERM, [base])
 base_of_optional(type: Term?) as Term? := only_term(parts_of_type(OPTIONAL_MARK, type))
+# a union of types: its parts flat, each once, sorted by their texts, ø among them making it optional and any any; a
+# part alone is itself
+union_type(types: list<Term>) as Term := {
+	parts = types.flat_map(union_parts).unique().sorted(by: part => type_text(part, yes))
+	if parts.contains(ANY_TERM) { return ANY_TERM }
+	present = parts.filter(part => part != EMPTY_TERM)
+	if present is empty { return EMPTY_TERM }
+	if #present < #parts { return optional_type(union_type(present)) }
+	present.reverse().drop(1).fold(present.last, (rest, part) => applied(UNION_TERM, [part, rest]))
+}
+# the parts of a union, an optional's value type and ø, any other type itself
+union_parts(type: Term) as list<Term> := {
+	base = base_of_optional(type)
+	if base != ø { return union_parts(base!) + [EMPTY_TERM] }
+	(parts_of_type(UNION_WORD, type) ?? return [type]).flat_map(union_parts)
+}
+# whether a type is a union, an optional one too, `(int or text)?`
+is_union(type: Term?) as bool := parts_of_type(UNION_WORD, base_or_self(type)) != ø
 only_term(parts: list<Term>?) as Term? := if parts != ø and #parts == 1 then parts#1 else ø
 # a function as the kernel's runtime words name it, `write(text, int, bool)`, when it is one of them
 # (kernel/primitives.wap RUNTIME_WORDS), its types spelled only for a name among theirs
@@ -223,10 +276,17 @@ type_text(type: Term?, whole: bool = no) as text := {
 	if is_word(type) { return if whole or TYPES.shared.has(word_id(type!)) then declared_at(TYPES.environment, word_id(type!))!.name else if TYPES.functions.has(word_id(type!)) then FUNCTION_WORD else word_of(type)! }
 	if function_value_key(type) != ø and not whole { return FUNCTION_WORD }
 	base = base_of_optional(type)
-	if base != ø { return type_text(base, whole) + OPTIONAL_MARK }
+	if base != ø { return if is_union(base) then failable_text(base!, whole) ?? "(${type_text(base, whole)})${OPTIONAL_MARK}" else type_text(base, whole) + OPTIONAL_MARK }
+	if is_union(type) { return union_parts(type!).map(part => type_text(part, whole)).join(" ${UNION_WORD} ") }
 	function = function_parts(type)
 	if function != ø { return "(${types_text(function.parameters, whole)}) ${FUNCTION_ARROW} ${type_text(function.result, whole)}" }
 	"${type_text(head_of(type!), whole)}<${types_text(parts_of(type!), whole)}>"
+}
+# an optional's union of an Error and one other type, shown as that type failable, `int??`; ø for any other
+failable_text(base: Term, whole: bool) as text? := {
+	parts = union_parts(base)
+	others = parts.filter(part => type_text(part) != ERROR_CASE)
+	if #parts == 2 and #others == 1 then type_text(others#1, whole) + FAILABLE_MARK else ø
 }
 types_text(types: list<Term>, whole: bool = no) as text := types.map(type => type_text(type, whole)).join(", ")
 # a value of a type read as another where that one is wanted: a char as its text, a range as its list
@@ -234,7 +294,7 @@ READS = [[CHAR_TERM, TEXT_TERM], [RANGE_TERM, list_type(INT_TERM)]]
 read_of(given: Term?) as Term? := if given == ø then ø else (READS.find(pair => same(pair#1, given!)) ?? return ø)#2
 # the types whose values pass an any's test for a type: its own and those read as it, a char for a text; a number has
 # no box of its own, its values are ints and floats
-passing_types(type: Term) as list<Term> := if same(type, NUMBER_TERM) then [INT_TERM, FLOAT_TERM] else [type] + READS.filter(pair => same(pair#2, type)).map(pair => pair#1)
+passing_types(type: Term) as list<Term> := if is_union(type) then union_parts(type).flat_map(passing_types) else if same(type, NUMBER_TERM) then [INT_TERM, FLOAT_TERM] else [type] + READS.filter(pair => same(pair#2, type)).map(pair => pair#1)
 list_type(item: Term) as Term := applied(LIST_TERM, [item])
 # the word a type is named by, `list` of list<int>, `text` of text
 type_word(type: Term) as text := word_of(type) ?? type_text(type)
@@ -267,6 +327,10 @@ refused_type(type: Term, why: text) as never := raise("${why}: ${type_text(type)
 type_term(n: Node) as Term := {
 	known = fact_type(fact_of(n, TYPE))
 	if known != ø { return known! }
+	subset = subset_written(n)
+	if subset != ø { return subset_term(type_term(subset#1), subset#2) }
+	union = union_written(n)
+	if union != ø { return union_type(union.map(part => type_term(part))) }
 	parts = written_parts(n)
 	if parts != ø { return type_built(word_term(text(parts#1)), parts.drop(1).map(part => type_term(part))) }
 	match n {
@@ -275,12 +339,55 @@ type_term(n: Node) as Term := {
 		_ => word_named(n)
 	}
 }
+# whether code is a type as written with parts or a condition, `list<int>`, `int?`, `int where it > 0`
+is_type_written(n: Node) as bool := written_parts(n) != ø or subset_written(n) != ø or union_written(n) != ø
+# a union as written, read as `or` reads (both_parts), or `int | text`: its two parts; ø for other code
+union_written(n: Node) as list<Node>? := {
+	or_parts = both_parts(n)
+	if or_parts != ø { return if or_parts!.arm == 2 then [or_parts!.first, or_parts!.second] else ø }
+	match n { Call(called, items) => if text(called) == UNION_ALIAS and #items == 2 then items else ø; _ => ø }
+}
+# the two parts of `a and b`, If(a, b, no), with the arm where both hold, 1; of `a or b`, { held = a; If(held, held, b) },
+# with the arm where neither holds, 2, so `if x == ø or x.n == 0 { return }` leaves x present after it; ø for any other
+# form
+class BothParts { first: Node; second: Node; arm: int }
+both_parts(n: Node) as BothParts? := match n {
+	If(first, second, otherwise) => if otherwise is False then BothParts(first, second, 1) else ø
+	_ => {
+		statements = statements_written(n) ?? return ø
+		if #statements == 2 then either_parts(statements#1, statements#2) else ø
+	}
+}
+# a block's statements, written (`{ a; b }`) or lowered
+statements_written(n: Node) as list<Node>? := match n {
+	Block(items) => items
+	List(items, Bracket.Curly, separator) => items
+	_ => ø
+}
+either_parts(held: Node, chosen: Node) as BothParts? := {
+	assignment = assignment_parts(held) ?? return ø
+	place = assignment#1
+	match chosen { If(tested, kept, otherwise) => if same_name(tested, place) and same_name(kept, place) then BothParts(assignment#2, otherwise, 2) else ø; _ => ø }
+}
+# a variable's place and the value given it, written (`x = 1`) or lowered
+assignment_parts(n: Node) as list<Node>? := match n {
+	Set(place, value) => [place, value]
+	Call(called, arguments) => if is_default_given(n) then arguments else ø
+	_ => ø
+}
+# a subtype as written, `where(T, it => p)`, as notation or lowered: its parent and its condition's function; ø for
+# other code
+subset_written(n: Node) as list<Node>? := match n {
+	Key(name, Op.None, List(items, Bracket.Round, separator)) => if text(name) == WHERE_WORD and #items == 2 then items else ø
+	Call(called, items) => if text(called) == WHERE_WORD and #items == 2 then items else ø
+	_ => ø
+}
 # A written type with parts read as its word and then the parts, as type_parts reads a term: `list<int>` as list and
 # int, `int?` as ? and int, `(int, text) -> bool` as ->, int, text and bool, in round brackets or not; ø for a word
 # alone and any other code
 written_parts(n: Node) as list<Node>? := match n {
 	Key(name, Op.None, List(items, Bracket.Less, separator)) => [name] + items
-	List(items, Bracket.None, separator) => if #items == 2 and text(items#2) == OPTIONAL_MARK then [items#2, items#1] else ø
+	List(items, Bracket.None, separator) => if #items == 2 and [OPTIONAL_MARK, FAILABLE_MARK].contains(text(items#2)) then [items#2, items#1] else ø
 	Call(called, items) => if text(called) == FUNCTION_ARROW and #items == 2 then [called] + items_or_one(items#1) + [items#2] else ø
 	List(items, Bracket.Round, separator) => if #items == 1 then written_parts(items#1) else ø
 	_ => ø

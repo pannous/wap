@@ -34,12 +34,12 @@ parts_fitted(parts: list, s: TypingState, expected: Term? = ø) as list := {
 	type = parts_type(parts, s, expected)
 	parts.map(part => as_wanted(part, type, s))
 }
-# the type that holds all of these, ø for none: two at a time, or where two only meet in any, the one of them that
-# holds every other, whatever their order: `"one"`, `2` and a Symbol meet in Node
+# the type that holds all of these, ø for none: two at a time, or where two only meet in any or a union, the one of
+# them that holds every other, whatever their order: `"one"`, `2` and a Symbol meet in Node
 joined_all(types: list, s: TypingState) as Term? := {
 	if types is empty { return ø }
 	folded = types.drop(1).fold(types#1, (a, b) => joined_settling(a, b, s))
-	if folded != ANY_TERM { return folded }
+	if folded != ANY_TERM and not is_union(folded) { return folded }
 	types.find(holder => types.all(type => conversion(type, holder, s) in STATIC_CONVERSIONS)) ?? folded
 }
 # the type that holds both: either when they are one, `T?` for a T and ø (or a T?), the type two shapes of it narrow,
@@ -56,8 +56,16 @@ joined_type(a: Term?, b: Term?, s: TypingState) as Term? := {
 	# two shapes of one type join as that type, `Define` and `Fn?` as a Node?
 	if base_of_optional(a) != ø or base_of_optional(b) != ø then optional_type(shared) else shared
 }
-# the type of two where one fits the other: the wider, else any
-wider(a: Term, b: Term, s: TypingState) as Term := if conversion(b, a, s) in STATIC_CONVERSIONS then a else if conversion(a, b, s) in STATIC_CONVERSIONS then b else ANY_TERM
+# whether a list or a map is as it is where one of its word is wanted whose parts its own parts are as they are:
+# `[Call(…)]` where a list<Node> is, `{a: 1, b: "x"}` where a map<text, any> is
+parts_as_they_are(given: Term, wanted: Term, s: TypingState) as bool := {
+	if not type_word(given) in COLLECTION_WORDS or type_word(given) != type_word(wanted) { return no }
+	own = parts_of(given)
+	wanted_parts = parts_of(wanted)
+	#own == #wanted_parts and (1 to #own).all(at => conversion(own#at, wanted_parts#at, s) == Conversion.Same)
+}
+# the type of two where one fits the other: the wider, else their union; any while a type is still unknown
+wider(a: Term, b: Term, s: TypingState) as Term := if conversion(b, a, s) in STATIC_CONVERSIONS then a else if conversion(a, b, s) in STATIC_CONVERSIONS then b else if has_unknowns(a) or has_unknowns(b) then ANY_TERM else union_type([a, b])
 # the type a shape narrows, `Node` of `Define` or of `Fn?`; ø for any other type
 shape_base(type: Term) as Term? := narrowed_type(base_of_optional(type) ?? type)
 
@@ -101,14 +109,19 @@ conversion(given: Term?, wanted: Term?, s: TypingState) as Conversion? := {
 	# a shape's value is a value of the type it narrows: a Record where a Node is
 	narrows = narrowed_type(given)
 	if narrows != ø and conversion(narrows, wanted, s) == Conversion.Same { return Conversion.Same }
-	# a list of a shape's values is a list of the type it narrows, its items those values as they are
+	# a list of a shape's values is a list of the type it narrows, its items those values as they are, and so a map's
 	given_item = item_type(given)
 	wanted_item = item_type(wanted)
-	if given_item != ø and wanted_item != ø and (narrowed_type(given_item) ?? given_item) == wanted_item { return Conversion.Same }
+	if parts_as_they_are(given, wanted, s) { return Conversion.Same }
+	# a union's value is held as an any's is, so it is as it is where an any is, a wider union, or where each of its
+# parts is
+	if is_union(given) and (wanted == ANY_TERM or is_union(wanted) and boxed_fit(given, wanted) or union_parts(given).all(part => conversion(part, wanted, s) == Conversion.Same)) { return Conversion.Same }
+	# a value of what a narrowing narrows, or of what narrows to that, is narrowed: an int to an index through nat
 	narrowing = narrowed_type(wanted)
-	if narrowing != ø and given == narrowing { return Conversion.Narrowed }
+	if narrowing != ø and conversion(given, narrowing!, s) in [Conversion.Same, Conversion.Narrowed] { return Conversion.Narrowed }
 	if boxed_fit(given, wanted) { return Conversion.Boxed }
 	if subtype_base(wanted, s.records) == given { return Conversion.Subtyped }
+	if narrowed_part(given, wanted, s) != ø { return Conversion.Narrowed }
 	if given == INT_TERM and wanted == FLOAT_TERM { return Conversion.Widened }
 	optional = base_of_optional(wanted)
 	if reads_as(optional ?? wanted, given, s.records) { return Conversion.Read }
@@ -118,7 +131,8 @@ conversion(given: Term?, wanted: Term?, s: TypingState) as Conversion? := {
 	if optional != ø and base_of_optional(given) != ø and conversion(base_of_optional(given), optional, s) == Conversion.Same { return Conversion.Same }
 	if optional != ø and (given == EMPTY_TERM or conversion(given, optional, s) == Conversion.Same) { return Conversion.Wrapped }
 	if (has_unknowns(given) or has_unknowns(wanted)) and unified(wanted, given, [], s) != ø { return Conversion.Settled }
-	if given == ANY_TERM then Conversion.Checked else ø
+	# out of an any, or of a union to a part of it, the way is a check when the program runs
+	if given == ANY_TERM or is_union(given) and union_parts(given).any(part => part in passing_types(wanted)) then Conversion.Checked else ø
 }
 # typed code as the wanted type has its value, its conversion written: an unknown settled, a character read as its
 # text, an any's value checked by `prim cast`, typed the wanted type, at the code's place; refused at `at` when it
@@ -133,7 +147,8 @@ converted(n: Node, wanted: Term, s: TypingState, at: Node, place: text) as Node 
 	# a function value converts by its function, typed for the wanted function type
 	way = conversion(given, wanted, s) ?? refused(at, "this gives ${type_text(given)}, ${place} ${type_text(wanted)}" + (if counted(given, wanted) then ": a bool counts as 1 or 0 only in a call, write it `as int`" else ""))
 	if way == Conversion.Settled { settles(given, wanted, s) }
-	if way == Conversion.Narrowed { return narrowed_call(n, wanted, at, s) }
+	if way == Conversion.Narrowed { return if narrowed_part(given, wanted, s) == ø then narrowed_call(n, wanted, at, s) else converted(narrowed_call(n, narrowed_part(given, wanted, s)!, at, s), wanted, s, at, place) }
+	if way == Conversion.Checked and error_part(given) != ø and error_part(wanted) == ø { return unfailed_call(n, given, wanted, s) }
 	if way == Conversion.Checked then with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [n]), n), wanted) else repacked(n, way, wanted, s)
 }
 # code giving no value gives ø wherever a value is wanted, `answer(f())` and `y: int? = f()` of an f giving nothing;
@@ -149,10 +164,10 @@ repacked(n: Node, way: Conversion, wanted: Term, s: TypingState) as Node := matc
 	Conversion.Adapted => function_converted(n, wanted, s)
 	_ => n
 }
-# a list or a map put into an any, its type kept for the dispatches that choose among generic definitions by it
+# a list or a map put into an any or a union, its type kept for the dispatches that choose among generic definitions by it
 boxing_noted(n: Node, wanted: Term, s: TypingState) as Node := {
 	given = value_type(n) ?? return n
-	if wanted == ANY_TERM and type_word(given) in [LIST_TYPE, MAP_TYPE] and not s.boxed.any(type => type == given) { s.boxed.add(given) }
+	if wanted == ANY_TERM or is_union(wanted) { for part in union_parts(given) { if type_word(part) in COLLECTION_WORDS and not s.boxed.any(type => type == part) { s.boxed.add(part) } } }
 	n
 }
 # a plain value put where a reference is wanted, an any, a number or an optional, in its box: `prim box(3)`; any
@@ -183,14 +198,18 @@ bare_fit(given: Term, wanted: Term, records: Records) as bool := {
 }
 # whether a value is tested for a type when the program runs: an any or a number boxing it, or a class's value that
 # may be one of its extensions, a place typed by a class holding those too (notes/coc-plan.md "extends")
-tested_when_run(wanted: Term, given: Term, records: Records) as bool := boxed_fit(wanted, given) or records.extending and extends_class(wanted, given, records)
+tested_when_run(wanted: Term, given: Term, records: Records) as bool := boxed_fit(wanted, given) or extends_class(wanted, given, records)
 # a class's value where a class it extends is wanted, as it is: its fields begin with those of the class it extends
 # (wap/sugar/records.wap writes `@extends(A)` on its name), and so on up, `class C extends B` where B extends A
 extends_class(given: Term, wanted: Term, records: Records) as bool := {
+	if not records.extending.contains(word_of(given) ?? return no) { return no }
 	base = record_term(record_named(records, type_term(class_extended(record_named(records, given) ?? return no) ?? return no)) ?? return no)
 	base == wanted or extends_class(base, wanted, records)
 }
-# any value where any is wanted, an int or a float where a number is
-boxed_fit(given: Term, wanted: Term) as bool := wanted == ANY_TERM or wanted == NUMBER_TERM and given in passing_types(wanted)
+# the part of a union wanted that a value given narrows to, a Node to the Error of an `int or Error`; ø for none
+narrowed_part(given: Term, wanted: Term, s: TypingState) as Term? := if is_union(wanted) then union_parts(wanted).find(part => conversion(given, part, s) == Conversion.Narrowed) else ø
+# any value where any is wanted, an int or a float where a number is, a part of a union, or a narrower union, where it is:
+# every value passing as the given type passes as the wanted one, a number's where a union holds int and float
+boxed_fit(given: Term, wanted: Term) as bool := wanted == ANY_TERM or (wanted == NUMBER_TERM or is_union(wanted)) and union_parts(given).flat_map(passing_types).all(part => part in passing_types(wanted))
 # whether a type's values are held as they are, not by reference: put where a reference is wanted, each goes in its box
 is_plain(type: Term?) as bool := is_word(type) and type_text(type) in [INT_TYPE, FLOAT_TYPE, BOOL_TYPE, CHAR_TYPE]

@@ -159,7 +159,7 @@ one_run() {
 }
 # the tests, the longest of their last run first (a test not run before counts as quick)
 longest_first() {
-	for test in "$@"; do printf '%s\t%s\n' "$(sed -n "s/^$TOOK \([0-9]*\) s$/\1/p" "$(outputs "$test")" 2>/dev/null)" "$test"; done | sort -t $'\t' -k1,1nr | cut -f2-
+	for test in "$@"; do printf '%s\t%s\n' "$(sed -n "s/^$TOOK \([0-9]*\) s$/\1/p" "$(outputs "$test")" 2>/dev/null | tail -1)" "$test"; done | sort -t $'\t' -k1,1nr | cut -f2-
 }
 # a test whose output does not end with ENDED was cut short: one ✗ says so, whoever killed it
 ended() { [ "$(tail -n 1 "$(outputs "$1")" 2>/dev/null)" = "$ENDED" ] || echo "✗ $(basename "$1") ran to its end" >>"$(outputs "$1")"; }
