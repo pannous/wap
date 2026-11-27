@@ -17,7 +17,7 @@ use "quotients.wap"
 use "primitives.wap"
 
 # the shortcuts, each fixed on every number by its theorems; a divide statement binds the remainder too
-enum Shortcut { Add, Subtract, Multiply, Equal, AtMost, Divide, Remainder }
+enum Shortcut { Add, Subtract, Multiply, Equal, AtMost, Divide, Remainder, Difference }
 # the shortcuts a statement names, by the word it names them with
 SHORTCUT_WORDS := ["add", "subtract", "multiply", "equal", "at_most", "divide"]
 DECLARED_SHORTCUTS := [Shortcut.Add, Shortcut.Subtract, Shortcut.Multiply, Shortcut.Equal, Shortcut.AtMost, Shortcut.Divide]
@@ -39,7 +39,7 @@ class Numbers {
 }
 # What core's int is made of (counting.wap): its type and cases, the functions its rows mean that the provers read,
 # and the two theorems joining `(a == b) == yes` and `Equal(int, a, b)`
-class Integers { type: Term; zero: Term; positive: Term; negative: Term; difference: Term; sum: Term; minus: Term; not_above: Term; equal_integers: Term; equals_sound: Term; equals_complete: Term }
+class Integers { type: Term; zero: Term; positive: Term; negative: Term; sum: Term; minus: Term; not_above: Term; equal_integers: Term; equals_sound: Term; equals_complete: Term }
 # a whole number as int's case, its payload a count literal
 int_numeral(e: Environment, value: int): Term := {
 	i = e.integers!
@@ -138,10 +138,10 @@ shortcut_declared(e: Environment, kind: Shortcut, functions: list<Term>, theorem
 		if bound_function(n, kinds#at) is not ø { refused(SHORTCUT, "${kinds#at} is bound already") }
 		axiom_free(e, functions#at)
 		d = declaration_of(e, functions#at)
-		wanted = function_type(n, kinds#at)
+		wanted = function_type(e, kinds#at)
 		if d.levels is not empty or not computes_as(e, d.type, wanted) { refused(SHORTCUT, "${d.name} is a ${shown(d.type)}, and ${kinds#at} takes a ${shown(wanted)}") }
 	}
-	statements = shortcut_statements(n, kind, functions)
+	statements = shortcut_statements(e, kind, functions)
 	if #theorems != #statements { refused(SHORTCUT, "${kind} is fixed by ${#statements} theorems, and is given ${#theorems}") }
 	for at in 1 to #statements { theorem_fixes(e, theorems#at, statements#at) }
 	for at in 1 to #kinds { n.shortcuts += [BoundFunction(functions#at, kinds#at)] }
@@ -175,15 +175,17 @@ bound_function(n: Numbers, kind: Shortcut): Term? := (n.shortcuts.find(bound => 
 # the function a statement needs bound first
 needed(n: Numbers, kind: Shortcut, by: Shortcut): Term := bound_function(n, kind) ?? refused(SHORTCUT, "${by} needs ${kind} bound first")
 
-# a shortcut's function type: two numbers to a number, or to a truth value for a comparison
-function_type(n: Numbers, kind: Shortcut): Term := {
+# a shortcut's function type: two numbers to a number, to a truth value for a comparison, to an int for difference
+function_type(e: Environment, kind: Shortcut): Term := {
+	n = e.numbers!
 	nat = number_type(n)
-	pi("m", nat, pi("n", nat, if compares(kind) then n.truth else n.number))
+	pi("m", nat, pi("n", nat, if compares(kind) then n.truth else if kind == Shortcut.Difference then e.integers!.type else n.number))
 }
 compares(kind: Shortcut): bool := kind == Shortcut.Equal or kind == Shortcut.AtMost
 
 # The statements that fix a shortcut's functions on every number, in the order of the table in notes/theory.md
-shortcut_statements(n: Numbers, kind: Shortcut, functions: list<Term>): list<Term> := {
+shortcut_statements(e: Environment, kind: Shortcut, functions: list<Term>): list<Term> := {
+	n = e.numbers!
 	m = free(FOR_M.id)
 	k = free(FOR_N.id)
 	z = n.zero
@@ -202,6 +204,11 @@ shortcut_statements(n: Numbers, kind: Shortcut, functions: list<Term>): list<Ter
 			[numbers_equal(n, call(add, call(multiply, call(f, m, k), k), call(rest, m, k)), m), numbers_equal(n, call(f, m, z), z), truths_equal(n, call(at_most, call(rest, m, next(n, k)), k), truth(n, yes))]
 		}
 		Remainder => []
+		Difference => {
+			i = e.integers!
+			ints_equal = (left: Term, right: Term) => for_all(n, equation(n, i.type, left, right))
+			[ints_equal(call(f, z, z), i.zero), ints_equal(call(f, next(n, m), z), apply(i.positive, m)), ints_equal(call(f, z, next(n, k)), apply(i.negative, k)), ints_equal(call(f, next(n, m), next(n, k)), call(f, m, k))]
+		}
 	}
 }
 call(f: Term, a: Term, b: Term): Term := apply(apply(f, a), b)
@@ -226,11 +233,12 @@ for_all(n: Numbers, statement: Term): Term := {
 # a shortcut on two count literals: a count, or for a comparison a truth value. Subtracting past zero gives zero,
 # dividing by zero gives zero and the remainder is then the number itself, as the theorems fix them. Two Numerals
 # whose result is one compute as ints, any others through magnitude's arithmetic (6.7)
-shortcut_value(n: Numbers, shortcut: Shortcut, a: Term, b: Term): Term := {
+shortcut_value(e: Environment, shortcut: Shortcut, a: Term, b: Term): Term := {
+	n = e.numbers!
 	small_a = literal(a)
 	small_b = literal(b)
 	small = if small_a is ø or small_b is ø then ø else small_value(n, shortcut, small_a!, small_b!)
-	small ?? whole_value(n, shortcut, whole_of(a)!, whole_of(b)!)
+	small ?? whole_value(e, shortcut, whole_of(a)!, whole_of(b)!)
 }
 # the shortcut on two ints, ø where a sum or a product passes WHOLE_LARGEST
 small_value(n: Numbers, shortcut: Shortcut, a: int, b: int): Term? := match shortcut {
@@ -241,16 +249,23 @@ small_value(n: Numbers, shortcut: Shortcut, a: int, b: int): Term? := match shor
 	Remainder => numeral(if b == 0 then a else a % b)
 	Equal => truth(n, a == b)
 	AtMost => truth(n, a <= b)
+	Difference => ø
 }
-# the shortcut on two counts of any size
-whole_value(n: Numbers, shortcut: Shortcut, a: Magnitude, b: Magnitude): Term := match shortcut {
+# the shortcut on two counts of any size; int's difference is zero for equal counts, else the case of the larger side
+# over the gap's count before it
+whole_value(e: Environment, shortcut: Shortcut, a: Magnitude, b: Magnitude): Term := match shortcut {
 	Add => count_literal(sum(a, b))
 	Subtract => count_literal(if compared(a, b) <= 0 then ZERO else difference(a, b))
 	Multiply => count_literal(product(a, b))
 	Divide => count_literal(if is_zero(b) then ZERO else divided(a, b).quotient)
 	Remainder => count_literal(if is_zero(b) then a else divided(a, b).rest)
-	Equal => truth(n, compared(a, b) == 0)
-	AtMost => truth(n, compared(a, b) <= 0)
+	Equal => truth(e.numbers!, compared(a, b) == 0)
+	AtMost => truth(e.numbers!, compared(a, b) <= 0)
+	Difference => match compared(a, b) {
+		0 => e.integers!.zero
+		1 => gap_case(e.integers!.positive, a, b)
+		_ => gap_case(e.integers!.negative, b, a)
+	}
 }
 truth(n: Numbers, holds: bool): Term := if holds then n.yes_case else n.no_case
 
@@ -276,7 +291,7 @@ number_computed(c: Checker, n: Numbers, t: Term): Term? := {
 	u = deeper(c, () => computed(c, t))
 	given = arguments(u)
 	match head(u).shape {
-		Constant(name, levels, _) => if is_constant(head(u), n.zero) and given is empty then numeral(0) else if is_constant(head(u), n.successor) and #given == 1 then shortcut_value(n, Shortcut.Add, number_computed(c, n, given#1) ?? return ø, numeral(1)) else ø
+		Constant(name, levels, _) => if is_constant(head(u), n.zero) and given is empty then numeral(0) else if is_constant(head(u), n.successor) and #given == 1 then shortcut_value(c.environment, Shortcut.Add, number_computed(c, n, given#1) ?? return ø, numeral(1)) else ø
 		_ => if is_count(u) then u else ø
 	}
 }
@@ -295,22 +310,9 @@ shortcut_fired(c: Checker, t: Term): Term? := {
 	a = number_computed(c, n, given#1) ?? return ø
 	b = number_computed(c, n, given#2) ?? return ø
 	stepped(c)
-	shortcut_value(n, shortcut!, a, b)
+	shortcut_value(c.environment, shortcut!, a, b)
 }
 
-# int's difference of two counts computed at once, as its definition (counting.wap) computes it one unit at a time:
-# zero for equal counts, else the case of the larger side over the gap's count before it
-difference_fired(c: Checker, t: Term): Term? := {
-	i = c.environment.integers ?? return ø
-	n = c.environment.numbers ?? return ø
-	given = arguments(t)
-	if not is_constant(head(t), i.difference) or #given != 2 { return ø }
-	m = whole_of(number_computed(c, n, given#1) ?? return ø)!
-	k = whole_of(number_computed(c, n, given#2) ?? return ø)!
-	stepped(c)
-	order = compared(m, k)
-	if order == 0 then i.zero else if order > 0 then gap_case(i.positive, m, k) else gap_case(i.negative, k, m)
-}
 # int's case over the count before larger - smaller
 gap_case(case: Term, larger: Magnitude, smaller: Magnitude): Term := apply(case, count_literal(difference(difference(larger, smaller), ONE)))
 
