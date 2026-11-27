@@ -320,8 +320,6 @@ theory needs the syntax changed. What goes is looseness in what a type means.
 | a unit mismatch is found at run time | at compile time where the units are written; `quantity("5 km")` still checks at run time | dimensions are type arguments |
 | `f == g` on functions: by hash, by polynomial normal form, else "undecidable" | a proposition; the same methods are provers, extensionality is a theorem | the answer comes with a proof |
 | `int`: 64 bits and wrapping on some wiki pages, unbounded on others | each number type is one mathematical object: `int` the whole numbers, stored by context; `i32` and `i64` the wrapping words | a law must mean one thing |
-| `wap verify` proves with Lean | with wap's own provers and kernel | no second system |
-| W0, the model of wap's types in Lean | the kernel is the model; `wap types` shows a program's terms | one definition of wap's types |
 | `type(x)` asks at run time | known at compile time; for an `any` it reads the node's kind | types are gone at run time |
 | the sixteen kernel forms, read by the emitter | the emitter reads the same statements, their facts made by the kernel; types and proofs emit nothing | what is checked is what runs |
 | no evaluator in the compiler | the kernel computes: types, proofs by computing, folding | equality by computing |
@@ -1372,9 +1370,7 @@ Decided by the user (2026-11-25), after the audits:
 
 Open, with the recommendation first and its cost in core; with the user through the interviewer:
 
-1. **W0 and `wap verify`.** Recommended: the Lean model and the Lean prover retire at steps T7 and P3; until
-   then they stay beside the new ones. 0 core lines.
-2. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
+1. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
    `refl`; `axiom`, `assume`; `by`, `chain`; `decreasing`; the axioms' names. Settled on the wiki pages.
 
 Decided by the plan, for the user to overrule: the rules are those of Lean 4's kernel with the four departures of
@@ -1456,5 +1452,5 @@ lets a module ship without source.
   and recursion compiled to recursors, and `do` blocks compiled to terms; its opaque constants and its IO type for
   effects.
 - The architecture audits notes/audit/2026-11-25-2.md and 2026-11-25-3.md ("What the plan misses").
-- In wap: wiki/type.md, alias.md, char.md, enum.md, variant.md, trait.md, effects.md, laws.md, W0.md, Footguns.md;
+- In wap: wiki/type.md, alias.md, char.md, enum.md, variant.md, trait.md, effects.md, laws.md, Footguns.md;
   notes/backbone.md; wap/kernel/forms.wap; wap/core/analyze/.
