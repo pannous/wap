@@ -8,9 +8,6 @@ root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
 SELF_COMPILE_SECONDS=60
 # the instructions wap1 retires compiling wap's compiler, main's as measured (notes/speed.md), and how many percent
 # more a change may take: lower the ceiling when a landing measures less, raise it only with the change's OK
-SELF_COMPILE_INSTRUCTIONS=186076190935
->>>>>>>>> Temporary merge branch 2
-=======
 SELF_COMPILE_INSTRUCTIONS=181560170107
 SLOWER_PERCENT=1
 
