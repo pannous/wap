@@ -110,20 +110,22 @@ open(path, "ab").write(b"\0" + bytes(leb) + payload)
 PY
 }
 source_commit=$(git -C "$tree" rev-parse HEAD)
-# the seed and what it reads beside it, installed and published
-cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$(dirname "$seed")" && wap_tools_built "$tree" "$seed" && wap_library_compiled "$seed" && echo "refresh-seed: replaced $seed, its folder holding no source" || { echo "refresh-seed: the new seed is installed but not published: restore the release wap-seed.lock names" >&2; exit 1; }
+# the seed and what it reads beside it, installed
+folder=$(dirname "$seed")
+cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$folder" && wap_tools_built "$tree" "$seed" || { echo "refresh-seed: the new seed is installed but not published: restore the release wap-seed.lock names" >&2; exit 1; }
 # (the old compiler's machine code goes with it, and every program's it compiled: the native wap writes the new
 # compiler's at its first run, below)
-rm -f "$(dirname "$seed")"/*.cwasm
+rm -f "$folder"/*.cwasm
 # the native wap, the command that runs the seed (wap/extensions/native/driver.wap), built by it
-native=$(dirname "$(dirname "$seed")")
+native=$(dirname "$folder")
 wap_linked "$native"
 "$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" "${WAP_LINKED[@]}" && echo "refresh-seed: installed $native/wap" ||
 	echo "refresh-seed: the native wap was not built; $native/wap stays" >&2
-# its first run, so the first one anyone makes finds the compiler's machine code written
-"$native/wap" '1+1' >/dev/null || echo "refresh-seed: the installed $native/wap fails to run 1+1" >&2
+# its first run, so the first one anyone makes finds the compiler's machine code written (the seed's folder keeps the
+# library's source: a native program's build reads types/host.wap, which no warm state holds)
+"$native/wap" '1+1' >/dev/null && echo "refresh-seed: replaced $seed" || { echo "refresh-seed: the installed $native/wap fails to run 1+1; not published: restore the release wap-seed.lock names" >&2; exit 1; }
 beside=$scratch/wap-seed-beside.tar.gz
-COPYFILE_DISABLE=1 tar -czf "$beside" -C "$(dirname "$seed")" "${WAP_BESIDE[@]}" "$WAP_LIBRARY" "${WAP_TOOLS[@]%%:*}" || { echo "refresh-seed: what the seed reads beside itself was not packed" >&2; exit 1; }
+COPYFILE_DISABLE=1 tar -czf "$beside" -C "$folder" $(cd "$folder" && ls | grep -v -e '\.cwasm$' -e '^wap\.wasm$') || { echo "refresh-seed: what the seed reads beside itself was not packed" >&2; exit 1; }
 release=wap-seed-$(date +%Y-%m-%d)-$(shasum -a 256 "$seed" | cut -c1-8)
 gh release create "$release" "$seed" "$beside" --repo "$REPOSITORY" --prerelease --title "$release" --target "$source_commit" \
 	--notes "wap's seed compiler: wap/compiler.wap of ${source_commit:0:10}, compiled by the stages A B C." &&
