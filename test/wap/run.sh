@@ -34,6 +34,8 @@ RED_NAME_LENGTH=120
 # the last line of a test's output once it ran to its end and its status was judged; an output without it was cut
 # short (a signal, a memory or time guard, a crash) and its later checks never printed
 ENDED="— ran to its end"
+# a test's wall time, the line before ENDED: the next run starts the longest tests first, so none ends the run alone
+TOOK="— took"
 # a statement starts at the margin; an indented line, a closing bracket or a comment there is none
 STATEMENT_START='^[^] \t})#]'
 
@@ -155,6 +157,10 @@ one_run() {
 		*) bash "$1" ${2:+--compiler "$2"} ;;
 	esac
 }
+# the tests, the longest of their last run first (a test not run before counts as quick)
+longest_first() {
+	for test in "$@"; do printf '%s\t%s\n' "$(sed -n "s/^$TOOK \([0-9]*\) s$/\1/p" "$(outputs "$test")" 2>/dev/null)" "$test"; done | sort -t $'\t' -k1,1nr | cut -f2-
+}
 # a test whose output does not end with ENDED was cut short: one ✗ says so, whoever killed it
 ended() { [ "$(tail -n 1 "$(outputs "$1")" 2>/dev/null)" = "$ENDED" ] || echo "✗ $(basename "$1") ran to its end" >>"$(outputs "$1")"; }
 # every test run in a job slot, niced (all_run <module or ""> <all: yes or no> <known: yes or no> <tests>), then the
@@ -179,10 +185,12 @@ all_run() {
 [ "$1" = one_run ] && {
 	shift
 	output=$(outputs "$1")
+	began=$(date +%s)
 	# in a subshell, as compile.sh exits when the compiler under test does not build
 	(one_run "$@") >"$output" 2>&1; status=$?
 	[ $status = 0 ] || grep -q '^✗' "$output" || echo "✗ $(basename "$1") exited $status" >>"$output"
 	grep -q '^[✓✗⊘]' "$output" || echo "✗ $(basename "$1") printed no check" >>"$output"
+	echo "$TOOK $(($(date +%s) - began)) s" >>"$output"
 	echo "$ENDED" >>"$output"
 	exit
 }
@@ -213,6 +221,7 @@ for test in "$@"; do
 done
 if [ $# -gt 0 ]; then all=no; set -- "${tests[@]}"; else all=yes; set -- "$programs"/test_*.wap "$here"/test_*.wap "$here"/test_*.sh; fi
 for test in "$@"; do [ -f "$test" ] || { echo "no test $test" >&2; exit 2; }; done
+mapfile -t ordered < <(longest_first "$@") && set -- "${ordered[@]}"
 mkdir -p "$results/wap" && rm -f $(outputs "$@") "$SUMMARY"
 source "$here/compile.sh"
 # --stage <n>: the compiler under test is wap<n>, wap built by itself n times (milestone 2: the tests pass with wap2)
