@@ -27,6 +27,23 @@ LEB_PAYLOAD := 128
 # the custom section of a module naming the folder of the library it imports by file name (extensions/wasm/modules.wap)
 LIBRARY_SECTION := "wap.library"
 
+# `wap build --wasm app.wap` (wiki/cli.md): app.mod.wasm the program as compiled, app.full.wasm it and every module it
+# imports by a .wasm name linked into one by Binaryen's wasm-merge, which needs no loader, app.wasm that one trimmed
+WASM_OPTION := "--wasm"
+MOD_ENDING := ".mod.wasm"
+FULL_ENDING := ".full.wasm"
+# Binaryen's features; its compact import section and custom descriptors left out, which wasmtime does not read yet
+# (drop each once it does)
+BINARYEN_FEATURES := "--all-features --disable-compact-imports --disable-custom-descriptors"
+# app.wasm's trim, wasm-opt's passes: all of them by default, `--trim=unused` only drops what nothing reaches,
+# `--trim=none` keeps the module as linked
+TRIM_OPTION := "--trim="
+TRIMMED := "-O2"
+TRIM_PASSES := {"unused": "--remove-unused-module-elements", "none": ""}
+# the name the program itself is merged under, which nothing imports
+PROGRAM_NAME := "program"
+BINARYEN_MISSING := "wap build --wasm: linking or trimming failed; it runs Binaryen's wasm-merge and wasm-opt (brew install binaryen)"
+
 # the path of the module a name names, beside the importing module unless it starts at the root, else the file of
 # its name beside the importer (a seed's tools and its modules move together), else in the folder of the library a
 # compiled importer records, else in the seed folder, whose compiler compiled a program run from its source; "" where
@@ -38,24 +55,43 @@ module_path(name: text, importer: text): text := {
 	found ?? ""
 }
 
-# the text of the module's custom section of that name; "" where it has none
-section_text(path: text, name: text): text := {
+# a module's bytes in the host's memory, their count, and where its custom section of a name starts, 0 where it has
+# none (or where there is no module)
+class Section { bytes: int, size: int, at: int }
+section_of(path: text, name: text): Section := {
 	size_at = host_block(8)
 	bytes = file_read(path, size_at)
-	if bytes == 0 { return "" }
-	at = bytes + WASM_HEADER_BYTES
-	while at < bytes + long_at(size_at) {
-		id = host_byte(at)
-		size = leb_at(at + 1)
-		content = leb_end(at + 1)
-		if id == CUSTOM_SECTION and c_copied(leb_end(content), leb_at(content)) == name {
-			name_end = leb_end(content) + leb_at(content)
-			return c_copied(name_end, content + size - name_end)
-		}
-		at = content + size
-	}
-	""
+	if bytes == 0 then Section(0, 0, 0) else Section(bytes, long_at(size_at), section_at(bytes, long_at(size_at), name))
 }
+# the text of the module's custom section of that name; "" where it has none
+section_text(path: text, name: text): text := {
+	found = section_of(path, name)
+	if found.at == 0 { return "" }
+	content = leb_end(found.at + 1)
+	name_end = leb_end(content) + leb_at(content)
+	c_copied(name_end, section_end(found.at) - name_end)
+}
+# the module at the path written again without its custom section of that name
+section_dropped(path: text, name: text) := {
+	found = section_of(path, name)
+	if found.at == 0 { return }
+	file = fopen(path, "wb")
+	fwrite(found.bytes, 1, found.at - found.bytes, file)
+	fwrite(section_end(found.at), 1, found.bytes + found.size - section_end(found.at), file)
+	fclose(file)
+}
+# where a module's custom section of that name starts, its id byte, among the module's bytes; 0 where it has none
+section_at(bytes: int, size: int, name: text): int := {
+	at = bytes + WASM_HEADER_BYTES
+	while at < bytes + size {
+		content = leb_end(at + 1)
+		if host_byte(at) == CUSTOM_SECTION and c_copied(leb_end(content), leb_at(content)) == name { return at }
+		at = section_end(at)
+	}
+	0
+}
+# where the section starting at `at` ends
+section_end(at: int): int := leb_end(at + 1) + leb_at(at + 1)
 # the unsigned LEB128 number at the host's address; where the bytes after it start
 leb_at(at: int): int := if host_byte(at) < LEB_PAYLOAD then host_byte(at) else host_byte(at) - LEB_PAYLOAD + LEB_PAYLOAD * leb_at(at + 1)
 leb_end(at: int): int := if host_byte(at) < LEB_PAYLOAD then at + 1 else leb_end(at + 1)
@@ -106,3 +142,17 @@ seed_part(name: text): text := seed_folder + name
 executable_path = executable_found()
 seed_folder = seed_folder_found()
 compiler_path = seed_part(COMPILER_PART)
+
+# a module linked, by the name its importer imports it under
+class Linked { path: text, name: text }
+# the modules a module imports by a .wasm name, found as the loader finds them, then theirs, each once after those held
+linked_modules(importer: text, held: list<Linked>): list<Linked> := {
+	imports = host_block(VECTOR_BYTES)
+	wasmtime_module_imports(module_compiled(importer), imports)
+	for i in 0 upto long_at(imports) {
+		name = vector_text(wasm_importtype_module(vector_item(imports, i)))
+		path = if name.ends_with(MODULE_SUFFIX) then module_path(name, importer) else ""
+		if path != "" and not held.any(linked => linked.path == path) { held = linked_modules(path, held + [Linked(path, name)]) }
+	}
+	held
+}

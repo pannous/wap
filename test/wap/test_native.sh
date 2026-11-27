@@ -409,4 +409,18 @@ for refused in no yes; do
 	check "wap format spaces an operator of a used module$([ $refused = yes ] && echo ' that refuses a form')" "$(cd "$stage/format_$refused" && "$native_wap" format p.wap 2>&1)" 'use "m.wap"
 x = 1 ⊕ 2'
 done
+# `wap build --wasm app.wap` links the program and the modules it uses, its own compiled ones too, into one module that
+# plain wasmtime runs without wap's loader: app.full.wasm as linked, app.wasm trimmed (wiki/cli.md)
+WASMTIME_RUN="wasmtime -W gc,exceptions,function-references --invoke main"
+mkdir -p "$stage/linked" && printf '%s\n' 'add(a: int, b: int) as int := a + b' >"$stage/linked/adding.wap" && $wap "$compiler" "$stage/linked/adding.wap" "$stage/linked/adding.wasm" >/dev/null 2>&1
+printf '%s\n' 'use "adding.wasm"' 'print "Hello ${add(1, 2)}"' >"$stage/linked/app.wap" && (cd "$stage/linked" && "$native_wap" build --wasm app.wap >/dev/null 2>&1)
+for linked in app.full.wasm app.wasm; do
+	check "wap build --wasm links a program and its modules into $linked, which runs alone" "$(cd "$stage" && $WASMTIME_RUN "linked/$linked" 2>&1)" "Hello 3"
+done
+# --trim=none keeps app.wasm as linked, as big as app.full.wasm, where the default trim drops what nothing reaches
+module_bytes() { wc -c <"$stage/linked/$1" | tr -d ' '; }
+trimmed=$(module_bytes app.wasm)
+(cd "$stage/linked" && "$native_wap" build --wasm --trim=none app.wap >/dev/null 2>&1)
+check "wap build --wasm --trim=none keeps the linked module whole, the default trims it" "$([ "$(module_bytes app.wasm)" -ge "$(module_bytes app.full.wasm)" ] && [ "$trimmed" -lt "$(module_bytes app.full.wasm)" ] && $WASMTIME_RUN "$stage/linked/app.wasm" 2>&1)" "Hello 3"
+check "a linked module names no folder to find modules in" "$(grep -c wap.library "$stage/linked/app.full.wasm")" "0"
 exit $((failures > 0))
