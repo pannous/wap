@@ -176,7 +176,7 @@ too:
 | `implies(a, b)` | types/prelude.wap:56 `not a or b` | the `or` above over `not` | as `or` |
 
 `and(…)` and `or(…)` written as calls are refused (sugar/conditions.wap:33–34), and `xor(a: bool, b: bool)` is
-`a != b`, the row `i64.ne`'s meaning, with no Choice. So no fourth step is needed. Step 2's choice_term covers all
+`a != b`, a row of `!=`, with no Choice. So no fourth step is needed. Step 2's choice_term covers all
 four, and step 3's grep proves it.
 
 ### Steps
