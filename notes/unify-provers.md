@@ -266,6 +266,83 @@ is the same Π that a nat binder's condition gets above. So T6a2's first part is
 Π per hypothesis, built once for both uses. Recommended: build it in M2b, beside the conditions, since the prover
 needs these 7 laws to prove anything with a bound.
 
+## The rest of M2b: linear.wap onto int, name by name
+
+Everything linear.wap reads of nat today (unify-typers 3a0742ef), with what replaces it. All of it rests on
+core's int_declared (section "count_declared and int_declared").
+
+### What replaces e.numbers
+
+int_declared sets `e.integers`, a kernel record beside `e.literals`, as numbers_declared set `e.numbers`:
+`Integers { type; of_count; below_zero; sum; minus; not_above; equal_integers; equals_sound; equals_complete }`,
+each a constant (kernel +about 8 lines). `sums_of` builds Sums from it:
+
+```
+class Sums { c: Checker; i: Integers }      # was: c, n: Numbers, nat, add, at_most, equals, subtract
+```
+
+The row constants a law's body holds (`prim i64.add int -> int -> int`) are Defined as these functions, so
+`unfolded_until` reaches `sum`, `not_above` and `equal_integers` from them as it reaches `add` today.
+
+| linear.wap today | after |
+|---|---|
+| `s.nat` (11 places: hypotheses' types, equations, congruences) | `s.i.type` |
+| `s.n.zero`, `zero_of(s)` | `of_count(·count.none)`, written by `int_numeral(s, 0)` |
+| `s.n.successor` (normal :303, beyond :147) | gone: `b + 1` is `added(s, b, int_numeral(s, 1))` |
+| `numeral(v)` (:252, :345–349, :383) | `int_numeral(s, v)`: `of_count(k)` for v ≥ 0, else `below_zero(−1 − v)` |
+| `normal`'s Numeral, zero and successor cases, `is_sum_part` (:300–303, :326–327) | `of_count(lit)` → lit, `below_zero(lit)` → −lit−1, a sum, and `minus(t)` → t's Normal with each atom's minus and the number negated, by `minus_add` and computing |
+| `s.subtract`, `with_differences`, `differences_in`, `difference_bounds`, `linked`'s difference branch (:180–205, :316) | gone: `a - b` unfolds to `sum(a, minus(b))` |
+| the unit rows `0 <= atom` in `eliminated` (:248) | gone: an atom's lower bound comes from a hypothesis only |
+| `s.n.truth`, `yes_case`, `no_case`, `equality`, `equation()`, `truth_stated()` | `e.literals` and core's `equated` (kernel/equality.wap) |
+
+### The laws, role by role
+
+A law of integers.wap concludes with a bool `==` or `<=`. Its kernel theorem states `Equal(bool, …, yes)`. A
+comparison's conclusion is already the `truth_stated` form linear.wap reads. An equation's is carried to
+`Equal(int, l, r)` by `equals_sound` from `e.integers`, and an int equation going into a hypothesis goes back by
+`equals_complete`. One helper does both, `law_equal(s, name, given)` = `equals_sound(l, r, law(s, name, given))`.
+
+| role in linear.wap | nat law | int replacement | how it is used |
+|---|---|---|---|
+| ZERO_ADD | zero_add | integers.wap `zero_add` | through `law_equal` |
+| ADD_ASSOCIATIVE | add_associative | `add_associative` | through `law_equal` |
+| ADD_SWAPPED | add_swapped | `add_swapped` | through `law_equal` |
+| ADD_CANCEL | add_cancel | `add_cancel` | its h is `equals_complete(chain.proof)`; its conclusion through `law_equal` |
+| AT_MOST_DIFFERENCE | at_most_difference (a <= b → a + (b − a) == b) | `add_difference` (a + (b + −a) == b, no hypothesis) and `difference_nonnegative` (a <= b → 0 <= b + −a) | `bounds_of` for `a <= b`: `Bound(a, b + −a, b, law_equal(add_difference), nonnegative: difference_nonnegative(a, b, h))`, a new Bound field |
+| AT_MOST_ADD | at_most_add (t <= t + k) | `gap_bound` (0 <= g → t + g == u → t <= u) and `nonnegative_add` | `at_most_from`: `gap_bound(t, gap, u, nonnegative, equals_complete(gap.equated.proof))`, where nonnegative folds the used bounds' `nonnegative` proofs and the kept literal's (computed) by `nonnegative_add`; `carried` is no longer needed there |
+| EQUALS_SOUND | equals_sound | `e.integers.equals_sound`, core's | `bounds_of` for `(a == b) == yes`, and `law_equal` |
+| BEYOND_AT_MOST | beyond_at_most | `beyond_not_above` (not (a <= b) → b + 1 <= a) | `bounds_of` for a negation, as today |
+| CHOSEN_DECIDED, CHOSEN_AT_YES | chosen_* (a choice between propositions) | `both_first`, `both_second` (h: a and b) | a hypothesis `(a and b) == yes`, read where `made_yes` meets a choice whose part at no is `no`: replaces `chosen_bounds`'s Prop reading. `chosen_proof` for a goal `(a and b) == yes` proves a and b, then builds it by computing (a and b computes to b once a is yes) |
+| SYMMETRIC, TRANSITIVE, CONGRUENT | equal_* | kernel/equality.wap's, same names | unchanged, at `s.i.type` |
+| (new) | — | `add_minus` (x + −x == 0) | the bound `atom + minus(atom) == 0` for each minus atom, through `law_equal` |
+| (new) | — | `minus_add` (−(a + b) == −a + −b) | `normal` pushing minus inward, through `law_equal` |
+
+The law names are looked up as theorems. law_proved declares a law's proof as `name + LAW_HOLDS` (laws.wap:30), so
+declare it under the law's own name instead, as a law is used by calling it (wiki/proof.md). Then
+`law(s, "zero_add", …)` finds it.
+
+### Where integers.wap's laws get proved
+
+verify types the program's laws, not the types module's. The provers prove integers.wap's 14 laws once per run,
+before the program's (laws.wap: the library's `law_` functions taken like the program's, about +8 lines). They do it
+by computing, apart and induction over int's cases with the count's theorems, never by linear. A law the provers do
+not prove is no theorem, and the linear prover's `sums_of` refuses with the missing names (today's
+`missing`-check), loudly. The 7 with hypotheses need the hypothesis Π first (section "A nat binder's condition…").
+
+### Steps and line counts
+
+| step | what | lines | gate |
+|---|---|---|---|
+| 1 | bool's block, count_declared, int_declared with `e.integers` (wap-theory-reads-types) | core and kernel +about 70 | test_hello, test_law_runs unchanged |
+| 2 | hypothesis Π and binder conditions in law_statement; integers.wap's laws proved first, declared by name | laws.wap +about 25 | the 14 laws Proved by verify on integers.wap alone |
+| 3 | Sums over int: reading, writing, minus atoms, no differences, no unit rows | linear.wap about −40 +35 | `regrouped` Proved |
+| 4 | bounds: the role table, the Bound's nonnegative proof, gap_bound, both_* | linear.wap about −15 +30 | `lt` Proved; test_theory_arithmetic's five with `h:`; law_runs 11–15 |
+| 5 | bool equality goals by `equals_complete` and `equal_integers_itself` | linear.wap +about 6 | test_theory_connectives' `==` laws |
+
+linear.wap net about +15 (416 → about 430); laws.wap about +25; core and kernel about +70 (step 1). No reds are
+expected along the way. Since the deletion, linear.wap proves nothing (`sums_of` finds no `e.numbers`), so nothing
+green depends on it.
+
 ## Steps, each with its outcome
 
 1. **int's meaning in wap/types.** wap-theory-reads-types writes the enum and the rows' meanings. The comparisons by
