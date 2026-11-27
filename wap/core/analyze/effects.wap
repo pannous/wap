@@ -1,0 +1,164 @@
+# A function's effects (wiki/effects.md): what it may do beyond computing its value, found from its typed body and
+# the functions it names. A host operation brings its row's effect (kernel/primitives.wap OPERATION_EFFECTS), a
+# `while` Div, a variable declared `global` read or given a value State, and each call its callee's effects; a call
+# inside a `try` brings no Fail. Functions that call each other round, a recursion, may not end: Div, until T5c tells
+# those that end. A foreign function's body cannot be read: its claim is its effects, else IO for the host's (WASI)
+# and FFI for any other module's. `effects of f` names them; `! IO` after a body claims them, and a function past its
+# claim is refused. Each typed function carries its effects as the fact EFFECTS, which a compiled module writes as the
+# claim of its export (extensions/wasm/modules.wap).
+
+use folder
+use "../errors.wap"
+use "../stage.wap"
+use "../bindings.wap"
+use "../type_notation.wap"
+use "../../kernel/forms.wap"
+use "../../kernel/primitives.wap"
+
+# the effects in the order `effects of` names them, and its word for none
+EFFECT_ORDER = ["State", "Allocation", "IO", "FFI", "Async", "Unsafe", "Div", "Eval", "Fail"]
+PURE_WORD = "Pure"
+STATE_EFFECT = "State"
+DIVERGING_EFFECT = "Div"
+FAILING_EFFECT = "Fail"
+IO_EFFECT = "IO"
+FOREIGN_EFFECT = "FFI"
+
+# What a typed function does itself, and the typed functions it calls, each with whether a `try` catches its Fail
+class Callee { key: text; caught: bool }
+class Own { effects: list<text> = []; calls: list<Callee> = [] }
+# The search through the calls, by Tarjan's way of finding the groups of functions that call each other round: each
+# function's own part, its order of reaching and the lowest order its calls reach back to, the functions on the way,
+# and the effects found, each group's alike
+class Joining {
+	by_key: map<text, TypedFunction>
+	s: TypingState
+	own: map<text, Own> = {}
+	order: map<text, int> = {}
+	low: map<text, int> = {}
+	way: list<text> = []
+	found: map<text, list<text>> = {}
+}
+
+# every typed function's effects, written on its Define, and its claim checked
+effects_written(s: TypingState) := {
+	joining = effects_joined(s)
+	claims_checked(s, joining)
+	for typed in s.functions { if typed.define != ø { typed.define = with_fact(typed.define, EFFECTS, data_list((joining.found.get(instance_key(typed)) ?? []).map(effect => symbol(effect)))) } }
+}
+# the effects of every typed function so far
+effects_joined(s: TypingState) as Joining := {
+	by_key: map<text, TypedFunction> = {}
+	for typed in s.functions { if typed.define != ø { by_key[instance_key(typed)] = typed } }
+	joining = Joining(by_key, s)
+	for key in by_key.keys { if not joining.order.has(key) { joined(key, joining) } }
+	joining
+}
+# one function reached: its calls reached first; where none of them reaches back past it, it and the functions on the
+# way after it are one group, each with the group's own effects and its calls' outside it
+joined(key: text, x: Joining) := {
+	own = own_of(key, x)
+	x.order[key] = #x.order
+	x.low[key] = x.order[key]
+	x.way += [key]
+	for call in own.calls {
+		if not x.order.has(call.key) {
+			joined(call.key, x)
+			x.low[key] = min(x.low[key], x.low[call.key])
+		} else if x.way.contains(call.key) { x.low[key] = min(x.low[key], x.order[call.key]) }
+	}
+	if x.low[key] == x.order[key] {
+		group = x.way.drop(x.way.index_of(key) - 1)
+		x.way = x.way.take(x.way.index_of(key) - 1)
+		round = #group > 1 or own.calls.any(call => call.key == key)
+		effects: list<text> = if round then [DIVERGING_EFFECT] else []
+		for member in group {
+			effects += own_of(member, x).effects
+			for call in own_of(member, x).calls { if not group.contains(call.key) { effects += (x.found.get(call.key) ?? []).filter(effect => not (call.caught and effect == FAILING_EFFECT)) } }
+		}
+		for member in group { x.found[member] = effects.unique }
+	}
+}
+# what a typed function's body does itself and calls, read once
+own_of(key: text, x: Joining) as Own := {
+	if x.own.has(key) { return x.own[key] }
+	own = Own()
+	match x.by_key[key].define { Define(name, parameters, body) => if fact_of(body, CLAIMED) != ø and is_foreign(body) then own.effects = claimed_effects(body) else effects_in(body, no, own, x); _ => ø }
+	x.own[key] = own
+	own
+}
+is_foreign(n: Node) as bool := match n { Prim(operation, arguments) => text(operation) == FOREIGN; _ => no }
+claimed_effects(body: Node) as list<text> := effect_words(fact_of(body, CLAIMED)!).filter(word => word != PURE_WORD)
+# the words a claim writes, one or a phrase of several, `! IO`, `! (IO FFI)`, as `effects of` writes them
+effect_words(claim: Node) as list<text> := match claim { Call(called, arguments) => [text(called)] + arguments.map(word => text(word)); _ => items_or_one(claim).map(word => text(word)) }
+# what a typed body does itself, and the typed functions it names, called or given as values; a function value written
+# in it brings its function's, as what it is given may call it; a definition in it is its own function
+effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
+	Fn(parameters, body) => { own.calls += instances_named(place_key(name_for(LAMBDA_NAME, n)), x).map(key => Callee(key, caught)) }
+	Define(name, parameters, body) => ø
+	Try(body, handler) => {
+		effects_in(body, yes, own, x)
+		match handler { Fn(parameters, handled) => effects_in(handled, caught, own, x); _ => ø }
+	}
+	_ => {
+		own.effects += effects_of_node(n).filter(effect => not (caught and effect == FAILING_EFFECT))
+		named = if n is Symbol then fact_of(n, DEFINED_AT) else ø
+		if named != ø { own.calls += instances_named(place_key(named!), x).map(key => Callee(key, caught)) }
+		for part in direct_parts(unwrapped(n)) { effects_in(part, caught, own, x) }
+	}
+}
+# the typed functions a name means: the one a call chose, or every one of a function named as a value
+instances_named(key: text, x: Joining) as list<text> := if x.by_key.has(key) then [key] else instances_of(key, x.s).filter(typed => typed.define != ø).map(typed => instance_key(typed))
+# the effects a node brings itself: its operation's, a loop's, a global variable's
+effects_of_node(n: Node) as list<text> := match n {
+	Prim(operation, arguments) => if text(operation) == FOREIGN then [if text(arguments#1) == WASI then IO_EFFECT else FOREIGN_EFFECT] else OPERATION_EFFECTS.keys.filter(effect => OPERATION_EFFECTS[effect].contains(text(operation)))
+	While(condition, body) => [DIVERGING_EFFECT]
+	Symbol(name) => if is_kind_word(fact_of(fact_of(n, DEFINED_AT) ?? Empty, ASSIGNS), DefinitionKind.Global) then [STATE_EFFECT] else []
+	_ => []
+}
+
+# `effects of f`: the effects of f's typed functions joined, as text; one nothing calls is typed for its written types
+effects_of_typed(n: Node, of: Node, s: TypingState) as Node := {
+	definitions = definitions_named(text(of), s)
+	if definitions is empty { refused(of, "effects of ${of}: ${of} names no function") }
+	asked = definitions.flat_map(definition => instances_asked(definition, of, s))
+	joining = effects_joined(s)
+	with_type(placed_like(Text(effects_text(asked.flat_map(typed => joining.found.get(instance_key(typed)) ?? []))), n), TEXT_TYPE)
+}
+instances_asked(definition: Signature, at: Node, s: TypingState) as list<TypedFunction> := {
+	typed = instances_of(definition.key, s)
+	if typed is not empty { return typed }
+	if not all_typed(definition, s.records) { refused(at, "effects of ${definition.name}: nothing calls it and its parameters have no types, so no body of it is typed: write their types, `${definition.name}(x: int)`") }
+	[function_typed(definition, definition.parameters, s, at)]
+}
+# Pure, one effect, or several in parentheses
+effects_text(found: list<text>) as text := {
+	named = EFFECT_ORDER.filter(effect => found.contains(effect))
+	if named is empty then PURE_WORD else if #named == 1 then named#1 else "(${named.join(" ")})"
+}
+
+# `f(x) := … ! IO`: the body, which f's effects are checked against the effects written after it
+claim_typed(n: Node, arguments: list, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
+	if f.function == ø { refused(n, "a misplaced effect constraint: `! ${arguments#2}` claims a function's effects, after its body, `f(x) := … ! ${arguments#2}`") }
+	strays = effect_words(arguments#2).filter(word => not (EFFECT_ORDER + [PURE_WORD]).contains(word))
+	if strays is not empty { refused(arguments#2, "! ${strays#1} names no effect: a claim names ${PURE_WORD} or ${EFFECT_ORDER.join(", ")}") }
+	with_fact(typed_form(arguments#1, s, f, expected), CLAIMED, arguments#2)
+}
+# each typed function whose body claims its effects, refused where it has one the claim leaves out, naming the calls
+# down to the function that does it itself; a foreign function's claim is its effects, never checked
+claims_checked(s: TypingState, joining: Joining) := {
+	claimed = s.functions.filter(typed => match typed.define { Define(name, parameters, body) => fact_of(body, CLAIMED) != ø and not is_foreign(body); _ => no })
+	for typed in claimed {
+		body = match typed.define { Define(name, parameters, body) => body; _ => Empty }
+		key = instance_key(typed)
+		beyond = (joining.found.get(key) ?? []).filter(effect => not claimed_effects(body).contains(effect))
+		if beyond is not empty { refused(fact_of(body, CLAIMED)!, "${typed.function.name} is declared ! ${fact_of(body, CLAIMED)!} but has ${beyond#1} via ${chain_to(key, beyond#1, [], joining)}") }
+	}
+}
+# the calls from a function down to one whose own body does an effect, or that calls round back
+chain_to(key: text, effect: text, seen: list<text>, x: Joining) as text := {
+	name = x.by_key[key].function.name
+	if own_of(key, x).effects.contains(effect) or seen.contains(key) { return name }
+	next = own_of(key, x).calls.find(call => (x.found.get(call.key) ?? []).contains(effect)) ?? return name
+	"${name} → ${chain_to(next.key, effect, seen + [key], x)}"
+}
