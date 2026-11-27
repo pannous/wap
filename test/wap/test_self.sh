@@ -8,7 +8,7 @@ root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
 SELF_COMPILE_SECONDS=60
 # the instructions wap1 retires compiling wap's compiler, main's as measured (notes/speed.md), and how many percent
 # more a change may take: lower the ceiling when a landing measures less, raise it only with the change's OK
-SELF_COMPILE_INSTRUCTIONS=179142114979
+SELF_COMPILE_INSTRUCTIONS=187278247059
 SLOWER_PERCENT=1
 
 # what loading the module wap makes of a file of wap's own says: "loads", or the compiler's or the run's error

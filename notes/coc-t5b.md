@@ -135,13 +135,67 @@ normal path.
 |---|---|---|---|---|
 | T5b1 effects | prim rows carry their effect; analyze writes `effects` per instance; `effects of`, one table of questions with `type of`; the `!` claim checked; the census prints the effects | core +120 (analyze/effects.wap +100, calls.wap's question table +10, the claim +10), kernel +10 (primitives.wap), sugar +1 | elaborate/effects.wap's inference half, about −120: the door (A2) reads the `effects` fact of a program's functions; the computation types (`T ! e`, Eff) stay for T6 | test_effects_wanted's four `effects of` checks (a constant free variable Pure, a global State, `! IO`, `! Pure`); test_errors_wanted's "effects of a function that can fail name Fail, try removes it"; wiki/effects.md's `effects of f // State` and `// Pure`, moved to test_effects_page |
 | T5b2 enums | an enum's declaration fills its word with an inductive block, cases its constructors; mutual enums one block; a case's value a constructor term; open or refused enums stay assumed, counted | core +80 (analyze/inductives.wap: block of a record +50, grouping +15, case terms in terms.wap +15), kernel 0 (A1's fill) | the door finds a program's enum filled and elaborates it no more (declare.wap's block path for programs, about −15); blocks.wap stays for indexed families and propositions | the census counts enums defined and assumed, a ratchet; every test as before (an enum's equality, a law's `Dime == Dime`, needs the decidable equality coc-plan.md 7 adds per block: T6) |
-| T5b3 bool | `enum bool { no, yes }` in wap/types fills core's bool and its truths; `if` is bool's recursor | core −5 (literals_declared's choice, choice_term names the recursor), kernel −12 (DeclarationKind.Choice, `choice_step`, its `stated` arm), types +2 | logic.wap's `bool` and its `runs` lines go once the prelude is read on core's words (A1 already defines bool in its place) | every test as before; test_law_runs' "a law without binders that holds is Proved by computing it" still Proved |
-| T5b4 match | a match on a filled enum with case arms is the recursor's case split, the catch-all filling the cases left; literal arms are choices on the row's equality | core +60 (terms.wap `match_term` +45, literal arms +15) | match.wap's program path: the door takes analyze's term; `arm_of`, `names_case`, `pattern_name`, `pattern_fields` and `minor_elaborated`'s non-dependent half, about −50; the dependent motive (`motive_made`) stays for T6, the course (`course_elaborated`) goes with T5c | wiki/law.md and enum.md: `enum Coin { Penny, Nickel, Dime }`, `cents(c: Coin) := match c { Penny: 1; Nickel: 5; Dime: 10 }`, `law dime: cents(Dime) == 10` prints `dime: Proved` (test_law_runs, a new line); `effects of cents` is Pure (coc-t5.md T5b row); "match on Coin misses Dime" unchanged |
-| T5b5 the recursor | `E.recursor(minors…, value)` typed with its motive found; it runs by the definition analyze adds to the enum | core +50 (calls.wap: the recursor's type for a filled enum +30, the added definition +20) | match.wap `recursor_given`, about −8 | the form of wiki/enum.md on an enum of the program, `enum Tree { leaf, node(left: Tree, right: Tree) }`, `leaves(t: Tree): int := Tree.recursor(1, (l, r, below_l, below_r) => below_l + below_r, t)`, `leaves(node(leaf, leaf))` is 2 (test_enum_wanted); enum.md's `enum nat { zero, successor }` is a teaching example, no second nat: its `double(3)` is 6 runs on a program's own enum only with a numeral of that enum, so the page's line goes green with T6c, where `zero` and `successor(k)` are patterns of the one nat, `int where it >= 0` |
+| T5b3 bool | core declares bool's block, `enum bool: Type { no; yes }`, in core_environment; `if` is bool's recursor; the Choice goes (section "T5b3: the Choice goes") | core −5, kernel −12 | none: the theory's reader is gone | every test as before; laws with `if`, `and`, `or`, `not` and `implies` reach the provers' recursor reading |
+| T5b4 match | (plan: notes/coc-t5b4.md) a match on a filled enum with case arms is the recursor's case split, the catch-all filling the cases left; literal arms are choices on the row's equality | core +60 (terms.wap `match_term` +45, literal arms +15) | match.wap's program path: the door takes analyze's term; `arm_of`, `names_case`, `pattern_name`, `pattern_fields` and `minor_elaborated`'s non-dependent half, about −50; the dependent motive (`motive_made`) stays for T6, the course (`course_elaborated`) goes with T5c | wiki/law.md and enum.md: `enum Coin { Penny, Nickel, Dime }`, `cents(c: Coin) := match c { Penny: 1; Nickel: 5; Dime: 10 }`, `law dime: cents(Dime) == 10` prints `dime: Proved` (test_law_runs, a new line); `effects of cents` is Pure (coc-t5.md T5b row); "match on Coin misses Dime" unchanged |
+| T5b5 the recursor | (plan: notes/coc-t5b4.md) `E.recursor(minors…, value)` typed with its motive found; it runs by the definition analyze adds to the enum | core +50 (calls.wap: the recursor's type for a filled enum +30, the added definition +20) | match.wap `recursor_given`, about −8 | the form of wiki/enum.md on an enum of the program, `enum Tree { leaf, node(left: Tree, right: Tree) }`, `leaves(t: Tree): int := Tree.recursor(1, (l, r, below_l, below_r) => below_l + below_r, t)`, `leaves(node(leaf, leaf))` is 2 (test_enum_wanted); enum.md's `enum nat { zero, successor }` is a teaching example, no second nat: its `double(3)` is 6 runs on a program's own enum only with a numeral of that enum, so the page's line goes green with T6c, where `zero` and `successor(k)` are patterns of the one nat, `int where it >= 0` |
 
 Order: T5b1 can start at once (it needs neither the fill nor the door for its core half); its theory deletion waits
 for the door (A2). T5b2 needs A1 on main. T5b3 and T5b4 follow T5b2 in either order; T5b3 first is recommended,
 since it is a pure shrink that makes `if` and `match` one mechanism before `match_term` is written. T5b5 last.
+
+## T5b3: the Choice goes
+
+bool is a core word, so core declares its block, as it declares Equal and int (wap-supervisor's decision). The
+kernel then holds no `if` of its own: an `if` is bool's recursor.
+
+### Where the Choice is used today (unify-typers 3a0742ef)
+
+| place | what it does | after T5b3 |
+|---|---|---|
+| core/type_notation.wap:82 `TRUTH_WORDS`, :138 `literals_declared`'s truths | `bool.yes`, `bool.no` as core axioms of type bool | the block's constructors `bool.no` (case 1), `bool.yes` (case 2), named as now, so every lookup by name stays |
+| core/type_notation.wap:83 `CHOICE_WORD`, :140 the Choice declaration | `if: (T: Type) → bool → T → T → T`, kind Choice | gone |
+| core/type_notation.wap:141 `e.literals` | the truths for terms.wap, laws.wap and choice_step | the same record, filled from the block's constructors |
+| core/analyze/terms.wap:83, :119 `choice_term` | `if c then a else b` as `if(T, c, a, b)` | `bool.recursor[1]((_: bool) => T, b, a, c)`: the motive constant in T, the no arm first (case order), then the yes arm, the condition last; level 1, since a program's T is in Type |
+| kernel/compute.wap:60 `Choice => choice_step`, :80 `choice_step` | the Choice's computing rule | gone: iota computes the recursor on a constructor |
+| kernel/environment.wap:89 `DeclarationKind.Choice`, :298 `stated`'s arm | the kind | gone |
+| extensions/verify/laws.wap:73, :89 | compares a value with `literals.yes_case` and `no_case`; states `… == yes` | unchanged: constructors are constants |
+| extensions/prove/linear.wap `choice_of`, `chosen_proof`, `chosen_bounds`; apart.wap | read a choice by bool's recursor (`recursor_facts` of the truth type) | unchanged, and they now see analyze's `if`, `and`, `or` and `not` (below), which reach them as a Choice today and are not read |
+
+dispatch.wap's `Choice` class is a dispatch's test list, unrelated; it keeps its name.
+
+### `and`, `or`, `not` and `implies` reach the Choice through `if`
+
+None of them has a term of its own. Each lowers to an `If` before typing, so choice_term alone replaces their Choice
+too:
+
+| form | lowered by | term after T5b3 | what the provers read |
+|---|---|---|---|
+| `a and b` | sugar/conditions.wap:29 `rule $a and $b => If($a, $b, no)` | `bool.recursor[1](_ => bool, no, b, a)` | chosen_bounds and chosen_proof: the part at no is `no`, so a and b both hold |
+| `a or b` | sugar/conditions.wap:30 `rule $a or $b => { held = $a; If(held, held, $b) }` | `let held := a in bool.recursor[1](_ => bool, b, held, held)` (lets_term, terms.wap:128), held unfolded by computing | choice_of after `computed_folded`: the choice decided by a, b at no |
+| `not x` | types/prelude.wap:138 `not(x): bool := if x then no else yes`, a pure function entered as a definition | `not` unfolds to `bool.recursor[1](_ => bool, yes, no, x)` | negation_of: yes at no, no at yes, so `not (a <= b)` is read by beyond_of |
+| `implies(a, b)` | types/prelude.wap:56 `not a or b` | the `or` above over `not` | as `or` |
+
+`and(…)` and `or(…)` written as calls are refused (sugar/conditions.wap:33–34), and `xor(a: bool, b: bool)` is
+`a != b`, a row of `!=`, with no Choice. So no fourth step is needed. Step 2's choice_term covers all
+four, and step 3's grep proves it.
+
+### Steps
+
+1. **bool's block in core** (wap-theory-reads-types, with count_declared). `bool_declared` in core_environment, before
+   `equality_declared`: the block through `inductive_declared` in core's scope, its two constructors replacing the
+   truth axioms, `e.literals` from them. The Choice stays, now over a block bool. Expected reds: none. Every
+   `is_constant(…, yes_case)` compares a constructor's id as it compared the axiom's. Gate: test_hello,
+   test_law_runs and test_theory_verify unchanged.
+2. **`if` is bool's recursor.** choice_term writes the recursor, as in the table. Expected reds: none, since iota
+   computes the same arm the Choice did. What turns green: laws whose statement holds an `if` and that need a prover,
+   which now reads them (chosen_proof). The same goes for the connectives' laws (test_theory_connectives) with binders, as below.
+3. **The Choice out.** CHOICE_WORD, its declaration, DeclarationKind.Choice, choice_step and the `stated` arm go.
+   Expected reds: none; `git grep -n 'Choice'` in kernel/ and core/ then finds only dispatch.wap's class. Measures:
+   core about −5, kernel about −12, and the census and self-compile time reported (track T).
+
+Step 1 lands with count_declared; steps 2 and 3 may be one commit. A red in step 2 means an `if` whose arms differ in
+type reached choice_term. Its guard (`kernel_value` of both arms equals the `if`'s) is kept, so that red would come
+from the motive's level. Then use the arm type's sort, `Sort(level)`, rather than the constant level 1.
 
 ## The estimate
 

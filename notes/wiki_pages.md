@@ -266,7 +266,6 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - value.md (67 lines): wap-wiki; asked (internals to notes/value-layout.md)
 - variable.md (85 lines): wap-wiki, tests test_variable_page.wap green, test_variable_wanted.wap; asked (write-through lambdas)
 - variant.md (16 lines): wap-wiki, tests test_variant_page.wap green
-- W0.md (30 lines): wap-wiki; asked (hole count, wap types)
 - warning.md (45 lines): wap-wiki, tests test/wap/test_warning_wanted.wap
 - wasm-representation.md (44 lines): wap-wiki; asked (compiler design to notes)
 - wasm.md (563 lines): wap-wiki; asked (wasm ecosystem notes to notes)

@@ -21,8 +21,8 @@ cut and what is open.
 - The rules are those of Lean 4's kernel, the best-tested rules for exactly this list of features, with four
   stated departures (section 6). Nothing of Lean itself is used: syntax, elaborator, library and provers are wap's
   own, written in wap.
-- Cost: the compiler is at 16,067 lines and ends about 17,100 once T5 deletes the analyze files it replaces, near
-  the ballpark of 17,000, about 2,500 of them trusted.
+- Cost: the compiler is at 16,796 lines; section 11 has the count and what each step adds, against a ballpark of
+  17,000, about 2,500 of them trusted.
 
 ## 1 What is asked
 
@@ -70,7 +70,7 @@ What a program writes, and what it is in the theory:
 | the condition of an `if` | a proposition that can be decided; its branch knows that it holds |
 | `law` | a proposition; with its proof a theorem |
 | a trait | a structure of operations and their laws, found by the compiler |
-| `f(x) := …` with an effect | a function into a computation type, `B ! IO` |
+| `f(x) := …` with an effect | a function with its effects as facts (`effects of f`), a claim `! IO` checked against them |
 | `quotient(T, same)` | the quotient type |
 | `axiom` | an axiom: the only way to add one, and always reported |
 
@@ -320,8 +320,6 @@ theory needs the syntax changed. What goes is looseness in what a type means.
 | a unit mismatch is found at run time | at compile time where the units are written; `quantity("5 km")` still checks at run time | dimensions are type arguments |
 | `f == g` on functions: by hash, by polynomial normal form, else "undecidable" | a proposition; the same methods are provers, extensionality is a theorem | the answer comes with a proof |
 | `int`: 64 bits and wrapping on some wiki pages, unbounded on others | each number type is one mathematical object: `int` the whole numbers, stored by context; `i32` and `i64` the wrapping words | a law must mean one thing |
-| `wap verify` proves with Lean | with wap's own provers and kernel | no second system |
-| W0, the model of wap's types in Lean | the kernel is the model; `wap types` shows a program's terms | one definition of wap's types |
 | `type(x)` asks at run time | known at compile time; for an `any` it reads the node's kind | types are gone at run time |
 | the sixteen kernel forms, read by the emitter | the emitter reads the same statements, their facts made by the kernel; types and proofs emit nothing | what is checked is what runs |
 | no evaluator in the compiler | the kernel computes: types, proofs by computing, folding | equality by computing |
@@ -976,25 +974,19 @@ step, measured against the step before; more goes to the user.
 |---|---|---|
 | T1 one table of primitives | wap/kernel/primitives.wap holds one row per host operation: its name, the wasm types it takes and gives, its builder; the emitter finds an operation by one lookup, and the Prim(shown) mark goes into the row; a `runs(…)` body is a `prim` of that table, checked against its row (9.7), and no wap spelling of a host operation is typed or checked | `runs(add, prim i64.add(m, n))` accepted, a body of the wrong width refused naming the row; the trust base listed by a command from the `runs(…)` declarations |
 | T1b the emitter decides nothing it can be told | the text routines are written in wap, once for both builds, and the emitter calls the library's words it needs by the kernel's list of runtime words; the type words' value layouts are rows of T1's table; a build that keeps its values in the memory reads its own text and list files by its layout's row. The branches on such a build are build strategies, not row values (GC structs or C structs in the memory, call_ref or a table, struct.get or a load): they go to T5's erasure stage. The list words stay emitter helpers (card lists-once-in-wap) | every test as before; a value layout changed in its row alone, no emitter line touched |
-| T2 the kernel inside | the kernel (terms, levels, typing, equality, computing, inductive types, recursors, quotients, the environment, show) moves from wap/extensions/theory into wap/kernel; its typing becomes rule functions that each make one `Checked(term, type)`, and the kernel checks each declaration whole as analyze finishes it; a node's facts are read only once the kernel has accepted their declaration, and a refused declaration's facts are never read; the environment keeps declarations by id and is persistent: checking a declaration gives a new environment or a refusal, so a refused statement needs no rollback and a name's text is only how it is shown; kernel numbers are i64 with an overflow check (6.7); the door `wap check` stays in the extension and uses wap/kernel; the theory census (its statement floor and time ratio in test/wap/ratchet_census.sh) retires, the typing census guards from here on, over wap/kernel too, its size ceiling raised by the kernel's measured nodes; how it is built: notes/coc-t2.md | the K and L test files green through the compiler's kernel; `2 + 2 == 4` by `refl`; a shortcut whose result passes 2^63 does not fire; two modules that declare the same name both accepted, each one's uses meaning its own (format.wap's `Side`); `--stage 2` a fixed point |
+| T2 the kernel inside | the kernel (terms, levels, typing, equality, computing, inductive types, recursors, quotients, the environment, show) moves from wap/extensions/theory into wap/kernel; its typing becomes rule functions that each make one `Checked(term, type)`, checked as the paragraph above says; the environment keeps declarations by id and is persistent: checking a declaration gives a new environment or a refusal, so a refused statement needs no rollback and a name's text is only how it is shown; kernel numbers are i64 with an overflow check (6.7); the door `wap check` stays in the extension and uses wap/kernel; the theory census (its statement floor and time ratio in test/wap/ratchet_census.sh) retires, the typing census guards from here on, over wap/kernel too, its size ceiling raised by the kernel's measured nodes; how it is built: notes/coc-t2.md | the K and L test files green through the compiler's kernel; `2 + 2 == 4` by `refl`; a shortcut whose result passes 2^63 does not fire; two modules that declare the same name both accepted, each one's uses meaning its own (format.wap's `Side`); `--stage 2` a fixed point |
 | TM one environment per module | each module is read with its own environment, built from the modules it `use`s: the language record splits into the language, the tables kept per file, one compile's caches and the build; an operator, alias, rule or phrase word declared in a file applies from its declaration on, in that file and in the files that use it, never in a file read later that does not; a file's text is scanned once, not three times for its uses; the restart after a standard module is brought in goes (notes/audit/2026-11-25-2.md R1) | a rule declared in one file does not fire in a file that does not use it; an operator used above its declaration in the same file is refused; `--stage 2` a fixed point |
-| T3 numbers and arguments found | the typer's types are kernel terms, one representation, compared by computing and shown as notation only in messages and `format`; analyze's readers of the notation read terms. analyze types each function once: a recursive function's header is typed first, an assignment of another type is a new binding, and the retypings and the fresh start on a retype go, since a discarded round would leave checked judgements behind (the dispatcher's restart goes with T6, the restart for a standard module brought in with TM4). A kind rule's output is typed in place, at the node's position, as that node, and never fires on its own output. analyze types numbers through the kernel: a numeral has the type its place wants, else `int`; `i32` and `i64` the wrapping words; `#xs` an `int`; letters and `_` found by unification (E1); the readings typing chose stay the compile's table, keyed by the source place `format` prints. Until T5 a function analyze typed enters the kernel as an opaque constant by its signature, counted by the census as assumed; the numbers prelude is read in the explicit spelling | `0 - 3` is -3; `#xs - 1` is -1 on an empty list; `type of 3` is `int`; `identity(3)` and `identity(int)`; a recursive function's result is written, or found once its other arm gives the type, else refused with the fix-it naming it; a kind rule's error names the line of the phrase it rewrote |
+| T3 numbers and arguments found | the typer's types are kernel terms, one representation, compared by computing and shown as notation only in messages and `format`; analyze's readers of the notation read terms. analyze types each function once: a recursive function's header is typed first, an assignment of another type is a new binding, and the retypings and the fresh start on a retype go, since a discarded round would leave checked judgements behind (the dispatcher's restart goes with T6, the restart for a standard module brought in with T5). A kind rule's output is typed in place, at the node's position, as that node, and never fires on its own output. analyze types numbers through the kernel: a numeral has the type its place wants, else `int`; `i32` and `i64` the wrapping words; `#xs` an `int`; letters and `_` found by unification (E1); the readings typing chose stay the compile's table, keyed by the source place `format` prints. Until T5 a function analyze typed enters the kernel as an opaque constant by its signature, counted by the census as assumed; the numbers prelude is read in the explicit spelling | `0 - 3` is -3; `#xs - 1` is -1 on an empty list; `type of 3` is `int`; `identity(3)` and `identity(int)`; a recursive function's result is written, or found once its other arm gives the type, else refused with the fix-it naming it; a kind rule's error names the line of the phrase it rewrote |
 | T4 subtypes | `where`, `type X < T`, the declared conversions; `nat` is `int where it >= 0`; an obligation proved by computing or by facts in scope, else a check with the effect Fail (E4, 3.2, 3.3, 3.9) | `d: char = "a"` accepted and `d: char = "ab"` refused by `condition`; `char` is `text where #it == 1` and nothing else; `effects of` a function with a check left is Fail |
 | T5u unions (before T5a) | `A or B` (also `A \| B`, written `or`) is a sum type, flat, without order or repeats, `T or ø` being `T?`; its value is boxed as an `any`'s, so a part converts into the union as into any (Boxed) and the union narrows to a part by its `is` test (Narrowed, T4's check); unlike types join to their union; a call on a union picks each case's definition when the program runs, a case with none refused; `T or Error` is a failable value: `failed` is `is Error`, and narrowing an Error out raises it. Steps T5u1 types, T5u2 calls, T5u3 failable; T5a (definitions and pure expressions as kernel terms) follows, and T4d waits for T5a | the lines of wiki/type.md "Optional values and unions"; `type of [1, "a"]` is `list<int or text>`; `describe(s)` picks by the case; `r failed` of a `T or Error` |
-| T5 definitions, statements and inductive types (steps: notes/coc-t5.md) | enums, classes, functions, `match`, blocks, variables, loops and exits become kernel declarations and terms as analyze types them: inductive blocks, recursors, structural recursion, a measure, else Div; unions, optional values and `any`; classes with type arguments, `class Pair<A, B> { first: A; second: B }` (wiki/type.md), as inductive types with parameters: each use an instance of the record, as T3f instances functions (about 40–80 lines in types, fits and declarations, the letters handed on by a records.wap rule); `extends` as the closed sum, built by analyze from the class declarations while the `inherited` rule keeps copying the fields; a compiled library carries, beside its signatures, the bodies that may unfold (definitions a type or a proof computes with), as a Lean module does, which replaces the signatures-only format of notes/compile_inputs.md; a compiled library's declarations are; the theory's doors read analyze's typed nodes, so read.wap takes analyze's choice in place of `nearest`, TRIAL_LIMIT and the numeral special cases (extension −40); letters.wap, fits.wap, conditions.wap and ROUNDS_LIMIT go
-carried once, as the kernel accepted them when it was built (13); the emitter reads the statements and their checked facts, types, levels and proofs left out (E2, E5's statements, E6, E7), and the erasure stage chooses the build's strategies, the emitter's branches on a build that keeps its values in the memory (GC structs or C structs, call_ref or a table, struct.get or a load) | a `match` that misses a case is refused by `covering`; `effects of fact` is Pure; `effects of` a `while` without a measure is Div and it still runs; `speak` over a list of an animal and a dog picks each one's method |
-| T6 laws, effects and instances | a law is a theorem; a plain compile proves by computing, else the law is Tested; effects are computation types and a proof refuses an impure function; traits are structures and instances come from overloads, a protocol (a class with a required word) is such a trait (E3, E5's effects, P1, P2); `wap check` loads the proof extension | `law double(3) == 6` Proved; `wap check` proves a law from two earlier laws; a proof using an impure function refused naming the chain; `sort` on a class without `compare` refused naming the trait |
+| T5 definitions, statements and inductive types | enums, classes, functions, `match`, blocks, variables, loops and exits become kernel declarations and terms as analyze types them (E2, E5's statements, E6, E7); classes take type arguments; a compiled library carries its declarations as the kernel accepted them (13); the erasure stage chooses the build's strategies. Steps T5a to T5g: notes/coc-t5.md | a `match` that misses a case is refused by `covering`; `effects of fact` is Pure; `effects of` a `while` without a measure is Div and it still runs; `speak` over a list of an animal and a dog picks each one's method |
+| T6 laws, effects and instances | a law is a theorem; effects are facts and a proof refuses an impure function; traits are structures and instances come from overloads (E3, E5's effects, P1, P2). Steps T6a1 to T6a6: notes/coc-t6a.md; T6a7, V, C and Q1: "T6 after T6a3a" below | `law double(3) == 6` Proved; `wap check` proves a law from two earlier laws; a proof using an impure function refused naming the chain; `sort` on a class without `compare` refused naming the trait |
 | T7 the theory extension retires | what is left of wap/extensions/theory goes: its run door and its prelude, whose words now live once in wap/types; the provers (P3, P4), the second opinion (K7), the export, the arithmetic proofs and the door `wap check` live in wap/extensions/proof, which only `wap check` and proofs load | every test as before; `wap check` and the second opinion from wap/extensions/proof; the trust base listed by a command |
-| T8 storage by context (cuttable) | an `int` is stored as i32 or i64 where computing or a fact in scope shows it fits (the plain compile loads no provers), else as a big number; the big numbers come from a library only the programs that need them load; `int` no longer wraps | `2 ^ 62 * 4` prints 18446744073709551616; a loop counter stays an i64 and the benchmarks keep their guardrails; the compiler's build holds no big numbers (13) |
+| T8 exact int (steps T8a to T8c: "T8" below) | a whole literal past i64 reads as an int; i64 and i32 are wrapping refinements of int; an `int` is stored as i32 or i64 where computing or a fact in scope shows it fits, else as a big number from a library only the programs that need it load | `2 ^ 62 * 4` prints 18446744073709551616; a loop counter stays an i64 and the benchmarks keep their guardrails |
 
-Order: K1, then K2 to K6 in a row, with K3 right after K2 since every program is full of numbers. L follows K as
-its table says. P1 and P2 follow K4; P3 and P4 follow P2, in the proof extension. T1 to T8 follow one another, T1b right after T1, T5u before T5a (held work waits on unions: possessive-dynamic, record-fields-loop, refusal-partway's finally, emit-literals' K), TM between T2 and T3, each
-landing before the next begins. T1 changes the kernel the seed reads beside it, so it takes the careful
-path: the new kernel added, the seed refreshed, then the old code deleted. T2 changes nothing the seed reads (the
-compiler reads only kernel/forms.wap and links no moved file until T3), so its sub-steps land on the normal path
-plus the census (notes/coc-t2.md); T3, the first step whose core uses wap/kernel's typing, takes the careful path. Each of T3 to T6 deletes the files of
-wap/extensions/theory/elaborate whose job analyze took over, so the two typers never both do one job. The E
-milestones are reached in the T steps that name them.
+Order: what each open step waits on is in "Where each step stands" below; each step's plan file has its own order.
+Each of T3 to T6 deletes the files of wap/extensions/theory/elaborate whose job analyze took over, so the two typers
+never both do one job.
 
 What T1 to T8 cost, roughly, in the compiler (wap/core, wap/kernel, wap/types, sugar). The estimates for T3 to T6
 follow the theory extension's elaborator, which does the same work today:
@@ -1008,23 +1000,304 @@ follow the theory extension's elaborator, which does the same work today:
 | T3 | 350 analyze (unification 180, numerals at their expected type 170), 100 analyze (types as terms, the notation's readers), 40 analyze (one pass: headers first, assignments as bindings), 20 rules (kind rules in place), 200 types (the numbers prelude) | 100 (80 analyze: the 40 below and 40 of restarts and retypings; 20 rules: the refiring) | typed_readings and analyze's own numerals (40); letters.wap and fits.wap stay, T5 deletes them | +610 |
 | T4 | 450 analyze (conditions, obligations, conversions, below), 100 types | 0 | conditions.wap stays and grows, T5 deletes it | +550 |
 | T5 | 1,000 analyze (declarations, match, recursion, blocks, statements, sums), 200 types (data), 200 emit (erasure) | 967 (817 analyze, 150 emit) | matching.wap (192), letters.wap (286), fits.wap (196), conditions.wap (143); emit's shape guessing that erasure replaces (150) | +433 |
-| T6 | 500 analyze (effects, instances, laws, tested), 30 analyze (protocols as traits), 150 types (logic, effects) | 227 analyze | dispatch.wap (227): overloads become instances | +453 |
+| T6 | 500 analyze (effects, instances, laws, tested), 30 analyze (protocols as traits), 150 types (logic, effects) | 90 analyze | dispatch.wap's rounds (about 90): generic dispatch goes through instances; calls on an `any` keep their `is` chains, the dispatch of a union | +590 |
 | T7 | 0 | 0 in the compiler; the rest of the extension | | 0 |
-| T8 | 200 emit and types | 20 | | +180 |
-| **all** | **6,000** | **1,494** | **1,084 of analyze** | **+4,506** |
+| T8 | 300 core, types, emit and native (T8a to T8c) | 20 | | +280 |
+| **all** | **6,100** | **1,357** | **947 of analyze** | **+4,743** |
 
-Measured, the compiler is at 16,067 lines with T4 underway; with the rest of T4, T5, T6 and T8 as estimated it ends
-near 17,700 if T5 keeps the analyze files, about 17,100 with the four deleted as its row says, near the ballpark of
-17,000 (5.3). A step's deletions belong in its gate, measured by a script (the file is gone), as its tests are. A step that
+Measured with `wc -l` on main at 25046c0f, the compiler is at 16,796 lines (core 11,201, kernel 2,784, types 2,136,
+sugar 321, compiler.wap and nodes.wap 354), with T3, T4a, T4b, T5u, T5a's A1, T5c2 and T5e in. A step's deletions belong in its gate, measured by a script (the file is gone), as its tests are. A step that
 needs more lines takes them and reports its measured lines; only a jump far above the ballpark goes to the
 interviewer.
 
-K7 any time after K2, in the proof extension.
+### Where each step stands
 
-After T3:
-- a typing that can be discarded (closes the loop red, and would let headers find a recursive result), measured before building.
+On main at 25046c0f and the branches on origin. A landed milestone of K, L, E and P landed in the theory extension
+(wap/extensions/theory); the kernel moved into wap/kernel in T2, and the rest reaches the compiler in the T step
+that names it. In progress names the branch, its tip and its owner; waits names the step it waits on.
 
-Feature by feature:
+| step | state | commit, or branch and owner | waits on |
+|---|---|---|---|
+| K0 | landed | results in data/ | |
+| K1 | landed | 2c04a7ce | |
+| K2 | landed | 4e49e80f | |
+| K3 | landed | d6fd9b5f, d6286366 (the shortcuts), 8e79c8d3 (divide's) | |
+| K4 | landed | a016fa65 | |
+| K5 | landed | 94b0496e | |
+| K6 | landed | 4e49e80f, 438cf07e | |
+| K7 | landed | 0b72075e | |
+| L1 logic | landed; leaves with the theory prelude on unify-typers, back in wap/types at T6a6 | c9f1a8fd | |
+| L2 numbers | landed; on unify-typers int's laws live in the kernel (kernel/integer_laws.wap) | f1220084 | |
+| L3 data | landed; its tests go as unpinned (lists as an enum is parked, "Not in T6") | 67154fad | |
+| L4 effects | landed; the effect facts are T5b1, computation types cut | 62ce375f | |
+| L5 collections | folded: `rational` and `set` are Q1, `i64` is T8b | | Q1, T8b |
+| E1 | landed; in analyze since T3 | 306c4004 | |
+| E2 | landed; reaches analyze in T5b and T5c | 80647de3 | |
+| E3 | landed; reaches analyze in C1 and C2 | d0bb3f37 | |
+| E4 | landed; in analyze since T4a, T4b | 2ea47109 | |
+| E5 | landed; reaches analyze in T5b1 and T5d | ac959757 | |
+| E6 | landed; reaches analyze in T5c | d0373dc1 | |
+| E7 | landed; in analyze since T5u and T5e | acff54b4, a4491606 | |
+| P1 | landed | a606bc60, 4ee96a68 (`wap verify` without Lean) | |
+| P2 | landed | e46a9dc0 | |
+| P3 | landed | df644b2e, 6fafd387 (linear) | |
+| P4 | landed | 2c38b2f7 | |
+| P on the unified typer | in progress: the provers over int (M2b, notes/unify-provers.md) | unify-provers e75b2e9c, unify-linear b07cbed1; wap-theory-reads-types | unify-typers |
+| T1 | landed | 3f95fa00 | |
+| T1b | landed | c483626d (step 1), 6c1a187c (step 3) | |
+| T2 | landed | d60bf285 (T2a to T2d), 383f6a92 (T2e), 59a4edd3 (T2f) | |
+| TM | landed (TM1 to TM3); TM4, the restart after a standard module, folded into T5 | 10bd563b (TM1), f9c06b41 (TM2, TM3) | |
+| T3 | landed, closed with machine-words | 896823f3 (T3a), 551ffd93 and 471a8882 (T3e), e0dea1d8 (T3f), d3791cd3, f5d9d5a8 | |
+| T4a, T4b | landed | 3410aa94 | |
+| T4d computed obligations | planned (notes/coc-t4d.md: T4d1 decided, T4d2 no check, T4d3 texts), no branch | | unify-typers (`conditions_entered`) |
+| T4c char | waits, no branch | | T4d1 to T4d3 |
+| T4e types that take values | planned (notes/coc-t4e.md) | | T4d1 to T4d3, unify-typers; its (8) T5b1 |
+| T5u | landed | 3410aa94, d0b3c9e8 (failable values, `T??`) | |
+| T5a | A1 landed; A2 (a typed law's verdict from analyze's environment) lands with unify-typers, which holds both its commits | 4112fe55, c43b08e3 | unify-typers |
+| unify-typers (M2, M2b) | in progress: core declares count, int and logic, the theory reader and prelude go, int's kernel laws in; unify-dedup 77e07344 merged into it | unify-typers bf69c6b8; wap-theory-reads-types | |
+| exact-big-literals | in progress: the kernel's counts past 2^63 exact as `Large` (decision 13) | exact-big-literals df289030; wap-native-no-layout-any | merging onto unify-typers |
+| T5b1 effects | in progress | t5b-effects 9e6cf1d2; wap-primitive-lookup-tables | |
+| T5b2 enums, T5b3 bool | in progress | t5b-enums 547f33e5; wap-annotation-attachment-fix | |
+| T5b4 match, T5b5 the recursor | planned (notes/coc-t5b4.md) | | T5b4: unify-typers; T5b5: its lookup half now, its enum half after unify-typers |
+| T5c1 ending as an effect | waits | | T5b1 |
+| T5c2 products and courses | landed | e86988d2 | |
+| T5c3 structural terms | planned (notes/coc-t5c3.md) | | T5b4, unify-typers, fix-core-name-shadowing |
+| T5c4 recursion over whole numbers | planned (notes/coc-t5c4.md) | | T5c3, int-takes, T5b4, T5b5 |
+| T5d statements | parked (plan f3594c8f, notes/coc-t5d.md) | | |
+| T5e classes, extends | landed | 25c7e387, 9b8169cd | |
+| T5f erasure, T5g compiled libraries | wait | | T5b to T5d |
+| kernel-length: the kernel's theory files shrunk, about −55 plus 38 dead (notes/kernel-length.md) | waits | | unify-typers, int-takes |
+| int-takes: int in Lean's shape, `natural(n) \| negative(n)` (notes/unify-provers.md) | waits; card int-takes, wap-theory-reads-types | | unify-typers |
+| T6a1 proofs of bool laws, T6a2 hypotheses | re-read on unify (notes/coc-t6a12.md: T6a1 in verify, core +10; T6a2's binders landed, its run skip and implies left) | | unify-typers (the deletion commit, the int enum) |
+| T6a3a propositions in wap spelling | in progress | t6a3a ad022f23; wap-native-no-layout-any | M2b step 1, T6a1 |
+| T6a3 indexed families | waits | | T6a3a, T5b2 |
+| T6a4 proofs by cases and induction | planned (notes/coc-t6a4.md) | | T5c3, T5c4, unify-dedup landed |
+| T6a5 False, Exists, undecidable | waits | | T5b1 |
+| T6a6 the logic in wap/types | waits | | T6a1 to T6a5 |
+| T6a7 universes | planned (notes/coc-t6a7.md) | | T6a6 |
+| V1 one verdict per law | planned (notes/coc-v1.md; the plain-compile report cut, no wiki passage); builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
+| V2 `wap check`, V3 proved laws as facts | planned (notes/coc-v2.md, notes/coc-v3.md) | | V1 (V3 also T6a2 and unify-dedup) |
+| C1 traits | planned (notes/coc-c1.md: C1a now, the structures with C2); builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
+| C2 instances passed, C4 generic dispatch | planned (notes/coc-c2.md: B decided, a trait value as the union of its conformers, core +15; A, instances, with C4 at T5g) | | C1 (C2 also T5e's type arguments) |
+| Q1 quotients | planned (notes/coc-q1.md; also after T4e and V3) | | C1, T6a3, T6a4 |
+| T7 the theory extension retires | planned (notes/coc-t7.md) | | T6 |
+| T8a the reader | planned (notes/coc-t8.md); its first commit is whole()'s sign | | exact-big-literals |
+| T8b the machine words | planned (notes/coc-t8.md) | | Q1, T4d |
+| T8c exact int on the run | planned (notes/coc-t8.md) | | T8a, T5f |
+
+### What each open step costs now
+
+One current estimate per open step, from its plan (lines added minus lines deleted; "other" is extensions, emit and
+native, outside the compiler's count unless it is emit). A plan's own file has the parts.
+
+| step | plan | core | kernel | types, sugar | other |
+|---|---|---|---|---|---|
+| T4d1 to T4d3 | coc-t4d.md | +52 | +20 | | |
+| T4c char | coc-t4.md | −10 | | +30 | |
+| T4e types that take values | coc-t4e.md | +74 | +6 | +4 | |
+| T5b1 effects | coc-t5b.md | +120 | +10 | +1 | |
+| T5b2 enums, T5b3 bool | coc-t5b.md | +75 | −12 | | |
+| T5b4 match | coc-t5b4.md | +46 | | | |
+| T5b5 the recursor | coc-t5b4.md | +14 (the lookup) | | +3, and the enum recursor as a sugar rule on t5c4 (c055162e) in place of core +47 | |
+| T5c1 ending | coc-t5c.md | +30 | | | |
+| T5c3 structural terms | coc-t5c3.md | +80 | | | |
+| T5c4 whole numbers | coc-t5c4.md | +60 (the guards +45, the inverse patterns +12, nat's recursor +3; (1)-(2) not built) | +5 | +5 | |
+| T5f erasure | coc-t5.md | | | | emit +50 |
+| T5g compiled libraries | coc-t5.md | 0 | | | wasm +150 |
+| kernel-length | kernel-length.md | | −55, and about −37 dead | | |
+| T6a1 proofs | coc-t6a12.md | +10 | | | verify +35, extension +3 |
+| T6a2 hypotheses (what is left) | coc-t6a12.md | | +10 | (+3 with T6a6) | extension +4 |
+| T6a3 indexed families | coc-t6a.md | +100 | | | |
+| T6a4 cases and induction | coc-t6a4.md | +92 | 0 (apart's builder moved, net 0) | | |
+| T6a5 False, Exists | coc-t6a.md | +29 | | +2 | |
+| T6a6 the logic in wap/types | coc-t6a.md | +30 | | +38 | |
+| T6a7 universes | coc-t6a7.md | +61 | | | |
+| V1 verdicts | coc-v1.md | +7 | | +2 | verify +23, extension +1 |
+| V2 `wap check` | coc-v2.md | +4 | | | native +2 |
+| V3 proved laws as facts | coc-v3.md | −6 | | | check +25, prove +15, verify +4, native +3 |
+| C1 traits (C1a) | coc-c1.md | +13 | | +19 | |
+| C2 trait values (B) | coc-c2.md | +15 | | | |
+| C1b structures | coc-c2.md | +22, with V3 or Q1 | | | |
+| C4 generic dispatch | coc-c2.md | −90 with C2's A, at T5g | | | |
+| Q1 quotients | coc-q1.md | +37 | | +27 | prove +5 |
+| T7 the extension retires | coc-t7.md | 0 (moves) | | | native +12 |
+| T8a the reader | coc-t8.md | +12 | +2 | | |
+| T8b machine words | coc-t8.md | | | +15 | |
+| T8c exact int on the run | coc-t8.md | +50 | −10 | +60 | emit +150, native +10 |
+| T5d statements | coc-t5d.md | parked | | | |
+
+### T6 after T6a3a: laws everywhere, traits and instances
+
+T6a3, T6a4, T6a5 and T6a6 are planned in notes/coc-t6a.md; T6a7 is the first row below. The rest of T6 is two
+tracks, V (verdicts of laws) and C (traits), which share no file, and a row of wap/types after C1, Q1 (quotients).
+Each step is one builder, on the careful path when it changes a value layout (C2) and on the normal path
+otherwise. Line estimates are for the compiler (core, kernel, types, sugar); the proof extension's lines
+are counted apart, since a plain compile does not load them.
+
+| step | what works after it | core / kernel / types (estimate) | extension | wiki pages it serves | outcome tests |
+|---|---|---|---|---|---|
+| T6a7 universes in analyze | A binder's type may be a universe, `Sort(u)`, `Type(u)` or `Prop`, and a one-letter level name nothing defines is found as `T` is (universe.md "One definition at every level"); `type of Type` is `Type(1)`; a level written as an argument, `identity[1](int, 3)`, is read where the name before it is a function with level parameters, and refused with both readings named where it might also be an index (`fs[1](3)` of a list, wiki/lambda.md) | core +45 (level binders found +20, a written level argument +15, levels shown +10), kernel 0 | 0 | universe.md | test_theory.wap's 13 universe lines: `type of (A: Type) -> A` is `Type(1)`, `bad: Type := Type` refused, `box(int)` refused where box takes a `Type(1)` |
+| V1 one verdict per law | A plain compile computes each law. Without binders, it is Proved by computing or reported as FAILED, and it never stops the program. With binders, the run tries it and it is Tested. `wap verify` adds the provers and prints proof.md's six verdicts: Proved (with "rests on" its axioms, from the kernel's `axioms_of`), Tested, FAILED with the counterexample, Untested, Assumed (an `assume` it uses) and Axiom | core +25 (analyze/laws.wap: the statement computed to yes or no, its notice), kernel 0 | verify +30 (Tested, Assumed and Axiom beside today's three) | proof.md "Checking proofs", law.md "Checking a law" | `law double(3) == 6` Proved on a plain compile; `hard: Assumed`; `uses_choice: Proved, rests on choice`; an `axiom` line `Axiom`; a program's own `runs(…)` refused by `wap verify` too (test_theory_layouts: only the types module says how the host runs a declaration) |
+| V2 `wap check` | `wap check` lists the obligations left to the run, `--strict` refuses each one not proved, and the laws' verdicts are printed as `wap verify` prints them. Both commands load the proof extension through one door; a plain compile never loads it. dispatch.wap's global `obligations` list becomes a fact the door reads | core −5 (the global list goes), kernel 0 | check +40 (a door beside verify.wap, sharing door_arguments and the verdicts) | type.md "Proved or checked", effects.md (`wap check --strict` refuses an impure function), cli.md | `wap check` on `xs#i` with nothing proving `i` in range lists "is checked when the program runs"; `--strict` exits 1 naming it; a program with every obligation proved lists none |
+| V3 proved laws are facts | A law proved earlier is a fact for the laws after it (law.md's `fact(n) > 0` with its helper law first) and for obligations (3.9 step 2: an obligation matched against the conclusions of proved laws by unification, with no search, so a plain compile needs no provers). An obligation the provers prove under `wap check` loses its run check and its Fail | core +30 (an obligation instantiated from a proved law's conclusion), kernel 0 | prove +15 (an obligation as a Goal) | law.md (the helper-law example), type.md "Proved or checked" | law.md's pair both Proved; `#xs > 0` discharged by a proved law, so `effects of` the function has no Fail |
+| C1 traits are structures | `trait shape { area(); perimeter() }` (today a class annotated `@protocol`, sugar/types.wap) is a structure over the type that conforms: one field per word, the word's type with that type in the trait's place. A type's instance is the record of its overloads found by `does_word`. `square(1) is shape` and `3 is Comparable` compute at compile time. The built-in traits that wap has words for (Equatable, Orderable, Comparable, Printable, Iterable, Sized, Addable) are declared in wap/types as traits, so the vocabulary stays library | core +30 (the structure from the record, `is` against a trait), kernel 0, types +25 (the traits), sugar 0 | 0 | trait.md "Built-in traits", "Conforming", "Declaring a trait" | `square(1) is shape` yes; `3 is Comparable` yes; `sort [dot(2) dot(1)]` refused with "dot is not Comparable: sort needs compare(a:dot, b:dot)"; `class dot: Comparable {x:int}` refused until `compare` is defined |
+| Q1 quotients | `quotient(T, same)` is a type, `.of` puts a value in and `.lift` takes a function that respects `same` out (the kernel has quotients since K5); `fraction`, `rational` and `set` are quotients in wap/types | core +50 (the type form +20, `.of` and `.lift` typed +20, values compared by `same` +10), kernel 0, types +40 (fraction, rational, set) | 0 | quotient.md | test_theory_quotients_wanted's three laws: `lift` on `quotient.of` computes, `half == fraction(2, 4)`; test_theory_prelude_checked's lines in wap spelling |
+| C2 instances passed | A value whose type is not known at the call (a list of mixed shapes, a value through `any`, a function value) carries its instance. The instance is the record of its type's function references, built where the value is boxed into the trait (`x as shape`, a `list<shape>` literal); a word called on it reads its field (call_ref). Where the type is known statically, the call is specialised as today, with no change to the emitted code. This pays off calls.wap's protocol DEBT (mixed lists, `x is shape` at run time). A trait's word with a body is the instance's default where the type has none (green today for known types, test_protocols) | core +110 (the instance built at boxing +40, a word called through it +30, the trait value's layout as a row of T1's table +20, defaults in the instance +20), emit +20 (a record of function references), kernel 0 | 0 | trait.md "Dispatch", "Constraints", "Declaring a trait" (each type its own `area`) | `[square(2), circle(1)].map(area)` gives each its own; `smallest([person("Ann", 3), person("Bo", 1)])` through `Comparable list`; careful path (value layout) |
+| C4 generic dispatch through instances | A generic definition (`f(x: T)` with a trait word in its body) called on a boxed value takes the value's instance, instead of a dispatcher retyped round by round for each boxed type. dispatch.wap's rounds go (generic_choices, generic_results, taken, dispatches_completed, deeper_type, fits_generic, boxed_known, dispatcher_retyped: about 90 lines); its `is` chains over the definitions of a word called on an `any` stay, because an `any` is the trait of no words and carries no instance | core −90 (measured at the gate) | 0 | trait.md "Dispatch" | every dispatch test as before; a generic `describe(x: T)` called on mixed boxed values picks each type's `area`; the rounds' "nests without end" refusal is never reached |
+
+#### Each step's wiki lines and the tests that pin them
+
+A builder starts from these lines red. "red" is the last recorded full run (test/reds.txt); `_wanted` files are
+red by design until their step lands. A **gap** is a wiki line no test pins, with the line to add first, in the
+page's own test file (test/test_<page>_wanted.wap, or test/wap/test_<page>_wanted.wap where it needs a command).
+
+- **T6a3 indexed families.** proposition.md:74-80 (`Even`, `Even(4)` proved, `Even(3)` has no proof), :82-86 (Even
+  with Odd), enum.md:94-95. Pinned: test_proposition_wanted "an enum of proofs proves its cases", `four_is_even`;
+  wap/test_proposition_wanted "Even(3) has no proof", "two propositions defined together" (all red). No gap.
+- **T6a4 cases and induction.** proof.md:17-18, :42-45 (`double_even`, the theorem's own call), enum.md:100-114 (the
+  recursor). Pinned: test_proof_wanted "a law's proof is a function giving a proof for each value", "a recursor
+  computes like the match it makes", "a function by its recursor"; wap/test_proof_wanted "a match that misses a case
+  proves nothing", "wap verify: a law with its proof is Proved" (all red). No gap.
+- **T6a5 False, Exists, effects.** proof.md:111-117 (a loop or a raise is no proof), proposition.md:24-28 (`False`,
+  `exists`), :66 (an undecidable `if`), effects.md:81 (a proof refuses an impure function, naming the chain).
+  Pinned: wap/test_proof_wanted "a loop is no proof", "a raise is no proof"; wap/test_proposition_wanted "an if on a
+  proposition nobody can decide is refused" (red). The chain a refusal names is V2's line. No gap.
+- **T6a6 propositions as values, the logic in wap/types.** proposition.md:6-7, :16-24 (the table), :99-105 (`use
+  classical`). Pinned: test_proposition_wanted "an equation is a proposition", "a false equation is a proposition
+  too", "True has its proof"; wap/test_proposition_wanted "a proof decides no data", "excluded middle comes with use
+  classical" (red), its verdict in proof.md:77's words, `rests on`.
+- **T6a7 universes.** universe.md, all of it. Pinned: test_universe_wanted, 16 lines (red); wap/test_universe_wanted
+  "levels do not include each other", "a universe never holds itself" (red); test_universe_page "one definition
+  serves a value" (green). Gap: universe.md:20-21 → `[Type(1), Type(2)] == [Sort(2), Sort(3)]` is yes.
+- **V1 one verdict per law.** proof.md:74-84 (the six verdicts, :84 the exit status), law.md:6-7 (a law never stops the
+  program), law.md "Checking a law". Pinned: wap/test_law_runs, 5 lines (green: closed laws Proved or FAILED, Tested,
+  the counterexample); test_theory_verify "a proof that uses an axiom is Proved and names what it rests on", with
+  `Axiom` (green); wap/test_proof_wanted "a law nobody proved is Tested", "a broken law shows its counterexample", "an
+  assume shows as Assumed", "an axiom is reported" (red); test_laws_page "a law with written binders leaves the
+  program's value alone" (green); test_theory_layouts, a program's own `runs(…)` (red). Gaps:
+  - proof.md:84: the exit status of `wap verify` on `law two: 2 + 2 == 5` → 1, and on `law both: 1 < 2` → 0.
+- **V2 `wap check`.** type.md:188-189, effects.md:81, cli.md "Proofs". Pinned: wap/test_check, 4 lines (green: an
+  obligation listed, an `if`'s condition, an assignment ending it, a parameter's own). Gaps:
+  - type.md:189: `wap check --strict` of `n = 3\nx: int where it > 0 = n\nprint x` → refused, naming `it > 0` (its
+    exit status 1 by cli.md:87, a failed run);
+  - effects.md:81: `wap check --strict` of `log(): int := { print "a"; 1 }\nlaw one: log() == 1 := refl` → refused,
+    naming `one → log` and IO.
+- **V3 proved laws are facts.** law.md:36-44 (a proved law a lemma of the later ones), type.md:181-182 (an
+  obligation found from a proved law). Pinned: test_laws_wanted checks only the program's value (red), no verdict. Gaps:
+  - law.md:36-44: `wap verify` of the three lines → both laws Proved (red until the provers have a product law);
+  - type.md:181-182: `law up(n: int where it >= 0): n + 1 > 0` and `h(n: int where it >= 0) := g(n + 1)` beside
+    `g(x: int where it > 0) := x` → `wap check` lists nothing.
+- **C1 traits are structures.** trait.md "Built-in traits", "Conforming", "Declaring a trait". Pinned:
+  test_trait_page "sort orders Comparable values", a type's own text (green); test_trait_wanted "a number is
+  Comparable", "sort uses a class's compare", "> uses a class's compare", "== uses a class's equals", "a class
+  defining a trait's words is of the trait", "for walks what iterate gives" (red); test_protocols, the structural
+  fit and a class's claim (green). Gaps:
+  - trait.md:74-76: `class dot{x:int}\nsort [dot(2) dot(1)]` → refused with `dot is not Comparable: sort needs
+    compare(a:dot, b:dot)`;
+  - trait.md:83: `class dot: Comparable {x:int}` with no `compare` → refused naming `compare(a:dot, b:dot)`.
+- **C2 instances passed.** trait.md "Dispatch", "Constraints", "Declaring a trait" ("a call picks the one of its
+  argument's type"). Pinned: test_protocols "a class fits a protocol by having its words" (green, known types only).
+  Gap:
+  - trait.md:109-111: `smallest(xs: Comparable list) := (sort xs)#1` on `[person("Ann", 3) person("Bo", 1)]` →
+    `person("Bo", 1)`, and on `[dot(3) dot(1)]` refused naming `compare(a:dot, b:dot)`.
+  trait.md:114's default body is pinned for known types by test_protocols: "a protocol's default body is the word of
+  a class without its own", "a class's own word replaces the protocol's default" (green). No page shows a default
+  reached through an instance, so C2 adds no line for it.
+- **C4 generic dispatch through instances.** trait.md "Dispatch". Pinned: test_dynamic, the dispatch of a known and
+  an unknown value (green), which must stay green. No wiki line beyond C2's; C4 is a shrink measured by its gate.
+- **Q1 quotients.** quotient.md, all of it. Pinned: test_quotient_wanted, 9 lines (red: the relation, `quotient.of`,
+  `lift`, `lift_of` by `refl`, a set, function extensionality, i64's wrap, which is T8's);
+  wap/test_quotient_wanted "a function that tells joined values apart is refused" (red); test_quotient_page (green).
+  No gap.
+
+Net: core about +195 (T6a7 +45, V +50, C +50, Q1 +50), types +65, emit +20, kernel 0; the proof extension
++85. Against the cost table's T6 row: the 500 analyze for "effects, instances, laws, tested" are T6a's +355 plus
+V's and C's +100; the 30 for protocols is C1; the 90 deleted are C4's. T6a7 and Q1 (+95 core, +40 types) are beyond
+the row, which counted quotients under the prelude the deletion took.
+
+**Order.** T6a7 after T6a6. V1, then V2, then V3. C1, then C2, then C4. Q1 after C1, T6a3 and
+T6a4 (a quotient's `same` is a proposition about two values, and laws over it are proved by cases). V and C run
+side by side, one builder each. V3 needs T6a2 (hypotheses), and the law.md example needs the provers to prove `x > 0 and y > 0 implies
+x * y > 0`, which they do once a product law joins int's kernel laws (T6a2's positive_product); until then that
+example stays red. C2 needs T5's classes with type arguments (the trait's structure takes the conforming type as one).
+
+**Beside the dedup and the exact-big-literals landing.**
+- The dedup (unify-dedup: the equation toolkit and the regrouper shared by kernel/counting.wap,
+  kernel/integer_laws.wap and extensions/prove/linear.wap) touches none of T6a7, V1, V2, C1, C2, C4 or Q1's
+  files, so these run in parallel with it. V3 touches extensions/prove (goals.wap, facts.wap), so it starts after the dedup lands. Of
+  T6a, T6a4 starts after it (a nat subject goes through int's case split in counting.wap); T6a3, T6a5 and T6a6 run
+  beside it.
+- exact-big-literals touches the reader, kernel/numbers.wap, kernel/show.wap and lib/magnitude.wap; no T6 step does.
+  The one meeting point is V1's FAILED line, which prints the counterexample through show, so V1 lands after it or
+  merges show.wap. C2 is a careful landing, and no other careful landing (a seed refresh, T6a3's
+  families) may share their run.
+
+**Wiki before building.** law.md "Checking a law" and cli.md:108 still say `wap verify` proves "with Lean" and list
+Lean's tactics. V1 rewrites that text to wap's own provers. As a rewrite of what a page says, it goes to the user
+through wap-interviewer first, with the old and the new text. Default bodies and C1's built-in traits are on
+trait.md already; a trait carrying laws ("a structure of operations and their laws", section 2) has no wiki line, so
+it is not built in T6.
+
+**Not in T6.**
+- Effects as computation types (`B ! IO` as `Eff(IO, B)`): cut. Every wiki line about effects (effects.md: a claim
+  checked, `effects of`, a proof refusing an impure function) is met by the effect facts (T5b1) and T6a5's check.
+  The computation types of 9.2 stay the theory extension's and leave with it at T7.
+- `map default ListMap` (trait.md "Protocol and default class"): a declaration rule, not an instance.
+- Lists as an enum with a host layout (`enum list<T> { empty; item(first: T, rest: list<T>) }` for the built-in
+  list, the kernel computing `#xs`, `xs#i`, `xs + ys`, `map` by its recursor; about core +60, types +40, careful
+  path): parked until a wiki page states a law over the built-in list. enum.md:93's `enum list<T>` is a program's own
+  enum and needs none of it; test_theory_prelude_data's lines came from this plan's L3, not from a page, and go as
+  unpinned.
+- Text literals in laws: a gap, not a shrink. Nothing declares the kernel's texts (`e.texts` is set only by a texts
+  declaration, kernel/numbers.wap), so `law #"abc" == 3` is refused by "no texts are declared". It waits on lists as
+  an enum, above, since a text is the list of its code points.
+- A trait with laws (above).
+
+### T8: exact int through the reader, the machine words and the run
+
+The limit at 2^63 sits in three layers (notes/unify-provers.md "Exact int literals past 2^63"). The kernel's layer
+is exact-big-literals: a count at or past 2^63 is a `Large(Magnitude)`, and the largest i64 is named once, as
+WHOLE_LARGEST in kernel/primitives.wap. T8 is the other two layers, in three steps:
+- T8a, the reader: a literal is never a float by size.
+- T8b, the machine words: `i64` and `i32`.
+- T8c, the run: an exact `int`, stored by context.
+Each step is one builder; T8a and T8c take the careful path (the reader; a value layout).
+
+| step | what works after it | core / kernel / types (estimate) | extension, emit, native | wiki pages it serves | outcome tests |
+|---|---|---|---|---|---|
+| T8a the reader keeps whole literals whole | A whole literal is an int at every size. One in the signed i64 range, `-9223372036854775808` included, reads as today. One past it reads as the digits it is (an atom holding its digit text), which analyze types as an `int` and the kernel holds as a `Large` (magnitude_of_digits). The reader's comparison goes: core/parse/atoms.wap's `LARGEST_INT` text copy and `whole`'s length test (and its DEBT) are replaced by one test against WHOLE_LARGEST. Until T8c a literal past i64 in code that runs is refused while compiling, with "an int past 2^63 runs once ints are exact"; laws and proofs take it at once | core +12 (the atom +5, its int typing +4, the range test against WHOLE_LARGEST +3, LARGEST_INT and the DEBT −3), kernel +2 (a numeral from digits) | 0 | int.md:4, number.md:107-112 | test_theory_prelude_numbers `big` (`law big: 4294967296 * 4294967296 == 18446744073709551616`, red); test_number_wanted:35 and test_quotient_wanted:14 `(9223372036854775807 as i64) + 1 == -9223372036854775808 as i64` (red today because `-9223372036854775808` reads as a float: "nothing defines i64 … as a field of float"). Gap: `type of 18446744073709551616` → `int` (int.md:4) |
+| T8b the machine words | `i64` and `i32` are wap/types' wrapping words, refinements of int by their range whose operations are T1's rows and wrap (number.md:109-111), and `i64` is the quotient of int by differences that are multiples of 2^64 (quotient.md:43-44), so laws that hold modulo 2^64 prove on it and `a + 1 > a` is refused there (coc-plan 13). A literal that does not fit its declared word is refused while compiling, by the range condition T4 computes | core 0, kernel 0, types +15 (the two words, `wrapped_alike`, the quotient) | 0 | number.md:109-112, quotient.md:43-44 | test_number_page "i64 wraps as the machine does" (green); the two T8a lines. Gap: `x: i64 = 2^70` → refused, naming the range (number.md:112) |
+| T8c exact int on the run, stored by context | An `int` runs exact: its operations check for overflow and carry a value past i64 into a big int, which comes from a library only the programs that need one load (lib/magnitude.wap with a sign). Where computing or a fact in scope (a parameter's condition, a range's bounds, an `if`) shows that a value fits, it is stored as an i64 with no check. `wap fast` builds with every int as a wrapping i64 and no checks (fast.md, int.md:4-5). The kernel's ROW_OVERFLOW and FOLDED_ARITHMETIC guard go, since the rows are exact on the run as in the kernel | core +40 (analyze: the storage chosen from facts), kernel −10 (ROW_OVERFLOW, the fold's guard), types +60 (the signed big int over magnitude) | emit +150 (checked operations, the carry into a big int, the int value's layout as a row of T1's table), native +10 (`wap fast`) | int.md:4-5, number.md:107-108, fast.md, bignum.md | test_number_wanted "text(xs#1 * 4)" (`xs = [2^62]`, red: got "0") and "an int is unbounded: big: int = 2^70" (red); test_exact "a whole number past 64 bits" (green, through `use exact`), which must stay green. Gaps: `wap fast` of `xs = [2^62]\nprint xs#1 * 4` → `0`; `for i in 1 to 10 { s += i }` with `s = 0` compiles its loop counter to an i64 with no check, measured by the benchmarks' guardrails (coc-plan's T8 row) |
+
+Net: core about +52, kernel −8, types +75, emit +150, native +10, about +280 in all.
+
+**Order.** First of T8, after exact-big-literals lands: whole()'s sign. `whole` tests the digits' length without the
+sign, so `-9223372036854775808`, the smallest i64, reads as a float. Testing the signed value against the i64 range
+(core about +1) turns test_number_wanted:35 and test_quotient_wanted:14 green at once; it is the first commit of T8a.
+The rest of T8a follows (it needs Large). T8b after Q1 (the quotient) and T4's computed range
+conditions. T8c after T8a and T5's erasure stage (the int layout is one of its build strategies), last of track T.
+
+**Beside the other work.**
+- T8a touches core/parse/atoms.wap and analyze's numerals. No T6 step and no dedup file does, so it runs beside
+  them, but alone in its careful run.
+- T8b is wap/types only and runs beside anything after its two prerequisites.
+- T8c touches the emitter's value layouts. It is the one T8 step no other careful landing may share (C2 included),
+  and it reports the self-compile time and the benchmarks against main.
+
+**The compiler's own ints.** The compiler builds with `wap fast`: every int a wrapping i64 with no checks, as
+today, so its source needs no edit and its build holds no big numbers (decision 13).
+
+**Fast values flow (user, warp decisions aec483024d).** A value of a fast type stays fast wherever it goes. The fast
+types are i64, i32 and byte, and a value has one when it is declared so, read from a field so declared, or returned
+by a function whose result is declared so (a graphics library's coordinates, say). It stays fast through untyped
+locals, globals and loop variables (warp's notes/fast_types_contagious.md, "flow contagion"). A plain int stays
+exact. Mixing a fast value with a plain int never makes the result fast without the program saying so: the result is
+an exact int, or the program converts with `as i64`. Only a whole literal takes the fast type of the value beside it,
+since a numeral has the type its place wants (T3). Strong contagion is not adopted: under it, warp's `24!` wrapped to
+a wrong value. Laws over fast values speak of wrapping arithmetic (i64 is the quotient of T8b). In wap, an untyped
+name already takes its value's type (T3), so T8c adds only the mixing rule, about core +10 in fits.wap's conversions.
+
+### Features and the milestones that show them
 
 | feature | rule | milestone | the test that shows it |
 |---|---|---|---|
@@ -1106,8 +1379,8 @@ Decided by the user (2026-11-25), the basis of track T:
   The census and the seed guard each step.
 - **The kernel is the only maker of checked facts** (LCF). The elaborator builds its results only through it, so no
   pass checks them again; the facts the stages write on nodes are those checked facts.
-- **No unbounded arithmetic in core or kernel.** Kernel numbers are i64 with an overflow check; reasoning about
-  larger numbers in proofs comes from a module only proofs load.
+- **Unbounded counts live in the kernel for exact laws; none in core.** A kernel count below 2^63 is an i64, one
+  at or past it a `Large` through lib/magnitude.wap; core and the compiler's build hold no big numbers.
 - **The provers (P3, P4), the second opinion (K7) and the arithmetic proofs** live in an extension that only
   `wap check` and proofs load.
 - **Size.** About 17,000 lines for the whole compiler is a ballpark, not a gate (5.3): "If someone needs more, give
@@ -1117,8 +1390,8 @@ Decided by the user (2026-11-25), the basis of track T:
   table, keyed by the source place that `format` prints, as TYPES is (T3).
 - **`i64` is the integers modulo 2^64** (prelude/checked.wap: `quotient(int, wrapped_alike)`), as Lean's `Int64`.
   Laws that hold modulo 2^64 (commutativity, associativity) prove on `i64`; laws that assume no overflow
-  (`a + 1 > a`) are refused there. The compiler's own source writes `i64` where it means a machine word, so its
-  build holds no big numbers; 0 core lines, a source edit after a seed refresh.
+  (`a + 1 > a`) are refused there. The compiler builds with `wap fast` (every int a wrapping i64, no checks), so its
+  build holds no big numbers; 0 source lines (user 2026-11-27).
 - **T8** stays in the plan and is decided at its turn, once the sizes of T1 to T7 are measured.
 
 Decided by the user (2026-11-25), after the extensions audit (data/extensions-audit/report.md) and R1:
@@ -1151,9 +1424,7 @@ Decided by the user (2026-11-25), after the audits:
 
 Open, with the recommendation first and its cost in core; with the user through the interviewer:
 
-1. **W0 and `wap verify`.** Recommended: the Lean model and the Lean prover retire at steps T7 and P3; until
-   then they stay beside the new ones. 0 core lines.
-2. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
+1. **Words**, each an alias question: `Prop`, `Type`, `Sort`; `where` for a subset type; `quotient`, `lift`;
    `refl`; `axiom`, `assume`; `by`, `chain`; `decreasing`; the axioms' names. Settled on the wiki pages.
 
 Decided by the plan, for the user to overrule: the rules are those of Lean 4's kernel with the four departures of
@@ -1235,5 +1506,5 @@ lets a module ship without source.
   and recursion compiled to recursors, and `do` blocks compiled to terms; its opaque constants and its IO type for
   effects.
 - The architecture audits notes/audit/2026-11-25-2.md and 2026-11-25-3.md ("What the plan misses").
-- In wap: wiki/type.md, alias.md, char.md, enum.md, variant.md, trait.md, effects.md, laws.md, W0.md, Footguns.md;
+- In wap: wiki/type.md, alias.md, char.md, enum.md, variant.md, trait.md, effects.md, laws.md, Footguns.md;
   notes/backbone.md; wap/kernel/forms.wap; wap/core/analyze/.
