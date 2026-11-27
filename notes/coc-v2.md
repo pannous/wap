@@ -37,8 +37,8 @@ obligation left to the run is a warning in that form:
 `line 2:5: #line == 1 is checked when the program runs: line as char`. test_check's lines match it as they are,
 since they test with `lines_with`.
 
-Recommended: obligations print as warnings in `warning_of`'s form, and wap/test_type_wanted:10 is rewritten to that
-form in its own commit. This went to warp-interviewer as a question.
+Decided: obligations print as warnings in `warning_of`'s form, one place format for every message, and
+wap/test_type_wanted:10 is rewritten to that form in its own commit.
 
 ## The plan
 
