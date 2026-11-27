@@ -74,7 +74,7 @@ T4a and T4b add a type form, so they take the careful path; T4c changes the valu
 | T4c char | `char` is `text where #it == 1`, stored as its text; today's i32 code point is `codepoint` (wiki/char.md); core's char conversions go (char_text, the READS row, the place-typed `'a'`, `is_plain`'s char, about 49 uses); `type Port < int where …` once c-type-names has `<` | −30 core, +30 types | careful (value layout), the speed gate measured at this step; test_subtype_page and test_char_page unchanged; the run-time check line of test/wap/test_subtype_wanted; the Port line |
 | T4e value arguments | a type alias of value parameters, `vector(T, n: nat)`, `index(xs)`; its arguments found by unification and compared by computing | +60 | careful; the vector and index lines; test_type_wanted's `dot` and `append` lines |
 
-Order: T4a, T4b, then T5a (definitions and pure expressions as kernel terms), then T4d, T4c (after c-type-names
+Order: T4a, T4b, then T5u (unions, coc-plan's T5u row), then T5a (definitions and pure expressions as kernel terms), then T4d, T4c (after c-type-names
 lands) and T4e. A char literal is a char by computing (`#"a" == 1`), so T4c follows T4d: before it, every char
 literal would be checked at run time, or the place-typed `'a'` kept under another name. T4 closes after T5a.
 
