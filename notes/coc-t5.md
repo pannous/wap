@@ -38,3 +38,18 @@ T5 is done when:
 
 - **Generic records' layout:** a `Pair<A, B>` value as one struct whose fields are anyref (boxed, as an any is), or one struct type for each instance. The boxed layout is the one card wap-native-no-layout-any estimates at 40 to 80 core. Recommended: boxed, as unions are.
 - **T5a's size:** pure definitions first, and statements in T5d, is the recommendation, so that T4d can land after T5a. One step for all definitions would land about +700 at once.
+
+## T5f and T5g re-read on unify-typers 2b0e87be
+
+- **T5f erasure.** The emitter (core/emit/, 12 files) still guesses a value's shape from its node, beside the build's
+  strategies (GC structs or memory, call_ref or a table).
+  - unify-typers gives every pure function a kernel term (T5a), and the plan's later steps give every match,
+    recursion and narrowing one too: T5b4, T5c3, T5c4, T4d.
+  - So erasure reads typed facts that are now there for those forms. Statements (T5d) are parked, so a function with
+    statements keeps today's path until T5d returns.
+  - Estimate: emit +200 −150 = +50, as the row says. T8c waits on T5f.
+- **T5g compiled libraries.** wap build --wasm already stamps a module's law verdicts (test_law_runs:20-24, the stamps
+  section). T5g adds the declarations the kernel accepted, with their erased bodies. That is the warm state's section
+  reader, about 150 in extensions/wasm, core 0.
+  - It is also where C2's A (instances) and C4 come back (coc-c2.md, decided B).
+  - It is where a plain build could use proofs from a module's stamps (coc-v3.md (3)).
