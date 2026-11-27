@@ -111,3 +111,18 @@ The T4 row's `effects of` line (a function with a check left is Fail) moves to T
   `.chars`. The other reading keeps the code point as char's storage and makes the up-conversion a declared one
   (c-type-names' `<`); it keeps core's READS row and costs a conversion where the plan's costs nothing.
   Recommendation: the plan's, its text, core −30; the other reading about −10.
+
+## T4c re-read on unify-typers 2b0e87be
+
+- **Where core's char conversions are now:**
+  - `char_text` (analyze/calls.wap:218);
+  - the char row of `READS` (type_notation.wap:322-326);
+  - `is_plain`'s char (calls.wap, fits.wap, types.wap).
+
+  The row's "about 49 uses" is counted again by the builder.
+- **`type X < T` is not there.** sugar/definitions.wap:30 reads only `type $head = $body`. records.wap's `class $name <
+  $base` is a class's extends. The Port line (test_subtype_wanted:20-21) waits on c-type-names' `<`.
+- **The three T4d steps it needs are planned** (coc-t4d.md). T4d3's text rows give `#"a" == 1` by computing, which is
+  what a char literal needs.
+- **Estimate: about −10 core, +30 types**, as the row says. The speed gate is measured at this step. It lands after
+  T4d1 to T4d3, and after c-type-names for the Port line only. The rest does not wait on `<`.

@@ -65,3 +65,43 @@ After T5c3 (the course term and the below reading), int-takes (the two cases), T
 recursor's name lookup). T6c in coc-t5c.md's row is int-takes. Careful path: the reshape of `·difference` changes the
 kernel's int, and the census and the provers' test lines (test_theory_arithmetic, test_induction, wap/test_law_runs)
 must not drop.
+
+## How nat's arms come into the language
+
+`match n { zero => …; successor(k) => … }` on `n: nat`, with `type nat = int where it >= 0` (proof.md:10,
+enum.md:100-113). Read on t5c4 554c1afd. There `match_term` (analyze/terms.wap:154) reads a match on a defined
+enum's cases, and no nat is declared in wap/types yet.
+
+Programs never see count. `zero` and `successor` must be words of nat, not of int's kernel enum.
+
+| | (a) a sugar rewrite into a guard | (b) a typed reading on int's cases | (c) zero and successor as functions with inverse patterns |
+|---|---|---|---|
+| what it is | `match n { zero => A; successor(k) => B }` becomes `if n == 0 then A else { k = n - 1; B }` | the arms are int's split, then count's split under natural, k bound as `natural(c)` (this note's (1)-(2)) | types/integers.wap declares `zero: nat := 0` and `successor(k: nat): nat := k + 1`, each with its inverse. An arm whose pattern names a function with an inverse matches where the inverse gives a value, its fields bound to it |
+| core | a rule cannot see types, so it needs a typed rewrite stage: a new mechanism, about +20, plus the rule (+3). It replaces (1)-(2) (−35) | +35, as estimated above | the arm's guard and binding from an inverse, about +12. It replaces (1)-(2) (−35). `zero` is a value arm, T5b4's literal arms |
+| words of nat | the rule names `zero` and `successor`: a nat word in sugar | core names count's cases as nat's patterns: a library word in core, which the layers forbid | plain wap words in wap/types, with nothing in core or sugar naming them |
+| siblings (`even(k)`/`odd(k)`, `xs.first`/`rest`) | a rule each | none | the same mechanism: `even(k: int): int := 2 * k` with its inverse `n ÷ 2` where `n % 2 == 0` |
+| the kernel | the guard goes through (3), `choice_by_cases` | its own path, (1)-(2) | the same guard as (a), through (3) |
+| proofs (T6a4) | the negative arm through (3)'s split, filled by apart from `n_holds` (coc-t6a4.md (4)) | coc-t6a4.md as written | as (a) |
+| a new form | the typed rewrite stage | none | the inverse's declaration, which needs the user |
+
+**Recommended: (c).** It is the general mechanism the arms ask for:
+- the words stay library;
+- the siblings come free;
+- core is smaller than (b) by about 23 lines;
+- the kernel needs one path, (3), for guards and arms alike.
+
+It is a new form, so the spelling of the inverse goes to the user. The candidates:
+1. `successor⁻¹(n: nat): nat? := if n > 0 then n - 1`, the inverse as a function named with ⁻¹, giving ø where the
+   pattern does not match (recommended: plain wap, one function);
+2. a `pattern` declaration, `pattern successor(k) of n: nat where n > 0 := k = n - 1`, beside the node patterns of
+   pattern-matching.md:148-163.
+
+**Until the user decides**, T5c4 builds (3) (guards) and the plain-wap `nat.recursor` as a guard (coc-t5b4.md). These
+lines go green without arms: test_proof_wanted:23-25 and test_laws_wanted:9-11. The arms' lines stay red:
+test_proof_wanted:5, and through it :6 and :8-10. (1)-(2) are not built: under (c) they would be deleted, and (c)'s
+guard reuses (3).
+
+**A finding on the run today.** A bare name in a pattern fits any value and holds it (kernel/forms.wap:56-59). So
+`zero => 0` on an int binds a new `zero` and always matches. Under (c), a pattern name that is a defined value of the
+subject's type (nat's `zero`) is that value. A name that might be either is refused with both readings named. That
+refusal is part of (c)'s +12.
