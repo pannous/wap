@@ -28,13 +28,41 @@ slot_waited() {
 		sleep $RETRY_SECONDS
 	done
 }
-# --alone: the command runs once every other slot is free, the caller's own aside (a measured run inside a test, whose
-# instruction count grows with the machine's load): each slot is held as it frees, so no new job starts meanwhile,
-# behind a lock of its own, so two such runs never hold each other's slots
+# how many slots are taken by runs doing something: all taken but those up the process chain of this run or of a run
+# asleep on the alone lock (its lockf with no child yet)
+slots_busy() {
+	ps -axo pid=,ppid=,command= | awk -v slot="lockf -s -t 0 $slot_store/job-slots/" -v alone="lockf -s $slot_store/job-slots/alone " -v me=$$ '
+		{ pid = $1; parent[pid] = $2; $1 = $2 = ""; command[pid] = substr($0, 3); has_child[parent[pid]] = 1 }
+		END {
+			for (pid in command) if (index(command[pid], slot) == 1 && substr(command[pid], length(slot) + 1, 1) ~ /[0-9]/) taken[pid] = 1
+			for (pid in command) if (pid == me || index(command[pid], alone) == 1 && !(pid in has_child)) for (up = pid; up > 1; up = parent[up]) delete taken[up]
+			busy = 0; for (pid in taken) busy++; print busy
+		}'
+}
+# whether a process this one runs under holds a job slot: a slot's lockf up the parent chain
+slot_above() {
+	local pid=$PPID
+	while [ "$pid" -gt 1 ]; do
+		case $(ps -o command= -p "$pid") in "lockf -s -t 0 $slot_store/job-slots/"*) return 0 ;; esac
+		pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
+	done
+	return 1
+}
+# --alone: the command runs once every slot is free but those held around idle runs (a measured run inside a test,
+# whose instruction count grows with the machine's load), behind a lock of its own: each slot is taken as it frees, so
+# no new job starts meanwhile, and once none is free it runs when every slot still taken is held by its own process
+# ancestry or by that of a run asleep waiting for the alone lock, which does nothing meanwhile
 case $1 in
-	--alone) shift; exec lockf -s "$slot_store/job-slots/alone" "$0" --holding $((slots - 1)) "$@" ;;
-	--holding) left=$2; shift 2; waited=1
-		[ "$left" -gt 0 ] || exec nice -n 19 "$guarded" "$@"
-		slot_waited "$0" --holding $((left - 1)) "$@"; exit ;;
+	--alone) shift; exec lockf -s "$slot_store/job-slots/alone" "$0" --holding "$@" ;;
+	--holding) shift
+		while :; do
+			slot_tried "$slot_store/job-slots" "$slots" "$0" --holding "$@"
+			status=$?
+			[ $slot_held = no ] || exit $status
+			[ "$(slots_busy)" -gt 0 ] || exec nice -n 19 "$guarded" "$@"
+			sleep $RETRY_SECONDS
+		done ;;
 esac
+# a run inside one that holds a slot runs in that slot
+! slot_above || exec nice -n 19 "$guarded" "$@"
 slot_waited nice -n 19 "$guarded" "$@"
