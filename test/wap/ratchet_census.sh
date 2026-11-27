@@ -38,6 +38,7 @@ size=$(cd "$root" && $wap "$compiler" scripts/wap-size.warp "$measure" 2>&1 && $
 whole=$(echo "$total" | sed -n 's/^\([0-9]*\) of .* files typed whole.*/\1/p')
 counted=$(echo "$total" | sed -n 's/.*files typed whole, \([0-9]*\) of \([0-9]*\) functions typed.*/\2 - \1/p')
 untyped=$([ -n "$counted" ] && echo $(($counted)))
+defined=$(echo "$assumed" | sed -n 's/^\([0-9]*\) function instances defined.*/\1/p')
 # the places typed any in the compiler's own files: the types module's are the language's dynamic words for programs,
 # `show(x: any)`, a Node's `Data(value: any)`
 compiler_anys=$(awk '/^== /{ file = $2 } /as every program.s library/ { library[file] = 1 } /^any\t/ && !(file in library) { print file ": " substr($0, 5) }' "$report")
@@ -47,6 +48,7 @@ at_least() { [ -n "$1" ] && [ "$1" -ge "$2" ] && echo yes || echo "${1:-no total
 check "the files wap types whole stay at least $FILES_TYPED_WHOLE ($total; $assumed)" "$(at_least "$whole" $FILES_TYPED_WHOLE)" "yes"
 check "the functions wap does not type alone stay at most $FUNCTIONS_UNTYPED" "$(at_most "$untyped" $FUNCTIONS_UNTYPED)" "yes"
 check "wap's size stays at most $SIZE_NODES nodes" "$(at_most "$size" $SIZE_NODES)" "yes"
+check "the function instances the kernel holds defined stay at least $DEFINED_INSTANCES" "$(at_least "$defined" $DEFINED_INSTANCES)" "yes"
 check "wap reads, lowers and binds its own source" "$(if [ -n "$total" ]; then grep '^front' "$report"; else echo "no total line"; fi)" ""
 check "no place of the compiler's own source is typed any" "$( [ -n "$total" ] && echo "$compiler_anys" || echo "no total line")" ""
 exit $((failures > 0))
