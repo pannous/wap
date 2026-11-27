@@ -10,6 +10,10 @@ use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
 use "../type_notation.wap"
+use "../rules/typed.wap"
+use "../rules/lowering.wap"
+use "calls.wap"
+use "function_values.wap"
 use "../../kernel/terms.wap"
 use "../../kernel/environment.wap"
 use "../../kernel/typing.wap"
@@ -21,11 +25,14 @@ ROW_MARK = "prim"
 
 # the typed functions entered, callees before their callers: each by its key, once
 instances_entered(functions: list<TypedFunction>, s: TypingState) := {
-	# a function value, a subtype's condition among them, is no declaration of its own
-	declared = functions.filter(typed => typed.define is Define)
+	by_key = instances_keyed(functions)
+	for typed in by_key.values() { instance_entered(typed, by_key, s) }
+}
+# the typed functions by their keys; a function value of no Define is no declaration of its own
+instances_keyed(functions: list<TypedFunction>) as map<text, TypedFunction> := {
 	by_key: map<text, TypedFunction> = {}
-	for typed in declared { by_key[instance_key(typed)] = typed }
-	for typed in declared { instance_entered(typed, by_key, s) }
+	for typed in functions.filter(typed => typed.define is Define) { by_key[instance_key(typed)] = typed }
+	by_key
 }
 instance_key(typed: TypedFunction) as text := function_key(typed.define)
 # a typed function's constant, entered the first time: defined where its body is pure and the kernel takes it, else
@@ -53,7 +60,8 @@ instance_entered(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 # returns
 kernel_signature(typed: TypedFunction, s: TypingState) as Term? := {
 	if typed.jumps { return ø }
-	parameters = typed.arguments.map(type => kernel_settled(type, s))
+	# a parameter keeps its subtype, the parent by definition, so a law reads its binders' conditions
+	parameters = typed.arguments.map(type => settled_type(type, s))
 	result = kernel_settled(typed.result ?? return ø, s)
 	if (parameters + [result]).any(type => has_letters(type) or has_unknowns(type)) { return ø }
 	parameters.reverse.fold(result, (body, parameter) => pi("_", parameter, body))
@@ -140,8 +148,41 @@ terms_applied(function: Term, arguments: list, x: Entering) as Term? := {
 	terms = arguments.map(argument => term_of(argument, x))
 	if terms.any(term => term == ø) then ø else apply_all(function, terms.map(term => term!))
 }
-# a type as the kernel reads it: a subtype by condition is its parent's, the condition a law's hypothesis
-# (extensions/verify/laws.wap)
+# a type as the kernel reads a value's: a subtype by condition is its parent's
 kernel_type(type: Term?) as Term? := if type != ø and subset_condition(type) != ø then kernel_type(narrowed_type(type)) else type
 kernel_settled(type: Term, s: TypingState) as Term := kernel_type(settled_type(type, s))!
 kernel_value(n: Node) as Term? := kernel_type(value_type(n))
+
+# Each subtype's condition, a definition of the parent's values named after the subtype, `int where it >= 0 holds`:
+# typed as the function value it is with the program's functions, then its body read with `it` its one binder
+CONDITION_HOLDS = " holds"
+class Condition { type: Term; typed: TypedFunction }
+conditions_typed(s: TypingState) as list<Condition> := {
+	conditions: list<Condition> = []
+	for type in TYPES.subsets {
+		written = written_bound(subset_condition(type)!, s)
+		match written {
+			Fn(parameters, body) => {
+				function = lambda_of(written, parameters, body, s)
+				conditions += [Condition(type, shaped_typed(function, [function_value_type(function.key, []), narrowed_type(type)!], s, written))]
+			}
+			_ => ø
+		}
+	}
+	conditions
+}
+conditions_entered(conditions: list<Condition>, s: TypingState) := {
+	by_key = instances_keyed(s.functions)
+	for condition in conditions { condition_entered(condition, by_key, s) }
+}
+condition_entered(condition: Condition, by_key: map<text, TypedFunction>, s: TypingState) := match condition.typed.define {
+	Define(name, parameters, body) => {
+		keys = items_of(parameters).map(parameter => place_key(declared_name(parameter)))
+		value = term_of(body, Entering(keys, by_key, s)) ?? return
+		parent = narrowed_type(condition.type)!
+		added(TYPES.environment, Declaration(condition_name(TYPES.environment, condition.type)!, [], pi("_", parent, BOOL_TERM), Defined(lambda(IT_WORD, parent, value))))
+	}
+	_ => ø
+}
+# the name of a subtype's condition: its word's name and "holds"
+condition_name(e: Environment, type: Term) as text? := (declared_at(e, word_id(type)) ?? return ø).name + CONDITION_HOLDS
