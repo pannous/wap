@@ -39,7 +39,7 @@ printf '%s\n' 'use sound' 'use units' \
 	>"$stage/playing.wap"
 check "every playing word compiles" "$($wap "$compiler" "$stage/playing.wap" "$stage/playing.wasm" 2>&1; [ -f "$stage/playing.wasm" ] && echo written)" "written"
 # muted runs of the native wap: a tone played is rendered all the same, so a saved file holds its samples
-muted() { printf '%s\n' "$2" >"$stage/$1.wap" && (cd "$stage" && $wap --muted --no-window "$1.wap" 2>&1); }
+muted() { printf '%s\n' "$2" >"$stage/$1.wap" && (cd "$stage" && $wap --mute --no-window "$1.wap" 2>&1); }
 check "a tone played muted is saved: half a second at 22050 Hz, mono, 16-bit" "$(muted saving 'use sound
 use units
 play(440Hz, 0.5s)
@@ -49,4 +49,6 @@ tone = sample("tone.wav")
 print "${tone.rate} ${tone.channels} ${#tone.frames}"')" "22050 1 11025"
 check "the MIDI outputs are listed, none sounding" "$(muted ports 'use sound
 print #midi_outputs() >= 0')" "yes"
+check "--muted is --mute, said" "$(cd "$stage" && $wap --muted --no-window ports.wap 2>&1)" "got it: --muted is --mute
+yes"
 exit $((failures > 0))
