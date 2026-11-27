@@ -307,10 +307,10 @@ equals_sound(a: int, b: int, h: Equal(bool, equal_integers(a, b), yes)): Equal(i
 equals_complete(a: int, b: int, h: Equal(int, a, b)): Equal(bool, equal_integers(a, b), yes)
 ```
 
-Neither can be written in wap spelling: a law's `==` is always the bool one, so `Equal(int, …)` has no wap form
-before T6a3 puts `==` in a proposition's place. So linear.wap declares both itself, the first time `sums_of` meets
-int. It hands each statement, as a kernel term, to `proof_found`, and keeps the proof through `lemma_declared`. They
-are checked theorems, never axioms. The same function serves any enum whose `==` decides it (bool's own `==`
+Their proofs go through the hidden count (count_equals_sound, difference_equal, parts_back), so int_declared
+declares both, as checked theorems, never axioms, and `e.integers` names them. T6a3a (notes/coc-t6a.md "How wap
+source states a proposition") gives the statements a wap spelling, `h: (a == b) == yes` against `a == b`, but
+the proofs stay core's. The same function serves any enum whose `==` decides it (bool's own `==`
 included), so it is written once over the type and its equality function.
 
 - **complete** is Equal's recursor: rewrite b to a in the goal (`rewritten`), leaving `equal_integers(a, a) == yes`,
