@@ -112,7 +112,7 @@ wanted_compiled() {
 		start=$(awk -v refused="$line" -v statement="$STATEMENT_START" 'NR <= refused && $0 ~ statement { start = NR } END { print start }' "$program")
 		[ -n "$start" ] && [ -n "$(sed -n "${start}p" "$program")" ] || { cat "$stage/refused.txt"; return 1; }
 		echo "✗ $(sed -n "${start}p" "$program" | sed 's/^check("\([^"]*\)".*/\1/' | cut -c1-$RED_NAME_LENGTH): got $(head -1 "$stage/refused.txt" | sed "s|^$program ||"), expected it compiles"
-		awk -v start="$start" -v statement="$STATEMENT_START" 'NR > start && $0 ~ statement { start = 0 } start { $0 = "" } 1' "$program" >"$program.blanked" && mv "$program.blanked" "$program"
+		awk -v start="$start" -v statement="$STATEMENT_START" 'NR > start && $0 ~ statement { start = 0 } start && NR >= start { $0 = "" } 1' "$program" >"$program.blanked" && mv "$program.blanked" "$program"
 	done
 }
 one_run() {
