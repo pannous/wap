@@ -21,8 +21,8 @@ cut and what is open.
 - The rules are those of Lean 4's kernel, the best-tested rules for exactly this list of features, with four
   stated departures (section 6). Nothing of Lean itself is used: syntax, elaborator, library and provers are wap's
   own, written in wap.
-- Cost: the compiler grows from about 12,300 lines (16,067 measured now) to about 17,100 once T5 deletes the analyze
-  files it replaces, near the ballpark of 17,000, about 2,500 of them trusted.
+- Cost: the compiler is at 16,067 lines and ends about 17,100 once T5 deletes the analyze files it replaces, near
+  the ballpark of 17,000, about 2,500 of them trusted.
 
 ## 1 What is asked
 
