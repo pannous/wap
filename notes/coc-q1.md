@@ -59,19 +59,19 @@ All of quotient.md:
 
    i64 is T8b's. types about +20.
 
-## A doubt for warp-interviewer: the wiki's `sign` lift may be beyond the provers
+## The wiki's `sign` lift needs a lemma (decided A)
 
 quotient.md's fine example, `q.lift(f => sign(f.top * f.bottom))`, needs
 `a.top * b.bottom == b.top * a.bottom` (with bottoms nonzero) to imply `sign(a.top * a.bottom) == sign(b.top * b.bottom)`.
 That is a nonlinear fact about products and signs. The provers are linear plus induction (law.md: "Floats and `/` stay
 at Tested"), so as read they would refuse it, and the program the wiki calls fine would be refused.
 
-- A (recommended): types/quotients.wap states and proves the sign law over products once
+- A (decided): types/quotients.wap (or wherever sign lives) states and proves the sign law over products once
   (`sign(x * y) == sign(x) * sign(y)` with the multiplication cases), and the provers use it as a lemma (V3). That is
   types +6 and no wiki change. The builder measures whether the provers then find the respect proof.
 - B: change the wiki's example to one the provers reach. That is a wiki change.
 
-The test line "a lifted function gives one answer for joined values" stays red until A or B.
+If the respect proof is still not found, what is missing comes back as a further lemma, never a change to the wiki's example.
 
 ## The red lines it turns green
 
