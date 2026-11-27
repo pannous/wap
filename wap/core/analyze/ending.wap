@@ -14,10 +14,10 @@ SUBTRACT_WORDS = ["-", "subtract"]
 ARM_ABOVE = {"<=": 2, "<": 2, ">": 1, ">=": 1}
 
 # a function (its key, its parameters' keys, its body) that calls itself and only so, and ends
-ends(key: text, parameters: list<text>, body: Node) as bool := {
+ends(typed: TypedFunction, key: text, parameters: list<text>, body: Node, s: TypingState) as bool := {
 	calls = self_calls(key, body)
 	named = nodes_in(body).filter(n => n is symbol and definer_key(n) == key)
-	calls is not empty and #named == #calls and (structural(parameters, calls, body) or bounded(parameters, calls, body))
+	calls is not empty and #named == #calls and (structural(typed, parameters, calls, body, s) or bounded(typed, parameters, calls, body, s))
 }
 # the calls of the function in a body
 self_calls(key: text, body: Node) as list<Node> := nodes_in(body).filter(n => match n { Call(called, arguments) => definer_key(called) == key; _ => no })
@@ -25,13 +25,13 @@ definer_key(n: Node) as text := match fact_of(n, REBOUND) ?? fact_of(n, DEFINED_
 spelled(n: Node) as text := text(fact_of(n, SPELLING) ?? n)
 argument_at(call: Node, place: int) as Node := match call { Call(called, arguments) => arguments#place; _ => Empty }
 
-# the body takes a parameter apart by a match, and every call has at that parameter's place a field of a case of it, or
+# the body takes a parameter of a program's enum apart by a match (an enum's cases are values, never changed in place), and every call has at that parameter's place a field of a case of it, or
 # of a case of such a field
-structural(parameters: list<text>, calls: list<Node>, body: Node) as bool := match unwrapped(body) {
+structural(typed: TypedFunction, parameters: list<text>, calls: list<Node>, body: Node, s: TypingState) as bool := match unwrapped(body) {
 	Case(subject, arms) => {
 		place = parameters.index_of(definer_key(subject))
 		below = below_of(body, [definer_key(subject)])
-		place > 0 and calls.all(call => below.contains(definer_key(argument_at(call, place))))
+		place > 0 and TYPES.enums.get(word_id(kernel_settled(typed.arguments#place, s))) == ENUM_DEFINED and calls.all(call => below.contains(definer_key(argument_at(call, place))))
 	}
 	_ => no
 }
@@ -41,14 +41,14 @@ below_of(n: Node, held: list<text>) as list<text> := nodes_in(n).fold(held, (fou
 	_ => found
 })
 
-# the body is an `if` comparing a parameter with a literal, and every call lies in the arm where it is above, with the
+# the body is an `if` comparing an int parameter (a float stops shrinking past 2^53) with a literal, and every call lies in the arm where it is above, with the
 # parameter less a literal above 0 at the parameter's place
-bounded(parameters: list<text>, calls: list<Node>, body: Node) as bool := match unwrapped(body) {
+bounded(typed: TypedFunction, parameters: list<text>, calls: list<Node>, body: Node, s: TypingState) as bool := match unwrapped(body) {
 	If(condition, then_part, else_part) => {
 		compared = match condition { Call(called, arguments) => if #arguments == 2 and arguments#2 is Number and ARM_ABOVE.has(spelled(called)) then [spelled(called), definer_key(arguments#1)] else []; _ => [] }
 		place = if compared is empty then 0 else parameters.index_of(compared#2)
 		arm = if place > 0 then [then_part, else_part]#(ARM_ABOVE[compared#1]) else Empty
-		place > 0 and #calls == #self_calls_in(calls, arm) and calls.all(call => shrinks(argument_at(call, place), compared#2))
+		place > 0 and kernel_settled(typed.arguments#place, s) == INT_TERM and #calls == #self_calls_in(calls, arm) and calls.all(call => shrinks(argument_at(call, place), compared#2))
 	}
 	_ => no
 }
