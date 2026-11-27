@@ -52,7 +52,7 @@ dispatching_named(name: Node, called: Node, counted: list<Signature>, types: lis
 	order = ranked(counted, types, s)
 	dispatch = Dispatch(called, name, order, types, reads)
 	generic = order.filter(definition => generic_place(definition, types, s) != ø)
-	made = dispatcher_made(name, reads, dispatch_body(dispatch, s), (taking_of(dispatch, s) + generic).map(definition => if has_letters(definition.result) then ø else definition.result), s)
+	made = dispatcher_made(name, reads, dispatch_body(dispatch, s), dispatch_results(dispatch, s), s)
 	if generic is not empty { s.dispatches.add(dispatch) }
 	made
 }
@@ -119,6 +119,21 @@ generic_choices(definition: Signature, dispatch: Dispatch, s: TypingState) as li
 	taking = taken(definition, at, boxed_known(s), s).filter(type => takes_fitting(definition, read_as(type), s))
 	taking.map(type => Choice(places.map(place => test_of(dispatch.reads#place, type, dispatch.name, s)), named_call(definition.name, [definition], read_as(type), dispatch.name, s)))
 }
+# what each choice gives: a definition's written result, a generic one's for each boxed type it takes, `list<text>`
+# of keys(m: map<K, V>) for a map<text, int>; ø where its letters stay open
+dispatch_results(dispatch: Dispatch, s: TypingState) as list<Term?> := {
+	plain = taking_of(dispatch, s).filter(definition => generic_place(definition, dispatch.types, s) == ø)
+	plain.map(definition => if has_letters(definition.result) then ø else definition.result) + dispatch.order.flat_map(definition => generic_results(definition, dispatch, s))
+}
+generic_results(definition: Signature, dispatch: Dispatch, s: TypingState) as list<Term?> := {
+	at = generic_place(definition, dispatch.types, s) ?? return []
+	taken(definition, at, boxed_known(s), s).map(type => generic_result(definition, at, type, s))
+}
+generic_result(definition: Signature, at: int, type: Term, s: TypingState) as Term? := {
+	bound = unified(parameters_holed(definition, s)#at ?? return ø, type, [], s) ?? return ø
+	result = answered(substituted(definition.result, letter_holes(definition, s)) ?? return ø, bound)
+	if has_letter_holes(result, s) then ø else result
+}
 # the boxed types a definition's generic parameter takes
 taken(definition: Signature, at: int, boxed: list<Term>, s: TypingState) as list<Term> := {
 	wanted = parameters_holed(definition, s)#at ?? ANY_TERM
@@ -164,7 +179,7 @@ boxed_known(s: TypingState) as list<Term> := {
 dispatcher_retyped(dispatch: Dispatch, s: TypingState) as bool := {
 	key = place_key(dispatch.name)
 	define = define_of(definition_keyed(key, s) ?? refused(dispatch.name, "a dispatcher is held"), s)
-	retyped: Define = match define { Define(name, parameters, body) => refitted(Define(name, parameters, dispatch_body(dispatch, s)), define) }
+	retyped: Define = match define { Define(name, parameters, body) => refitted(Define(dispatcher_written(dispatch.name, dispatch.reads, dispatch_results(dispatch, s), s), parameters, dispatch_body(dispatch, s)), define) }
 	s.defines[key] = retyped
 	s.dispatchers = s.dispatchers.map(each => if function_key(each) == key then retyped else each)
 	typed = instances_of(key, s)
@@ -195,14 +210,16 @@ parameters_of(name: Node, types: list) as list := (1 to #types).map(at => {
 # The dispatching function, kept with the typing stage's definitions and placed with the program's functions; its
 # result written when every choice writes its own, so a choice calling back through the dispatch finds it
 dispatcher_made(name: Node, reads: list, body: Node, results: list<Term?>, s: TypingState) as Signature := {
-	# joined_type is ø where either is: a choice without a written result writes none
-	joined = if results is empty then ø else results.drop(1).fold(results#1, (a, b) => held_joined(a, b, s))
-	# a choice among an any's types gives an any where the choices give unlike types or types their letters decide
-	result = if (joined == ø or is_union(joined)) and reads.any(read => value_type(read) == ANY_TERM) then ANY_TERM else joined
-	written = if result == ø then name else Key(name, Op.Colon, written_of(result!))
-	dispatcher = placed_like(Define(written, List(reads.map(read => Key(read, Op.Colon, written_of(value_of(read, "for a dispatcher's parameter")))), Bracket.Round, Separator.Comma), body), name)
+	dispatcher = placed_like(Define(dispatcher_written(name, reads, results, s), List(reads.map(read => Key(read, Op.Colon, written_of(value_of(read, "for a dispatcher's parameter")))), Bracket.Round, Separator.Comma), body), name)
 	s.dispatchers += [dispatcher]
 	function_added(dispatcher, s)
+}
+# a dispatcher's name with its result written where every choice writes one: joined_type is ø where either is; a
+# choice among an any's types gives an any where the choices give unlike types
+dispatcher_written(name: Node, reads: list, results: list<Term?>, s: TypingState) as Node := {
+	joined = if results is empty then ø else results.drop(1).fold(results#1, (a, b) => held_joined(a, b, s))
+	result = if is_union(joined) and reads.any(read => value_type(read) == ANY_TERM) then ANY_TERM else joined
+	if result == ø then name else Key(name, Op.Colon, written_of(result!))
 }
 # the results of choices made when the program runs, each kept as it is: an int's and a float's a number, not a float
 held_joined(a: Term?, b: Term?, s: TypingState) as Term? := if a != ø and b != ø and a != b and boxed_fit(a!, NUMBER_TERM) and boxed_fit(b!, NUMBER_TERM) then NUMBER_TERM else joined_type(a, b, s)
