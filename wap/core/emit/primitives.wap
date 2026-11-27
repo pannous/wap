@@ -99,8 +99,11 @@ first_operand_type(form: Prim) as Term := match form { Prim(operation, given) =>
 # an optional's value, x known to be there: a plain value taken out of its box, a reference made non-null, a value
 # of no optional's type (a condition found it present) itself; a missing one traps. A value any or a number holds,
 # known of its type, is cast to it first.
-# an any's value as an any, `x!` of an any (an any? is an any), is the any itself, missing raising
-optional_value(form: Node, p: Emission) as list<int> := if layout_of(first_operand_type(form), p.m, p.records) == ANYREF then (if typed_layout(form, p) == ANYREF then REF_AS_NON_NULL else held_value(type_of(form), form, p)) else if base_of_optional(first_operand_type(form)) == ø then [] else present(p) + (if type_text(type_of(form)) in BOXED_WORDS then box_opened(plain_word(form), p) else [])
+# an any's value as an any, `x!` of an any (an any? is an any), is the any itself, missing raising. A class's value a
+# test found of an extension is cast to it
+optional_value(form: Node, p: Emission) as list<int> := if layout_of(first_operand_type(form), p.m, p.records) == ANYREF then (if typed_layout(form, p) == ANYREF then REF_AS_NON_NULL else held_value(type_of(form), form, p)) else (if base_of_optional(first_operand_type(form)) == ø then [] else present(p) + (if type_text(type_of(form)) in BOXED_WORDS then box_opened(plain_word(form), p) else [])) + cast_down(layout_of(first_operand_type(form), p.m, p.records) ?? [], typed_layout(form, p), p)
+# a reference to a struct cast to one of its subtypes' references, nothing for any other two types
+cast_down(given: list<int>, wanted: list<int>, p: Emission) as list<int> := if is_reference(given) and supertype_passes(wanted, given, p.m) then REF_CAST_NULL + heap_of(wanted) else []
 # a plain value of a type word, `int`, put in its box, and the value a box on the stack holds
 box_made(word: text, p: Emission) as list<int> := struct_made([WORD_LAYOUTS[word]], () => box_index(p.m, word), p)
 box_opened(word: text, p: Emission) as list<int> := if p.m.memory != ø then item_loaded(WORD_LAYOUTS[word]).code else instruction(STRUCT_GET, [box_index(p.m, word), 0])
@@ -126,11 +129,16 @@ type_tested(type: Term, at: Node, p: Emission) as list<int> := {
 }
 # the test of an any for any of these types, its local 0 the value
 passing_test_function(types: list<Term>, at: Node, p: Emission) as int := added_function(p.m, [ANYREF], [I32], [], types.flat_map(each => local_get(0) + type_tested(each, at, p)) + types.drop(1).flat_map(each => I32_OR))
-# the test of an any for a class: its struct, then its tag. Its local: 0 the value
+# the test of an any for a class: its struct, then its tag, the class's or one of a class extending it. Its locals: 0
+# the value, 1 its tag
 class_test_function(record: Record, p: Emission) as int := {
 	type = struct_of(record, p.m, p.records)
-	added_function(p.m, [ANYREF], [I32], [], local_get(0) + heap_instruction(REF_TEST, type) + IF + I32 + local_get(0) + heap_instruction(REF_CAST_NULL, type) + tagged(p.m) + i32_const(class_tag(record)) + I32_EQ + ELSE + i32_const(0) + END)
+	tags = kin(record, p.records).map(class_tag)
+	tag_is = tags.flat_map(tag => local_get(1) + i32_const(tag) + I32_EQ) + tags.drop(1).flat_map(tag => I32_OR)
+	added_function(p.m, [ANYREF], [I32], [I32], local_get(0) + heap_instruction(REF_TEST, type) + IF + I32 + local_get(0) + heap_instruction(REF_CAST_NULL, type) + tagged(p.m) + local_set(1) + tag_is + ELSE + i32_const(0) + END)
 }
+# a class and the classes extending it, at any depth
+kin(record: Record, records: Records) as list<Record> := [record] + records.items.filter(each => class_extended(each) != ø and record_named(records, type_term(class_extended(each)!)) == record).flat_map(each => kin(each, records))
 # the helper function of an operation, added by `build` the first time
 helper(p: Emission, operation: text, build: (Emission) -> int) as int := {
 	if p.helpers.has(operation) { return p.helpers[operation] }
