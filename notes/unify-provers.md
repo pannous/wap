@@ -18,6 +18,8 @@ payload is a kernel object of its own with no wap name, the **count**:
 count: Type            the kernel block   enum count { none; one_more(c: count) }
                        its literals the kernel's Numeral (a count literal k is one_more applied k times to none,
                        computed by the numbers binding's shortcuts, kernel/numbers.wap, so 10^12 costs nothing)
+                       — below 2^63 only: the shortcuts and row_step refuse a result past it (LARGEST,
+                       ROW_OVERFLOW), so exact int past 2^63 needs the kernel's literals exact, a step of its own
 count_add, count_subtract, count_equals, count_at_most     by count's recursor
 count_equals_sound, count_equals_itself, count_add_zero …  theorems by count's recursor
 ```
