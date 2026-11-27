@@ -164,6 +164,53 @@ bridge's own spelling, needing no new word.
 - Kernel 0. Total about +18 over T6a1 and T6a2. coc-t6a's T6a3 row had "Equal's place +10" for the same reading
   without the guard.
 
+**The draft, read against unify-typers 2af0a649.** Reading the code makes the step smaller than the mechanism
+above says, in two ways:
+- **It reads the statement's term, not its node.** law_statement gets the law function's kernel value, and
+  `beta(value, frees)` gives the body as a term (verify/laws.wap:85–90). In that term `a == b` is the row constant
+  `prim i64.eq int -> int -> bool` applied to a and b, and the row is Defined as int's equality function. So
+  proposition_of works on terms, beside `equated` in kernel/equality.wap. Analyze needs no branch. A T6a1 theorem's
+  statement reaches it through `term_of`, the same way.
+- **There is no `implies` arm.** `implies` lowers to an `if`, so its term is bool's case split. Recognising it would
+  mean matching a lowering's shape. The bool reading `Equal(bool, a implies b, yes)` is the same proposition as
+  `Π _: a == yes, b == yes` by bool's cases, and the provers already read it (`both_*`, the choice reading). The named
+  form, an `h:` parameter, is T6a2's hypothesis binder. The table's middle row is dropped.
+
+```
+# a type whose == decides Equal: its equality function and the two theorems joining them (int_declared, bool's block)
+class Bridge { type: Term; equality: Term; sound: Term; complete: Term }
+# what a statement says: `l == r` of a type with a bridge is Equal at that type, any other truth is `b == yes`
+proposition_of(e: Environment, statement: Term): Term := {
+	bridge = bridge_of(e, head(statement)) ?? return truth_stated(e, statement)
+	sides = arguments_of(statement)
+	equated(e, DATA_LEVEL, bridge.type, sides#1, sides#2)
+}
+# the bridge whose equality a head is: the function itself, or a row Defined as it
+bridge_of(e: Environment, head: Term): Bridge? := e.bridges.find(bridge => same(head, bridge.equality) or same(defined_value(e, head) ?? head, bridge.equality))
+```
+
+- `e.bridges: list<Bridge>` sits beside `e.literals`. int_declared adds int's, and `Integers` holds its bridge in
+  place of its own equal_integers, equals_sound and equals_complete fields (notes/unify-provers.md "What replaces
+  e.numbers"), so the three are named once. literals_declared adds bool's.
+- truth_stated moves from verify/laws.wap to kernel/equality.wap beside `equated`. Every place that states a
+  statement calls proposition_of: law_statement's body, `hypothesized` and T6a2's hypothesis binders. A subtype's
+  condition (`it >= 0`) has no bridged head, so it comes out as today.
+- A bridged type sits at Type, so its Equal is at DATA_LEVEL, the level truth_stated uses (TRUTH_LEVEL there, the same
+  `Successor(Zero)`: one constant, not two).
+- **Lines.**
+  - kernel/equality.wap: Bridge, proposition_of, bridge_of and truth_stated moved in, about +7.
+  - environment.wap: the field, +1.
+  - bool's bridge: +6.
+  - int_declared: Integers' three fields become one, −2.
+  - verify/laws.wap: truth_stated out, −1, and two calls switched, ±0.
+  - Net about +11, all kernel, none in analyze. The +18 above becomes +11.
+- **What it needs before it can be built.** `e.integers` and int's bridge (M2b step 1) and bool's block (t5b-enums). On
+  unify-typers today neither exists, so the code cannot be drafted there until M2b step 1 lands. Before that, the sketch
+  above is the draft.
+- **Its outcome test.** `law sum_commutes(a: int, b: int): a + b == b + a` stays Proved through linear's own
+  equal_proof with M2b step 5 never built (test_theory_connectives' `==` laws). `law nan_free(y: float): y == y`
+  keeps its run's FAILED at NaN and is never Proved.
+
 **What moves to wap afterwards, and what cannot.**
 
 | hand-declared today (or in M2b's plan) | after T6a3a |
