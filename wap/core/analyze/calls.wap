@@ -16,6 +16,7 @@ use "../type_notation.wap"
 use "../../kernel/environment.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/surface.wap"
+use "../../kernel/levels.wap"
 use "../parse/operator_table.wap"
 
 # the word an item taken by its place calls on a value that is no list, `r#2` is `#(r, 2)`
@@ -55,7 +56,8 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	placed = spread_alone(if arguments.any(is_named) then arranged_arguments(n, called, arguments, candidates, s) else arguments, candidates, s)
 	by_count = candidates.filter(definition => takes_count(definition, #placed, s))
 	# a function's name among arguments no definition takes takes the rest, `sin cos 0` is sin(cos(0)) (wiki/call.md)
-	reading = nested_read(n, called, placed, candidates, s)
+	# (a call writing a level gives its arguments as written, the types of letters among them: implicit_typed)
+	reading = if fact_of(called, LEVEL_WRITTEN) == ø then nested_read(n, called, placed, candidates, s) else ø
 	if reading != ø { hint(warning_of(n, "the parameter counts read it as ${call_shown(reading!)}")); typed_readings[reading_key(called)] = reading!; return typed_form(reading!, s, f, expected) }
 	receiver = fact_of(called, RECEIVER)
 	held = if by_count is empty and receiver != ø then value_type(typed_form(receiver, s, f, ø)) else ø
@@ -80,12 +82,32 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	if written == ø { return call_chosen(n, called, scopes, given, expected, s, f) }
 	# the level the call writes is its definitions' level letters' (letters.wap level_letters) while the call chooses
 	# among them, and no other call's; where none has one level letter, the brackets read two ways
-	if not candidates.any(definition => #level_names(definition) == 1) { refused(n, "${called}[${written!}](…) reads as a level written to ${called}, which has no level letter like the u of Sort(u), or as the item of a list ${called}, which is a function: give ${called} a level letter, or write the item's call as (${called}[${written!}])(…)") }
+	if not candidates.any(definition => #level_names(definition) == 1) { return implicit_typed(n, called, given, written!, candidates, s, f, expected) ?? refused(n, "${called}[${written!}](…) reads as a level written to ${called}, which has no level letter like the u of Sort(u), or as the item of a list ${called}, which is a function: give ${called} a level letter, or write the item's call as (${called}[${written!}])(…)") }
 	s.levels_written[text(called)] = [level_written(written!, 0) ?? refused(written!, "a level is a whole number from 0, Sort(0) Prop")]
 	chosen = call_chosen(n, called, scopes, given, expected, s, f)
 	s.levels_written.remove(text(called))
 	chosen
 }
+# A call at a written level giving the types of a definition's letters first, `identity[1](int, 3)` of `identity(a:
+# T)`: each letter an implicit parameter `T: Sort(u)` in front (wiki/universe.md), given a type at that level, and the
+# call that of the rest with each letter bound to its type; ø where no definition has letters and these arguments
+implicit_typed(n: Node, called: Node, given: list, written: Node, candidates: list<Signature>, s: TypingState, f: TypeFrame, expected: Term?) as Node? := {
+	level = level_written(written, 0) ?? return ø
+	definition = candidates.find(one => not letters_written(one) is empty and takes_count(one, #given - #letters_written(one), s)) ?? return ø
+	letters = letters_written(definition)
+	types = (1 to #letters).map(at => fact_type(fact_of(given#at, DENOTES)) ?? refused(given#at, "${called}[${written}] takes the type of ${letters#at} here, and this is no type"))
+	for at in 1 to #letters {
+		universe = universe_of(types#at!)
+		if not levels_equal(universe_level(universe)!, level) { refused(given#at, "${called}[${written}] takes ${letters#at} at level ${written}, and ${type_text(types#at!)} is a ${type_text(universe)}") }
+	}
+	# the letters bound to these types while the call chooses its definition (letters.wap letters_bound)
+	s.letters_given[text(called)] = (1 to #letters).map(at => Binding(letters#at, types#at!))
+	chosen = call_chosen(n, called, [[definition]], given.drop(#letters), expected, s, f)
+	s.letters_given.remove(text(called))
+	chosen
+}
+# the letters a definition's parameters write, each once, in the order they first appear
+letters_written(definition: Signature) as list<text> := definition.parameters.flat_map(type => letters_in(type)).unique()
 # where no definition takes them all, a function's name among the arguments takes the rest, in turn: `print sin cos 0`
 # is print(sin(cos(0))) (wiki/call.md), said whole in one note
 nested_read(n: Node, called: Node, placed: list, candidates: list<Signature>, s: TypingState) as Node? := {
