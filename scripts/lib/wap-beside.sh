@@ -40,6 +40,15 @@ wap_tools_built() {
 		(cd "$(dirname "$2")" && wap "${2##*/}" "$tree/${tool#*:}" "${tool%%:*}" >&2) || { echo "wap-beside: ${tool#*:} did not compile" >&2; return 1; }
 	done
 }
+# wap_seed_linked <seed> <folder>: the seed linked into the folder as its wap.wasm, its machine code beside it, so run
+# from there it reads the library and anything its warm state lacks in that folder, the tree's copy, never the seed
+# folder, which holds no source; prints the link's path
+wap_seed_linked() {
+	local code
+	ln -sf "$1" "$2/wap.wasm" || return 1
+	for code in "$(dirname "$1")"/wap-*.cwasm; do [ ! -e "$code" ] || ln -sf "$code" "$2/"; done
+	echo "$(cd "$2" && pwd)/wap.wasm"
+}
 # wap_beside_copied <tree> <folder>: all of it copied from the tree into the folder
 wap_beside_copied() {
 	(cd "$1/wap" && cp -R "${WAP_BESIDE[@]}" "$2/") && cp -R "$1/$WAP_LIBRARY" "$2/"
