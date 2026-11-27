@@ -1,6 +1,6 @@
 # T5: definitions, statements and inductive types, in landable steps
 
-coc-plan.md's T5 row is the goal. analyze already types every function of wap's source. What it does not do yet is give the kernel what it typed: a function enters the kernel as an opaque constant by its signature, and the census counts it as assumed. T5 turns analyze's typed nodes into kernel declarations and terms. It does this step by step, each step for one family of forms, and each step deletes the files of wap/extensions/theory/elaborate whose job analyze takes over, so the two typers never both do one job.
+coc-plan.md's T5 row is the goal. analyze already types every function of wap's source. What it does not do yet is give the kernel what it typed: a function enters the kernel as an opaque constant by its signature, and the census counts it as assumed. T5 turns analyze's typed nodes into kernel declarations and terms. It does this step by step, each step for one family of forms; analyze is the only typer, and the extension holds no second one.
 
 T5u (unions, coc-plan.md's T5u row) comes first. Every step after it is measured as T4's were: core lines, the census, test_self's instructions. Each step takes the careful path, since each one changes what the census and the self-build count.
 
@@ -8,7 +8,7 @@ T5u (unions, coc-plan.md's T5u row) comes first. Every step after it is measured
 
 | step | what works after it | core lines (estimate) | deletes | outcome lines |
 |---|---|---|---|---|
-| T5a pure definitions (A1 landed; A2 lands with unify-typers) | a function whose body is a pure expression enters the kernel as a definition with its body as a term, checked by the kernel; its body unfolds when a type or a condition computes with it (T4d's need). Pure expressions are literals, calls of known definitions, `if`, `let` blocks, `and`/`or`, and the number and text primitives by their T1 row. Items, Entries and Instance (a list's items, a map's entries, a record's instance) become kernel forms, built with the elaborator (user 2026-11-27: kernel +6, core about +2) A function with any other form stays opaque, as today. The theory's door reads analyze's typed nodes, so read.wap takes analyze's choice in place of `nearest`, TRIAL_LIMIT and the numeral special cases. The door names only what the kernel accepted, a definition or a T1 row (notes/audit/2026-11-27.md R3): a law, a proof or a type argument naming a function still opaque (an assumed constant) is refused by that function's name. Effects stay out of T5a | +180 analyze (terms.wap: typed node to term, the declaration entered and checked), +2 core and +6 kernel (the three forms), −40 extension | the expression half of elaborate/read.wap; letters.wap, ROUNDS_LIMIT | `type of` a type alias whose argument calls a pure function computes, `vector(int, double(2))` is `vector(int, 4)`; the census counts the compiler's pure functions as defined, not assumed; a function giving a wrong type refused by the kernel, naming its line; a law naming a function that writes its parameter, `grow(xs) := { xs.add(1); 0 }`, refused naming grow |
+| T5a pure definitions (A1 landed; A2 lands with unify-typers) | a function whose body is a pure expression enters the kernel as a definition with its body as a term, checked by the kernel; its body unfolds when a type or a condition computes with it (T4d's need). Pure expressions are literals, calls of known definitions, `if`, `let` blocks, `and`/`or`, and the number and text primitives by their T1 row. Items, Entries and Instance (a list's items, a map's entries, a record's instance) become kernel forms, built with the elaborator (user 2026-11-27: kernel +6, core about +2) A function with any other form stays opaque, as today. The door (wap/extensions/verify) reads analyze's typed nodes and takes analyze's choice. The door names only what the kernel accepted, a definition or a T1 row (notes/audit/2026-11-27.md R3): a law, a proof or a type argument naming a function still opaque (an assumed constant) is refused by that function's name. Effects stay out of T5a | +180 analyze (terms.wap: typed node to term, the declaration entered and checked), +2 core and +6 kernel (the three forms), −40 extension | letters.wap, ROUNDS_LIMIT | `type of` a type alias whose argument calls a pure function computes, `vector(int, double(2))` is `vector(int, 4)`; the census counts the compiler's pure functions as defined, not assumed; a function giving a wrong type refused by the kernel, naming its line; a law naming a function that writes its parameter, `grow(xs) := { xs.add(1); 0 }`, refused naming grow |
 | T4d computed | an obligation whose value and predicate compute is decided when compiling (notes/coc-t4.md) | +30 | | test_subtype_wanted's two compile-time refusal lines |
 | T5b enums and match | an enum is an inductive declaration, its cases its constructors; `match` is the recursor's case split, and a `match` that misses a case is refused by `covering`; analyze's matching.wap replaced | +220 analyze, −191 (matching.wap) | elaborate/match.wap (256) | a `match` over an enum missing a case refused by `covering` (a theory refusal test, exempt); `effects of` a match over every case is Pure |
 | T5c recursion | a recursive function is structural where an argument shrinks by a case, else needs a measure, else has the effect Div and still runs | +120 | elaborate/recursion.wap (117) | `effects of fact` is Pure; `effects of` a `while` without a measure is Div and it still runs |
@@ -19,7 +19,7 @@ T5u (unions, coc-plan.md's T5u row) comes first. Every step after it is measured
 
 ## The estimate
 
-T5 as a whole: about +1,100 core added and −340 deleted, against coc-plan's +1,059 net. The difference is the generic record layout (+40 to +80) and T4d's +30, which coc-plan counts in T4. The extension loses its elaborate/ files as each step takes their job: about 950 lines, outside the compiler's count.
+T5 as a whole: about +1,100 core added and −340 deleted, against coc-plan's +1,059 net. The difference is the generic record layout (+40 to +80) and T4d's +30, which coc-plan counts in T4. The extension's former elaborate/ files, about 950 lines outside the compiler's count, are gone.
 
 ## Order and dependencies
 
@@ -30,7 +30,7 @@ T5u, then T5a (pure definitions: everything later builds on terms), then T4d (it
 T5 is done when:
 - the T5 row's lines are green;
 - the census counts every function of wap's source as defined or Div, none assumed;
-- the theory's elaborate/ holds no file whose job analyze does;
+- the extension holds no file whose job analyze does;
 - `--stage 2` is a fixed point;
 - the self-compile grows by at most a fifth over T5u's, measured on the same machine.
 
