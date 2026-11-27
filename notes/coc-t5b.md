@@ -135,7 +135,7 @@ normal path.
 |---|---|---|---|---|
 | T5b1 effects | prim rows carry their effect; analyze writes `effects` per instance; `effects of`, one table of questions with `type of`; the `!` claim checked; the census prints the effects | core +120 (analyze/effects.wap +100, calls.wap's question table +10, the claim +10), kernel +10 (primitives.wap), sugar +1 | elaborate/effects.wap's inference half, about −120: the door (A2) reads the `effects` fact of a program's functions; the computation types (`T ! e`, Eff) stay for T6 | test_effects_wanted's four `effects of` checks (a constant free variable Pure, a global State, `! IO`, `! Pure`); test_errors_wanted's "effects of a function that can fail name Fail, try removes it"; wiki/effects.md's `effects of f // State` and `// Pure`, moved to test_effects_page |
 | T5b2 enums | an enum's declaration fills its word with an inductive block, cases its constructors; mutual enums one block; a case's value a constructor term; open or refused enums stay assumed, counted | core +80 (analyze/inductives.wap: block of a record +50, grouping +15, case terms in terms.wap +15), kernel 0 (A1's fill) | the door finds a program's enum filled and elaborates it no more (declare.wap's block path for programs, about −15); blocks.wap stays for indexed families and propositions | the census counts enums defined and assumed, a ratchet; every test as before (an enum's equality, a law's `Dime == Dime`, needs the decidable equality coc-plan.md 7 adds per block: T6) |
-| T5b3 bool | core declares bool's block, `enum bool: Type { no; yes }`, in core_environment; `if` is bool's recursor; the Choice goes (section "T5b3: the Choice goes") | core −5, kernel −12 | none: the theory's reader is gone | every test as before; laws with an `if` reach the provers' recursor reading |
+| T5b3 bool | core declares bool's block, `enum bool: Type { no; yes }`, in core_environment; `if` is bool's recursor; the Choice goes (section "T5b3: the Choice goes") | core −5, kernel −12 | none: the theory's reader is gone | every test as before; laws with `if`, `and`, `or`, `not` and `implies` reach the provers' recursor reading |
 | T5b4 match | a match on a filled enum with case arms is the recursor's case split, the catch-all filling the cases left; literal arms are choices on the row's equality | core +60 (terms.wap `match_term` +45, literal arms +15) | match.wap's program path: the door takes analyze's term; `arm_of`, `names_case`, `pattern_name`, `pattern_fields` and `minor_elaborated`'s non-dependent half, about −50; the dependent motive (`motive_made`) stays for T6, the course (`course_elaborated`) goes with T5c | wiki/law.md and enum.md: `enum Coin { Penny, Nickel, Dime }`, `cents(c: Coin) := match c { Penny: 1; Nickel: 5; Dime: 10 }`, `law dime: cents(Dime) == 10` prints `dime: Proved` (test_law_runs, a new line); `effects of cents` is Pure (coc-t5.md T5b row); "match on Coin misses Dime" unchanged |
 | T5b5 the recursor | `E.recursor(minors…, value)` typed with its motive found; it runs by the definition analyze adds to the enum | core +50 (calls.wap: the recursor's type for a filled enum +30, the added definition +20) | match.wap `recursor_given`, about −8 | the form of wiki/enum.md on an enum of the program, `enum Tree { leaf, node(left: Tree, right: Tree) }`, `leaves(t: Tree): int := Tree.recursor(1, (l, r, below_l, below_r) => below_l + below_r, t)`, `leaves(node(leaf, leaf))` is 2 (test_enum_wanted); enum.md's `enum nat { zero, successor }` is a teaching example, no second nat: its `double(3)` is 6 runs on a program's own enum only with a numeral of that enum, so the page's line goes green with T6c, where `zero` and `successor(k)` are patterns of the one nat, `int where it >= 0` |
 
@@ -159,9 +159,25 @@ kernel then holds no `if` of its own: an `if` is bool's recursor.
 | kernel/compute.wap:60 `Choice => choice_step`, :80 `choice_step` | the Choice's computing rule | gone: iota computes the recursor on a constructor |
 | kernel/environment.wap:89 `DeclarationKind.Choice`, :298 `stated`'s arm | the kind | gone |
 | extensions/verify/laws.wap:73, :89 | compares a value with `literals.yes_case` and `no_case`; states `… == yes` | unchanged: constructors are constants |
-| extensions/prove/linear.wap `choice_of`, `chosen_proof`, `chosen_bounds`; apart.wap | read a choice by bool's recursor (`recursor_facts` of the truth type) | unchanged, and they now see analyze's `if`, which reaches them as a Choice today and is not read. `and` and `or` join it where analyze lowers them to an `if`; I could not find their lowering by reading, so check that before counting their laws |
+| extensions/prove/linear.wap `choice_of`, `chosen_proof`, `chosen_bounds`; apart.wap | read a choice by bool's recursor (`recursor_facts` of the truth type) | unchanged, and they now see analyze's `if`, `and`, `or` and `not` (below), which reach them as a Choice today and are not read |
 
 dispatch.wap's `Choice` class is a dispatch's test list, unrelated; it keeps its name.
+
+### `and`, `or`, `not` and `implies` reach the Choice through `if`
+
+None of them has a term of its own. Each lowers to an `If` before typing, so choice_term alone replaces their Choice
+too:
+
+| form | lowered by | term after T5b3 | what the provers read |
+|---|---|---|---|
+| `a and b` | sugar/conditions.wap:29 `rule $a and $b => If($a, $b, no)` | `bool.recursor[1](_ => bool, no, b, a)` | chosen_bounds and chosen_proof: the part at no is `no`, so a and b both hold |
+| `a or b` | sugar/conditions.wap:30 `rule $a or $b => { held = $a; If(held, held, $b) }` | `let held := a in bool.recursor[1](_ => bool, b, held, held)` (lets_term, terms.wap:128), held unfolded by computing | choice_of after `computed_folded`: the choice decided by a, b at no |
+| `not x` | types/prelude.wap:138 `not(x): bool := if x then no else yes`, a pure function entered as a definition | `not` unfolds to `bool.recursor[1](_ => bool, yes, no, x)` | negation_of: yes at no, no at yes, so `not (a <= b)` is read by beyond_of |
+| `implies(a, b)` | types/prelude.wap:56 `not a or b` | the `or` above over `not` | as `or` |
+
+`and(…)` and `or(…)` written as calls are refused (sugar/conditions.wap:33–34), and `xor(a: bool, b: bool)` is
+`a != b`, the row `i64.ne`'s meaning, with no Choice. So no fourth step is needed. Step 2's choice_term covers all
+four, and step 3's grep proves it.
 
 ### Steps
 
@@ -172,8 +188,7 @@ dispatch.wap's `Choice` class is a dispatch's test list, unrelated; it keeps its
    test_law_runs and test_theory_verify unchanged.
 2. **`if` is bool's recursor.** choice_term writes the recursor, as in the table. Expected reds: none, since iota
    computes the same arm the Choice did. What turns green: laws whose statement holds an `if` and that need a prover,
-   which now reads them (chosen_proof). The same goes for test_theory_connectives' laws over `and` with binders, if
-   `and` lowers to an `if`.
+   which now reads them (chosen_proof). The same goes for the connectives' laws (test_theory_connectives) with binders, as below.
 3. **The Choice out.** CHOICE_WORD, its declaration, DeclarationKind.Choice, choice_step and the `stated` arm go.
    Expected reds: none; `git grep -n 'Choice'` in kernel/ and core/ then finds only dispatch.wap's class. Measures:
    core about −5, kernel about −12, and the census and self-compile time reported (track T).
