@@ -1051,6 +1051,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T4a, T4b | landed | 3410aa94 | |
 | T4d computed obligations | planned (notes/coc-t4d.md: T4d1 decided, T4d2 no check, T4d3 texts), no branch | | unify-typers (`conditions_entered`) |
 | T4c char | waits, no branch | | T4d1 to T4d3 |
+| T4e types that take values | planned (notes/coc-t4e.md) | | T4d1 to T4d3, unify-typers; its (8) T5b1 |
 | T5u | landed | 3410aa94, d0b3c9e8 (failable values, `T??`) | |
 | T5a | A1 landed; A2 (a typed law's verdict from analyze's environment) lands with unify-typers, which holds both its commits | 4112fe55, c43b08e3 | unify-typers |
 | unify-typers (M2, M2b) | in progress: core declares count, int and logic, the theory reader and prelude go, int's kernel laws in; unify-dedup 77e07344 merged into it | unify-typers bf69c6b8; wap-theory-reads-types | |
@@ -1067,22 +1068,63 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T5f erasure, T5g compiled libraries | wait | | T5b to T5d |
 | kernel-length: the kernel's theory files shrunk, about −55 plus 38 dead (notes/kernel-length.md) | waits | | unify-typers, int-takes |
 | int-takes: int in Lean's shape, `natural(n) \| negative(n)` (notes/unify-provers.md) | waits; card int-takes, wap-theory-reads-types | | unify-typers |
-| T6a1 proofs of bool laws, T6a2 hypotheses | wait | | unify-typers (the deletion commit, the int enum) |
+| T6a1 proofs of bool laws, T6a2 hypotheses | re-read on unify (notes/coc-t6a12.md: T6a1 in verify, core +10; T6a2's binders landed, its run skip and implies left) | | unify-typers (the deletion commit, the int enum) |
 | T6a3a propositions in wap spelling | in progress | t6a3a ad022f23; wap-native-no-layout-any | M2b step 1, T6a1 |
 | T6a3 indexed families | waits | | T6a3a, T5b2 |
 | T6a4 proofs by cases and induction | planned (notes/coc-t6a4.md) | | T5c3, T5c4, unify-dedup landed |
 | T6a5 False, Exists, undecidable | waits | | T5b1 |
 | T6a6 the logic in wap/types | waits | | T6a1 to T6a5 |
-| T6a7 universes | waits | | T6a6 |
-| V1 one verdict per law | waits; builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
-| V2 `wap check`, V3 proved laws as facts | wait | | V1 (V3 also T6a2 and unify-dedup) |
-| C1 traits are structures | open; builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
-| C2 instances passed, C4 generic dispatch | wait | | C1 (C2 also T5e's type arguments) |
-| Q1 quotients | waits | | C1, T6a3, T6a4 |
-| T7 the theory extension retires | waits | | T6 |
-| T8a the reader | waits; its first commit is whole()'s sign | | exact-big-literals |
-| T8b the machine words | waits | | Q1, T4d |
-| T8c exact int on the run | waits | | T8a, T5f |
+| T6a7 universes | planned (notes/coc-t6a7.md) | | T6a6 |
+| V1 one verdict per law | planned (notes/coc-v1.md; the plain-compile report cut, no wiki passage); builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
+| V2 `wap check`, V3 proved laws as facts | planned (notes/coc-v2.md, notes/coc-v3.md) | | V1 (V3 also T6a2 and unify-dedup) |
+| C1 traits | planned (notes/coc-c1.md: C1a now, the structures with C2); builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
+| C2 instances passed, C4 generic dispatch | planned (notes/coc-c2.md: B decided, a trait value as the union of its conformers, core +15; A, instances, with C4 at T5g) | | C1 (C2 also T5e's type arguments) |
+| Q1 quotients | planned (notes/coc-q1.md; also after T4e and V3) | | C1, T6a3, T6a4 |
+| T7 the theory extension retires | planned (notes/coc-t7.md) | | T6 |
+| T8a the reader | planned (notes/coc-t8.md); its first commit is whole()'s sign | | exact-big-literals |
+| T8b the machine words | planned (notes/coc-t8.md) | | Q1, T4d |
+| T8c exact int on the run | planned (notes/coc-t8.md) | | T8a, T5f |
+
+### What each open step costs now
+
+One current estimate per open step, from its plan (lines added minus lines deleted; "other" is extensions, emit and
+native, outside the compiler's count unless it is emit). A plan's own file has the parts.
+
+| step | plan | core | kernel | types, sugar | other |
+|---|---|---|---|---|---|
+| T4d1 to T4d3 | coc-t4d.md | +52 | +20 | | |
+| T4c char | coc-t4.md | −10 | | +30 | |
+| T4e types that take values | coc-t4e.md | +74 | +6 | +4 | |
+| T5b1 effects | coc-t5b.md | +120 | +10 | +1 | |
+| T5b2 enums, T5b3 bool | coc-t5b.md | +75 | −12 | | |
+| T5b4 match | coc-t5b4.md | +46 | | | |
+| T5b5 the recursor | coc-t5b4.md | +14 (the lookup) | | +3, and the enum recursor as a sugar rule on t5c4 (c055162e) in place of core +47 | |
+| T5c1 ending | coc-t5c.md | +30 | | | |
+| T5c3 structural terms | coc-t5c3.md | +80 | | | |
+| T5c4 whole numbers | coc-t5c4.md | +60 (the guards +45, the inverse patterns +12, nat's recursor +3; (1)-(2) not built) | +5 | +5 | |
+| T5f erasure | coc-t5.md | | | | emit +50 |
+| T5g compiled libraries | coc-t5.md | 0 | | | wasm +150 |
+| kernel-length | kernel-length.md | | −55, and about −37 dead | | |
+| T6a1 proofs | coc-t6a12.md | +10 | | | verify +35, extension +3 |
+| T6a2 hypotheses (what is left) | coc-t6a12.md | | +10 | (+3 with T6a6) | extension +4 |
+| T6a3 indexed families | coc-t6a.md | +100 | | | |
+| T6a4 cases and induction | coc-t6a4.md | +92 | 0 (apart's builder moved, net 0) | | |
+| T6a5 False, Exists | coc-t6a.md | +29 | | +2 | |
+| T6a6 the logic in wap/types | coc-t6a.md | +30 | | +38 | |
+| T6a7 universes | coc-t6a7.md | +61 | | | |
+| V1 verdicts | coc-v1.md | +7 | | +2 | verify +23, extension +1 |
+| V2 `wap check` | coc-v2.md | +4 | | | native +2 |
+| V3 proved laws as facts | coc-v3.md | −6 | | | check +25, prove +15, verify +4, native +3 |
+| C1 traits (C1a) | coc-c1.md | +13 | | +19 | |
+| C2 trait values (B) | coc-c2.md | +15 | | | |
+| C1b structures | coc-c2.md | +22, with V3 or Q1 | | | |
+| C4 generic dispatch | coc-c2.md | −90 with C2's A, at T5g | | | |
+| Q1 quotients | coc-q1.md | +37 | | +27 | prove +5 |
+| T7 the extension retires | coc-t7.md | 0 (moves) | | | native +12 |
+| T8a the reader | coc-t8.md | +12 | +2 | | |
+| T8b machine words | coc-t8.md | | | +15 | |
+| T8c exact int on the run | coc-t8.md | +50 | −10 | +60 | emit +150, native +10 |
+| T5d statements | coc-t5d.md | parked | | | |
 
 ### T6 after T6a3a: laws everywhere, traits and instances
 

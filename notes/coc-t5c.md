@@ -95,3 +95,17 @@ T5c is done when:
   theory's state: the move makes it read analyze's typed nodes and the kernel's checker, and the theory hands those in.
 - **The guarded bound on int before T6c:** recommended, as above, an effect only (Pure), the kernel term at T5c4. The
   other reading, int's kernel definition and nat's induction before T5c, moves T6c's work forward.
+
+## T5c1 re-read on unify-typers 2b0e87be
+
+- **Effects are not on unify-typers.** T5b1 (t5b-effects) brings analyze/effects.wap, so T5c1 lands after it.
+- **The structural test is T5c3's course.** A recursion that T5c3 enters as its enum's course
+  (analyze/courses.wap, the below reading) ends. T5c1 reads that fact and writes no structural test of its own:
+  +5 in place of +25.
+- **The guarded bound is T5c4's (3).** A guard whose split by int's cases computes the condition in every arm, with
+  the recursive call on `n - 1` read as the count's hypothesis, ends. That is the guard reading's fact again, +5 in
+  place of +25.
+- **Groups** (mutual recursion found from the chosen calls) stay +20. A group of more than one stays Div, as the row
+  says.
+- **Estimate: core about +30** (groups +20, the two facts read +10), with effects.wap −5. The row said +70: two of
+  its three parts are now T5c3's and T5c4's. Lines as the row says.
