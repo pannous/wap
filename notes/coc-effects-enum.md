@@ -10,16 +10,17 @@ Core already reads a types enum by its cases: core/format.wap writes `Fixity.Inf
 enums of types/operators.wap. `Effect.State` in effects.wap is the same pattern, and the mechanism cases (State, Div,
 Fail, IO, FFI) are named by the walker the way Fixity's are. Nothing in core has to enumerate the cases.
 
-## What blocks it
+## The seed does not block it
 
-1. The seed rule. wap0 is the seed compiling the tree's compiler source beside the seed's own types module. An
-   `enum Effect` in the tree's types is unknown to wap0, so effects.wap cannot name `Effect.State` before a seed
-   refresh carries the enum. The enum can land in types first (nothing reads it); core's switch follows the refresh.
-2. The kernel. kernel/primitives.wap OPERATION_EFFECTS is keyed by effect word (`"IO"`, `"Fail"`) and sits below
-   types, so it cannot name the enum. The table keeps its text keys, and effects.wap maps the key to the case
-   (`Effect.IO` by name lookup) — a second spelling of the nine words, or the table moves up into types.
-3. extensions/wasm/modules.wap and extensions/theory/elaborate/effects.wap (its own PURE_WORD, effects_shown) write
-   and read the words as text in a module's claim; they would read the enum the same way, after (1).
+core reads types/operators.wap by `use "../types/operators.wap"`, the tree's own file, not through the seed's types
+module; `use "../../types/effects.wap"` does the same for Effect. The enum needs no seed refresh to be read.
 
-No workaround written; the order is: enum in types, seed refresh, then effects.wap, modules.wap and the theory
-elaborate file switch together, and OPERATION_EFFECTS' place (kernel keys or moved) is the open choice.
+## Plan
+
+Step 1 (done): wap/types/effects.wap holds `enum Effect`, read by nobody.
+
+Step 2, all together: the table OPERATION_EFFECTS moves from kernel/primitives.wap into types/effects.wap, keyed by
+Effect (a host operation's effect is vocabulary); the kernel keeps only the operations. Then core/analyze/effects.wap
+drops EFFECT_ORDER, PURE_WORD's list use and the five effect constants for `Effect` cases (the order is the enum's
+order; the claim words are the case names), extensions/wasm/modules.wap and extensions/theory/elaborate/effects.wap
+(if it survives unify) read the enum the same way. Checks: test_effects and test_hello.
