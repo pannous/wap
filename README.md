@@ -126,7 +126,8 @@ The language spec lives in [wiki](https://github.com/pannous/wap/wiki) (not all 
 [Angle](https://github.com/pannous/angle) and [english-script](https://github.com/pannous/english-script);  
 <!-- its compiler is now written in Wap itself ([core](core)), and so is the native `wap` command, which runs programs through wasmtime's C API ([core/native](core/native)). The old Rust compiler is preserved on the branch [rust-bootstrap](https://github.com/pannous/wap/tree/rust-bootstrap). -->
 
-The compiler has three layers:
+The compiler has four layers:
+- **kernel**: basis of proof theory and forms lowering to wasm    
 - **core**: just enough for wap to compile itself
 - **extensions**: every other language feature
 - **libraries**: modules programs import
