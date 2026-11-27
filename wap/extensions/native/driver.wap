@@ -33,6 +33,8 @@ BUILD_RUN := "wap/extensions/native/build.sh"
 # whose theory prelude it reads (wap/extensions/theory/options.wap)
 VERIFY_PART := "verify.wasm"
 SEED_OPTION := "--seed"
+# what an option word of `wap build` starts with, the program's file the word without it
+OPTION_START := "--"
 WAP_SUFFIX := ".wap"
 # a wait status's exit code, the byte above its signal's
 STATUS_UNIT := 256
@@ -96,9 +98,37 @@ format_checked(file: text) := {
 line_at(lines: list<text>, at: int): text := if at < #lines then lines[at] else ""
 # the program built by the compiler this wap runs
 built(words: list<text>) := {
-	program = words#2
+	given = words.drop(1)
+	options = given.filter(word => word.starts_with(OPTION_START))
+	program = given.find(word => not word.starts_with(OPTION_START)) ?? ""
 	if not program.ends_with(WAP_SUFFIX) { eprint("wap build takes a .wap file: wap build app.wap makes app"); exit(2) }
-	script_ran([BUILD_RUN, compiler_path, program, bytes_between(program, 0, byte_count(program) - byte_count(WAP_SUFFIX))])
+	base = bytes_between(program, 0, byte_count(program) - byte_count(WAP_SUFFIX))
+	if options.contains(WASM_OPTION) { return wasm_built(program, base, trim_passes(options)) }
+	script_ran([BUILD_RUN, compiler_path, program, base])
+}
+# the program compiled into app.mod.wasm, linked with the modules it uses into app.full.wasm, trimmed into app.wasm
+wasm_built(program: text, base: text, passes: text) := {
+	module = base + MOD_ENDING
+	if not module_ran(module_loaded(compiler_path), [compiler_path, program, module], compiler_path) { exit(1) }
+	# the program first, so its exports (main, warp/start, memory) keep their names; a module's clashing ones are renamed
+	merged = linked_modules(module, [Linked(module, PROGRAM_NAME)]).map(linked => "'${linked.path}' '${linked.name}'").join(" ")
+	full = base + FULL_ENDING
+	if system("wasm-merge ${BINARYEN_FEATURES} -g ${merged} --rename-export-conflicts -o '${full}'") != 0 or system("wasm-opt ${BINARYEN_FEATURES} -g ${passes} '${full}' -o '${base}${MODULE_SUFFIX}'") != 0 {
+		eprint(BINARYEN_MISSING)
+		exit(1)
+	}
+	# a linked module imports no module, so it names no folder to find one in
+	for linked in [full, base + MODULE_SUFFIX] { section_dropped(linked, LIBRARY_SECTION) }
+}
+# wasm-opt's passes for the build's --trim, all of them where it has none
+trim_passes(options: list<text>): text := {
+	trim = options.find(option => option.starts_with(TRIM_OPTION)) ?? return TRIMMED
+	passes = TRIM_PASSES.get(trim[byte_count(TRIM_OPTION) ..])
+	if passes == ø {
+		eprint("wap build --wasm trims all by default, or --trim=${TRIM_PASSES.keys.join(" or --trim=")}: ${trim}")
+		exit(2)
+	}
+	passes!
 }
 # the command run; its exit status is this run's
 script_ran(command: list<text>) := exit(system(command.join(" ")) ÷ STATUS_UNIT)
