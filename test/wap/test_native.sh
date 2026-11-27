@@ -427,4 +427,6 @@ check "a linked module names no folder to find modules in" "$(grep -c wap.librar
 # state holds what it reads, and a library module compiled once is used by its name
 check "a seed folder holding no wap source compiles hello and a program using a library module" "$(rm -rf "$stage/sourceless" && cp -R "$stage/bin" "$stage/sourceless" && (cd "$stage/sourceless/wap-seed/lib" && "$native_wap" ../wap.wasm math.wap math.wasm >/dev/null 2>&1) && find "$stage/sourceless/wap-seed" -name '*.wap' -delete && cd "$stage" && printf '%s\n' 'print "Hello"' >sourceless_hello.wap && printf '%s\n' 'use math' 'print(gcd(12, 18))' >sourceless_math.wap && "$stage/sourceless/wap" sourceless_hello.wap 2>&1 && "$stage/sourceless/wap" sourceless_math.wap 2>&1)" "Hello
 6"
+# and builds a native executable: the types module's files as a native build reads them come from its warm state too
+check "a seed folder holding no wap source builds a native executable" "$(cd "$tree" && "$stage/sourceless/wap" build "$stage/sourceless_hello.wap" >/dev/null 2>&1 && "$stage/sourceless_hello" 2>&1)" "Hello"
 exit $((failures > 0))

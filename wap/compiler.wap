@@ -39,6 +39,7 @@ use "core/stage.wap"
 use "core/analyze/types.wap"
 use "core/analyze/dispatch.wap"
 use "core/bindings.wap"
+use "core/paths.wap"
 use "extensions/warm.wap"
 use "extensions/native/memory.wap"
 
@@ -64,6 +65,11 @@ warm = not from_sources and WARM_STATE != ""
 language = base_language()
 # the extensions this compiler is built with: a compiled module brought in as its code; C functions as lib writes them
 modules_bringable(language)
+# a native build reads its own library files (memory.wap files) from the start, the warm state's entries of them too
+if given#1 == NATIVE_COMMAND {
+	language.build.memory = NATIVE_MEMORY
+	placed_files.update(NATIVE_MEMORY.files)
+}
 if warm { warm_brought(language, program.folder, WARM_STATE) } else { language.build.standard = standard_words(language, program.folder) }
 language.build.use_free_modules = USE_FREE_MODULES
 rules_files_loaded(language, program.folder)
@@ -71,12 +77,10 @@ rules_files_loaded(language, program.folder, if given#1 == LAWS_COMMAND then LAW
 if warm { rules_checked(language) }
 if #given < 2 { raise "usage: wap <compiler.wasm> [--sources] <program> <module.wasm>, format <program>, optimize <program>, warm <state file>, laws <program> <module.wasm>, or native <program> <module.wasm>" }
 # the library a compile reads: the module held where the compiler holds one; the warm state, written for the compiler
-# built next, holds the module beside it, the one that compiler holds; from sources, as the compilers bootstrap and a
-# native build compile (whose texts are not the GC ones the module holds), its source
-library_held(program.folder, if given#1 == WARM_COMMAND then read(in_folder(program.folder, LIBRARY_MODULE)) else if from_sources then "" else LIBRARY)
+# built next, holds the module beside it, the one that compiler holds; from sources, as the compilers bootstrap, and in
+# a native build (whose texts are not the GC ones the module holds), the types module's files, operated in the warm state
+library_held(program.folder, if given#1 == WARM_COMMAND then read(in_folder(program.folder, LIBRARY_MODULE)) else if from_sources or given#1 == NATIVE_COMMAND then "" else LIBRARY)
 library = library_file(program.folder, given#1)
-# a native build reads its own library files (memory.wap files) from the start
-if given#1 == NATIVE_COMMAND { language.build.memory = NATIVE_MEMORY }
 types = types_declared(language, program.folder, library)
 # a module: its functions compiled once each and exported, the rest of its code, as read, in its wap section
 compiled(file: text, module: text) as list := {
@@ -105,7 +109,7 @@ formatted(file: text, gone: list<Signature> = []) as text := {
 # the program's own functions nothing calls: typed only once called, as a used module's are, typing leaves them out.
 # A file of definitions only, a library, has no caller to judge by: none of its functions is uncalled
 uncalled(modules: list<Module>) as list<Signature> := {
-	if not top_level_statements(modules.last.code).any(statement => declaration_of(statement) == ø and not is_use(statement)) { return [] }
+	if not runs_statements(modules.last.code) { return [] }
 	typed = typed_names(modules)
 	modules.last.signatures.filter(signature => signature.kind == DefinitionKind.Function and not typed.contains(signature.name))
 }
@@ -131,7 +135,14 @@ if given#1 == FORMAT_COMMAND { print formatted(given#2) }
 # `check <program>`: the obligations its types leave to the run, a line each (wiki/type.md "Proved or checked")
 else if given#1 == CHECK_COMMAND { typed_modules(language, declared_modules(language, given#2), types, given#2); for line in obligations { print line } }
 else if given#1 == OPTIMIZE_COMMAND { optimized(given#2) }
-else if given#1 == WARM_COMMAND { write_bytes(given#2, bytes(warm_state(language, program.folder, types))) }
+else if given#1 == WARM_COMMAND {
+	# and the types module's files as a native build reads them, which differ where they include one of its own
+	common = language.operated.keys
+	placed_files.update(NATIVE_MEMORY.files)
+	operated_file(language, in_folder(program.folder, TYPES_FILE))
+	for end in NATIVE_MEMORY.files.keys { placed_files.remove(end) }
+	write_bytes(given#2, bytes(warm_state(language, program.folder, types, language.operated.keys.filter(file => not (file in common)))))
+}
 else if given#1 in [NATIVE_COMMAND, LAWS_COMMAND] { write_bytes(given#3, compiled(given#2, given#3)) }
 else {
 	write_bytes(given#2, compiled(given#1, given#2))
