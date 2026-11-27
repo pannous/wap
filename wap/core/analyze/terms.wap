@@ -17,6 +17,7 @@ use "function_values.wap"
 use "../../kernel/terms.wap"
 use "../../kernel/environment.wap"
 use "../../kernel/typing.wap"
+use "../../kernel/compute.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/primitives.wap"
 use "../../kernel/show.wap"
@@ -107,8 +108,15 @@ called_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
 	definer = fact_of(called, DEFINED_AT) ?? return ø
 	typed = x.by_key.get(place_key(definer)) ?? return ø
 	if kernel_value(n) != kernel_settled(typed.result ?? return ø, x.s) or #arguments != #typed.arguments or (1 to #arguments).any(at => kernel_value(arguments#at) != kernel_settled(typed.arguments#at, x.s)) { return ø }
+	row = text_row(typed)
+	if row != ø { return row_term(n, row!, arguments, x) }
 	function = instance_entered(typed, x.by_key, x.s) ?? return ø
 	terms_applied(function, arguments, x)
+}
+# the row a call of a library text function is computed by (kernel/primitives.wap TEXT_ROWS), ø for any other
+text_row(typed: TypedFunction) as text? := match typed.define {
+	Define(name, parameters, body) => TEXT_ROWS.get("${text(name)}(${typed.arguments.map(type => type_text(type)).join(", ")})")
+	_ => ø
 }
 # a host operation on whole numbers, its row's constant of the operands' types
 row_term(n: Node, operation: text, arguments: list, x: Entering) as Term? := {
@@ -187,6 +195,24 @@ condition_entered(condition: Condition, by_key: map<text, TypedFunction>, s: Typ
 		added(TYPES.environment, Declaration(condition_name(TYPES.environment, condition.type)!, [], pi("_", parent, BOOL_TERM), Defined(lambda(IT_WORD, parent, value))))
 	}
 	_ => ø
+}
+# Each narrowing whose value is a closed term and whose subtype's condition the kernel holds is decided by computing the
+# condition on it: a no is refused at its place, a yes needs no check, and the rest are left to the run, a line each in
+# the obligations (wiki/type.md "Proved or checked")
+narrowings_decided(by_key: map<text, TypedFunction>, s: TypingState) := {
+	truths = TYPES.environment.literals!
+	for each in s.narrowings {
+		verdict = condition_verdict(each, by_key, s)
+		if verdict == truths.no_case { raise "${place_of(each.at)}${REFUSED_BY_CONDITION} ${condition_shown(subset_condition(each.type)!)}" }
+		if verdict == truths.yes_case then s.decided.add(each.line) else if not obligations.contains(each.line) { obligations.add(each.line) }
+	}
+}
+condition_verdict(each: Narrowing, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
+	if subset_condition(each.type) == ø { return ø }
+	name = condition_name(TYPES.environment, each.type) ?? return ø
+	holds = constant(named_id(TYPES.environment, name) ?? return ø, name, [])
+	value = term_of(each.value, Entering([], by_key, s)) ?? return ø
+	computed(checker(TYPES.environment, []), apply(holds, value))
 }
 # the name of a subtype's condition: its word's name and "holds"
 condition_name(e: Environment, type: Term) as text? := (declared_at(e, word_id(type)) ?? return ø).name + CONDITION_HOLDS
