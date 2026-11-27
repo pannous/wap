@@ -18,8 +18,8 @@ With the second typer gone, analyze is the only reader of a law. What T6a builds
   (`law_proved`). Where neither proves it, the run's verdict stands (native/driver.wap `verdict_beside`).
 - **One environment.** The theory's door works in TYPES.environment, and core's own words sit in a scope of their
   own below every other (kernel/environment.wap `core`).
-- **Numbers.** A numeral is int, `of_nat(k)` or `negative_successor(k)`, of `enum int` over nat in wap/types. An
-  operator is a host row whose Defined value is int's function in wap/types, and the provers work over int only
+- **Numbers.** A numeral is int, `int.zero`, `int.positive(k)` or `int.negative(k)`, of core's int over its hidden
+  count (int_declared). An operator is a host row whose Defined value is int's function there, and the provers work over int only
   (notes/unify-provers.md). On int, `n + 0` is no longer `n` by computing for an open n, as `add(n, 0)` was on nat.
   A step that leaned on that now needs a prover.
 - **Refusals said per law.** A law analyze refuses says why and keeps its run's verdict (typed_laws.wap).
@@ -109,6 +109,132 @@ condition is a hypothesis these laws never need.
 - `Equal` is such a family, `enum Equal(a: T): T -> Prop { refl: Equal(a, a) }`, so `==` of two values in a
   proposition's place is Equal, and a bool statement is the Equal of its value with yes: one family, one conversion.
 
+### How wap source states a proposition (T6a3a, before the families)
+
+The spelling of a proposition needs no family. Core's Equal (kernel/equality.wap, declared by core_environment) is
+enough. It is therefore its own step, split from the families, and small.
+
+**What the wiki already shows.**
+- wiki/proposition.md: `type of (2 + 2 == 4)` is `Prop`, and `a == b` is the proposition that a and b are equal.
+  Its table gives `A and B`, `A or B`, `A implies B`, `not A`, `for x: T` and `exists`.
+- wiki/proof.md: `theorem name(parameters): statement := proof`, with `refl`, `by`, `chain`, `assume`, and a law's
+  call as a proof (`add_commutes(a, b)` proves `a + b == b + a`).
+- wiki/law.md: `law x > 0 and y > 0 implies x * y > 0`.
+- wiki/proposition.md "Conditions": the same `#line == 1` in an `if` is a bool, decided.
+
+So `==` reads by its place. A hypothesis parameter, `law widened(a: nat, b: nat, h: a <= b): a <= b + 1`, is in
+test_theory_arithmetic 12–15 but on no wiki page. It is the named form of `implies` (a function from proofs). A wiki
+passage for it goes to the interviewer (old text: none; new: "a parameter whose type is a statement is a
+hypothesis: `h: a <= b` is a proof of `a <= b` the law may use").
+
+**The mechanism: one reading of a proposition's place.** A proposition's place is:
+- a theorem's or law's statement;
+- a parameter's type that types as a bool value rather than a type;
+- each side of `implies` there.
+
+In such a place analyze writes the kernel proposition by one function, `proposition_of(n)`:
+
+| written in a proposition's place | kernel proposition |
+|---|---|
+| `l == r`, l's type T having a bridge in the environment | `Equal(T, l, r)`, at T's sort |
+| `P implies Q` | `Π _: proposition_of(P), proposition_of(Q)` |
+| any other bool `b` (`x < y`, `l == r` of a T with no bridge, `p(x)`) | `Equal(bool, b, yes)`, today's `truth_stated` |
+
+The operands themselves stay in value places, so `(a == b) == yes` is `Equal(bool, eq(a, b), yes)`. That is the
+bridge's own spelling, needing no new word.
+- **Why the guard is a bridge.** wiki/equality.md says `==` is equality for enums, classes, lists, texts and whole
+  numbers, but not for floats (`y == y` is no at NaN), nor for a class with its own `==`. `Equal(float, y, y)` would
+  be proved by refl while the run fails at NaN: a plausible wrong verdict. A type's bridge (`equals_sound`,
+  `equals_complete` for it) is the proof that its `==` decides Equal. Where it exists the two readings are one
+  proposition, so the reading is a choice of form, never a guess. Today int has one (int_declared,
+  notes/unify-provers.md "The bridge"). bool gets one beside its block (4 cases by bool's recursor, about +6). An
+  enum's derived `==` gets one when its `==` is derived (a later step, per type, never by hand).
+- **No special case.** `==` is not singled out in core by name: its row's Defined value is the type's equality
+  function, and the bridge is found as `e.integers.equals_sound` is, by the row's type. The `implies` row already
+  exists (types/operators.wap). `and`, `or` and `not` of propositions stay T6a2's sort-chosen rows.
+- **law_statement uses it.** `law_statement` (extensions/verify/laws.wap) builds `Π binders, proposition_of(body)`
+  in place of `truth_stated(body)`. The law's bool function stays what the run computes, and the bridge joins the
+  two. The subtype hypotheses (2af0a649) are bools in a proposition's place and stay `Equal(bool, c(x), yes)`.
+
+**Core lines.**
+- analyze: `proposition_of` with its three arms, about +12.
+- the parameter's type in a proposition's place, read as a hypothesis binder: T6a2's +25, shared, not counted again.
+- bool's bridge beside its block, about +6 (type_notation.wap).
+- law_statement's switch, ±0.
+- Kernel 0. Total about +18 over T6a1 and T6a2. coc-t6a's T6a3 row had "Equal's place +10" for the same reading
+  without the guard.
+
+**The draft, read against unify-typers 2af0a649.** Reading the code makes the step smaller than the mechanism
+above says, in two ways:
+- **It reads the statement's term, not its node.** law_statement gets the law function's kernel value, and
+  `beta(value, frees)` gives the body as a term (verify/laws.wap:85–90). In that term `a == b` is the row constant
+  `prim i64.eq int -> int -> bool` applied to a and b, and the row is Defined as int's equality function. So
+  proposition_of works on terms, beside `equated` in kernel/equality.wap. Analyze needs no branch. A T6a1 theorem's
+  statement reaches it through `term_of`, the same way.
+- **There is no `implies` arm.** `implies` lowers to an `if`, so its term is bool's case split. Recognising it would
+  mean matching a lowering's shape. The bool reading `Equal(bool, a implies b, yes)` is the same proposition as
+  `Π _: a == yes, b == yes` by bool's cases, and the provers already read it (`both_*`, the choice reading). The named
+  form, an `h:` parameter, is T6a2's hypothesis binder. The table's middle row is dropped.
+
+```
+# a type whose == decides Equal: its equality function and the two theorems joining them (int_declared, bool's block)
+class Bridge { type: Term; equality: Term; sound: Term; complete: Term }
+# what a statement says: `l == r` of a type with a bridge is Equal at that type, any other truth is `b == yes`
+proposition_of(e: Environment, statement: Term): Term := {
+	bridge = bridge_of(e, head(statement)) ?? return truth_stated(e, statement)
+	sides = arguments_of(statement)
+	equated(e, DATA_LEVEL, bridge.type, sides#1, sides#2)
+}
+# the bridge whose equality a head is: the function itself, or a row Defined as it
+bridge_of(e: Environment, head: Term): Bridge? := e.bridges.find(bridge => same(head, bridge.equality) or same(defined_value(e, head) ?? head, bridge.equality))
+```
+
+- `e.bridges: list<Bridge>` sits beside `e.literals`. int_declared adds int's, and `Integers` holds its bridge in
+  place of its own equal_integers, equals_sound and equals_complete fields (notes/unify-provers.md "What replaces
+  e.numbers"), so the three are named once. literals_declared adds bool's.
+- truth_stated moves from verify/laws.wap to kernel/equality.wap beside `equated`. Every place that states a
+  statement calls proposition_of: law_statement's body, `hypothesized` and T6a2's hypothesis binders. A subtype's
+  condition (`it >= 0`) has no bridged head, so it comes out as today.
+- A bridged type sits at Type, so its Equal is at DATA_LEVEL, the level truth_stated uses (TRUTH_LEVEL there, the same
+  `Successor(Zero)`: one constant, not two).
+- **Lines.**
+  - kernel/equality.wap: Bridge, proposition_of, bridge_of and truth_stated moved in, about +7.
+  - environment.wap: the field, +1.
+  - bool's bridge: +6.
+  - int_declared: Integers' three fields become one, −2.
+  - verify/laws.wap: truth_stated out, −1, and two calls switched, ±0.
+  - Net about +11, all kernel, none in analyze. The +18 above becomes +11.
+- **What it needs before it can be built.** `e.integers` and int's bridge (M2b step 1) and bool's block (t5b-enums). On
+  unify-typers today neither exists, so the code cannot be drafted there until M2b step 1 lands. Before that, the sketch
+  above is the draft.
+- **Its outcome test.** `law sum_commutes(a: int, b: int): a + b == b + a` stays Proved through linear's own
+  equal_proof with M2b step 5 never built (test_theory_connectives' `==` laws). `law nan_free(y: float): y == y`
+  keeps its run's FAILED at NaN and is never Proved.
+
+**What moves to wap afterwards, and what cannot.**
+
+| hand-declared today (or in M2b's plan) | after T6a3a |
+|---|---|
+| linear.wap's `law_equal` (equals_sound on each int law's conclusion) | goes: integers.wap's `==` laws conclude `Equal(int, l, r)` themselves |
+| M2b step 5 (bool `==` goals by equals_complete, linear.wap +6) | not built: an `==` goal is `Equal(int, l, r)`, linear's own equal_proof |
+| integers.wap's 7 laws with hypotheses (add_cancel, difference_nonnegative, …) | spelled in wap with `h:` parameters or `implies`, e.g. `law add_cancel(a: int, b: int, c: int, h: a + c == b + c): a == b`, in place of hand-built Π terms |
+| `equals_sound`, `equals_complete` for int | statements writable (`theorem equals_sound(a: int, b: int, h: (a == b) == yes): a == b`), but their proofs go through the hidden count (count_equals_sound, difference_equal, parts_back). They stay int_declared's |
+| `successor_sum`, `predecessor_sum`, the two step theorems | the same: the statements are writable, the proofs need count's cases, so they stay core's. integers.wap's `next_previous` and `previous_next` are wap laws already, proved by `by` with them |
+| kernel/equality.wap's `equal_symmetric`, `equal_transitive`, `equal_congruent` | writable once a theorem may take a type parameter and match on `h` (T6a4's dependent motive). They move then, not in T6a3a |
+| count_declared's 31 theorems | never: the count has no wap name |
+
+So the gain is the laws' side: the int laws, the hypotheses and every program's own `theorem … : a == b` read
+directly as Equal. The bridge and the count lemmas stay core's, because their proofs reach below int.
+
+**Order relative to M2b.**
+- **Needs:** M2b step 1 (int_declared's bridge) and T6a1's theorem declarations. The hypothesis binder is T6a2's.
+- **M2b step 3** (Sums over int) is independent. Build it in parallel.
+- **M2b step 4** (bounds, the role table) as planned. If T6a3a lands first, step 4 builds no `law_equal`. Otherwise
+  step 4 builds it (3 lines) and T6a3a removes it.
+- **M2b step 5 is dropped.** Its gate, test_theory_connectives' `==` laws, moves to T6a3a.
+- Recommended order: M2b 1 → 3 → 4 → T6a1 → T6a2 → T6a3a, then the families (T6a3b). T6a3a is the last step to
+  touch linear.wap.
+
 ### Proofs by cases and induction
 
 - A match whose type depends on the value matched (the theorem `double_even(n: nat): Even(double(n)) := match n {
@@ -149,7 +275,8 @@ last column says what the unification already gives.
 |---|---|---|---|---|
 | T6a1 proofs of bool laws | `law … := proof` and `theorem` typed by analyze: Prop, the statement's proposition, `refl`, `assume`, `by`, `chain`, a law's call (a fact for the provers where its type is not the statement); the glue laws (`equal_symmetric`, `equal_transitive`, `equal_congruent`, `chosen_decided`, `chosen_at_yes`) in wap/types; `type of` a law shows its statement | core +80 (analyze/laws.wap: the declaration +35, the proofs +35, PROP_TERM and the shown statement +10), kernel +20 (Equal and refl in core_environment, unless the deletion commit gives them a home), types +20 (the glue laws) | the 19 of the table above: 3 at once, 5 with the Fail rule, 9 with the provers over int; hard and uses_hard's `assume` lines once T6a3 has Even | the statement as `Π binders, Equal(bool, body, yes)` (`law_statement`), the provers' call and the theorem's declaration (`law_proved`), the per-law refusal, the run's verdict where none proves it: about 30 of the 90 lines planned here |
 | T6a2 hypotheses and connectives | bool-statement binders as hypotheses; `not`/`and`/`or` of propositions by the operands' sort | core +40 (hypothesis binders +25, the law run's skip +5, the sort-chosen rows +10), types +3 (Not, And, Or rows) | 13: connectives 16 implied, 20 smaller, 21 no_is_no_yes, 22, 23; connectives_wanted positive_product; induction 12 positive_product; arithmetic 12 to 16 (five laws with `h:`); verify 32 same_as_given. The arithmetic five with the provers over int | `implies` is a row already (types/operators.wap); hypothesis binders are not M2b's, so they are this step's whole |
-| T6a3 indexed families | enums over indices with a result per case, letters found as fields, mutual families one block; constructor calls typed by unifying their result; Equal as a family, replacing T6a1's core declaration, and `==` in a proposition's place | core +110 (header and cases with indices +50, found fields +20, constructor typing +30, Equal's place +10), kernel −20 (T6a1's Equal declaration) | 9: proposition_wanted 15 four_is_even, wap proposition_wanted 10 and 12 (two, mutual), proof_wanted wrong, verify 13 hard, 17 uses_hard, 20 wrong, 26 any_even (Untested), connectives 18, 19 (And, Or as families) | int as an enum over nat in wap/types is the first two-case block analyze declares for the kernel; the found fields are blocks.wap's, ported from 384b1e4e |
+| T6a3a propositions in wap spelling | `proposition_of`: `==` of a type with a bridge is `Equal(T, l, r)`, `implies` a Π, any other bool `b == yes`; law_statement through it; bool's bridge (section "How wap source states a proposition") | core +18 | test_theory_connectives' `==` laws (M2b step 5's gate); every `theorem … : a == b` reads as Equal | Equal in core_environment, int's bridge in int_declared, T6a2's hypothesis binders |
+| T6a3 indexed families | enums over indices with a result per case, letters found as fields, mutual families one block; constructor calls typed by unifying their result; Equal as a family, replacing T6a1's core declaration (`==`'s place is T6a3a's) | core +100 (header and cases with indices +50, found fields +20, constructor typing +30), kernel −20 (T6a1's Equal declaration) | 9: proposition_wanted 15 four_is_even, wap proposition_wanted 10 and 12 (two, mutual), proof_wanted wrong, verify 13 hard, 17 uses_hard, 20 wrong, 26 any_even (Untested), connectives 18, 19 (And, Or as families) | int as an enum over nat in wap/types is the first two-case block analyze declares for the kernel; the found fields are blocks.wap's, ported from 384b1e4e |
 | T6a4 proofs by cases and induction | a dependent motive; the theorem's own call on a field its hypothesis; a proof match missing a case refused by covering | core +60 (`motive_made` ported +35, the course with a dependent motive +25, after T5c3) | 7: double_even (test_proof_wanted 8, wap proof_wanted 7, elaborate 50 and 87, verify 12), wap proof_wanted 13 partial, verify 34 multiply_one_left | a nat subject is int's case split with the carrier's induction under it (the provers' step 5), so no nat induction theorem waits; `motive_made` ported from 384b1e4e |
 | T6a5 False, Exists, undecidable | `False`; a proof's effects checked pure and total; `exists … where`; `if` on an undecided proposition refused | core +35 (False +8, the effect check +12, Exists +15), types +2 | 5: wap proof_wanted 14 and 15 (loop, raise), effects 15 and 16 (spin, loop), proposition_wanted 8 some_sum; plus the two undecidable-condition checks | the effects are facts on each typed function (T5b1, t5b-effects): the check reads EFFECTS and refuses Fail and Div in a proof |
 | T6a6 propositions as values, the logic in wap/types | a type in a value's place compared at Type; Prop binders; False, True, And, Or, Not, Exists, Decidable and the axiom proposition_extensionality in types/logic.wap | core +30 (types as values +20, Prop binders +10), types +35 (the rest of the logic in wap spelling) | 4: elaborate 107, 108, 153 (unions at Type); logic 18 anything; and logic's own checks (10 to 17) read on wap/types | the prelude is gone already (the deletion commit); the glue laws moved in T6a1, Equal in T6a3 |
