@@ -17,6 +17,7 @@ use "../../../kernel/terms.wap"
 use "../../../kernel/environment.wap"
 use "../../../kernel/typing.wap"
 use "../../../kernel/compute.wap"
+use "../../../kernel/show.wap"
 use "../explicit.wap"
 use "../../../kernel/forms.wap"
 use "blocks.wap"
@@ -27,10 +28,9 @@ LAW_FUNCTION := "law_"
 # the refusal of a law that names what the kernel only assumes
 ASSUMED_NAMED := "assumed function"
 
-# the laws analyze typed, by name: each its function's constant and its parameters' types; none where the front cannot
-# read the program, which the theory then reads whole
-# a law analyze typed: its function's key and id in the environment, ø where analyze refused it, and the first
-# function its body calls that the kernel only assumes, all found while analyze's names are in scope
+# a law analyze typed: its function's key and id in the environment, and the first function its body calls that the
+# kernel only assumes, all found while analyze's names are in scope. A law analyze refuses says why on standard error
+# and keeps the verdict of its run
 class TypedLaw { key: text; id: int?; assumed: text? }
 laws_typed(wap_folder: text, program: text): map<text, TypedLaw> := {
 	front = base_language()
@@ -38,13 +38,19 @@ laws_typed(wap_folder: text, program: text): map<text, TypedLaw> := {
 	rules_files_loaded(front, wap_folder)
 	based(front, in_folder(wap_folder, LAW_STATEMENT_RULES))
 	types = types_declared(front, wap_folder)
-	TYPES.partial = yes
 	code = program_operated(front, program)
 	read = with_facts_of(List(top_level_statements(code).filter(front_reads), Bracket.None, Separator.Newline), code)
-	typed = try typed_modules(front, [declared_module(front, read)], types, program) catch e { eprint "PROBE front: ${e.message}"; return {} }
+	TYPES.refused = {}
+	typed = typed_modules(front, [declared_module(front, read)], types, program)
+	refused = TYPES.refused!
+	TYPES.refused = ø
 	laws: map<text, TypedLaw> = {}
 	for statement in statements_in(typed) {
-		if statement is Define and text(defined_name(statement)).starts_with(LAW_FUNCTION) { laws[text(defined_name(statement))[#LAW_FUNCTION ..]] = TypedLaw(function_key(statement), named_id(TYPES.environment, function_key(statement)), assumed_callee(TYPES.environment, statement)) }
+		if not (statement is Define and text(defined_name(statement)).starts_with(LAW_FUNCTION)) { continue }
+		name = text(defined_name(statement))[#LAW_FUNCTION ..]
+		key = function_key(statement)
+		if refused.has(key) { eprint "law ${name}: ${refused[key]}"; continue }
+		laws[name] = TypedLaw(key, named_id(TYPES.environment, key), assumed_callee(TYPES.environment, statement))
 	}
 	laws
 }
@@ -63,7 +69,8 @@ typed_verdict(name: text, law: TypedLaw): TypedVerdict := {
 	d = declared_at(e, id)!
 	if d.kind is Axiom { refused(ASSUMED_NAMED, "law ${name} names ${law.assumed ?? law.key}, which the kernel only assumes: it may write, raise or act, so no law states it") }
 	if d.type.shape is Pi { return Open }
-	value = computed(checker(e, []), constant(id, law.key, []))
+	value = try computed(checker(e, []), constant(id, law.key, [])) catch refusal { eprint "law ${name}: ${refusal.message}"; return Open }
+	eprint "PROBE ${name}: ${shown(value)}"
 	if is_constant(value, e.literals!.yes_case) then Holds else if is_constant(value, e.literals!.no_case) then Breaks else Open
 }
 # the first function a typed body calls whose instance the kernel only assumes, by its written name
