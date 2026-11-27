@@ -32,7 +32,7 @@ and its rewrites with their line counts, send wap-interviewer any edge case wort
 closes the session.
 
 ## One place to look: two type systems
-The dependent theory (wap/extensions/theory/) and the pragmatic compiler (wap/core/analyze, wap/types) give the same
+The dependent theory (wap/extensions/proof/) and the pragmatic compiler (wap/core/analyze, wap/types) give the same
 words two meanings, and most of the bridging code exists only because of that. Ask, for each item, how a rewrite with
 one elaborator (the theory is the typer; track T in notes/coc-plan.md) would remove it, and whether track T as
 planned goes far enough:
