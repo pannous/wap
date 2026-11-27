@@ -394,7 +394,7 @@ not prove is no theorem, and the linear prover's `sums_of` refuses with the miss
 | 4 | bounds: the role table, the Bound's nonnegative proof, gap_bound, both_* | linear.wap about −15 +30 | `lt` Proved; test_theory_arithmetic's five with `h:`; law_runs 11–15 |
 | 5 | bool equality goals by `equals_complete` and `equal_integers_itself` | linear.wap +about 6 | test_theory_connectives' `==` laws |
 
-linear.wap net about +15 (416 → about 430); laws.wap about +25; core and kernel about +70 (step 1). No reds are
+linear.wap net about +15 (416 → about 430); laws.wap about +25; core and kernel about +90 (step 1). No reds are
 expected along the way. Since the deletion, linear.wap proves nothing (`sums_of` finds no `e.numbers`), so nothing
 green depends on it.
 
