@@ -1068,7 +1068,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T5f erasure, T5g compiled libraries | wait | | T5b to T5d |
 | kernel-length: the kernel's theory files shrunk, about −55 plus 38 dead (notes/kernel-length.md) | waits | | unify-typers, int-takes |
 | int-takes: int in Lean's shape, `natural(n) \| negative(n)` (notes/unify-provers.md) | waits; card int-takes, wap-theory-reads-types | | unify-typers |
-| T6a1 proofs of bool laws, T6a2 hypotheses | wait | | unify-typers (the deletion commit, the int enum) |
+| T6a1 proofs of bool laws, T6a2 hypotheses | re-read on unify (notes/coc-t6a12.md: T6a1 in verify, core +10; T6a2's binders landed, its run skip and implies left) | | unify-typers (the deletion commit, the int enum) |
 | T6a3a propositions in wap spelling | in progress | t6a3a ad022f23; wap-native-no-layout-any | M2b step 1, T6a1 |
 | T6a3 indexed families | waits | | T6a3a, T5b2 |
 | T6a4 proofs by cases and induction | planned (notes/coc-t6a4.md) | | T5c3, T5c4, unify-dedup landed |
