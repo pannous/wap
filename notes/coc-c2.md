@@ -49,7 +49,7 @@ optimization.
 - It needs the whole program, which every wap compile has today. A trait parameter of a separately compiled module
   has no conformers to union over, and that is where A becomes needed.
 
-Recommended: B as C2 now, at core +15. A, with C4's −90, comes with T5g, compiled libraries: the first place a
+Decided: B as C2 now, at core +15. A, with C4's −90, comes with T5g, compiled libraries: the first place a
 trait value crosses a module boundary. It is the wiki's "later optimization", and it is measured then, against B's
 `is` chains.
 
@@ -88,4 +88,4 @@ No line pins a trait value today. For a builder, both from trait.md "Declaring a
 
 Kernel 0 for both. B: normal path, test_trait_wanted and test_protocols, after C1a. A: careful path (value layout).
 
-The choice between A and B is the supervisor's: it changes the row's mechanism and C4's place.
+Decided B: it is trait.md's dispatch by run-time match cases, at core +15 on the normal path. A comes back with C4 and T5g's compiled libraries, measured against B's chains. C1b's structure lands with its first law reader.

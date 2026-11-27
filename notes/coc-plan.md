@@ -1074,11 +1074,11 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T6a4 proofs by cases and induction | planned (notes/coc-t6a4.md) | | T5c3, T5c4, unify-dedup landed |
 | T6a5 False, Exists, undecidable | waits | | T5b1 |
 | T6a6 the logic in wap/types | waits | | T6a1 to T6a5 |
-| T6a7 universes | waits | | T6a6 |
+| T6a7 universes | planned (notes/coc-t6a7.md) | | T6a6 |
 | V1 one verdict per law | planned (notes/coc-v1.md; the plain-compile report cut, no wiki passage); builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
-| V2 `wap check`, V3 proved laws as facts | wait | | V1 (V3 also T6a2 and unify-dedup) |
+| V2 `wap check`, V3 proved laws as facts | planned (notes/coc-v2.md, notes/coc-v3.md) | | V1 (V3 also T6a2 and unify-dedup) |
 | C1 traits | planned (notes/coc-c1.md: C1a now, the structures with C2); builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
-| C2 instances passed, C4 generic dispatch | planned (notes/coc-c2.md: B, a trait value as the union of its conformers, core +15, recommended; A, instances with C4, at T5g) | | C1 (C2 also T5e's type arguments) |
+| C2 instances passed, C4 generic dispatch | planned (notes/coc-c2.md: B decided, a trait value as the union of its conformers, core +15; A, instances, with C4 at T5g) | | C1 (C2 also T5e's type arguments) |
 | Q1 quotients | waits | | C1, T6a3, T6a4 |
 | T7 the theory extension retires | waits | | T6 |
 | T8a the reader | waits; its first commit is whole()'s sign | | exact-big-literals |
