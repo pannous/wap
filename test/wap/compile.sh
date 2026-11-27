@@ -76,7 +76,7 @@ native_wap_built() {
 # and the driver's other host words are this tree's; with no wasm2c the installed wap runs them, said once
 tree_wap_built() {
 	local folder="$(dirname "$compiler")/bin"
-	[ -x "$folder/wap" ] || { native_wap_built "$folder.$$" >/dev/null || return 1; [ -x "$folder/wap" ] && rm -rf "$folder.$$" || mv "$folder.$$" "$folder"; }
+	[ -x "$folder/wap" ] || { native_wap_built "$folder.$$" >/dev/null || { rm -rf "$folder.$$"; return 1; }; [ -x "$folder/wap" ] && rm -rf "$folder.$$" || mv "$folder.$$" "$folder"; }
 	echo "$folder/wap"
 }
 # and the programs are compiled by the copy of the compiler beside it, as a user's are, so the library it writes goes
