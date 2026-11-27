@@ -117,7 +117,9 @@ The audit's R3, migration steps 2 to 4.
 - **The claim's reading, recommended:** a table row, no reader branch: `!` gets an infix reading in a group of its
   own between `arrow` and `assignment` (types/operators.wap), so `f(x) := x * 2 ! Pure` is the claim applied to the
   whole body and `x!` stays `required(x)`. The reader then does what its comment says (spaced on both sides is
-  infix). types +2, core 0; the claim's check +10 in analyze (in T5b1's +120). The theory's `effect_marked` reads the
+  infix). Where spacing alone separates the claim from the postfix `!` (`x ! IO` against `x! IO`), `wap format`
+  prints the reading explicitly, the claim as `(x) ! IO` and the unwrap as `x!` glued (CLAUDE.md "Refuse, never
+  guess"). types +2, core 0, its commit carrying `spec: wiki/effects.md` on its own line; the claim's check +10 in analyze (in T5b1's +120). The theory's `effect_marked` reads the
   infix call instead of the space list (−5 extension).
 - **What reads it:** terms.wap enters only a Pure function (or Fail with T5d's `T or Error`) as a definition; the
   census prints how many functions have each effect, and T5's gate becomes "every function defined, Div, or opaque by
@@ -135,7 +137,7 @@ normal path.
 | T5b2 enums | an enum's declaration fills its word with an inductive block, cases its constructors; mutual enums one block; a case's value a constructor term; open or refused enums stay assumed, counted | core +80 (analyze/inductives.wap: block of a record +50, grouping +15, case terms in terms.wap +15), kernel 0 (A1's fill) | the door finds a program's enum filled and elaborates it no more (declare.wap's block path for programs, about −15); blocks.wap stays for indexed families and propositions | the census counts enums defined and assumed, a ratchet; every test as before (an enum's equality, a law's `Dime == Dime`, needs the decidable equality coc-plan.md 7 adds per block: T6) |
 | T5b3 bool | `enum bool { no, yes }` in wap/types fills core's bool and its truths; `if` is bool's recursor | core −5 (literals_declared's choice, choice_term names the recursor), kernel −12 (DeclarationKind.Choice, `choice_step`, its `stated` arm), types +2 | logic.wap's `bool` and its `runs` lines go once the prelude is read on core's words (A1 already defines bool in its place) | every test as before; test_law_runs' "a law without binders that holds is Proved by computing it" still Proved |
 | T5b4 match | a match on a filled enum with case arms is the recursor's case split, the catch-all filling the cases left; literal arms are choices on the row's equality | core +60 (terms.wap `match_term` +45, literal arms +15) | match.wap's program path: the door takes analyze's term; `arm_of`, `names_case`, `pattern_name`, `pattern_fields` and `minor_elaborated`'s non-dependent half, about −50; the dependent motive (`motive_made`) stays for T6, the course (`course_elaborated`) goes with T5c | wiki/law.md and enum.md: `enum Coin { Penny, Nickel, Dime }`, `cents(c: Coin) := match c { Penny: 1; Nickel: 5; Dime: 10 }`, `law dime: cents(Dime) == 10` prints `dime: Proved` (test_law_runs, a new line); `effects of cents` is Pure (coc-t5.md T5b row); "match on Coin misses Dime" unchanged |
-| T5b5 the recursor | `E.recursor(minors…, value)` typed with its motive found; it runs by the definition analyze adds to the enum | core +50 (calls.wap: the recursor's type for a filled enum +30, the added definition +20) | match.wap `recursor_given`, about −8 | the form of wiki/enum.md on an enum of the program, `enum Tree { leaf, node(left: Tree, right: Tree) }`, `leaves(t: Tree): int := Tree.recursor(1, (l, r, below_l, below_r) => below_l + below_r, t)`, `leaves(node(leaf, leaf))` is 2 (test_enum_wanted); enum.md's own `double(3)` is 6 needs the numerals at nat, so it goes green with T6c |
+| T5b5 the recursor | `E.recursor(minors…, value)` typed with its motive found; it runs by the definition analyze adds to the enum | core +50 (calls.wap: the recursor's type for a filled enum +30, the added definition +20) | match.wap `recursor_given`, about −8 | the form of wiki/enum.md on an enum of the program, `enum Tree { leaf, node(left: Tree, right: Tree) }`, `leaves(t: Tree): int := Tree.recursor(1, (l, r, below_l, below_r) => below_l + below_r, t)`, `leaves(node(leaf, leaf))` is 2 (test_enum_wanted); enum.md's `enum nat { zero, successor }` is a teaching example, no second nat: its `double(3)` is 6 runs on a program's own enum only with a numeral of that enum, so the page's line goes green with T6c, where `zero` and `successor(k)` are patterns of the one nat, `int where it >= 0` |
 
 Order: T5b1 can start at once (it needs neither the fill nor the door for its core half); its theory deletion waits
 for the door (A2). T5b2 needs A1 on main. T5b3 and T5b4 follow T5b2 in either order; T5b3 first is recommended,
@@ -166,8 +168,11 @@ T5b is done when:
 
 - T5b1's core half lands first; its deletion in elaborate/effects.wap lands with A2, the door reading analyze's nodes.
 - elaborate/match.wap goes in three parts: the plain arms here, the course with T5c, the dependent motive with T6.
-- nat is one type: an inductive for the kernel, int's layout when it runs, converting up to int for free; this reads
-  wiki/number.md and wiki/enum.md alike, so no wiki text changes.
+- The numbers (user 2026-11-27, through wap-supervisor): `int`, unbounded and exact (wiki/number.md), is the type of
+  the numerals in both worlds, the program's and the prover's. `nat` is `int where it >= 0`, a subtype by condition
+  (T4); `i32` and `i64` are refinements of int too, whose T1 rows compute int's functions inside their range. nat's
+  induction runs through that refinement. wiki/enum.md's `enum nat { zero, successor }` is a teaching example, not
+  a second nat. No wiki text changes.
 - analyze finds levels itself.
 
 # T6 and T7: what the law statements ask of analyze
@@ -207,9 +212,10 @@ in wap/types").
 | logic.wap | `Pair`, `Sum`, `Unit` | none new: tuples, `A or B` (T5u) and the empty tuple are these; the products the course of a recursion rides (below.wap) are found from them | that the kernel's products are declared from wap/types' tuple, not the prelude's | T5c |
 | logic.wap | `proposition_extensionality` (axiom), the first laws (and_swap, equal_symmetric, …) | types/logic.wap, laws with their proofs | `axiom` and `theorem` as declarations analyze types (the theory's declare.wap path), a proof a term analyze builds | T6a |
 | operators.wap (29) | `implies`, `not` on propositions | types/operators.wap rows | the operator table's rows by the operands' sort: `and`, `or`, `not`, `implies`, `==`, `exists … where` of propositions write And, Or, Not, `->`, Equal, Exists; of bools the bool words. A bool statement where a proposition is wanted is `Equal(bool, b, yes)` (one conversion, coc-plan 8's "conversions", the prelude's `chosen_decided`) | T6b |
-| numbers.wap (197) | `nat` (zero, successor), `add`, `multiply`, `subtract`, `at_most`, `predecessor`, their laws | types/numbers.wap | nat as an enum with a host layout: its cases' values and its case split by int's (9.7, the prelude's `runs(nat, int)`): one declared layout per enum, read by the emitter, the general form of `runs`; the numerals at nat (the kernel's `numbers` literal binding); nat up to int Same, int down to nat by `it >= 0` (T4's narrowing), so wiki/number.md's "`nat` is `int where it >= 0`" and wiki/enum.md's `enum nat { zero, successor(n: nat) }` are one type | T6c |
-| numbers.wap | `int` as `of_nat`/`negative_successor`, `divide`, `remainder`, `equal_integers` | types/numbers.wap | the same layout form; int's operators as definitions over nat for the kernel and the host rows for the run (T1's rows, `prim` bodies) | T6c, or T8 (big numbers) |
-| data.wap (82) | `list(T)` (empty, item), `count`, `item_at`, `drop`, `joined`, `mapped`, optional, `text` | types/lists.wap, types/texts.wap | the layout form again (a list runs as today's list); `#xs`, `xs#i`, `xs + ys`, `xs.map(f)` as those definitions for the kernel, the library's code for the run; `index(xs)` (T4e) | T6d |
+| numbers.wap (197) | `int` and its operators (`add`, `multiply`, `subtract`, `at_most`, `divide`, `remainder`, `equal_integers`), their laws | types/numbers.wap | int as the kernel's type of the numerals, exact and unbounded: a numeral is an int in both worlds, its operators definitions the kernel computes by its shortcuts (kernel/numbers.wap, today on the kernel's own natural numbers, whose literals stay the kernel's mechanism and no wap word) and the host rows for the run (T1's rows, `prim` bodies); the prelude's `of_nat`/`negative_successor` cases only as the kernel's construction of int, never a word programs see | T6c |
+| numbers.wap | `nat` (`zero`, `successor`, `predecessor`) and its induction | types/numbers.wap | `nat` as `type nat = int where it >= 0` (T4a, landed); its induction a theorem of wap/types, proved once from int's construction, so a recursion or a proof by cases on a nat takes it apart: `zero` the shape `it == 0`, `successor(k)` the shape `it > 0` with `k = it - 1` (shapes.wap's declared patterns), which is how wiki/enum.md's and wiki/proof.md's `match n { zero => …; successor(k) => … }` read | T6c |
+| numbers.wap | `i32`, `i64` | types/numbers.wap | refinements of int by their range (`int where -2^31 <= it and it < 2^31`), their T1 rows computing int's functions inside it; where a result leaves the range, the type's own rule (an obligation, or the wrap of coc-plan 13's i64 quotient) | T6c, T8 |
+| data.wap (82) | `list(T)` (empty, item), `count`, `item_at`, `drop`, `joined`, `mapped`, optional, `text` | types/lists.wap, types/texts.wap | a declared host layout for an enum, the general form of the prelude's `runs`: a list runs as today's list, its cases and its case split by the library's code; `#xs`, `xs#i`, `xs + ys`, `xs.map(f)` as those definitions for the kernel, the library's code for the run; `index(xs)` (T4e) | T6d |
 | effects.wap (22) | `Effects`, `Eff`, `Fallible`, `Inhabited`, `never` | types/effects.wap | T5b1's facts made computation types: `T ! IO` as `Eff(IO, T)`, a function's type ending in its computation (9.2) | T6e |
 | quotient.wap (20) | `quotient`, `of`, `lift`, `quotient_sound`, `function_extensionality` | types/quotient.wap | `quotient(T, r)` as a type form, `.of` and `.lift` typed (test_quotient_wanted's three laws) | T6f |
 | checked.wap (43) | `fraction`, `rational`, `set`, `map` keys, `char`, i64's wrap | types/numbers.wap, types/maps.wap, types/characters.wap | quotients (T6f); char is T4c's; i64's wrap T8's | T6f, T4c, T8 |
@@ -217,8 +223,9 @@ in wap/types").
 
 ## What the ~19 wap statements need, in order
 
-1. `nat` binders: nat in wap/types (T6c) and its trial values in lib/laws.wap (`trial_values(): list<nat>`, the
-   whole numbers from 0), so the law run tries them before any proof exists.
+1. `nat` binders: `type nat = int where it >= 0` in wap/types, which T4a's subsets allow before T6c, and its trial
+   values in lib/laws.wap (int's trial values that meet the condition), so the law run tries them before any proof
+   exists.
 2. Hypotheses as binders: a binder whose type is a proposition (`a: x > 0`) takes no trial value; the run tries the
    other binders' values and skips a trial where a hypothesis computes to no; the proof reads it as a hypothesis.
    It needs T6b's bool-to-proposition conversion.
@@ -228,7 +235,7 @@ in wap/types").
 
 ## Order
 
-T6a (Prop and indexed families, logic.wap moved), T6b (the operators of propositions), T6c (nat and int with their
-layouts), then laws as theorems proved by computing and by the provers (coc-plan's T6 row), T6d to T6f as the tests
+T6a (Prop and indexed families, logic.wap moved), T6b (the operators of propositions), T6c (int as the numerals' type,
+nat and the machine words as its refinements), then laws as theorems proved by computing and by the provers (coc-plan's T6 row), T6d to T6f as the tests
 need them; T7 deletes the prelude files and what is left of elaborate/, the explicit-spelling tests then read by
 analyze.

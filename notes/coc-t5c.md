@@ -43,12 +43,13 @@ wiki/effects.md "Div"). Line counts are `grep -vc '^\s*#'` on main f749f499.
   the other parameters riding, step the match with each call read as its hypothesis among the values below. Every
   other argument may be anything.
 - **A guarded bound on a whole number:** wiki/effects.md calls Pure a "self-recursion that shrinks toward a guarded
-  base case", and wiki/law.md's `fact(n) := if n <= 0 then 1 else n * fact(n - 1)` is one. On an `int`, which stays an
-  opaque core word until T6c, this is decided as an effect only: in the arm where the condition `p <= c`, `p < c` or
+  base case", and wiki/law.md's `fact(n) := if n <= 0 then 1 else n * fact(n - 1)` is one. On an `int`, whose kernel
+  definition comes with T6c, this is decided as an effect only: in the arm where the condition `p <= c`, `p < c` or
   `p == c` (or its mirror, `p >= c` with `p + k`) does not hold, every call has `p - k` at p's place, k a literal above
-  0. Then the measure `p - c` falls at each call and is a nat in that arm, so the function is no Div; its kernel term
-  waits for nat to be the inductive of wap/types (T6c), where `choice_by_cases`' reading, ported, takes n apart by
-  the cases its condition waits on, and the function enters as a definition. Until then it stays assumed, counted
+  0. Then the measure `p - c` falls at each call and is a nat in that arm, `int where it >= 0`, so the function is no
+  Div. Its kernel term waits for T6c, where int is the numerals' type and nat's induction a theorem of wap/types:
+  `choice_by_cases`' reading, ported, takes p apart by the nat cases its condition waits on (`zero` and
+  `successor(k)`, the shapes of nat), and the function enters as a definition. Until then it stays assumed, counted
   with that reason.
 - **Anything else** (a call on no smaller value, a `decreasing` measure nothing proves, recursion through a function
   value) keeps Div and runs as written. Div is never an error (9.3 step 4).
@@ -63,7 +64,7 @@ compile, so they take the careful path; T5c1 changes only the effects fact, the 
 | T5c1 ending as an effect | groups from the chosen calls; a recursion is no Div when it is structural or shrinks toward a guarded bound; mutual recursion and the rest stay Div | core +70 (analyze/ending.wap: groups +20, the structural test +25, the guarded bound +25); effects.wap −5 (its "a call of itself is Div" becomes the call of ending.wap) | none: the theory's `effects of` on its own spelling stays until A2 reads the fact (coc-t5b.md, decided) | wiki/law.md's `fact` with `effects of fact` printing Pure (coc-t5.md T5c row, test_effects_wanted); `f(n) := if n == 0 then 1 else f(n + 1)` and `effects of f` printing Div (wiki/effects.md "Div", the wap spelling of test_theory_measures' "moving away" line); a Div function still runs: `f(0)` is 1 |
 | T5c2 products and courses | core declares the kernel's products itself (Pair and Unit as two blocks beside the literals, type_notation.wap `core_environment`); below.wap moves into core as analyze/courses.wap, `E.below` and `E.course` made the first time a recursion asks | core +100 (courses.wap +85: below.wap less its shape checks of a written Pair, since core builds them; products +15) | below.wap (112) moves, its readers (recursion.wap, match.wap, bindings.wap, erase.wap) import core's; the prelude's `products(Pair, Unit)` statement and bindings.wap's products binding go (about −30) | every test as before (test_theory_measures and test_theory_induction read core's courses) |
 | T5c3 structural terms | a structural recursion enters the kernel as a definition: its term the course of its match, calls read as hypotheses, the other parameters riding | core +80 (terms.wap: a function entered while it is being entered gives its recursion +15; `course_term`, the riding parameters and the calls read from the values below +65) | elaborate/recursion.wap's reading of a program's recursion: `place_of`, `riding`, `course_below`, `pairs_below`, `below_of`, `recursive_call_elaborated` move into core and the theory calls them (about −60 there, +0 twice); match.wap `course_elaborated` (about −20) | an enum of the program, `enum Tree { leaf, node(left: Tree, right: Tree) }`, `leaves(t: Tree): int := match t { leaf => 1; node(l, r) => leaves(l) + leaves(r) }`, `law four_leaves: leaves(node(node(leaf, leaf), node(leaf, leaf))) == 4` printing `four_leaves: Proved` (test_law_runs, new; wiki/law.md "Checking a law" and wiki/proof.md "A proof computes and ends"); the census counts the compiler's structural recursions as defined (a list walked by its cases); `effects of leaves` is Pure |
-| T5c4 guarded bounds as terms | after T6c (nat the inductive of wap/types, int built on it): `choice_by_cases` ported into core, so `fact` and `fib` over whole numbers enter as definitions | core +45 (analyze/ending.wap's guard as a match by the cases the condition waits on) | elaborate/conditions.wap `choice_by_cases` and its helpers (about −42) | test_proof_wanted's `law double_three: double(3) == 6 := refl`; test_theory_measures' `fact(4) == 24` and `fib(10) == 55` lines in wap spelling, `law r: fact(4) == 24` Proved |
+| T5c4 guarded bounds as terms | after T6c (int the numerals' type, nat `int where it >= 0` with its induction in wap/types): `choice_by_cases` ported into core, so `fact` and `fib` over whole numbers enter as definitions | core +45 (analyze/ending.wap's guard as a match by the cases the condition waits on) | elaborate/conditions.wap `choice_by_cases` and its helpers (about −42) | test_proof_wanted's `law double_three: double(3) == 6 := refl`; test_theory_measures' `fact(4) == 24` and `fib(10) == 55` lines in wap spelling, `law r: fact(4) == 24` Proved |
 
 Order: T5c1 right after T5b1 (it needs only the effects fact and the chosen calls, no enum); T5c2 and T5c3 after
 T5b4; T5c4 after T6c. The measures by `decreasing m` and accessibility (9.3 steps 2 and 3) need the provers for their
@@ -93,4 +94,4 @@ T5c is done when:
   T7 deletes nothing twice. Core cost the same; the extension shrinks at once. The moved code reads Elaborating, the
   theory's state: the move makes it read analyze's typed nodes and the kernel's checker, and the theory hands those in.
 - **The guarded bound on int before T6c:** recommended, as above, an effect only (Pure), the kernel term at T5c4. The
-  other reading, nat in wap/types before T5c, moves T6c's layout work forward.
+  other reading, int's kernel definition and nat's induction before T5c, moves T6c's work forward.
