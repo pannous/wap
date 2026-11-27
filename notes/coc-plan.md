@@ -327,7 +327,7 @@ theory needs the syntax changed. What goes is looseness in what a type means.
 | no evaluator in the compiler | the kernel computes: types, proofs by computing, folding | equality by computing |
 
 Unchanged: the reader, the operator table, the rewrite rules and sugar, phrases and prepositions, multiple
-dispatch as a way to write functions, value semantics (wiki/Footguns.md "Aliasing"), flow facts from conditions,
+dispatch as a way to write functions, sharing (wiki/Footguns.md "Aliasing"), flow facts from conditions,
 truthiness (a conversion to a proposition), the wasm value layouts, the command line.
 
 ## 5 The compiler
@@ -729,9 +729,13 @@ needed for it.
 A local variable, a loop and an early exit are ways to write a function, not actions on the world. The elaborator
 turns them into terms: an assignment is a new binding of the name; the variables a branch assigns are its result; a
 `for` is a fold with those variables as its state; `return`, `break` and `continue` are a mark in that state;
-`xs#i = v` and `p.x = v` give the variable the updated value (value semantics), and a method that changes its
-receiver gives the receiver back, so `k.inc()` binds `k` again. So `total` in 3.8 is a pure, total function, and
-laws about it can be proved. Since an assignment is a new binding, a name may be given a value of another type and
+a list, a map and an instance are shared, as in Python (wiki/Footguns.md "Aliasing"): `xs#i = v`, `p.x = v` and a
+method that changes its receiver change the one value every name of it sees. A write to a value the function made
+itself and gave no second name is a new binding of that name, so `k.inc()` on a local `k` binds `k` again; a write
+through a parameter, a capture, a global or a second name (`ys = xs; ys.add(2)`) is State, inferred as the
+function's effect, and a name ending in `!` (`sort!(xs)`) claims it, checked. So `total` in 3.8 is a pure, total
+function, and laws about it can be proved; `grown() := { xs = [1]; ys = xs; ys.add(2); xs }` gives `[1, 2]`, has
+State, and its laws are Tested, never Proved. Since an assignment is a new binding, a name may be given a value of another type and
 holds that type from there on; where two paths meet, it holds the union of what they left it with.
 
 An `emit` used as a value is no action either: it is an argument the compiler passes down from the handler that
