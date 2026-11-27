@@ -88,7 +88,8 @@ block, and the proofs use `bool.recursor`. Also `False` and `True` as blocks. Un
 | `·divide_and_remainder` (N160, `·divides_back` N159), `·divide_by_zero` (N171), `·remainder_below` (N174) | theorems | `·count.recursor` at level 0, `·bool_cases`, `·equals_sound`, `·at_most_step` |
 | shortcut divide (N180) | `shortcut_bound` | the three theorems above |
 
-That is 15 definitions and 33 theorems. All are checked as declared, and none is an axiom.
+That is 12 definitions, 5 helper propositions (sound_at, steps_up, beyond, difference_at, divides_back) and 31
+theorems. All are checked as declared, and none is an axiom.
 
 ### int (N184–N232, recast)
 
