@@ -44,6 +44,73 @@ its recursor (`case_recursor`), so int's two cases reach them unchanged.
 Proved today: small, neg, square_minus. Open: `law regrouped(a: int, b: int): a + 1 + b == b + a + 1` and
 `law lt(x: int): x < x + 1`.
 
+## count_declared and int_declared: what core declares
+
+Both are kernel terms that core_environment declares after `equality_declared`, in core's scope. Every name below
+carries the mark `·`, so no program can write it or meet it. The proofs are those of the deleted prelude, copied with
+a rename. Source: `git show 384b1e4e:wap/extensions/theory/prelude/numbers.wap` (N) and `…/prelude/logic.wap` (L),
+line numbers as cited.
+
+Rename: `nat` → `·count`, `nat.zero` → `·count.none`, `nat.successor` → `·count.one_more`,
+`nat.recursor` → `·count.recursor`, and every function and law `f` → `·f`. bool, Equal and their recursors keep their
+names, which are core's.
+
+**Needs first:** bool as a block (T5b3, t5b-enums), because numbers_declared refuses a yes case that is no case of a
+block, and the proofs use `bool.recursor`. Also `False` and `True` as blocks. Until T5b3, count_declared cannot run.
+
+### Logic support (L), before the count
+
+| name | statement | proof by |
+|---|---|---|
+| `·False`, `·True` | `enum False: Prop {}`, `enum True: Prop { intro }` (L7, L8) | blocks |
+| `·false_elim` | `(c: Sort(u), h: False): c` (L38) | False's recursor |
+| `·no_is_not_yes` | `Equal(bool, no, yes) → False` (L55) | Equal's recursor, motive by bool's recursor into Prop (True at no, False at yes) |
+| `·yes_is_not_no` | `Equal(bool, yes, no) → False` (N67) | `equal_symmetric`, then `·no_is_not_yes` |
+| `·bool_cases` | `(b, p: bool → Prop, if_no, if_yes): p(b)` (N65) | bool's recursor |
+| `·negated` | `bool → bool` (L68) | bool's recursor (definition) |
+
+### The count (N6–N180)
+
+| name | kind | by |
+|---|---|---|
+| `·count` | `enum count: Type { none; one_more(c: count) }` (N6) | block, then `numbers_declared(e, ·count, bool.yes, Equal)` (N10) |
+| `·predecessor`, `·is_zero` (N13–14), `·add` (N16), `·subtract` (N23), `·multiply` (N33), `·compared` (N42), `·equals` (N46), `·at_most` (N57), `·remainder`, `·divide` (N156–157) | definitions | `·count.recursor` at level 1 |
+| `·chosen` (N154), `·wraps` (N155) | definitions | bool's recursor; `·equals` |
+| `·add_zero`, `·add_successor` (N18–19); `·subtract_zero` (N24); `·multiply_zero`, `·multiply_successor` (N35–36); `·equals_zeros`, `·equals_successor_zero`, `·equals_zero_successor`, `·equals_successors` (N48–51); `·zero_at_most`, `·successor_at_most_zero`, `·at_most_successors` (N58–60) | theorems | `Equal.refl` (computing) |
+| `·zero_subtract` (N25), `·subtract_successors` (N28) | theorems | `·count.recursor` at level 0, `equal_congruent` with `·predecessor` |
+| shortcuts add, subtract, multiply, equal, at_most (N21, 31, 38, 53, 62) | `shortcut_bound` | the theorems just above |
+| `·equals_itself` (N54) | theorem | `·count.recursor` at level 0 |
+| `·equals_sound` (N74, helper `·sound_at` N73) | theorem | `·count.recursor` at level 0 twice, nested; mismatched cases by `·false_elim` and `·no_is_not_yes` |
+| `·at_most_step` (N84, `·steps_up` N83), `·beyond_at_most` (N95, `·beyond` N94) | theorems | `·count.recursor` at level 0 twice; `·false_elim`, `·no_is_not_yes`, `·yes_is_not_no` |
+| `·zero_add` (N103), `·successor_add` (N106), `·add_associative` (N113), `·zero_multiply` (N143) | theorems | `·count.recursor` at level 0, `equal_congruent` with `·count.one_more` |
+| `·add_commutative` (N109), `·add_swapped` (N116), `·successor_multiply` (N146) | theorems | `·count.recursor` at level 0 and the glue laws; add_swapped from add_associative and add_commutative alone |
+| `·at_most_add` (N123), `·at_most_difference` (N129, `·difference_at` N128), `·add_cancel` (N139) | theorems | `·count.recursor` at level 0; at_most_add rewrites by Equal's recursor, add_cancel by `·predecessor` |
+| `·divide_and_remainder` (N160, `·divides_back` N159), `·divide_by_zero` (N171), `·remainder_below` (N174) | theorems | `·count.recursor` at level 0, `·bool_cases`, `·equals_sound`, `·at_most_step` |
+| shortcut divide (N180) | `shortcut_bound` | the three theorems above |
+
+That is 15 definitions and 33 theorems. All are checked as declared, and none is an axiom.
+
+### int (N184–N232, recast)
+
+| name | kind | by |
+|---|---|---|
+| `int` | fills core's `int` word (A1's fill in place) with `enum int { of_count(n: ·count); below_zero(n: ·count) }` | block |
+| `·difference` (N191), `·minus` (N193), `·sum` (N197), `·size` (N206), `·negative` (N207), `·turned` (N209), `·times` (N210), `·equal_integers` (N213), `·subtracted` (N218), `·unequal` (N220) | definitions | int's recursor at level 1, the count's functions, `·negated` |
+| `·not_above` | definition, new: by int's cases (section "The comparisons") | int's recursor twice, `·at_most` |
+| `·below`, `·above`, `·not_below` | definitions, new: `not_above(a + 1, b)`, `below(b, a)`, `not_above(b, a)` | `·not_above` |
+| the rows' meanings | each row constant `prim i64.<op> int -> … ` declared Defined as its function: add ·sum, sub ·subtracted, mul ·times, sub(0, x) ·minus, eq ·equal_integers, ne ·unequal, le_s ·not_above, lt_s ·below, gt_s ·above, ge_s ·not_below | core/analyze/terms.wap's `row_term` then finds them declared |
+| a numeral | `term_of` writes k ≥ 0 as `of_count(k)` and k < 0 as `below_zero(−1 − k)`, k a count literal | replaces today's bare `numeral(value)` |
+| `·equal_integers_itself` (N230) | theorem | int's recursor at level 0, `·equals_itself` |
+| `·equals_sound`, `·equals_complete` for int | theorems (section "The bridge") | as there |
+
+Division on int (`i64.div_s`, `rem_s`) gets no meaning yet: the prelude had none for int. Those rows stay opaque,
+so a law dividing an int computes only on literals, which `row_step` folds.
+
+**One change to the decided placement.** int cannot be declared in wap/types: its cases' payload `·count` has no
+name wap can write. So int, its functions and the rows' meanings are core_environment's (int_declared), and wap/types
+keeps only types/integers.wap's laws, stated in wap over int's operators. Cost: kernel and core about +60 lines of
+declarations (count_declared about 45, int_declared about 15, the proofs copied rather than new). No new mechanism.
+
 ## linear.wap over int only
 
 The nat structure and the nat LAWS list go. `Sums` holds int's functions, found as the Defined values of the rows
