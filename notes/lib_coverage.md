@@ -32,7 +32,6 @@ blocked first; **lib** marks a module's own fault (fixed in lib/), **compiler** 
 | 1 each | interpret.warp:6 | a labelled parameter, `with names: map` |
 | | english.warp:12 | a rule phrase with a keyword hole, `increase $x by: $n` |
 | | frames.warp:17 | `data exit` |
-| | memory.warp:8 | a range written `start until end` |
 | | laws.warp:24 | no `op_of(Key)` |
 | | shown_frames.warp:6 | no host word window_open |
 | | c.warp | no C function field_u8 in the executable |
