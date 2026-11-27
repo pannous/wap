@@ -395,4 +395,6 @@ check "wap format check exits 0 when nothing would change" "$(cd "$stage" && "$n
 check "wap format check lists each line that would change and exits 1" "$(cd "$stage" && "$native_wap" format check unformatted.wap 2>&1; echo $?)" "unformatted.wap:1: layout: x = 1 + 2
 unformatted.wap:2: layout: f(a) = a * 2
 1"
+# a word before the program picks the build mode (wiki/cli.md "Build modes")
+check "wap release runs the program" "$(cd "$stage" && "$native_wap" release hello.wap 2>&1)" "Hello"
 exit $((failures > 0))
