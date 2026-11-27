@@ -3,9 +3,9 @@
 A program's whole numbers reach the kernel as int, and int is the only number structure the provers work in. nat is
 `int where it >= 0`, so no law reaches them over nat.
 
-int is `enum int { zero; positive(n: count); negative(n: count) }`, where `positive(n)` is n + 1 and `negative(n)`
-is −(n + 1), so each number has one form. Its payload is the kernel's count (next section). A numeral is `zero`,
-`positive(k)` or `negative(k)`, k a count literal. An operator is a row constant, `prim i64.add int -> int -> int`,
+int is `enum int { natural(n: count); negative(n: count) }` (Lean's), where `natural(n)` is n and `negative(n)`
+is −(n + 1), so each number has one form. Its payload is the kernel's count (next section). A numeral is
+`natural(k)` or `negative(k)`, k a count literal. An operator is a row constant, `prim i64.add int -> int -> int`,
 whose Defined value is its meaning: sum, minus, times, equal_integers, not_above, and the other comparisons. The count
 is only the payload of int's two signed cases. The provers never state a program's law over it; only the reader of an
 int numeral and the int lemmas' own proofs use it.
@@ -39,17 +39,16 @@ count_equals_sound, count_equals_itself, count_add_zero …  theorems by count's
 - **nat's induction.** A theorem over `int where it >= 0`: from P(zero), from P(x) → P(x + 1) for each `0 <= x`, and
   from `0 <= x`, P(x). It goes by int's cases on x:
   - `negative(k)` computes `0 <= x` to no, ruled out by apart over bool.
-  - `zero` is the base.
-  - `positive(k)` goes by count's recursor on k. At `·count.zero`, `positive(·count.zero)` is `zero + 1`, so the step
-    from the base gives it. At `·count.successor(k)`, the step from `positive(k)` gives it, carried by `successor_sum`
-    (`x + 1 == int.successor(x)`, section "int's step functions"), since `int.successor(positive(k))` computes to
-    `positive(·count.successor(k))`.
+  - `natural(k)` goes by count's recursor on k. At `·count.zero`, `natural(·count.zero)` is the base. At
+    `·count.successor(k)`, the step from `natural(k)` gives it, carried by `successor_sum`
+    (`x + 1 == int.successor(x)`, section "int's step functions"), since `int.successor(natural(k))` computes to
+    `natural(·count.successor(k))`.
 
   It is stated and proved once, and induction.wap uses it for a nat binder. A law is `Π binders, Equal(bool, body, yes)` (typed_laws.wap `law_statement`).
 
 The provers are 9 files, 937 lines. Only linear.wap (416) reads a number structure, today nat's through
 kernel/numbers.wap's Numbers record. apart, induction, rewriting, facts, introduction and computing take any enum by
-its recursor (`case_recursor`), so int's three cases reach them unchanged.
+its recursor (`case_recursor`), so int's two cases reach them unchanged.
 
 Proved today: small, neg, square_minus. Open: `law regrouped(a: int, b: int): a + 1 + b == b + a + 1` and
 `law lt(x: int): x < x + 1`.
@@ -107,17 +106,17 @@ theorems. All are checked as declared, and none is an axiom.
 
 | name | kind | by |
 |---|---|---|
-| `int` | fills core's `int` word (A1's fill in place) with `enum int { zero; positive(n: ·count); negative(n: ·count) }`; its cases are core's, named `int.zero`, `int.positive`, `int.negative` (not bare as bool's truths, so no program's `zero` or `negative` meets them) | block |
-| `·ups`, `·downs` | definitions, new: an int's two counts, `x == ups(x) − downs(x)`: zero → 0, 0; positive(n) → successor(n), 0; negative(n) → 0, successor(n) | int's recursor at level 1, three arms each |
-| `·difference` (N191, rewritten) | definition: m − n of two counts in its one form: `subtract(n, m)` is successor(k) → negative(k); else `subtract(m, n)` is zero → zero, successor(k) → positive(k) | count's recursor twice |
-| `·minus` (N193, rewritten) | definition: zero → zero, positive(n) → negative(n), negative(n) → positive(n), a swap | int's recursor, three arms, no count function |
+| `int` | fills core's `int` word (A1's fill in place) with `enum int { natural(n: ·count); negative(n: ·count) }`; its cases are core's, named `int.natural`, `int.negative` (not bare as bool's truths, so no program's `natural` or `negative` meets them) | block |
+| `·ups`, `·downs` | definitions, new: an int's two counts, `x == ups(x) − downs(x)`: natural(n) → n, 0; negative(n) → 0, successor(n) | int's recursor at level 1, two arms each |
+| `·difference` (N191, rewritten) | definition: m − n of two counts in its one form: `subtract(n, m)` is successor(k) → negative(k); else `subtract(m, n)` is zero → natural(zero), successor(k) → natural(successor(k)) | count's recursor twice |
+| `·minus` (N193, rewritten) | definition: natural(n) → `0 − n` (zero → natural(zero), successor(k) → negative(k)), negative(n) → natural(successor(n)) | int's recursor, two arms, one through the count's recursor |
 | `·sum`, `·times` (N197, N210, rewritten) | definitions by the two counts: `sum(a, b) := difference(ups(a) + ups(b), downs(a) + downs(b))`, `times(a, b) := difference(ups(a)·ups(b) + downs(a)·downs(b), ups(a)·downs(b) + downs(a)·ups(b))` | `·add`, `·multiply`; no case arms. `·size`, `·negative`, `·turned` (N206–209) are not needed and go |
 | `·equal_integers` (N213, rewritten), `·not_above` (new) | definitions: `count_equals(ups(a) + downs(b), ups(b) + downs(a))` and `count_at_most(` the same two `)` | no case arms (section "The comparisons") |
 | `·subtracted` (N218), `·unequal` (N220) | definitions, as in the prelude | `·sum`, `·minus`, `·negated` |
 | `·below`, `·above`, `·not_below` | definitions, new: `not_above(a + 1, b)`, `below(b, a)`, `not_above(b, a)` | `·not_above` |
 | the rows' meanings | each row constant `prim i64.<op> int -> … ` declared Defined as its function: add ·sum, sub ·subtracted, mul ·times, sub(0, x) ·minus, eq ·equal_integers, ne ·unequal, le_s ·not_above, lt_s ·below, gt_s ·above, ge_s ·not_below | core/analyze/terms.wap's `row_term` then finds them declared |
-| a numeral | `term_of` writes 0 as `int.zero`, k > 0 as `int.positive(k − 1)` and k < 0 as `int.negative(−1 − k)`, the payload a count literal | replaces today's bare `numeral(value)` |
-| `·parts_back` (new) | theorem: `difference(ups(x), downs(x)) == x` | int's recursor at level 0, three arms, each by computation |
+| a numeral | `term_of` writes k ≥ 0 as `int.natural(k)` and k < 0 as `int.negative(−1 − k)`, the payload a count literal | replaces today's bare `numeral(value)` |
+| `·parts_back` (new) | theorem: `difference(ups(x), downs(x)) == x` | int's recursor at level 0, two arms, each by computation |
 | `·difference_equal` (new) | theorem: `m + q == p + n → difference(m, n) == difference(p, q)` | count's recursor, `·zero_subtract`, `·subtract_successors`, `·add_cancel` |
 | `·equal_integers_itself` (N230, rewritten) | theorem | `·equals_itself(ups(x) + downs(x))`, no case split |
 | `int.successor`, `int.predecessor`, `·successor_sum`, `·predecessor_sum` and the two step theorems | definitions and theorems by cases (section "int's step functions") | int's recursor, count's recursor in one arm |
@@ -129,42 +128,24 @@ so a law dividing an int computes only on literals, which `row_step` folds.
 **One change to the decided placement.** int cannot be declared in wap/types: its cases' payload `·count` has no
 name wap can write. So int, its functions and the rows' meanings are core_environment's (int_declared), and wap/types
 keeps only types/integers.wap's laws, stated in wap over int's operators. Cost: kernel and core about +95 lines of
-declarations (count_declared about 45, copied; int_declared about 50, rewritten for the three cases and with the step functions). No new
+declarations (count_declared about 45, copied; int_declared about 50, rewritten for the two cases and with the step functions). No new
 mechanism.
 
-### Three cases against two: the honest cost
+### int's two cases: the cost
 
-The deleted prelude's int had two cases, Lean's `of_nat(n) | negative_successor(n)`, and its functions could be
-copied. With `zero | positive | negative` they cannot. Written **by cases**, as the prelude's were, each binary
-function goes from 2×2 to 3×3 arms:
+The deleted prelude's int had Lean's two cases, `of_nat(n) | negative_successor(n)`, as the kernel's now has
+(`natural | negative`). Written **by cases**, each binary function goes from 2 arms to 2×2 and its proofs to 4 cases.
+The kernel's functions go **by the two counts** instead, so every binary function is one line over `ups` and `downs`:
+`sum(a, b) := difference(ups(a) + ups(b), downs(a) + downs(b))`, `times`, `equal_integers` and `not_above` likewise.
+Only `ups`, `downs`, `minus`, `difference` and `parts_back` see the cases, two arms each.
 
-| | two cases, by cases | three cases, by cases | three cases, by the two counts (recommended) |
-|---|---|---|---|
-| `sum` | 4 arms, 2 through `difference` | 9 arms, 4 through `difference` | 1 line, no arms |
-| `times` | `size`, `negative`, `turned` (6 arms) | the same, 9 arms | 1 line, no arms |
-| `minus` | 2 arms, one a nested count recursor | 3 arms, a plain swap | 3 arms, a plain swap |
-| `difference` | one count recursor | two | two |
-| `equal_integers`, `not_above` | 4 arms each | 9 arms each | 1 line each, no arms |
-| `ups`, `downs` | — | — | 3 arms each (new) |
-| equals_sound's proof | 4 cases: 2 apart, 2 congruence | 9 cases: 6 apart, 1 refl, 2 congruence | no cases: count_equals_sound, then `difference_equal` and `parts_back` twice |
-| `equal_integers_itself` | 2 cases | 3 cases | none |
-| nat's induction | of_nat(k) by count's recursor, the step by computation | + the zero case and `successor_sum` | the same |
-| linear.wap's numerals | 2 arms read, 2 written | 3 read, 3 written | 3 read, 3 written |
-
-- **By cases** costs about +25 lines over the two-case shape: int_declared's functions about +18, the proofs about +7.
-  Every binary function, and every proof by cases, has 9 arms where it had 4.
-- **By the two counts**, every binary function is one line over `ups` and `downs`, and only `ups`, `downs`, `minus`,
-  `difference` and `parts_back` see the three cases. That is about the same size as the copied two-case prelude
-  (about 25 lines each): the definitions are shorter by about 7, which the new `difference_equal` (about 8) takes
-  back. The same route would serve two cases too, so the shape itself
-  costs about +4 lines there: one arm each in ups, downs, minus and parts_back. The gain of the shape is `minus` as a
-  plain swap, and linear.wap pushes minus everywhere (`a − b` is `sum(a, minus(b))`).
-- **What it costs in computing.** A sum of two literals computes through `difference` and the count's shortcuts.
-  That is as fast as before, since the payloads are count literals. A sum over a variable does not compute to a case
-  by itself: `positive(k) + 1` needs `successor_sum`, where the two-case `of_nat(k) + of_nat(1)` computed to
-  `of_nat(k + 1)` directly. This is the one lemma the count route adds for induction.
+- equals_sound's proof is a double split of 4 cases: 2 mixed by apart, 2 like by `count_equals_sound` (natural) or
+  `count_equals_sound` after the shift by zero's add (negative), each mapped under the case.
+- **What it costs in computing.** A sum of two literals computes through `difference` and the count's shortcuts,
+  since the payloads are count literals. A sum over a variable does not compute to a case by itself:
+  `natural(k) + 1` needs `successor_sum`.
 - **What does not change.** linear.wap reads `sum`, `minus`, `not_above` and `equal_integers` as opaque Defined
-  constants and never their arms. The provers' cost is the same in every shape; only the int lemmas' proofs see it.
+  constants and never their arms.
 
 ### int's step functions: successor and predecessor
 
@@ -172,18 +153,16 @@ int has the step functions `successor` and `predecessor`, with `next` and `previ
 `previous(0)` is −1. Their kernel meanings are int_declared's definitions by cases:
 
 ```
-int.successor(x)    zero → positive(·count.zero)
-                    positive(n) → positive(·count.successor(n))
-                    negative(n) → n by count's cases: ·count.zero → zero; ·count.successor(k) → negative(k)
-int.predecessor(x)  zero → negative(·count.zero)
-                    negative(n) → negative(·count.successor(n))
-                    positive(n) → n by count's cases: ·count.zero → zero; ·count.successor(k) → positive(k)
+int.successor(x)    natural(n) → natural(·count.successor(n))
+                    negative(n) → n by count's cases: ·count.zero → natural(zero); ·count.successor(k) → negative(k)
+int.predecessor(x)  negative(n) → negative(·count.successor(n))
+                    natural(n) → n by count's cases: ·count.zero → negative(zero); ·count.successor(k) → natural(k)
 ```
 
 - **The two step theorems** are proved by cases, not given as constructor rules:
   `int.successor(int.predecessor(n)) == n` and `int.predecessor(int.successor(n)) == n`.
   - Each goes by int's recursor at level 0, with count's recursor at level 0 in the one arm that steps across zero
-    (positive for the first, negative for the second).
+    (negative for the first, natural for the second).
   - Every arm then computes to n, so each arm's proof is refl.
   - No induction hypothesis is used, so the provers' apart and computing find them as they are.
 - **The program's words.** types/integers.wap writes them as plain wap:
@@ -193,10 +172,10 @@ int.predecessor(x)  zero → negative(·count.zero)
   next(x: int): int := successor(x)
   previous(x: int): int := predecessor(x)
   ```
-  Each runs as one i64 operation. Their kernel values are `sum(x, positive(·count.zero))` and the like.
+  Each runs as one i64 operation. Their kernel values are `sum(x, natural(·count.successor(·count.zero)))` and the like.
   - Two theorems join them to the definitions by cases: `·successor_sum: x + 1 == int.successor(x)` and
-    `·predecessor_sum: x + −1 == int.predecessor(x)`, each by int's cases. The positive arm of successor_sum is the old
-    `positive(k) + 1 == positive(·count.successor(k))`, through `·zero_subtract`.
+    `·predecessor_sum: x + −1 == int.predecessor(x)`, each by int's cases. The natural arm of successor_sum is
+    `natural(k) + 1 == natural(·count.successor(k))`, through `·zero_subtract`.
   - The wap laws `law next_previous(n: int): next(previous(n)) == n` and `law previous_next(n: int): …` go into
     integers.wap's list. Each is proved by the two join theorems and the step theorem.
   - The definitions by cases are what the theorems and nat's induction are about, and the wap function is what runs.
@@ -213,7 +192,7 @@ int.predecessor(x)  zero → negative(·count.zero)
     operation to a kernel meaning). So the join theorems carry the link, with no new mechanism.
 - **Lines.**
   - int_declared: about +16 (the two definitions 2 each, the two step theorems 3 each, the two join theorems 3 each).
-    `positive_next` goes into successor_sum, −2. Net about +14.
+    Net about +16.
   - types/integers.wap: +4 functions and +2 laws.
 
 ## linear.wap over int only
@@ -222,7 +201,7 @@ The nat structure and the nat LAWS list go. `Sums` holds int's functions, found 
 `i64.add`, `i64.le_s` and `i64.eq` at `int -> int -> int` (core/analyze/terms.wap `row_name`), so no function name is
 written twice.
 
-- **Numbers read.** `int.zero` is 0, `positive(k)` is k+1 and `negative(k)` is −k−1, k a count literal or built
+- **Numbers read.** `natural(k)` is k and `negative(k)` is −k−1, k a count literal or built
   from count's zero and successor. This is the one place the count appears in linear.wap, and only because it is int's payload. Numbers are
   written by `integer_numeral`. `Normal.number` may be negative.
 - **Subtraction is `sum(a, minus(b))` everywhere.** `subtracted` unfolds to it. `with_differences`, the difference
@@ -322,9 +301,8 @@ included), so it is written once over the type and its equality function.
   - The mismatched cases inside count_equals_sound are the step that needs bool as a block (t5b-enums). There the
     hypothesis is `Equal(bool, no, yes)`, and apart's chooser is the recursor of the equation's type,
     `case_recursor(bool)`, choosing the goal at no and anything at yes.
-  - By int's cases instead, sound would take 9 cases: 6 mixed by apart, zero against zero by refl, and the two like
-    signed cases by `count_equals_sound` and `equal_congruent` with `int.positive` or `int.negative`. See "Three cases
-    against two".
+  - By int's cases instead, sound takes 4 cases: 2 mixed by apart and the 2 like cases by `count_equals_sound` and
+    `equal_congruent` with `int.natural` or `int.negative`. See "int's two cases".
 
 Where the prover reads a hypothesis `h: (a == b) == yes`, `equal_bounds` gets `equals_sound(a, b, h)`. Where a law
 it calls takes an int equation (add_cancel's h, gap_bound's k), it passes `equals_complete(…, proof)`.
@@ -380,7 +358,7 @@ core's int_declared (section "count_declared and int_declared").
 ### What replaces e.numbers
 
 int_declared sets `e.integers`, a kernel record beside `e.literals`, as numbers_declared set `e.numbers`:
-`Integers { type; zero; positive; negative; sum; minus; not_above; equal_integers; equals_sound; equals_complete }`,
+`Integers { type; zero; natural; negative; sum; minus; not_above; equal_integers; equals_sound; equals_complete }`,
 each a constant (kernel +about 8 lines). `sums_of` builds Sums from it:
 
 ```
@@ -393,10 +371,10 @@ The row constants a law's body holds (`prim i64.add int -> int -> int`) are Defi
 | linear.wap today | after |
 |---|---|
 | `s.nat` (11 places: hypotheses' types, equations, congruences) | `s.i.type` |
-| `s.n.zero`, `zero_of(s)` | `s.i.zero`, the case itself, with no count in it |
+| `s.n.zero`, `zero_of(s)` | `s.i.zero`, `natural(·count.zero)` |
 | `s.n.successor` (normal :303, beyond :147) | gone: `b + 1` is `added(s, b, int_numeral(s, 1))` |
-| `numeral(v)` (:252, :345–349, :383) | `int_numeral(s, v)`: `s.i.zero` for v = 0, `positive(v − 1)` for v > 0, else `negative(−1 − v)` |
-| `normal`'s Numeral, zero and successor cases, `is_sum_part` (:300–303, :326–327) | `int.zero` → 0, `positive(lit)` → lit+1, `negative(lit)` → −lit−1, a sum, and `minus(t)` → t's Normal with each atom's minus and the number negated, by `minus_add` and computing |
+| `numeral(v)` (:252, :345–349, :383) | `int_numeral(s, v)`: `natural(v)` for v ≥ 0, else `negative(−1 − v)` |
+| `normal`'s Numeral, zero and successor cases, `is_sum_part` (:300–303, :326–327) | `natural(lit)` → lit, `negative(lit)` → −lit−1, a sum, and `minus(t)` → t's Normal with each atom's minus and the number negated, by `minus_add` and computing |
 | `s.subtract`, `with_differences`, `differences_in`, `difference_bounds`, `linked`'s difference branch (:180–205, :316) | gone: `a - b` unfolds to `sum(a, minus(b))` |
 | the unit rows `0 <= atom` in `eliminated` (:248) | gone: an atom's lower bound comes from a hypothesis only |
 | `s.n.truth`, `yes_case`, `no_case`, `equality`, `equation()`, `truth_stated()` | `e.literals` and core's `equated` (kernel/equality.wap) |
@@ -511,7 +489,7 @@ kernel"). The second checker still reads magnitude, and magnitude's header still
    instance and LAWS out. Gate: `regrouped` proves, law_runs 11–15 hold, and test_theory_arithmetic, test_induction
    and test_verify show no line that was green going red.
 4. **Bool equality goals.** Gate: test_connectives and a `==` law over int.
-5. **Induction and apart over int.** The recursor gives three cases: zero with no field, and positive and negative,
+5. **Induction and apart over int.** The recursor gives two cases, natural and negative,
    each with a count field. A law over one int binder
    that needs induction under a case takes depth 2, which INDUCTION_DEPTH allows. Check one such law, and raise the
    depth only if a target line needs it.
