@@ -388,4 +388,6 @@ TEMP_RUNS=48
 printf '%s\n' 'use file' 'print temp_file()' >"$stage/temp_name.wap" && $wap "$compiler" "$stage/temp_name.wap" "$stage/temp_name.wasm" >/dev/null 2>&1 && mkdir -p "$stage/temp_names"
 for run in $(seq $TEMP_RUNS); do "$native_wap" "$stage/temp_name.wasm" >"$stage/temp_names/$run.txt" 2>&1 & done; wait
 check "runs at the same moment get $TEMP_RUNS temporary files of their own" "$(cat "$stage/temp_names"/*.txt | grep '^/' | sort -u | wc -l | tr -d ' ')" "$TEMP_RUNS"
+# a word before the program picks the build mode (wiki/cli.md "Build modes")
+check "wap release runs the program" "$(cd "$stage" && "$native_wap" release hello.wap 2>&1)" "Hello"
 exit $((failures > 0))
