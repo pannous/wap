@@ -1082,7 +1082,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T7 the theory extension retires | waits | | T6 |
 | T8a the reader | waits; its first commit is whole()'s sign | | exact-big-literals |
 | T8b the machine words | waits | | Q1, T4d |
-| T8c exact int on the run | waits | | T8a, T5f; the user's answer on the compiler's own ints |
+| T8c exact int on the run | waits | | T8a, T5f |
 
 ### T6 after T6a3a: laws everywhere, traits and instances
 
@@ -1239,12 +1239,8 @@ conditions. T8c after T8a and T5's erasure stage (the int layout is one of its b
 - T8c touches the emitter's value layouts. It is the one T8 step no other careful landing may share (C2 included),
   and it reports the self-compile time and the benchmarks against main.
 
-**Open for the user (via wap-interviewer).**
-- **The compiler's own ints under T8c.** The decision is that the compiler's source writes `i64` where it means a
-  machine word, so its build holds no big numbers. That is a source edit across most of wap/ (indices, counts,
-  positions). The alternative is that the compiler builds with `wap fast`: every int is a wrapping i64, as today, so
-  it needs no source edit and no seed risk. Recommended: build with `wap fast`, as the one rule for any program that
-  wants machine ints throughout. It changes the decision's wording, so it waits for the user.
+**The compiler's own ints.** The compiler builds with `wap fast`: every int a wrapping i64 with no checks, as
+today, so its source needs no edit and its build holds no big numbers (decision 13).
 
 ### Features and the milestones that show them
 
@@ -1339,8 +1335,8 @@ Decided by the user (2026-11-25), the basis of track T:
   table, keyed by the source place that `format` prints, as TYPES is (T3).
 - **`i64` is the integers modulo 2^64** (prelude/checked.wap: `quotient(int, wrapped_alike)`), as Lean's `Int64`.
   Laws that hold modulo 2^64 (commutativity, associativity) prove on `i64`; laws that assume no overflow
-  (`a + 1 > a`) are refused there. The compiler's own source writes `i64` where it means a machine word, so its
-  build holds no big numbers; 0 core lines, a source edit after a seed refresh.
+  (`a + 1 > a`) are refused there. The compiler builds with `wap fast` (every int a wrapping i64, no checks), so its
+  build holds no big numbers; 0 source lines (user 2026-11-27).
 - **T8** stays in the plan and is decided at its turn, once the sizes of T1 to T7 are measured.
 
 Decided by the user (2026-11-25), after the extensions audit (data/extensions-audit/report.md) and R1:
