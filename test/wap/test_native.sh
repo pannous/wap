@@ -423,4 +423,8 @@ trimmed=$(module_bytes app.wasm)
 (cd "$stage/linked" && "$native_wap" build --wasm --trim=none app.wap >/dev/null 2>&1)
 check "wap build --wasm --trim=none keeps the linked module whole, the default trims it" "$([ "$(module_bytes app.wasm)" -ge "$(module_bytes app.full.wasm)" ] && [ "$trimmed" -lt "$(module_bytes app.full.wasm)" ] && $WASMTIME_RUN "$stage/linked/app.wasm" 2>&1)" "Hello 3"
 check "a linked module names no folder to find modules in" "$(grep -c wap.library "$stage/linked/app.full.wasm")" "0"
+# a seed folder holding no wap source (notes/coc-plan.md "Modules without source"): the compiler reads none, its warm
+# state holds what it reads, and a library module compiled once is used by its name
+check "a seed folder holding no wap source compiles hello and a program using a library module" "$(rm -rf "$stage/sourceless" && cp -R "$stage/bin" "$stage/sourceless" && (cd "$stage/sourceless/wap-seed/lib" && "$native_wap" ../wap.wasm math.wap math.wasm >/dev/null 2>&1) && find "$stage/sourceless/wap-seed" -name '*.wap' -delete && cd "$stage" && printf '%s\n' 'print "Hello"' >sourceless_hello.wap && printf '%s\n' 'use math' 'print(gcd(12, 18))' >sourceless_math.wap && "$stage/sourceless/wap" sourceless_hello.wap 2>&1 && "$stage/sourceless/wap" sourceless_math.wap 2>&1)" "Hello
+6"
 exit $((failures > 0))
