@@ -57,6 +57,8 @@ check "wap1 compiles wap's compiler in under a minute" "$(self_compile_time)" "u
 self_compile_instructions() {
 	retired=$(awk '$2 == "instructions" && $3 == "retired" { print $1 }' "$measured" 2>/dev/null)
 	[ -n "$retired" ] || { echo "no instructions counted"; return; }
+	# the count beside the check, green or red, so a landing reads its speed off this run
+	echo "— wap1 retired $retired instructions compiling wap's compiler" >&2
 	[ $((retired * 100)) -le $((SELF_COMPILE_INSTRUCTIONS * (100 + SLOWER_PERCENT))) ] && echo "as fast as main" || echo "$retired instructions, main's $SELF_COMPILE_INSTRUCTIONS"
 }
 check "wap1 compiles wap's compiler at most $SLOWER_PERCENT% slower than main" "$(self_compile_instructions)" "as fast as main"
