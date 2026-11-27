@@ -345,6 +345,59 @@ linear.wap net about +15 (416 → about 430); laws.wap about +25; core and kerne
 expected along the way. Since the deletion, linear.wap proves nothing (`sums_of` finds no `e.numbers`), so nothing
 green depends on it.
 
+## Exact int literals past 2^63: a kernel step after M2b
+
+### What stops at 2^63 today, and where
+
+The limit sits in three layers. The kernel alone would not turn `4294967296 * 4294967296 == 18446744073709551616`
+green:
+
+| layer | what it does past 2^63 |
+|---|---|
+| the reader, core/parse/atoms.wap:134 `whole` | a literal past `LARGEST_INT` reads as a `number`, a float: the law's right side is no int at all |
+| the runtime | int is i64 and wraps (`lib/exact.wap`'s header: "int(x) … wraps as ints do"); exact runtime int is T8 |
+| the kernel | `Numeral(value: int)` (terms.wap:95) holds an i64; the count's shortcuts fire only while the result fits (numbers.wap:24 `LARGEST`, :220–222, :273 `successor_of`); a row's fold refuses past it (compute.wap:72 `ROW_OVERFLOW`, primitives.wap:76–94) |
+
+The kernel held unbounded numbers once, through lib/magnitude.wap. 452176cb moved it to i64 ("magnitude leaves the
+kernel"). The second checker still reads magnitude, and magnitude's header still says the kernel trusts it.
+
+### The kernel's part
+
+- **A numeral holds a count, so it is never negative.** A program's negative int is `below_zero(k)` with k ≥ 0
+  (int_declared). So the unbounded value needs no sign: lib/magnitude.wap's `Magnitude` (limbs of 10^9, one spelling
+  per number; sum, difference of a ≥ b, product, divided, compared, digits) is exactly what a count literal needs.
+- **The representation, recommended: small stays small.** `Numeral(value: int)` stays the shape for every count below
+  2^63, which is every count a program and the census meet today, and keeps today's speed, which is why 452176cb left
+  magnitude. A new shape `Large(value: Magnitude)` holds a count at or past 2^63, and only there, so each number has
+  one spelling. `whole_of(t): Magnitude?` reads either shape, and `count_literal(m)` writes a Numeral where m fits,
+  else a Large.
+  - The other options: (a) every Numeral a Magnitude, which is simpler but slows every literal; (b) a Large built from
+    small numerals as a term (`q · 2^62 + r`), which needs its own normal form and is a magnitude spelled worse.
+- **What changes:**
+  - terms.wap: the shape, its constructor and its hash (+4).
+  - equal.wap and terms.wap's `same`: Large against Large by `compared` (+3).
+  - show.wap: `digits` (+1).
+  - typing.wap `numeral_rule`: a Large is a count (+1).
+  - numbers.wap: the Add, Multiply, Subtract, Equal, AtMost and Divide shortcuts compute through
+    `whole_of`/`count_literal` when a result passes 2^63, instead of returning ø, and `LARGEST`'s guards and
+    `successor_of`'s limit go (+18 −8).
+  - `use magnitude` in numbers.wap: a library module the compiler already compiles, as core uses `folder`. No copy of
+    its arithmetic.
+  - Kernel about +30 net. magnitude.wap itself unchanged (121 lines, already trusted).
+- **ROW_OVERFLOW stays until T8.** A row is the host's i64 operation. While the runtime wraps, a kernel that computed
+  a row exactly past 2^63 would prove what the run then breaks. After int_declared the rows that matter are Defined
+  as int's functions over the count, which are exact. For those, the kernel's meaning is the wiki's exact int, and the
+  runtime's wrap is T8's own red. The fold of an opaque row (int division) keeps its guard until T8.
+
+### Its order
+
+- **After M2b step 1, not before.** count_declared and int_declared work with counts below 2^63, and nothing in M2b
+  needs a larger literal: the provers' coefficients and the tests' laws are small. A Large first would only add a
+  shape the count block's literals must also handle, before that block exists.
+- **With T8, or after it.** The kernel step makes the kernel exact, but `big` stays red until the reader keeps the
+  digits (atoms.wap `whole` → an int, not a float) and the runtime int is exact. Recommended: one T8 card holding all
+  three layers, the kernel's part being the +30 above. The `big` test line's red names that card.
+
 ## Steps, each with its outcome
 
 1. **int's meaning in wap/types.** wap-theory-reads-types writes the enum and the rows' meanings. The comparisons by
