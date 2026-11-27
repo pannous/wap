@@ -1159,6 +1159,57 @@ neither.
   passes a second reader, since it is the one trusted part. The elaborator's owner also owns the closed sum of
   `extends` (T5) and protocols as traits (T6), with the class rules of sugar/records.wap.
 
+## 15 Modules without source
+
+The goal (card modules-without-source): a compiled module ships without its source, its types entirely in the wasm,
+and the seed runs with no .wap file beside it.
+
+What a module reads back from source today:
+- its wap section is wap text: the module's files with the definitions it compiled cut out (extensions/wasm/modules.wap
+  header_source, kept_lines), parsed again by every use (wasm_source, through core/pipeline.wap source_of and
+  notation_of);
+- each export's name is a header line, `add(a: int, b: int = 1) → int`, parsed into a foreign definition
+  (foreign_definition);
+- the files it uses travel as text in sections of their own, `types.wasm/host.wap` (carried_files, part_source);
+- the seed folder holds the types module's sources, the kernel, the extensions' rule files and lib/ as .wap
+  (scripts/lib/wap-beside.sh WAP_BESIDE), read where no warm state covers them, and lib/'s modules on every `use`.
+
+What it carries in their place: the code as read, never text. The warm state (extensions/warm.wap) already holds
+every file the compiler reads before a program operated once, packed (extensions/packed.wap), and a compile takes a
+file from it with no parse: core/pipeline.wap operated_once finds the file in `language.operated` and reads nothing.
+A module's wap section becomes that same thing for its own files: one packed list of file entries, each the file's
+operated code (its rules, records, enums, the bodies that travel along: generic and inlinable functions), its words
+and its declared code, its exports' declarations as declared code built from their signatures, and one entry for
+each file it carries. The header line stays as the export's name for other languages and the dispatcher; wap itself
+reads the entry.
+
+| step | what works after it | core | extension | outcome lines |
+|---|---|---|---|---|
+| M1 packed section | a `use "m.wasm"` brings m's entries in operated, as the warm state brings the compiler's own files: no reader, no shape rules, no header parse on it; header_source, kept_lines, carried_files, part_source and foreign_definition's parse go | +3 (pipeline.wap: a file's reader may bring it operated) | about −70, +30 (warm.wap's file_entry, shared) | a program using a module whose .wap files are deleted after its build runs and prints as before; a carried file's rule works in the program |
+| M2 seed without source | the seed folder holds wap.wasm, types.wasm, lib/'s modules compiled once each, and the tools; no .wap; the standard words name the modules (warm.wap standard_entry) | 0 | wap-beside.sh copies modules, not sources; refresh-seed.sh builds lib/ | test_hello and a `use math` program run from a seed folder holding no .wap file |
+| M3 kernel terms (with T5g) | the entries hold the declarations as the kernel accepted them: signatures and records as kernel terms, the bodies of pure definitions erased (T5a); the compiler's warm state is the types module's own section, so warm.wap goes | 0 | −100 (warm.wap), +60 (T5g's reader) | T5g's line |
+
+Messages: a refusal inside a module's code quotes it as the compiler holds it (core/errors.wap quoted, which already
+does so for code no file holds), with the module's file and line, which the places in the entry keep.
+
+Cost: +3 core in all, the extension about −80 net; the seed folder smaller by the sources. Order: M1 and M2 need no
+T step and can land beside T5a; M3 lands with T5g.
+
+The wiki: wiki/wasm-representation.md:39, old: "Format: The wap section is a header file in wap format, plain wap
+text: the module's rules, enums and the bodies that travel as source. Its exports' declarations need no lines there,
+since each export's name is its header line, `add(a: int, b: int = 1) → int`. The reader then runs the normal reader
+and declare stages on it. That needs no new binary format and no second schema, and reading a .wasm reuses about 90%
+of reading a .wap". New: "Format: the wap section holds the module's code as the compiler read it: its rules, enums,
+records, declarations and the bodies that travel along, already read and declared, in wap's packed notation. A use
+reads no source and parses nothing, so a module needs no source beside it. Each export's name stays its header line,
+`add(a: int, b: int = 1) → int`, for other languages and the dispatcher." Line 32, "Generic or inlinable functions as
+source", reads "Generic or inlinable functions, their bodies read: … its body goes along and the importer compiles a
+copy for its own types".
+
+Open for the user: the decision of 2026-11-25 lets templates, rules and class hierarchies "still travel as source";
+this plan carries them read, as packed code. Recommended: packed, since the warm state shows it works and it is what
+lets a module ship without source.
+
 ## Sources
 
 - The feature list: the Lean language reference, "The Type System".
