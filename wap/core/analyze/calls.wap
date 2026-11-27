@@ -299,7 +299,10 @@ chosen_definition(n: Node, called: Node, scopes: list, given: list, expected: Te
 	if #fitting > 1 { fitting = most_specific(fitting, types, s) }
 	if #fitting > 1 { fitting = innermost(fitting, scopes) }
 	if #fitting > 1 and wants_value(expected) { fitting = fitting.filter(definition => definition.result != ø and (definition.result) == expected!) }
-	if fitting is empty { refused(n, words_missing(candidates, types, "${called}", s) ?? "no ${called} takes (${types_text(types)}): ${candidates_text(candidates, s)}; define ${called}(${parameters_proposed(types)}) to take them") }
+	if fitting is empty {
+		s.lacking = words_missing(candidates, types, s)
+		refused(n, if s.lacking is empty then "no ${called} takes (${types_text(types)}): ${candidates_text(candidates, s)}; define ${called}(${parameters_proposed(types)}) to take them" else lacks_text(s.lacking, "${called}"))
+	}
 	if #fitting > 1 { refused(n, "this reads as a call of each of ${candidates_text(fitting, s)}; write the arguments' types or the type wanted") }
 	fitting#1
 }
@@ -412,8 +415,11 @@ protocol_named(records: Records, type: Term?) as Node? := {
 #   a class's field counting as a word are not there. Paid off by function references in core/emit/ and the typing of
 #   defaults here; `map default ListMap` waits for its declaration rule.
 conforms(given: Term?, wanted: Term?, s: TypingState) as bool := {
-	protocol = protocol_named(s.records, wanted)
-	protocol != ø and given != ø and fields_of(protocol).all(word => does_word(given, word, s))
+	protocol = protocol_named(s.records, wanted) ?? return no
+	if given == ø { return no }
+	key = "${given} ${wanted}"
+	if not s.conforming.has(key) { s.conforming[key] = fields_of(protocol).all(word => does_word(given, word, s)) }
+	s.conforming[key]
 }
 # A program adds to a function every program has only where none of its definitions takes these types already
 # (wiki/function.md): `+(n: int, t: Ship)` adds one, `round(x)` and `missing(x: int?)` are taken; a function taking a
@@ -439,41 +445,42 @@ taken_alike(word: Signature, signature: Signature, s: TypingState) as bool := {
 either_takes(a: Term?, b: Term?, s: TypingState) as bool := a == ø or b == ø or [[a!, b!], [b!, a!]].any(pair => conversion(pair#2, pair#1, s) in STATIC_CONVERSIONS or unified(pair#1, pair#2, [], s) != ø or conforms(pair#2, pair#1, s))
 # whether a written type names one of these types, inside list<…>, an optional or a function type too
 mentions_type(type: Term?, names: list<text>) as bool := type != ø and (names.contains(type_text(type!)) or (type_parts(type) ?? []).any(part => mentions_type(part, names)))
-# the protocol words these types lack for these definitions' protocol parameters, each once, as the refusal of the call
-# that needs them; ø where none is lacking
-words_missing(definitions: list<Signature>, types: list, caller: text, s: TypingState) as text? := {
+# the protocol words these types lack for these definitions' protocol parameters, each once
+words_missing(definitions: list<Signature>, types: list, s: TypingState) as list<Lack> := {
 	lacking = []
 	for definition in definitions {
 		if #definition.parameters == #types {
 			for at in 1 to #types {
 				protocol = protocol_named(s.records, definition.parameters#at)
-				if protocol != ø { lacking += words_lacking(types#at, protocol, caller, s) }
+				if protocol != ø { lacking += words_lacking(types#at, protocol, s) }
 			}
 		}
 	}
-	if lacking is empty then ø else lacking.unique.join("; ")
+	lacking.unique
 }
 # a function named as a protocol is its conversion, `x as shape`, and a class's claim of it, `class square: shape {…}`:
 # it takes a typed value whose type does the protocol's words
 claim_checked(claim: Signature, s: TypingState) := {
 	protocol = if #claim.parameters == 1 then protocol_named(s.records, word_term(claim.name)) else ø
 	given = if protocol == ø then ø else claim.parameters#1 ?? refused(claim.definer, "a function named as the protocol ${claim.name} takes a type doing it: `${claim.name}(x: square)`")
-	lacking = if given == ø then [] else words_lacking(given!, protocol!, claim.name, s)
-	if lacking is not empty { refused(claim.definer, lacking.join("; ")) }
+	lacking = if given == ø then [] else words_lacking(given!, protocol!, s)
+	if lacking is not empty { refused(claim.definer, lacks_text(lacking, claim.name)) }
 }
-# the required words of a protocol a type does not do, each as wiki/trait.md "Conforming" says what the caller needs,
-# with the fix-it defining it: `dot is not Comparable: < needs compare(a: dot, b: dot); define compare(a: dot, b: dot) := …`
-words_lacking(given: Term, protocol: Record, caller: text, s: TypingState) as list<text> := fields_of(protocol).filter(word => not does_word(given, word, s)).map(word => word_lacking(type_text(given), record_name(protocol), caller, "${declared_name(word)}(${parameters_proposed((1 to parameter_count(word)).map(_ => given))})"))
-word_lacking(type: text, protocol: text, caller: text, word: text) as text := "${type} is not ${protocol}: ${caller} needs ${word}; define ${word} := …"
+# the required words of a protocol a type does not do
+words_lacking(given: Term, protocol: Record, s: TypingState) as list<Lack> := fields_of(protocol).filter(word => not does_word(given, word, s)).map(word => Lack(type_text(given), record_name(protocol), "${declared_name(word)}(${parameters_proposed((1 to parameter_count(word)).map(_ => given))})"))
+# the lacking words as wiki/trait.md "Conforming" says what a caller needs, each with the fix-it defining it:
+# `dot is not Comparable: sorted needs compare(a: dot, b: dot); define compare(a: dot, b: dot) := …`
+lacks_text(lacking: list<Lack>, caller: text) as text := lacking.map(lack => "${lack.type} is not ${lack.protocol}: ${caller} needs ${lack.word}; define ${lack.word} := …").join("; ")
 # the parameters a fix-it proposes for values of these types, `a: dot, b: dot`
 parameters_proposed(types: list) as text := (1 to #types).map(at => "${PARAMETER_NAMES#at}: ${type_text(types#at)}").join(", ")
 does_word(given: Term, word: Node, s: TypingState) as bool := definitions_named(text(declared_name(word)), s).any(definition => does_as(definition, shaped(given, s), parameter_count(word), s))
 # how many parameters a protocol's required word takes, the value's own first
 parameter_count(word: Node) as int := #((function_parts(written_type(declared_type(word))) ?? refused(word, "a protocol's word is a function type")).parameters)
-# whether a definition takes a value of this type first, then as many parameters as a protocol's word
+# whether a definition takes a value of this type first, then as many parameters as a protocol's word: untyped or a
+# letter, it takes every type's, `equals(a: T, b: T)` making every value Equatable
 does_as(definition: Signature, given: Term, arity: int, s: TypingState) as bool := {
 	types = definition.parameters
-	#types == arity and (types#1 == ø or shaped(types#1!, s) == given)
+	#types == arity and (types#1 == ø or is_letter(types#1!) or shaped(types#1!, s) == given)
 }
 
 # whether the Nodes a definition takes, two or more, are all values read as one: values that are no Nodes never meet as
@@ -509,20 +516,25 @@ written_at(definition: Signature, s: TypingState) as text := "line ${line_of(def
 # a function as a refusal names it, its place telling apart the functions of one name and the function values, each a λ
 called_name(definition: Signature, s: TypingState) as text := "${definition.name} (${written_at(definition, s)})"
 
+# a call of a function wap refuses: a library function refused for a word a type lacks says that its caller needs
+# it, the program's own call named, `sorted needs compare(a: dot, b: dot)`; else the call names the function and,
+# for the library's, the first reason
+callee_refused(at: Node, definition: Signature, refusal: Refusal, library: bool, s: TypingState) := if library and refusal.lacking is not empty then refused(at, lacks_text(refusal.lacking, definition.name)) else calling_refused(at, called_name(definition, s), refusal.first, library)
 # A function typed for these argument types, its written types' shapes known first, so it types alike however it is
 # reached: from a block, a call, or alone
 # It ends alone when wap refuses it: refused once, and each caller is refused naming it
 function_typed(definition: Signature, argument_types: list, s: TypingState, at: Node) as TypedFunction := {
 	key = definition.key
-	name = called_name(definition, s)
 	library = has_fact(define_of(definition, s), UNBOUND)
 	known = s.refusals.find(each => each.key == key)
-	if known != ø { calling_refused(at, name, known!.first, library) }
+	if known != ø { callee_refused(at, definition, known!, library, s) }
 	before = #s.refusals
+	s.lacking = []
 	try shaped_typed(shaped_once(definition, s), argument_types, s, at) catch e {
-		first = if #s.refusals > before then s.refusals#(before + 1).first else e.message
-		s.refusals += [Refusal(key, e.message, first)]
-		calling_refused(at, name, first, library)
+		inner = if #s.refusals > before then s.refusals#(before + 1) else Refusal(key, e.message, e.message, s.lacking)
+		refusal = Refusal(key, e.message, inner.first, inner.lacking)
+		s.refusals += [refusal]
+		callee_refused(at, definition, refusal, library, s)
 	}
 }
 # A function typed for these argument types, once per tuple: its parameters, then its body, its result the written
