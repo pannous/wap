@@ -56,6 +56,15 @@ All of quotient.md:
    - `set<T> = quotient(list<T>, same_items)`, with `same_items` over sorting or counting;
    - the axiom `quotient_sound` (the kernel's soundness axiom under that name), and
      `function_extensionality` proved from it, a T6a1 theorem in types.
+   - The relation is a proposition: the kernel's quotient takes `r: T → T → Prop`. `same` may be a bool function,
+     read as `same(a, b) == yes`, or a proposition, as function_extensionality's pointwise
+     `(p, q) => for a: A, p(a) == q(a)` must be (a function's values need no decidable `==`). quotient_sound takes
+     either. `==` of a quotient (2) exists only for a bool relation.
+   - `sign(x: int)` lives once, here, and lib/math.wap keeps only its float overload. The lemma the provers use for
+     the wiki's `sign` lift is in the obligation's shape, applied by instantiation:
+     `sign_respects(a, b, c, d: int) where b != 0 and d != 0: a * d == c * b implies sign(a * b) == sign(c * d)`, proved
+     by int's cases. Rewriting with `sign(x * y) == sign(x) * sign(y)` alone leaves a product of sign atoms, which is
+     beyond the linear provers.
 
    i64 is T8b's. types about +20.
 
