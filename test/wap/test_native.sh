@@ -429,4 +429,8 @@ check "a seed folder holding no wap source compiles hello and a program using a 
 6"
 # and builds a native executable: the types module's files as a native build reads them come from its warm state too
 check "a seed folder holding no wap source builds a native executable" "$(cd "$tree" && "$stage/sourceless/wap" build "$stage/sourceless_hello.wap" >/dev/null 2>&1 && "$stage/sourceless_hello" 2>&1)" "Hello"
+# a file has one spelling: a program compiled by its relative path and by its full path is the same module, its used
+# file reached through either (core/paths.wap normalized_path)
+mkdir -p "$stage/spelled" && printf '%s\n' 'twice(x: int) as int := x * 2' >"$stage/spelled/m.wap" && printf '%s\n' 'use "m.wap"' 'print twice(21)' >"$stage/spelled/p.wap"
+check "a program compiled by its relative path and by its full path is the same module" "$(cd "$stage/spelled" && $wap "$compiler" p.wap relative.wasm 2>&1 && $wap "$compiler" "$stage/spelled/p.wap" "$stage/spelled/full.wasm" 2>&1 && cmp -s relative.wasm full.wasm && $wap relative.wasm 2>&1)" "42"
 exit $((failures > 0))
