@@ -8,7 +8,7 @@ root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
 SELF_COMPILE_SECONDS=60
 # the instructions wap1 retires compiling wap's compiler, main's as measured (notes/speed.md), and how many percent
 # more a change may take: lower the ceiling when a landing measures less, raise it only with the change's OK
-SELF_COMPILE_INSTRUCTIONS=182057249192
+SELF_COMPILE_INSTRUCTIONS=179142114979
 SLOWER_PERCENT=1
 
 # what loading the module wap makes of a file of wap's own says: "loads", or the compiler's or the run's error
@@ -48,7 +48,7 @@ check "wap built by itself is a fixed point: wap2 is wap1's bytes" "$(wap1_built
 measured="$stage/self/measured.txt"
 self_compile_time() {
 	wap1_built || return
-	/usr/bin/time -lp $wap "$wap1" "$source_compiler" "$stage/self/compiled.wasm" >"$stage/self/compiled.txt" 2>"$measured" || { cat "$stage/self/compiled.txt" "$measured"; return; }
+	"$tree/scripts/job-slot.sh" --alone /usr/bin/time -lp $wap "$wap1" "$source_compiler" "$stage/self/compiled.wasm" >"$stage/self/compiled.txt" 2>"$measured" || { cat "$stage/self/compiled.txt" "$measured"; return; }
 	seconds=$(awk '$1 == "user" || $1 == "sys" { cpu += $2 } END { printf "%d", cpu }' "$measured")
 	[ $seconds -lt $SELF_COMPILE_SECONDS ] && echo "under a minute" || echo "$seconds s CPU"
 }
