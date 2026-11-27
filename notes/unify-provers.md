@@ -55,7 +55,7 @@ line numbers as cited.
 
 Rename: `nat` → `·count`, `nat.zero` → `·count.zero`, `nat.successor` → `·count.successor`,
 `nat.recursor` → `·count.recursor`, and every function and law `f` → `·f`. The prelude's case names stay, as
-the user chose (Lean's): `zero | successor(count)`, and its inverse `·predecessor`, where `·predecessor(·successor(n))`
+the user chose (Lean's): `zero | successor(count)`, and its inverse `·predecessor`, where `·predecessor(·count.successor(n))`
 computes to n by count's recursor, so it needs no theorem. bool, Equal and their recursors keep their
 names, which are core's.
 
