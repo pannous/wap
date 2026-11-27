@@ -1022,9 +1022,9 @@ interviewer.
 ### T6 after T6a3a: laws everywhere, traits and instances
 
 T6a3, T6a4, T6a5 and T6a6 are planned in notes/coc-t6a.md; T6a7 is the first row below. The rest of T6 is two
-tracks, V (verdicts of laws) and C (traits), which share no file, and two rows of wap/types after C1, D1 (lists) and
-Q1 (quotients). Each step is one builder, on the careful path when it changes a value layout (C2, D1) and on the
-normal path otherwise. Line estimates are for the compiler (core, kernel, types, sugar); the proof extension's lines
+tracks, V (verdicts of laws) and C (traits), which share no file, and a row of wap/types after C1, Q1 (quotients).
+Each step is one builder, on the careful path when it changes a value layout (C2) and on the normal path
+otherwise. Line estimates are for the compiler (core, kernel, types, sugar); the proof extension's lines
 are counted apart, since a plain compile does not load them.
 
 | step | what works after it | core / kernel / types (estimate) | extension | wiki pages it serves | outcome tests |
@@ -1034,10 +1034,8 @@ are counted apart, since a plain compile does not load them.
 | V2 `wap check` | `wap check` lists the obligations left to the run, `--strict` refuses each one not proved, and the laws' verdicts are printed as `wap verify` prints them. Both commands load the proof extension through one door; a plain compile never loads it. dispatch.wap's global `obligations` list becomes a fact the door reads | core −5 (the global list goes), kernel 0 | check +40 (a door beside verify.wap, sharing door_arguments and the verdicts) | type.md "Proved or checked", effects.md (`wap check --strict` refuses an impure function), cli.md | `wap check` on `xs#i` with nothing proving `i` in range lists "is checked when the program runs"; `--strict` exits 1 naming it; a program with every obligation proved lists none |
 | V3 proved laws are facts | A law proved earlier is a fact for the laws after it (law.md's `fact(n) > 0` with its helper law first) and for obligations (3.9 step 2: an obligation matched against the conclusions of proved laws by unification, with no search, so a plain compile needs no provers). An obligation the provers prove under `wap check` loses its run check and its Fail | core +30 (an obligation instantiated from a proved law's conclusion), kernel 0 | prove +15 (an obligation as a Goal) | law.md (the helper-law example), type.md "Proved or checked" | law.md's pair both Proved; `#xs > 0` discharged by a proved law, so `effects of` the function has no Fail |
 | C1 traits are structures | `trait shape { area(); perimeter() }` (today a class annotated `@protocol`, sugar/types.wap) is a structure over the type that conforms: one field per word, the word's type with that type in the trait's place. A type's instance is the record of its overloads found by `does_word`. `square(1) is shape` and `3 is Comparable` compute at compile time. The built-in traits that wap has words for (Equatable, Orderable, Comparable, Printable, Iterable, Sized, Addable) are declared in wap/types as traits, so the vocabulary stays library | core +30 (the structure from the record, `is` against a trait), kernel 0, types +25 (the traits), sugar 0 | 0 | trait.md "Built-in traits", "Conforming", "Declaring a trait" | `square(1) is shape` yes; `3 is Comparable` yes; `sort [dot(2) dot(1)]` refused with "dot is not Comparable: sort needs compare(a:dot, b:dot)"; `class dot: Comparable {x:int}` refused until `compare` is defined |
-| D1 lists as an enum | `enum list<T> { empty; item(first: T, rest: list<T>) }` in wap/types with a declared host layout: the kernel sees the enum, its cases and its recursor, the run keeps today's list layout and code. `#xs`, `xs#i`, `xs + ys` and `xs.map(f)` are definitions the kernel computes with and the library's code for the run, so laws over lists are proved by induction on the enum | core +60 (a host layout declared for an enum: its terms for the kernel, its row's layout for the run +40; a definition with a host body +20), kernel 0, types +40 (the enum and its first definitions) | 0 | list.md, optional.md, wasm-representation.md | test_theory_prelude_data's lines in wap spelling: `#[3, 4] == 2` by `refl`, `law reversed_twice(xs: list<int>): xs.reversed.reversed == xs` Proved by induction; every list test as before; careful path (value layout) |
 | Q1 quotients | `quotient(T, same)` is a type, `.of` puts a value in and `.lift` takes a function that respects `same` out (the kernel has quotients since K5); `fraction`, `rational` and `set` are quotients in wap/types | core +50 (the type form +20, `.of` and `.lift` typed +20, values compared by `same` +10), kernel 0, types +40 (fraction, rational, set) | 0 | quotient.md | test_theory_quotients_wanted's three laws: `lift` on `quotient.of` computes, `half == fraction(2, 4)`; test_theory_prelude_checked's lines in wap spelling |
-| C2 instances passed | A value whose type is not known at the call (a list of mixed shapes, a value through `any`, a function value) carries its instance. The instance is the record of its type's function references, built where the value is boxed into the trait (`x as shape`, a `list<shape>` literal); a word called on it reads its field (call_ref). Where the type is known statically, the call is specialised as today, with no change to the emitted code. This pays off calls.wap's protocol DEBT (mixed lists, `x is shape` at run time) | core +90 (the instance built at boxing +40, a word called through it +30, the trait value's layout as a row of T1's table +20), emit +20 (a record of function references), kernel 0 | 0 | trait.md "Dispatch", "Constraints", "Declaring a trait" (each type its own `area`) | `[square(2), circle(1)].map(area)` gives each its own; `smallest([person("Ann", 3), person("Bo", 1)])` through `Comparable list`; careful path (value layout) |
-| C3 default bodies | A trait's word with a body is the default of every instance; a type's own definition wins | core +20 | 0 | trait.md ("A trait may give an operation a default body") | `describe(square(3))` is 18 by the default; a type that defines `describe` gets its own |
+| C2 instances passed | A value whose type is not known at the call (a list of mixed shapes, a value through `any`, a function value) carries its instance. The instance is the record of its type's function references, built where the value is boxed into the trait (`x as shape`, a `list<shape>` literal); a word called on it reads its field (call_ref). Where the type is known statically, the call is specialised as today, with no change to the emitted code. This pays off calls.wap's protocol DEBT (mixed lists, `x is shape` at run time). A trait's word with a body is the instance's default where the type has none (green today for known types, test_protocols) | core +110 (the instance built at boxing +40, a word called through it +30, the trait value's layout as a row of T1's table +20, defaults in the instance +20), emit +20 (a record of function references), kernel 0 | 0 | trait.md "Dispatch", "Constraints", "Declaring a trait" (each type its own `area`) | `[square(2), circle(1)].map(area)` gives each its own; `smallest([person("Ann", 3), person("Bo", 1)])` through `Comparable list`; careful path (value layout) |
 | C4 generic dispatch through instances | A generic definition (`f(x: T)` with a trait word in its body) called on a boxed value takes the value's instance, instead of a dispatcher retyped round by round for each boxed type. dispatch.wap's rounds go (generic_choices, generic_results, taken, dispatches_completed, deeper_type, fits_generic, boxed_known, dispatcher_retyped: about 90 lines); its `is` chains over the definitions of a word called on an `any` stay, because an `any` is the trait of no words and carries no instance | core −90 (measured at the gate) | 0 | trait.md "Dispatch" | every dispatch test as before; a generic `describe(x: T)` called on mixed boxed values picks each type's `area`; the rounds' "nests without end" refusal is never reached |
 
 #### Each step's wiki lines and the tests that pin them
@@ -1103,47 +1101,41 @@ page's own test file (test/test_<page>_wanted.wap, or test/wap/test_<page>_wante
     `[4, 3]`;
   - trait.md:109-111: `smallest(xs: Comparable list) := (sort xs)#1` on `[person("Ann", 3) person("Bo", 1)]` →
     `person("Bo", 1)`, and on `[dot(3) dot(1)]` refused naming `compare(a:dot, b:dot)`.
-- **C3 default bodies.** trait.md:114. Pinned: test_protocols "a protocol's default body is the word of a class
-  without its own", "a class's own word replaces the protocol's default" (green for statically known types). What is
-  left is a default through an instance, which is C2's: gap `measure(m: measured)` over `[tile(3), slab(3)]` mapped →
-  `[11, 103]`. With that line, C3 is part of C2's gate.
+  - trait.md:114, a default through an instance: `measure(m: measured)` mapped over `[tile(3), slab(3)]` held as
+    `list<measured>` → `[11, 103]`. For known types test_protocols pins it already: "a protocol's default body is the
+    word of a class without its own", "a class's own word replaces the protocol's default" (green).
 - **C4 generic dispatch through instances.** trait.md "Dispatch". Pinned: test_dynamic, the dispatch of a known and
   an unknown value (green), which must stay green. No wiki line beyond C2's; C4 is a shrink measured by its gate.
-- **D1 lists as an enum.** enum.md:93 (`enum list<T> { empty, item(first: T, rest: list<T>) }`, a program's own enum,
-  which works without D1). No wiki line proves a law over the built-in list. test_theory_prelude_data's lines come
-  from this plan's L3, not from a page. **D1 has no wiki line of its own**: it waits until a page states a law over
-  lists, and prelude_data's lines are unpinned.
 - **Q1 quotients.** quotient.md, all of it. Pinned: test_quotient_wanted, 9 lines (red: the relation, `quotient.of`,
   `lift`, `lift_of` by `refl`, a set, function extensionality, i64's wrap, which is T8's);
   wap/test_quotient_wanted "a function that tells joined values apart is refused" (red); test_quotient_page (green).
   No gap.
 
-Net: core about +255 (T6a7 +45, V +50, C +50, D1 +60, Q1 +50), types +105, emit +20, kernel 0; the proof extension
+Net: core about +195 (T6a7 +45, V +50, C +50, Q1 +50), types +65, emit +20, kernel 0; the proof extension
 +85. Against the cost table's T6 row: the 500 analyze for "effects, instances, laws, tested" are T6a's +355 plus
-V's and C's +100; the 30 for protocols is C1; the 90 deleted are C4's. T6a7, D1 and Q1 (+155 core, +80 types) are
-beyond the row, which counted lists and quotients under the prelude the deletion took.
+V's and C's +100; the 30 for protocols is C1; the 90 deleted are C4's. T6a7 and Q1 (+95 core, +40 types) are beyond
+the row, which counted quotients under the prelude the deletion took.
 
-**Order.** T6a7 after T6a6. V1, then V2, then V3. C1, then C2, then C3 and C4 in either order. D1 and Q1 after C1
-and T6a4 (laws over them are proved by induction and cases), Q1 after T6a3 too (a quotient's `same` is a
-proposition about two values). V and C run side by side, one builder
-each. V3 needs T6a2 (hypotheses), and the law.md example needs the provers to prove `x > 0 and y > 0 implies
+**Order.** T6a7 after T6a6. V1, then V2, then V3. C1, then C2, then C4. Q1 after C1, T6a3 and
+T6a4 (a quotient's `same` is a proposition about two values, and laws over it are proved by cases). V and C run
+side by side, one builder each. V3 needs T6a2 (hypotheses), and the law.md example needs the provers to prove `x > 0 and y > 0 implies
 x * y > 0`, which they do once a product law joins int's kernel laws (T6a2's positive_product); until then that
 example stays red. C2 needs T5's classes with type arguments (the trait's structure takes the conforming type as one).
 
 **Beside the dedup and the exact-big-literals landing.**
 - The dedup (unify-dedup: the equation toolkit and the regrouper shared by kernel/counting.wap,
-  kernel/integer_laws.wap and extensions/prove/linear.wap) touches none of T6a7, V1, V2, C1 to C4, D1 or Q1's
+  kernel/integer_laws.wap and extensions/prove/linear.wap) touches none of T6a7, V1, V2, C1, C2, C4 or Q1's
   files, so these run in parallel with it. V3 touches extensions/prove (goals.wap, facts.wap), so it starts after the dedup lands. Of
   T6a, T6a4 starts after it (a nat subject goes through int's case split in counting.wap); T6a3, T6a5 and T6a6 run
   beside it.
 - exact-big-literals touches the reader, kernel/numbers.wap, kernel/show.wap and lib/magnitude.wap; no T6 step does.
   The one meeting point is V1's FAILED line, which prints the counterexample through show, so V1 lands after it or
-  merges show.wap. C2 and D1 are careful landings, and no other careful landing (each other, a seed refresh, T6a3's
+  merges show.wap. C2 is a careful landing, and no other careful landing (a seed refresh, T6a3's
   families) may share their run.
 
 **Wiki before building.** law.md "Checking a law" and cli.md:108 still say `wap verify` proves "with Lean" and list
 Lean's tactics. V1 rewrites that text to wap's own provers. As a rewrite of what a page says, it goes to the user
-through wap-interviewer first, with the old and the new text. C3's default bodies and C1's built-in traits are on
+through wap-interviewer first, with the old and the new text. Default bodies and C1's built-in traits are on
 trait.md already; a trait carrying laws ("a structure of operations and their laws", section 2) has no wiki line, so
 it is not built in T6.
 
@@ -1152,6 +1144,11 @@ it is not built in T6.
   checked, `effects of`, a proof refusing an impure function) is met by the effect facts (T5b1) and T6a5's check.
   The computation types of 9.2 stay the theory extension's and leave with it at T7.
 - `map default ListMap` (trait.md "Protocol and default class"): a declaration rule, not an instance.
+- Lists as an enum with a host layout (`enum list<T> { empty; item(first: T, rest: list<T>) }` for the built-in
+  list, the kernel computing `#xs`, `xs#i`, `xs + ys`, `map` by its recursor; about core +60, types +40, careful
+  path): parked until a wiki page states a law over the built-in list. enum.md:93's `enum list<T>` is a program's own
+  enum and needs none of it; test_theory_prelude_data's lines came from this plan's L3, not from a page, and go as
+  unpinned.
 - A trait with laws (above).
 
 K7 any time after K2, in the proof extension.
