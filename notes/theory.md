@@ -277,44 +277,20 @@ when a law does. test/wap/test_theory_verify.wap gives programs and compares wha
 
 ## The run trust base
 
-What runs is believed where the kernel cannot see it (notes/coc-plan.md 9.7, 10.2): the kernel's own computation
-(from T2b its shortcuts on i64 with the overflow check, and a text literal opened into its code points), and
-the layouts of the prelude, each a `runs(…)` statement after the declaration it is about, which erase reads in place
-of the declaration's value (`elaborate/file.wap` layout_noted). Only the prelude writes them: every door refuses a
-program's own. Nothing checks them before a program's terms run: `run/erase.wap` layouts_checked has no caller. A spelling that
-is a host operation, `prim i64.add(m, n)`, is checked against its row in the table of the host's operations
-(wap/kernel/primitives.wap): its operands, the parameters it names at the wasm types their values run as (`nat`'s as an
-int, an i64), numbers and the operations inside it, are exactly the wasm types the row takes, and the row gives the
-wasm type of the declaration's value. Any other spelling (a list's, until lists have their rows) is host code, which
-wap's own typer types as the value of a definition of the parameters it names, a case's test as a bool and its fields
-as their wap types, a type's spelling as a wap type. What is checked is only that a spelling fits; that it means what
-the theory's word means is believed, and tested by the laws run on values. The set is kept small:
+What runs is believed where the kernel cannot see it (notes/coc-plan.md 9.7, 10.2). The kernel judges a program's
+laws; the program itself runs as the compiler emits it, so what the kernel's terms mean and what the machine does are
+joined only by these beliefs, kept small:
 
-| what | runs as | believed |
-|---|---|---|
-| `nat`, `int` | a machine int: `nat.zero`, `nat.successor`, `int.of_nat`, `int.negative_successor` by their tests and fields | the tests split the ints as the cases split the numbers, and `i64.sub(it, 1)`, `i64.sub(-1, it)` undo the cases |
-| `bool` | wap's bool: `bool.no`, `bool.yes` | |
-| `add`, `multiply`, `equals` | the machine's `i64.add`, `i64.mul`, `i64.eq` on two nats | they compute what the recursions do, below the wrap |
-| `minus`, `sum`, `times`, `negative`, `equal_integers` | the machine's `i64.sub` from 0, `i64.add`, `i64.mul`, `i64.lt_s` with 0, `i64.eq` on ints | as above |
-| `negated` | `i32.eqz` | |
-| `list`, `count`, `item_at`, `drop`, `joined`, `mapped` | wap's list: `list.empty`, `list.item` by `#it == 0`, `#it > 0`, `it#1`, `drop(it, 1)`; `#xs`, `xs#i`, `drop(xs, n)`, `xs + ys`, `xs.map(f)` | wap's list functions count, index, drop, join and map as the recursions do |
-| `Subset` | its value: `Subset.intro` as the value, its proof gone | |
-| `Eff`, `pure`, `bind` | a computation as its value, `pure(x)` as x, `bind(c, next)` as `next(c)` | a computation's effects happen as it runs |
+| what | in the kernel | runs as | believed |
+|---|---|---|---|
+| a whole number literal | int's case over a count numeral (core/analyze/terms.wap `int_numeral`) | a machine int | |
+| the count's numerals | computed natively by the shortcuts `numbers_declared` binds (kernel/numbers.wap), each fixed by theorems the kernel checks (counting.wap) | | the native computation is the recursion's |
+| int's host rows, `i64.add` … `i64.ge_s` on two ints | defined as their meanings, `·sum`, `·not_above` … (counting.wap `INT_MEANINGS`) | the machine's operation | it computes what the meaning does, below the wrap: one past 2^63 wraps where the kernel's int does not |
+| any other host row | an opaque constant `prim <operation> <types>` that computes by the host's operation (kernel/compute.wap `row_step`) | the machine's operation | what the operation does |
+| a text literal | its code points | wap's text | |
 
-A number runs as a machine int, so one past 2^63 wraps where the theory's does not.
-
-The types module adds two more, made by the declarations themselves (elaborate/declare.wap), never by a `runs(…)`:
-- **Its words the prelude has too.** A declaration with the signature of a prelude declaration is that declaration:
-  proofs read the prelude's definition, and the program runs the types module's function for it, by its name, where
-  the prelude lays out none. The signature is the name, the parameters' types and the result's. The pairs, every
-  declaration of the types module whose signature a prelude declaration has: int's `+`, `-` (both arities), `*`,
-  `==`, `<`, `<=`, `>`, `>=`, and text's `+` (types/texts.wap's `+(a: text, b: text)`). Every other function of the types module runs its own body, as
-  the theory read it. A name is laid out once: a second layout of it is refused, never a silent replacement.
-- **The host's operations.** A function of the types module whose body is `prim …` is a constant of its written
-  type, never unfolded; it runs as the host's operation. One giving a proposition, or a type that may be one (a
-  letter's), is refused as a hosted proposition (an opaque proof of an empty type would prove anything), and one with
-  neither a written type nor a limit after its body (`! IO`) too, since nothing says what it does. A program's own
-  `prim …` is refused: what it runs would be believed unproved, as a program's `runs(…)` would.
+A function the kernel only assumes (it writes, raises or acts) is an axiom, and a law naming it is refused
+(extensions/verify/laws.wap), so no belief about its effects enters a proof.
 
 The compiler adds one outside the theory: its warm state (extensions/warm.wap). The rules it brings in were checked
 to terminate when the state was written, and `rules_checked` marks them checked without checking them again, so the
@@ -322,20 +298,17 @@ rules of a warm state are believed as built.
 
 ## A second opinion
 
-A program either door accepts can be written out: `export("file")` writes what the environment accepted, in order
-and as it was given (a declaration as stated, a block as written, a binding statement with its names). The format is
-Lean 4's export format with wap's own names, one JSON record a line, described at the top of `export.wap`. A block's
-cases, recursors and the quotients' constants are never written: the reader makes them again.
+`export.wap` writes an environment out in Lean 4's export format with wap's own names, one JSON record a line,
+described at its top: a declaration as stated, a block as written, a binding statement with its names. A block's
+cases, recursors and the quotients' constants are never written: the reader makes them again. No door calls it yet.
 
 `second/` checks an export again, `wap second/check.wap <export> [<name>…]`, silent when it accepts and printing the
-first refusal otherwise; each name given prints the axioms it rests on, as `axioms of` does. It shares no function
-with the kernel and reads only the export, so a mistake in one is caught by the other unless both make it. It is kept
-as small as it can be: no elaboration, no caches, a term compared by its tree. Its files: `expressions.wap` (levels
-and terms), `read.wap` (the export read, a record out of order or of no known kind refused), `judge.wap` (typing,
-computing, equality, a declaration admitted), `blocks.wap` (a block checked, its recursors and their computation,
-structures), `bindings.wap` (numbers, shortcuts and quotients). test/wap/test_theory_second.wap gives it the preludes
-and mutual, indexed and level-polymorphic blocks with a projection (nested blocks are left out), compares its axioms
-with the door's, and hands it forged exports that it must refuse.
+first refusal otherwise; each name given prints the axioms it rests on. It shares no function with the kernel and
+reads only the export, so a mistake in one is caught by the other unless both make it. It is kept as small as it can
+be: no elaboration, no caches, a term compared by its tree. Its files: `expressions.wap` (levels and terms),
+`read.wap` (the export read, a record out of order or of no known kind refused), `judge.wap` (typing, computing,
+equality, a declaration admitted), `blocks.wap` (a block checked, its recursors and their computation, structures),
+`bindings.wap` (numbers, shortcuts and quotients).
 
 ## Costs
 
