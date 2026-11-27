@@ -31,6 +31,9 @@ job_slot="$here/../../scripts/job-slot.sh"
 # a _wanted program compiles without at most this many of its statements, each red, and how much of one names its red
 WANTED_REFUSALS=60
 RED_NAME_LENGTH=120
+# the last line of a test's output once it ran to its end and its status was judged; an output without it was cut
+# short (a signal, a memory or time guard, a crash) and its later checks never printed
+ENDED="— ran to its end"
 # a statement starts at the margin; an indented line, a closing bracket or a comment there is none
 STATEMENT_START='^[^] \t})#]'
 
@@ -53,7 +56,7 @@ summed() {
 reds() {
 	for test in "$@"; do
 		grep '^✗' "$(outputs "$test")" | sed -e 's/^✗ //' -e 's/: got .*//' -e "s|^|$(test_key "$test"): |"
-		! grep -q "^✗ $(basename "$test") compiled and ran" "$(outputs "$test")" || expected_reds "$test"
+		! grep -qE "^✗ $(basename "$test") (compiled and ran|ran to its end)" "$(outputs "$test")" || expected_reds "$test"
 	done | LC_ALL=C sort -u
 }
 # the baseline's lines of the tests run (known_reds in <tests>), or of every other test (known_reds out <tests>)
@@ -121,6 +124,8 @@ one_run() {
 		*) bash "$1" ${2:+--compiler "$2"} ;;
 	esac
 }
+# a test whose output does not end with ENDED was cut short: one ✗ says so, whoever killed it
+ended() { [ "$(tail -n 1 "$(outputs "$1")" 2>/dev/null)" = "$ENDED" ] || echo "✗ $(basename "$1") ran to its end" >>"$(outputs "$1")"; }
 # every test run in a job slot, niced (all_run <module or ""> <all: yes or no> <known: yes or no> <tests>), then the
 # summary written, compared with the baseline; a test waiting for its slot says so in its output
 all_run() {
@@ -128,6 +133,7 @@ all_run() {
 	shift 3
 	started=$(date +%s)
 	printf '%s\n' "$@" | xargs -P "$cores" -I{} "$job_slot" bash "${BASH_SOURCE[0]}" one_run {} "$module"
+	for test in "$@"; do ended "$test"; done
 	summed "$@" >"$SUMMARY"
 	compared "$@" >>"$SUMMARY"; status=$?
 	cat "$SUMMARY"
@@ -146,6 +152,7 @@ all_run() {
 	(one_run "$@") >"$output" 2>&1; status=$?
 	[ $status = 0 ] || grep -q '^✗' "$output" || echo "✗ $(basename "$1") exited $status" >>"$output"
 	grep -q '^[✓✗⊘]' "$output" || echo "✗ $(basename "$1") printed no check" >>"$output"
+	echo "$ENDED" >>"$output"
 	exit
 }
 [ "$1" = all_run ] && { shift; all_run "$@"; exit; }
