@@ -1,0 +1,62 @@
+# Packages (wiki/use.md "packages"): a program's `use name` that no file beside it nor the library holds is a package,
+# found in the registry's folder of its name, or where packages.wap beside the program pins or redirects it. The
+# compiler reads these files, every one of them wap notation; the native wap fetches what it writes
+# (extensions/native/packages.wap): `uses <program> <registry folder> <file>` writes a line for each package
+# `<name> <source> <version>`, the source "registry" or a repository, the version "" for the newest.
+use "../core/pipeline.wap"
+use "../core/analyze/declarations.wap"
+
+PINS_FILE = "packages.wap"
+MANIFEST_FILE = "package.wap"
+REGISTRY_SOURCE = "registry"
+# a pin's or a manifest's fields, and what parts a repository from its version in `owner/repo@1.2.3`
+REPOSITORY_FIELD = "repository"
+VERSION_FIELD = "version"
+VERSION_MARK = "@"
+# the file of the packages a compile wants, beside the module it would write, and the status it then ends with
+PACKAGES_ENDING = ".packages"
+PACKAGES_WANTED = 3
+
+# the lines of the packages a program uses, or the pins file names: each by its pin, else by the registry's folder of
+# its name
+packages_wanted(language: Language, program: text, registry: text) as list<text> := {
+	pins = fields_of(language, beside(program, PINS_FILE))
+	(if file_name(program) == PINS_FILE then pins.keys else unfound_uses(language, program)).map(name => package_line(language, name, pins.get(name), registry))
+}
+# the names the program's `use name` lines give that no module beside it nor the library holds
+unfound_uses(language: Language, program: text) as list<text> := {
+	statements = top_level_statements(read_notation(language, program))
+	statements.filter(statement => phrase_part(statement, USE_WORD) is symbol and not module_found(text(phrase_part(statement, USE_WORD)!), statement, program)).map(statement => text(phrase_part(statement, USE_WORD)!))
+}
+module_found(name: text, statement: Node, program: text) as bool := try { module_named(name, statement, program); yes } catch e { no }
+# where a package comes from: a pin `name: 1.0.0` is the registry's at that tag, `name: owner/repo@1.2.3` or a git url
+# that repository, `{repository: …, version: …}` both; no pin: the registry's folder, or the repository its manifest
+# names at the manifest's version (a proxy)
+package_line(language: Language, name: text, pin: Node?, registry: text) as text := {
+	if pin == ø {
+		manifest = fields_of(language, registry + "/" + name + "/" + MANIFEST_FILE)
+		return if manifest.has(REPOSITORY_FIELD) then fields_line(name, manifest) else line_of(name, REGISTRY_SOURCE, "")
+	}
+	match pin! {
+		List(fields, bracket, separator) => fields_line(name, fields_from(fields))
+		_ => repository_line(name, text(pin!))
+	}
+}
+# `owner/repo@1.2.3`, a git url, or a version of the registry's package
+repository_line(name: text, written: text) as text := {
+	parts = written.split(VERSION_MARK)
+	if not written.contains("/") then line_of(name, REGISTRY_SOURCE, written) else line_of(name, parts#1, if #parts > 1 then parts#2 else "")
+}
+fields_line(name: text, fields: map<text, Node>) as text := line_of(name, field_text(fields, REPOSITORY_FIELD), field_text(fields, VERSION_FIELD))
+field_text(fields: map<text, Node>, key: text) as text := text(fields.get(key) ?? Text(""))
+line_of(name: text, source: text, version: text) as text := "${name} ${source} ${version}"
+# a file of `key: value` lines as a map of its values by key; empty for no file
+fields_of(language: Language, file: text) as map<text, Node> := if exists(file) then fields_from(top_level_statements(read_notation(language, file))) else {}
+fields_from(entries: list<Node>) as map<text, Node> := {
+	fields: map<text, Node> = {}
+	for entry in entries {
+		match entry { Key(key, Op.Colon, value) => { fields[text(key)] = value }; _ => ø }
+	}
+	fields
+}
+lines_text(lines: list<text>) as text := lines.map(line => line + "\n").join("")
