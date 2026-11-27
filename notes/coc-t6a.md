@@ -18,7 +18,7 @@ With the second typer gone, analyze is the only reader of a law. What T6a builds
   (`law_proved`). Where neither proves it, the run's verdict stands (native/driver.wap `verdict_beside`).
 - **One environment.** The theory's door works in TYPES.environment, and core's own words sit in a scope of their
   own below every other (kernel/environment.wap `core`).
-- **Numbers.** A numeral is int, `int.zero`, `int.positive(k)` or `int.negative(k)`, of core's int over its hidden
+- **Numbers.** A numeral is int, `int.natural(k)` or `int.negative(k)` (Lean's shape, card int-takes), of core's int over its hidden
   count (int_declared). An operator is a host row whose Defined value is int's function there, and the provers work over int only
   (notes/unify-provers.md). On int, `n + 0` is no longer `n` by computing for an open n, as `add(n, 0)` was on nat.
   A step that leaned on that now needs a prover.

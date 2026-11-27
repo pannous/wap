@@ -1065,6 +1065,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T5d statements | parked (plan f3594c8f, notes/coc-t5d.md) | | |
 | T5e classes, extends | landed | 25c7e387, 9b8169cd | |
 | T5f erasure, T5g compiled libraries | wait | | T5b to T5d |
+| int-takes: int in Lean's shape, `natural(n) \| negative(n)` (notes/unify-provers.md) | waits; card int-takes, wap-theory-reads-types | | unify-typers |
 | T6a1 proofs of bool laws, T6a2 hypotheses | wait | | unify-typers (the deletion commit, the int enum) |
 | T6a3a propositions in wap spelling | in progress | t6a3a ad022f23; wap-native-no-layout-any | M2b step 1, T6a1 |
 | T6a3 indexed families | waits | | T6a3a, T5b2 |
@@ -1242,6 +1243,16 @@ conditions. T8c after T8a and T5's erasure stage (the int layout is one of its b
 
 **The compiler's own ints.** The compiler builds with `wap fast`: every int a wrapping i64 with no checks, as
 today, so its source needs no edit and its build holds no big numbers (decision 13).
+
+**Fast values flow (user, warp decisions aec483024d).** A value of a fast type stays fast wherever it goes. The fast
+types are i64, i32 and byte, and a value has one when it is declared so, read from a field so declared, or returned
+by a function whose result is declared so (a graphics library's coordinates, say). It stays fast through untyped
+locals, globals and loop variables (warp's notes/fast_types_contagious.md, "flow contagion"). A plain int stays
+exact. Mixing a fast value with a plain int never makes the result fast without the program saying so: the result is
+an exact int, or the program converts with `as i64`. Only a whole literal takes the fast type of the value beside it,
+since a numeral has the type its place wants (T3). Strong contagion is not adopted: under it, warp's `24!` wrapped to
+a wrong value. Laws over fast values speak of wrapping arithmetic (i64 is the quotient of T8b). In wap, an untyped
+name already takes its value's type (T3), so T8c adds only the mixing rule, about core +10 in fits.wap's conversions.
 
 ### Features and the milestones that show them
 
