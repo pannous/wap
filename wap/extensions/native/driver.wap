@@ -33,6 +33,16 @@ BUILD_RUN := "wap/extensions/native/build.sh"
 # whose theory prelude it reads (wap/extensions/theory/options.wap)
 VERIFY_PART := "verify.wasm"
 SEED_OPTION := "--seed"
+# the compiler's command that compiles a program's laws into functions (wap/compiler.wap), the verdicts of the kernel
+# and of the run each written to a temporary file of this template, and how a verdict line reads
+LAWS_COMMAND := "laws"
+VERDICTS_TEMPLATE := "/wap-verdicts-XXXXXX.txt"
+VERDICTS_SUFFIX := ".txt"
+VERDICT_SEPARATOR := ": "
+TESTED_VERDICT := "Tested"
+UNTESTED_VERDICT := "Untested"
+FAILED_VERDICT := "FAILED"
+VERDICT_WORDS := ["Proved", TESTED_VERDICT, FAILED_VERDICT, UNTESTED_VERDICT, "Assumed", "Axiom"]
 # what an option word of `wap build` starts with, the program's file the word without it
 OPTION_START := "--"
 WAP_SUFFIX := ".wap"
@@ -71,8 +81,47 @@ code_of(argument: text): text := if argument == STANDARD_INPUT_PATH then input_r
 
 # the tests of the areas named after `test`, run by test/wap/run.sh; its exit status is this run's
 tested(words: list<text>) := script_ran(followed(TESTS_RUN, words, 2))
-# the program's laws verified, by this wap running the verify program on it
-verified(words: list<text>) := script_ran([executable_path, seed_part(VERIFY_PART), SEED_OPTION, seed_part(""), words#2])
+# the program's laws verified: the verify program's verdicts, the kernel's, joined with those of the laws run, the
+# program compiled by the compiler's laws command and its laws called (run.wap laws_ran), never its main. The run exits
+# 1 when a law fails
+verified(words: list<text>) := {
+	program = words#2
+	proved = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
+	ran = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
+	module = temporary_made(MODULE_TEMPLATE, MODULE_SUFFIX)
+	compiling = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
+	system("'${executable_path}' '${seed_part(VERIFY_PART)}' ${SEED_OPTION} '${seed_part("")}' '${program}' >'${proved}'")
+	compiled = system("'${executable_path}' '${compiler_path}' ${LAWS_COMMAND} '${program}' '${module}' 2>'${compiling}'") == 0
+	if compiled { laws_ran(module_compiled(module), module, ran) }
+	shown = verdicts_joined(lines_of(file_text(proved)), lines_of(file_text(ran)))
+	# why the laws did not run, said where a law needed the run: one left Untested, or none given a verdict
+	if not compiled and (shown is empty or shown.any(line => line.ends_with(VERDICT_SEPARATOR + UNTESTED_VERDICT))) { eprint(file_text(compiling)) }
+	for path in [proved, ran, module, compiling] { unlink(path) }
+	for line in shown { print line }
+	exit(if shown.any(line => line.contains(VERDICT_SEPARATOR + FAILED_VERDICT)) then 1 else 0)
+}
+# a law's verdict as `wap verify` prints it, `positive: Tested`
+class Verdict { law: text; said: text }
+# the verdict a line says, ø for a line that says none, a refusal
+verdict_read(line: text): Verdict? := {
+	parts = line.split(VERDICT_SEPARATOR)
+	said = parts.drop(1).join(VERDICT_SEPARATOR)
+	if VERDICT_WORDS.any(word => said.starts_with(word)) then Verdict(parts#1, said) else ø
+}
+# the kernel's verdict of each law, and beside it the run's: a run that failed says so whatever the kernel says (a
+# Proved law that fails when it runs shows its translation is wrong), one that held makes an Untested law Tested; a law
+# only the run gave a verdict, the theory having refused the file, after them. What the kernel said that is no verdict
+# goes to standard error
+verdicts_joined(kernel: list<text>, run: list<text>): list<text> := {
+	for line in kernel.filter(line => verdict_read(line) == ø) { eprint(line) }
+	proved = kernel.map(verdict_read).compact()
+	tried = run.map(verdict_read).compact()
+	shown = proved.map(verdict => Verdict(verdict.law, verdict_beside(verdict.said, tried.find(trial => trial.law == verdict.law))))
+	(shown + tried.filter(trial => not proved.any(verdict => verdict.law == trial.law))).map(verdict => verdict.law + VERDICT_SEPARATOR + verdict.said)
+}
+verdict_beside(proved: text, tried: Verdict?): text := if tried is ø then proved else if tried!.said.starts_with(FAILED_VERDICT) or proved in [UNTESTED_VERDICT, TESTED_VERDICT] then tried!.said else proved
+# the lines of a text, its empty ones left out
+lines_of(t: text): list<text> := t.split("\n").filter(line => not line is empty)
 # `wap format <program.wap>`, the program in canonical spelling, and `wap check <program.wap>`, the obligations left to
 # the run: the compiler's own command of that name
 FORMAT_COMMAND := "format"

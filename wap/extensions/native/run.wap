@@ -139,10 +139,10 @@ engine_made(): int := {
 	made
 }
 # a store's context, within the run's caps, whose WASI gives the host argument list, the standard files (standard
-# input the text given, else the command's), the environment, the current folder by its real name (types/host.wap
-# real_path follows links from it) and the root
+# input the text given, else the command's; standard output the file at `output`, else the command's), the
+# environment, the current folder by its real name (types/host.wap real_path follows links from it) and the root
 context_made(arguments: list<text>): int := wasmtime_store_context(store_made(arguments))
-store_made(arguments: list<text>, input: text = ""): int := {
+store_made(arguments: list<text>, input: text = "", output: text = ""): int := {
 	store = wasmtime_store_new(engine, 0, 0)
 	wasmtime_store_limiter(store, memory_cap_gb * GB, NO_CAP, NO_CAP, NO_CAP, NO_CAP)
 	context = wasmtime_store_context(store)
@@ -150,7 +150,7 @@ store_made(arguments: list<text>, input: text = ""): int := {
 	wasi = wasi_config_new()
 	wasi_config_set_argv(wasi, #arguments, arguments)
 	if input is empty { wasi_config_inherit_stdin(wasi) } else { wasi_config_set_stdin_bytes(wasi, byte_vector(input)) }
-	wasi_config_inherit_stdout(wasi)
+	if output is empty { wasi_config_inherit_stdout(wasi) } else { wasi_config_set_stdout_file(wasi, output) }
 	wasi_config_inherit_stderr(wasi)
 	wasi_config_inherit_env(wasi)
 	wasi_config_preopen_dir(wasi, ".", realpath(".", 0), 1)
@@ -292,6 +292,23 @@ module_ran(module: int, arguments: list<text>, importer: text, input: text = "")
 	ran = module != 0 and instance_ran(linker_made(), wasmtime_store_context(store), module, importer, yes) != 0
 	if finishing != wasmtime_store_context(store) { wasmtime_store_delete(store) }
 	ran
+}
+# the laws of a module wap verify compiled (extensions/law_runs.wap) run, its verdicts written to the file at `output`:
+# its top level started, never its main, then each export whose name starts so, in the module's order, each printing
+# its law's verdict; whether every one ran to its end. A function is exported by its name and by its signature, a
+# law's `law_positive()`, which names it once
+LAW_PREFIX := "law_"
+LAW_SIGNATURE_END := "()"
+laws_ran(module: int, path: text, output: text): bool := {
+	context = wasmtime_store_context(store_made([path], output: output))
+	instance = if module == 0 then 0 else instance_ran(linker_made(), context, module, path, no)
+	if instance == 0 { return no }
+	exports = host_block(VECTOR_BYTES)
+	wasmtime_module_exports(module, exports)
+	item = host_block(EXTERN_BYTES)
+	trap_at = host_block(8)
+	names = (0 upto long_at(exports)).map(i => vector_text(wasm_exporttype_name(vector_item(exports, i)))).filter(name => name.starts_with(LAW_PREFIX) and name.ends_with(LAW_SIGNATURE_END))
+	names.all(name => wasmtime_instance_export_get(context, instance, name, byte_count(name), item) % BOOL_BYTE != 0 and not failed(wasmtime_func_call(context, item + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, trap_at), trap_at))
 }
 # a new path in the temporary folder by the template
 temporary_path(template: text): text := temporary_folder() + template
