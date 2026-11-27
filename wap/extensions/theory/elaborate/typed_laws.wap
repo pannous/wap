@@ -29,7 +29,10 @@ ASSUMED_NAMED := "assumed function"
 
 # the laws analyze typed, by name: each its function's constant and its parameters' types; none where the front cannot
 # read the program, which the theory then reads whole
-laws_typed(wap_folder: text, program: text): map<text, Node> := {
+# a law analyze typed: its function's key and id in the environment, ø where analyze refused it, and the first
+# function its body calls that the kernel only assumes, all found while analyze's names are in scope
+class TypedLaw { key: text; id: int?; assumed: text? }
+laws_typed(wap_folder: text, program: text): map<text, TypedLaw> := {
 	front = base_language()
 	modules_bringable(front)
 	rules_files_loaded(front, wap_folder)
@@ -38,10 +41,10 @@ laws_typed(wap_folder: text, program: text): map<text, Node> := {
 	TYPES.partial = yes
 	code = program_operated(front, program)
 	read = with_facts_of(List(top_level_statements(code).filter(front_reads), Bracket.None, Separator.Newline), code)
-	typed = try typed_modules(front, [declared_module(front, read)], types, program) catch e { return {} }
-	laws: map<text, Node> = {}
+	typed = try typed_modules(front, [declared_module(front, read)], types, program) catch e { eprint "PROBE front: ${e.message}"; return {} }
+	laws: map<text, TypedLaw> = {}
 	for statement in statements_in(typed) {
-		if statement is Define and text(defined_name(statement)).starts_with(LAW_FUNCTION) { laws[text(defined_name(statement))[#LAW_FUNCTION ..]] = statement }
+		if statement is Define and text(defined_name(statement)).starts_with(LAW_FUNCTION) { laws[text(defined_name(statement))[#LAW_FUNCTION ..]] = TypedLaw(function_key(statement), named_id(TYPES.environment, function_key(statement)), assumed_callee(TYPES.environment, statement)) }
 	}
 	laws
 }
@@ -54,14 +57,13 @@ is_written_definition(n: Node): bool := match n { Call(called, arguments) => tex
 # T6c's numbers give the theory its proofs). Refused where its function is only assumed, naming the first function its
 # body calls that the kernel only assumes
 enum TypedVerdict { Holds, Breaks, Open }
-typed_verdict(name: text, define: Node): TypedVerdict := {
+typed_verdict(name: text, law: TypedLaw): TypedVerdict := {
 	e = TYPES.environment
-	key = function_key(define)
-	id = named_id(e, key) ?? refused(ASSUMED_NAMED, "law ${name} is not typed")
+	id = law.id ?? refused(ASSUMED_NAMED, "law ${name} is not typed")
 	d = declared_at(e, id)!
-	if d.kind is Axiom { refused(ASSUMED_NAMED, "law ${name} names ${assumed_callee(e, define) ?? key}, which the kernel only assumes: it may write, raise or act, so no law states it") }
+	if d.kind is Axiom { refused(ASSUMED_NAMED, "law ${name} names ${law.assumed ?? law.key}, which the kernel only assumes: it may write, raise or act, so no law states it") }
 	if d.type.shape is Pi { return Open }
-	value = computed(checker(e, []), constant(id, key, []))
+	value = computed(checker(e, []), constant(id, law.key, []))
 	if is_constant(value, e.literals!.yes_case) then Holds else if is_constant(value, e.literals!.no_case) then Breaks else Open
 }
 # the first function a typed body calls whose instance the kernel only assumes, by its written name
