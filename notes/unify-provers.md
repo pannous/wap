@@ -133,7 +133,8 @@ mechanism.
 
 ### int's two cases: the cost
 
-The kernel's int has Lean's two cases, `natural(n) | negative(n)`. Written **by cases**, each binary function goes from 2 arms to 2×2 and its proofs to 4 cases.
+The deleted prelude's int had Lean's two cases, `of_nat(n) | negative_successor(n)`, as the kernel's now has
+(`natural | negative`). Written **by cases**, each binary function goes from 2 arms to 2×2 and its proofs to 4 cases.
 The kernel's functions go **by the two counts** instead, so every binary function is one line over `ups` and `downs`:
 `sum(a, b) := difference(ups(a) + ups(b), downs(a) + downs(b))`, `times`, `equal_integers` and `not_above` likewise.
 Only `ups`, `downs`, `minus`, `difference` and `parts_back` see the cases, two arms each.
