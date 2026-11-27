@@ -1206,6 +1206,9 @@ it is not built in T6.
   path): parked until a wiki page states a law over the built-in list. enum.md:93's `enum list<T>` is a program's own
   enum and needs none of it; test_theory_prelude_data's lines came from this plan's L3, not from a page, and go as
   unpinned.
+- Text literals in laws: a gap, not a shrink. Nothing declares the kernel's texts (`e.texts` is set only by a texts
+  declaration, kernel/numbers.wap), so `law #"abc" == 3` is refused by "no texts are declared". It waits on lists as
+  an enum, above, since a text is the list of its code points.
 - A trait with laws (above).
 
 ### T8: exact int through the reader, the machine words and the run
