@@ -1061,7 +1061,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T5c1 ending as an effect | waits | | T5b1 |
 | T5c2 products and courses | landed | e86988d2 | |
 | T5c3 structural terms | planned (notes/coc-t5c3.md) | | T5b4, unify-typers, fix-core-name-shadowing |
-| T5c4 guarded bounds as terms | waits | | int the numerals' type (unify-typers) |
+| T5c4 recursion over whole numbers | planned (notes/coc-t5c4.md) | | T5c3, int-takes, T5b4, T5b5 |
 | T5d statements | parked (plan f3594c8f, notes/coc-t5d.md) | | |
 | T5e classes, extends | landed | 25c7e387, 9b8169cd | |
 | T5f erasure, T5g compiled libraries | wait | | T5b to T5d |
