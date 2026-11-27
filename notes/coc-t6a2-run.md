@@ -17,8 +17,9 @@ hypothesis computes to no holding trivially (`h implies P`).
 
 ## How the run gets the split
 `compiler laws` types the law before it builds trials, as verify's `laws_typed` does: each law's function is typed with
-its hypotheses split off (a binder whose type has universe Prop), and `law_trials` is built from the remaining binders
-only. A fact typing writes on each binder (its universe) would be read too late: law_runs' rules fire in the shape stage,
+its hypotheses split off (a binder whose type has universe Prop), the Prop binders are removed from the law, and only
+then do law_runs' rules build `law_trials`, from the remaining binders (the laws command runs verify's front and typing
+first; the rules never see a hypothesis binder). A fact typing writes on each binder (its universe) would be read too late: law_runs' rules fire in the shape stage,
 before typing. So the cost is in the laws command, not in the rules: the front `laws_typed` builds is shared with the
 run (its typing call moves to one place both use), about +10 lines, the rules' `law_trials` untouched.
 
