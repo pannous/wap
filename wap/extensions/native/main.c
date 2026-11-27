@@ -84,6 +84,9 @@ const char* wap_library_folder(void) { return library_folder; }
 static const char* run_options = NULL;
 void wap_run_options_set(const char* options) { run_options = strdup(options); }
 const char* wap_run_options(void) { return run_options; }
+// an address of the program's memory as a host pointer: the glue hands an address argument over translated (glue.awk
+// c_value), so the translated address is the answer (c.wap host_of)
+void* wap_host_pointer(void* translated) { return translated; }
 // wap's seed folder built into this executable, a tar archive (build.sh --standalone: WAP_SEED its path, WAP_SEED_NAME
 // its name), which linking.wap unpacks once into the cache folder; a build without one names none, its seed folder
 // beside it
