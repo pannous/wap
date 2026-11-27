@@ -87,10 +87,6 @@ echo "refresh-seed: wap's source took $new_cost s CPU with the new compiler, $ol
 awk -v new="$new_cost" -v old="$old_cost" -v most="$SLOWER_PERCENT" 'BEGIN { exit !(new * 100 <= old * most) }' || { echo "refresh-seed: the new compiler is over ${SLOWER_PERCENT}% of the seed's time; the seed stays" >&2; exit 1; }
 # every library module compiles alone with it, as with the seed it becomes (scripts/lib/wap-beside.sh), before it replaces one
 wap_library_compiled "$chosen" || { echo "refresh-seed: the seed stays" >&2; exit 1; }
-if [ -n "$check" ]; then
-	cmp -s "$chosen" "$seed" && echo "refresh-seed: the seed is that stage" || echo "refresh-seed: the seed differs from that stage (--check: kept)"
-	exit 0
-fi
 
 # the build stamp appended to a compiler, the custom section wap.build of lines: the tree's commit, when it was built
 # (`wap version` shows it, wap/extensions/native/commands.wap; as warp's stamp, core/native/warp.warp stamped)
@@ -110,20 +106,31 @@ open(path, "ab").write(b"\0" + bytes(leb) + payload)
 PY
 }
 source_commit=$(git -C "$tree" rev-parse HEAD)
-# the seed and what it reads beside it, installed
+# the seed, what it reads beside it and the native wap built by it (wap/extensions/native/driver.wap), staged in the
+# scratch folder as installed: <staged>/wap beside <staged>/wap-seed and the runtime library in <staged>/lib
 folder=$(dirname "$seed")
-cp "$chosen" "$seed" && stamped "$seed" "$source_commit" && wap_beside_mirrored "$tree" "$folder" && wap_tools_built "$tree" "$seed" || { echo "refresh-seed: the new seed is installed but not published: restore the release wap-seed.lock names" >&2; exit 1; }
-# (the old compiler's machine code goes with it, and every program's it compiled: the native wap writes the new
-# compiler's at its first run, below)
-rm -f "$folder"/*.cwasm
-# the native wap, the command that runs the seed (wap/extensions/native/driver.wap), built by it
 native=$(dirname "$folder")
+staged=$scratch/staged
+mkdir -p "$staged/lib" && cp -p "$native/lib/libwarp_wasmtime".* "$staged/lib/" && mkdir "$staged/wap-seed" &&
+	cp "$chosen" "$staged/wap-seed/wap.wasm" && stamped "$staged/wap-seed/wap.wasm" "$source_commit" &&
+	wap_beside_mirrored "$tree" "$staged/wap-seed" && wap_tools_built "$tree" "$staged/wap-seed/wap.wasm" || { echo "refresh-seed: the seed was not staged; the seed stays" >&2; exit 1; }
 wap_linked "$native"
-"$tree/wap/extensions/native/build.sh" "$seed" "$tree/wap/extensions/native/driver.wap" "$native/wap" "${WAP_LINKED[@]}" && echo "refresh-seed: installed $native/wap" ||
-	echo "refresh-seed: the native wap was not built; $native/wap stays" >&2
-# its first run, so the first one anyone makes finds the compiler's machine code written (the seed's folder keeps the
-# library's source: a native program's build reads types/host.wap, which no warm state holds)
-"$native/wap" '1+1' >/dev/null && echo "refresh-seed: replaced $seed" || { echo "refresh-seed: the installed $native/wap fails to run 1+1; not published: restore the release wap-seed.lock names" >&2; exit 1; }
+"$tree/wap/extensions/native/build.sh" "$staged/wap-seed/wap.wasm" "$tree/wap/extensions/native/driver.wap" "$staged/wap" "${WAP_LINKED[@]}" || { echo "refresh-seed: the native wap was not built; the seed stays" >&2; exit 1; }
+# the staged wap checked as it will be used: an expression, a program using the host's files, and the tests' compiler
+# built from the staged seed (test_hello); the seed's folder keeps the library's source, as a native program's build
+# reads types/host.wap, which no warm state holds yet
+printf 'use os\nuse file\npath = temp_file()\nappend_file(path, "kept")\nprint read(path)\ndelete_file(path)\n' >"$scratch/files.wap"
+staged_ran() { (cd "$scratch" && "$staged/wap" "$@" 2>&1); }
+[ "$(staged_ran '1+1')" = 2 ] || { echo "refresh-seed: the staged wap fails to run 1+1; the seed stays" >&2; exit 1; }
+files=$(staged_ran files.wap)
+[ "$(echo "$files" | head -1)" = kept ] || { echo "refresh-seed: the staged wap runs no program using files ($(echo "$files" | tail -1 | cut -c1-200)); the seed stays" >&2; exit 1; }
+PATH="$staged:$PATH" bash "$tree/test/wap/test_hello.sh" >"$scratch/hello.log" 2>&1 && ! grep -q '✗' "$scratch/hello.log" || { echo "refresh-seed: test_hello fails on the staged seed: $(grep -m1 '✗' "$scratch/hello.log"); the seed stays" >&2; exit 1; }
+if [ -n "$check" ]; then
+	cmp -s "$chosen" "$seed" && echo "refresh-seed: the seed is that stage" || echo "refresh-seed: the seed differs from that stage (--check: kept)"
+	exit 0
+fi
+# installed by one move each, the old seed's folder taken into the scratch folder, which goes with it
+mv "$folder" "$scratch/replaced-seed" && mv "$staged/wap-seed" "$folder" && mv -f "$staged/wap" "$native/wap" && echo "refresh-seed: installed $seed and $native/wap" || { echo "refresh-seed: the install broke off; the old seed's folder is $scratch/replaced-seed" >&2; trap - EXIT; exit 1; }
 beside=$scratch/wap-seed-beside.tar.gz
 COPYFILE_DISABLE=1 tar -czf "$beside" -C "$folder" $(cd "$folder" && ls | grep -v -e '\.cwasm$' -e '^wap\.wasm$') || { echo "refresh-seed: what the seed reads beside itself was not packed" >&2; exit 1; }
 release=wap-seed-$(date +%Y-%m-%d)-$(shasum -a 256 "$seed" | cut -c1-8)
