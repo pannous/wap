@@ -14,3 +14,14 @@ Handover for the run's skip of a hypothesis binder (notes/coc-t6a12.md "T6a2 on 
 
 The fix is on the typed route: the run takes its binders from verify's typed hypotheses split, a trial where the
 hypothesis computes to no holding trivially (`h implies P`).
+
+## How the run gets the split
+`compiler laws` types the law before it builds trials, as verify's `laws_typed` does: each law's function is typed with
+its hypotheses split off (a binder whose type has universe Prop), and `law_trials` is built from the remaining binders
+only. A fact typing writes on each binder (its universe) would be read too late: law_runs' rules fire in the shape stage,
+before typing. So the cost is in the laws command, not in the rules: the front `laws_typed` builds is shared with the
+run (its typing call moves to one place both use), about +10 lines, the rules' `law_trials` untouched.
+
+## The hypothesis runs first
+A trial evaluates each hypothesis on the values before the conclusion, and a trial whose hypothesis computes to no holds
+without the conclusion ever running: `h: b != 0` guards `a / b`, so the run never divides by zero.
