@@ -1057,7 +1057,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | exact-big-literals | in progress: the kernel's counts past 2^63 exact as `Large` (decision 13) | exact-big-literals df289030; wap-native-no-layout-any | merging onto unify-typers |
 | T5b1 effects | in progress | t5b-effects 9e6cf1d2; wap-primitive-lookup-tables | |
 | T5b2 enums, T5b3 bool | in progress | t5b-enums 547f33e5; wap-annotation-attachment-fix | |
-| T5b4 match, T5b5 the recursor | waits | | T5b2 |
+| T5b4 match, T5b5 the recursor | planned (notes/coc-t5b4.md) | | T5b4: unify-typers; T5b5: its lookup half now, its enum half after unify-typers |
 | T5c1 ending as an effect | waits | | T5b1 |
 | T5c2 products and courses | landed | e86988d2 | |
 | T5c3 structural terms | planned (notes/coc-t5c3.md) | | T5b4, unify-typers, fix-core-name-shadowing |
@@ -1070,7 +1070,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T6a1 proofs of bool laws, T6a2 hypotheses | wait | | unify-typers (the deletion commit, the int enum) |
 | T6a3a propositions in wap spelling | in progress | t6a3a ad022f23; wap-native-no-layout-any | M2b step 1, T6a1 |
 | T6a3 indexed families | waits | | T6a3a, T5b2 |
-| T6a4 proofs by cases and induction | planned (notes/coc-t6a4.md) | | T5c3, T5c4, unify-dedup landed; kernel move of apart's builder (interviewer) |
+| T6a4 proofs by cases and induction | planned (notes/coc-t6a4.md) | | T5c3, T5c4, unify-dedup landed |
 | T6a5 False, Exists, undecidable | waits | | T5b1 |
 | T6a6 the logic in wap/types | waits | | T6a1 to T6a5 |
 | T6a7 universes | waits | | T6a6 |

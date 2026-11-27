@@ -114,8 +114,9 @@ counting it.
 
 (4) needs apart's term builder (apart.wap:31-55) in reach of core's match reading. Today it sits in
 extensions/prove. Two ways:
-- **A (recommended):** move the builder into wap/kernel/, beside recursors.wap. That is kernel +25 and prove −25,
-  net 0. The prover stays in apart.wap and calls it. It goes to warp-interviewer, since kernel is semi-frozen.
+- **A (decided, track T):** move the builder into wap/kernel/, beside recursors.wap. That is kernel +25 and prove
+  −25, net 0. The prover stays in apart.wap and calls it. The builder only makes a proof term: the kernel's checker
+  judges it like any other value (typing.wap `declared`), so the trust base stays where it is.
 - **B:** leave the arm open and let verify's provers fill it. That keeps a written proof's check split across two
   layers, so a program's `type of double_even(3)` would fail without verify.
 
