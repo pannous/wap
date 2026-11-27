@@ -1051,6 +1051,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T4a, T4b | landed | 3410aa94 | |
 | T4d computed obligations | planned (notes/coc-t4d.md: T4d1 decided, T4d2 no check, T4d3 texts), no branch | | unify-typers (`conditions_entered`) |
 | T4c char | waits, no branch | | T4d1 to T4d3 |
+| T4e types that take values | planned (notes/coc-t4e.md) | | T4d1 to T4d3, unify-typers; its (8) T5b1 |
 | T5u | landed | 3410aa94, d0b3c9e8 (failable values, `T??`) | |
 | T5a | A1 landed; A2 (a typed law's verdict from analyze's environment) lands with unify-typers, which holds both its commits | 4112fe55, c43b08e3 | unify-typers |
 | unify-typers (M2, M2b) | in progress: core declares count, int and logic, the theory reader and prelude go, int's kernel laws in; unify-dedup 77e07344 merged into it | unify-typers bf69c6b8; wap-theory-reads-types | |
