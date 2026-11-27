@@ -94,6 +94,82 @@ the carrier's add laws. The comparison laws are case splits on a and b, ending i
 carrier lemmas are proved by computing and induction, not by linear, which no longer reads nat. Never let the
 linear prover prove a lemma it uses itself.
 
+## Between bool laws and Equal, hypotheses, and the binders' conditions
+
+### The bridge, both ways
+
+A wap law states bool: `a == b` is `Equal(bool, eq(a, b), yes)`, eq being `i64.eq`'s meaning, `equal_integers`. The
+linear prover chains `Equal(int, a, b)` with the kernel's glue laws (kernel/equality.wap). Two kernel theorems join
+the two forms, and the role table names them (EQUALS_SOUND, and EQUALS_COMPLETE, new):
+
+```
+equals_sound(a: int, b: int, h: Equal(bool, equal_integers(a, b), yes)): Equal(int, a, b)
+equals_complete(a: int, b: int, h: Equal(int, a, b)): Equal(bool, equal_integers(a, b), yes)
+```
+
+Neither can be written in wap spelling: a law's `==` is always the bool one, so `Equal(int, …)` has no wap form
+before T6a3 puts `==` in a proposition's place. So linear.wap declares both itself, the first time `sums_of` meets
+int. It hands each statement, as a kernel term, to `proof_found`, and keeps the proof through `lemma_declared`. They
+are checked theorems, never axioms. The same function serves any enum whose `==` decides it (bool's own `==`
+included), so it is written once over the type and its equality function.
+
+- **complete** is Equal's recursor: rewrite b to a in the goal (`rewritten`), leaving `equal_integers(a, a) == yes`,
+  which is `equal_integers_itself`. That law is proved by int's cases and nat's `equals_itself` (induction).
+- **sound** is induction on a, then on b, over int's cases:
+  - In the two mixed cases (`of_nat m` against `negative_successor n`), `equal_integers` computes to no. The
+    hypothesis becomes `Equal(bool, no, yes)`, and apart.wap proves the goal from it. This is the step that needs bool
+    as a block (t5b-enums): apart's chooser is the recursor of the equation's type, `case_recursor(bool)`, choosing
+    the goal at no and anything at yes. While bool is the kernel's Choice, it has no recursor, and `no == yes`
+    cannot be told apart.
+  - In the two like cases, `equal_integers` computes to nat's `equals(m, n)`. nat's `equals_sound` (induction on m
+    and n, the mismatched cases again by apart over bool) gives `Equal(nat, m, n)`. `equal_congruent` with `of_nat`,
+    or with `negative_successor`, carries it to `Equal(int, …)`.
+
+Where the prover reads a hypothesis `h: (a == b) == yes`, `equal_bounds` gets `equals_sound(a, b, h)`. Where a law
+it calls takes an int equation (add_cancel's h, gap_bound's k), it passes `equals_complete(…, proof)`.
+
+### A nat binder's condition as a hypothesis
+
+`law p(n: nat): n + 1 > 0` reaches the kernel as `law_p: int -> bool`. kernel_type erases the subtype, because a
+kernel function of int is what runs. The condition must therefore be put back into the statement:
+
+- laws_typed records, for each binder, the condition of its written type where the type is a subtype:
+  `subset_condition` on the binder's settled type, before kernel_type erases it. The condition is a function value
+  `it => it >= 0`, entered into the environment like any other (terms.wap's `instances_entered` takes conditions as
+  function values), so it has a constant c.
+- law_statement puts a hypothesis binder after each conditioned binder: `Π n: int, Π n_holds: Equal(bool, c(n), yes),
+  Equal(bool, law_p(n), yes)`. The law's function still takes only n: `beta` gets frees for the value binders only,
+  and the hypotheses' frees are abstracted in place. A later binder's condition may name an earlier binder; the order
+  Π x, Π x_holds, Π y, Π y_holds keeps that.
+- The provers read `n_holds` like any hypothesis. With the comparisons by cases, `n >= 0` is `not_above(0, n)`, so
+  `bounds_of` gives it one row, `n - 0 >= 0`. That is the "atom at least 0 from a hypothesis" of the int-only design.
+- The run gives a conditioned binder only trial values its condition holds for (law_runs already does this for a
+  `where` type; no change).
+
+This changes core's typing not at all; laws.wap gains about 15 lines (the conditions recorded, the hypothesis binders
+built). It closes the stale comment on terms.wap:145.
+
+### integers.wap's laws that need hypothesis binders (T6a2)
+
+A binder whose type is a bool statement is a proof of `Equal(bool, statement, yes)`. Until T6a2 builds that, analyze
+reads it as a plain parameter, so these 7 of the 15 laws can neither be stated nor proved as meant:
+
+| law | hypotheses |
+|---|---|
+| `add_cancel(a, b, c)` | `h: a + c == b + c` (the prover passes `equals_complete` of its int equation) |
+| `difference_nonnegative(a, b)` | `h: a <= b` |
+| `nonnegative_add(a, b)` | `h: 0 <= a`, `k: 0 <= b` |
+| `gap_bound(t, g, u)` | `h: 0 <= g`, `k: t + g == u` (k by `equals_complete`) |
+| `beyond_not_above(a, b)` | `h: not (a <= b)` |
+| `both_first(a, b: bool)` | `h: a and b` |
+| `both_second(a, b: bool)` | `h: a and b` |
+
+The other 8 (zero_add, add_commutative, add_associative, add_swapped, add_minus, minus_add, add_difference, and
+`equal_integers_itself` once added) have value binders only and wait for nothing but int's cases. A hypothesis binder
+is the same Π that a nat binder's condition gets above. So T6a2's first part is that function in law_statement: one
+Π per hypothesis, built once for both uses. Recommended: build it in M2b, beside the conditions, since the prover
+needs these 7 laws to prove anything with a bound.
+
 ## Steps, each with its outcome
 
 1. **int's meaning in wap/types.** wap-theory-reads-types writes the enum and the rows' meanings. The comparisons by
