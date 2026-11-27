@@ -199,6 +199,9 @@ bridge_of(e: Environment, head: Term): Bridge? := e.bridges.find(bridge => same(
   condition (`it >= 0`) has no bridged head, so it comes out as today.
 - A bridged type sits at Type, so its Equal is at DATA_LEVEL, the level truth_stated uses (TRUTH_LEVEL there, the same
   `Successor(Zero)`: one constant, not two).
+- **A refusal shows wap's spelling.** A refused proof shows the statement it proves (wiki/proof.md), so T6a1, which
+  checks a law's proof, shows Equal at a bridged type as `l == r`: a `shown` case for Equal whose type has a bridge.
+  Until T6a1 a law with a proof gets nothing (`law($head := $proof) => ()`), so no refusal reaches the output yet.
 - **Lines.**
   - kernel/equality.wap: Bridge, proposition_of, bridge_of and truth_stated moved in, about +7.
   - environment.wap: the field, +1.
