@@ -1,0 +1,112 @@
+# The laws analyze types (notes/coc-t5.md T5a, wiki/law.md): the program's definitions and its laws written in wap go
+# through the compile's front, each law the bool function of its binders (extensions/law_statements.wap), and analyze
+# enters each typed function into the environment the theory shares (core/analyze/terms.wap). A law whose function
+# the kernel holds defined is stated `Equal(bool, law(x…), yes)` over its binders and never read by the theory; one
+# whose function the kernel only assumes is refused naming the first function it calls that the kernel only assumes.
+# A law analyze refuses, its binders the prelude's nat or a proposition, is the theory's, and so is every axiom,
+# theorem, proof and statement analyze has no form for.
+use "../../../core/pipeline.wap"
+use "../../wasm/modules.wap"
+use "../../../core/bindings.wap"
+use "../../../core/stage.wap"
+use "../../../core/errors.wap"
+use "../../../core/parse/cascade.wap"
+use "../../../core/language.wap"
+use "../../../core/type_notation.wap"
+use "../../../kernel/terms.wap"
+use "../../../kernel/environment.wap"
+use "../../../kernel/typing.wap"
+use "../explicit.wap"
+use "../../../kernel/forms.wap"
+use "blocks.wap"
+
+# the rules the front reads laws by, and the name each law's function takes
+LAW_STATEMENT_RULES := "extensions/law_statements.wap"
+LAW_FUNCTION := "law_"
+# the refusal of a law that names what the kernel only assumes
+ASSUMED_NAMED := "assumed function"
+# the declarations every compile's environment starts with, core's words, at the same places in the theory's
+CORE_SIZE := size(core_environment())
+
+# the laws analyze typed, by name: each its function's constant and its parameters' types; none where the front cannot
+# read the program, which the theory then reads whole
+laws_typed(wap_folder: text, program: text): map<text, Node> := {
+	front = base_language()
+	modules_bringable(front)
+	rules_files_loaded(front, wap_folder)
+	based(front, in_folder(wap_folder, LAW_STATEMENT_RULES))
+	types = types_declared(front, wap_folder)
+	TYPES.partial = yes
+	code = program_operated(front, program)
+	read = with_facts_of(List(top_level_statements(code).filter(front_reads), Bracket.None, Separator.Newline), code)
+	typed = try typed_modules(front, [declared_module(front, read)], types, program) catch e { return {} }
+	laws: map<text, Node> = {}
+	for statement in statements_in(typed) {
+		if statement is Define and text(defined_name(statement)).starts_with(LAW_FUNCTION) { laws[text(defined_name(statement))[#LAW_FUNCTION ..]] = statement }
+	}
+	laws
+}
+# what the front reads of a program: its definitions, its enums and classes, and its laws
+front_reads(statement: Node): bool := is_written_definition(statement) or block_written(statement) is not ø or after_words(statement, [LAW_WORD]) is not ø
+is_written_definition(n: Node): bool := match n { Call(called, arguments) => text(called) == DEFINE and #arguments == 2 and DECLARATION_WORDS.all(word => after_words(arguments#1, [word]) is ø); _ => no }
+
+# A typed law's statement as the kernel states it: for every value of its binders, its function gives yes; refused
+# where its function is only assumed, by the first function its body calls that the kernel only assumes. The function
+# is analyze's, brought into the theory's environment with all it names
+typed_statement(into: Environment, name: text, define: Node, equal: Term): Term := {
+	from = TYPES.environment
+	key = function_key(define)
+	id = named_id(from, key) ?? refused(ASSUMED_NAMED, "law ${name} is not typed")
+	if declared_at(from, id)!.kind is Axiom { refused(ASSUMED_NAMED, "law ${name} names ${assumed_callee(from, define) ?? key}, which the kernel only assumes: it may write, raise or act, so no law states it") }
+	bringing = Bringing(into, from)
+	function = brought(bringing, constant(id, key, []))
+	binders = binder_types(brought(bringing, declared_at(from, id)!.type))
+	values = (1 to #binders).list().map(at => bound(#binders - at))
+	body = apply_all(equal, [brought(bringing, BOOL_TERM), apply_all(function, values), brought(bringing, from.literals!.yes_case)])
+	binders.reverse.fold(body, (inner, domain) => pi("_", domain, inner))
+}
+# A term of the compile's environment in the theory's: core's words stand at the same places in both, every
+# declaration analyze added is declared again in the theory's, once, with its own terms brought first
+class Bringing { into: Environment; from: Environment; ids: map<int, int> = {} }
+brought(b: Bringing, t: Term): Term := match t.shape {
+	Constant(name, levels, id) => constant(brought_id(b, id), name, levels)
+	Apply(function, argument) => apply(brought(b, function), brought(b, argument))
+	Lambda(binder, domain, body) => lambda(binder, brought(b, domain), brought(b, body))
+	Pi(binder, domain, body) => pi(binder, brought(b, domain), brought(b, body))
+	LetIn(binder, type, value, body) => let_in(binder, brought(b, type), brought(b, value), brought(b, body))
+	Projection(structure, field, of) => projection(brought(b, structure), field, brought(b, of))
+	_ => t
+}
+brought_id(b: Bringing, id: int): int := {
+	if id <= CORE_SIZE { return id }
+	if b.ids.has(id) { return b.ids[id] }
+	d = declared_at(b.from, id)!
+	type = brought(b, d.type)
+	kind = match d.kind {
+		Defined(value) => Defined(brought(b, value))
+		other => other
+	}
+	if kind is Defined { declared(b.into, Declaration(d.name, d.levels, type, kind)) } else { added(b.into, Declaration(d.name, d.levels, type, kind)) }
+	b.ids[id] = named_id(b.into, d.name)!
+	b.ids[id]
+}
+# a function type's binders' types, outermost first
+binder_types(type: Term): list<Term> := match type.shape {
+	Pi(binder, domain, body) => [domain] + binder_types(body)
+	_ => []
+}
+# the first function a typed body calls whose instance the kernel only assumes, by its written name
+assumed_callee(e: Environment, body: Node): text? := {
+	for n in nodes_in(body) {
+		found = callee_assumed(e, n)
+		if found is not ø { return found }
+	}
+	ø
+}
+callee_assumed(e: Environment, call: Node): text? := match call {
+	Call(called, arguments) => {
+		id = named_id(e, place_key(fact_of(called, DEFINED_AT) ?? return ø)) ?? return ø
+		if declared_at(e, id)!.kind is Axiom then text(called) else ø
+	}
+	_ => ø
+}
