@@ -9,6 +9,7 @@
 # Later: the readings a phrase allows, a fix-it, and the rule that expanded the form.
 
 use "stage.wap"
+use "parse/lexemes.wap"
 
 # what a compiler-made form of one shape is, said when another reaches the place that takes it
 NOT_A_FIELD = "a field is written name: value"
@@ -41,18 +42,40 @@ written_line(code: Node) as text? := {
 	if source is empty { return ø }
 	source.split("\n")#(at.line).trim()
 }
-# code as the program wrote it: from where the reader began reading its first part to where it finished its last,
-# a bracketed list up to its closer; ø for code the reader did not read, a node a stage or a rule's template built
+# code as the program wrote it: from the first of its words to the end of its last, a bracketed list up to the closer
+# the reader balances it with; ø for code no file holds, or a node a stage or a rule's template built
 written_span(code: Node) as text? := {
 	source = sources_read.get(file_of(code) ?? return ø) ?? return ø
-	read = nodes_in(code).filter(n => written_end(n) != ø and position_of(n) != ø)
-	if read is empty { return ø }
 	lines = source.split("\n")
-	source[read.map(n => offset_in(lines, position_of(n)!)).min .. read.map(n => written_end(n)!).max]
+	# the words spelled where they stand: a kernel form's head stands at its operator, the words a rule's template
+	# spells where the rewritten code was
+	words = nodes_in(code).filter(n => spelled_at(n, source, lines))
+	if words is empty { return ø }
+	starts = words.map(word => offset_in(lines, position_of(word)!))
+	reader = Reader{code: source.codepoints, n: #source.codepoints}
+	source[starts.min .. (1 to #words).map(at => word_end(reader, words#at, starts#at)).max]
 }
-written_end(n: Node) as int? := match fact_of(n, WRITTEN_END) { Number(end) => end as int; _ => ø }
+# whether a word is spelled in its source where its position says
+spelled_at(word: Node, source: text, lines: list<text>) as bool := {
+	spelling = spelled(word) ?? return no
+	source[offset_in(lines, position_of(word) ?? return no) ..].starts_with(spelling)
+}
+# where a word written at `start` ends: a bracketed list after its closer, any other word after its spelling
+word_end(r: Reader, word: Node, start: int) as int := match word { List(items, bracket, separator) => bracket_end(r, start) + 1; _ => start + #spelled(word)! }
 # where a position is in its source, counted from 0
 offset_in(lines: list<text>, at: Position) as int := lines.take(at.line - 1).map(line => #line + 1).sum + at.column - 1
+# a word as written, a text with its quotes, a bracketed list by its opener; ø for code that is no word
+spelled(word: Node) as text? := match word {
+	Symbol(name) => name
+	List(items, bracket, separator) => if bracket == Bracket.None then ø else opening(bracket)
+	Number(value) => word_written(word)
+	Text(value) => word_written(word)
+	Char(value) => word_written(word)
+	True => code(word)
+	False => code(word)
+	_ => ø
+}
+word_written(word: Node) as text := match fact_of(word, WRITTEN) { Text(spelling) => spelling; _ => code(word) }
 # `hello.wap line 2:1: `, `line 2:1: ` for code no file holds or read from standard input, or nothing for code without
 # a position
 place_of(code: Node) as text := {
