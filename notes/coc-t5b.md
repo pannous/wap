@@ -30,8 +30,7 @@ statements T5d's, classes T5e's. Line counts are `grep -vc '^\s*#'` on main f749
   recursor, and the Choice goes.
 - **`type of` is the model for `effects of`:** sugar/types.wap `rule type of $x => type_of($x)`, and calls.wap
   answers the call by TYPE_OF_WORD with a text literal (`type_of_typed`).
-- **No effects in core:** nothing in wap/core or wap/kernel says effect. The only inference is the theory's own,
-  extensions/theory/elaborate/effects.wap (191), on its own reading of programs, with the computation types `T ! e`.
+- **No effects in core:** nothing in wap/core or wap/kernel says effect.
 - **The theory's twins of this step:** elaborate/blocks.wap (111, enums and classes into blocks), elaborate/match.wap
   (216: arms to minor premises, dependent motives, the course of a recursion), elaborate/effects.wap (191: inference
   and computation types). Each serves two readers: a program read through the door, and the explicit theory spelling

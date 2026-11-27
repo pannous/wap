@@ -4,7 +4,7 @@ Session wap-coc-plan held the design of notes/coc-plan.md, reviewed every theory
 environment, typing and the elaborator's holes and unification. It is retired; wap-supervisor holds the design, the
 reviews and the board (notes/agents/supervisor.md). Three notes carry the design: notes/coc-plan.md (the plan and
 the user's decisions, section 13), notes/theory.md (the contract between the kernel's files) and notes/elaborate.md
-(the elaborator's contract, E1 to E4).
+(holes and unification, core/analyze/holes.wap and unify.wap).
 
 ## Branches and worktrees of this session
 
@@ -62,7 +62,7 @@ Delicate points:
   `?a` against `?b(x)` cannot take `?b(x)`, so `?b` is answered by the function that ignores x.
 - **A pattern is a hole applied to distinct binder variables.** After a function is applied to a value, `?h(3)` is
   no pattern and waits. Nothing guesses the constant function, and `?F(?A)` against `list(int)` is not taken apart
-  (notes/elaborate.md says where that belongs).
+  (notes/elaborate.md).
 - **Waiting says yes.** A problem put off counts as solved until an answer makes it fail; then that answer is
   refused. What still waits at the end of a declaration is judged by the kernel, which checks the filled term
   whole.
@@ -110,9 +110,7 @@ Delicate points:
 ## What is decided and where
 
 The user's decisions are in notes/coc-plan.md section 13. The rules every kernel file keeps are in notes/theory.md,
-the elaborator's in notes/elaborate.md. Not written elsewhere:
-- The prelude is the door's input, not a module of the compiler; until the switch test_self and the census read
-  the compiler's sources only.
+those of holes and unification in notes/elaborate.md. Not written elsewhere:
 - A block's types, cases and recursors each rest on the axioms their own type names. Inside a mutual block a case
   is recorded before a later type of the block; no program was found where that loses an axiom, since a case that
   names the type also writes its indices' types.

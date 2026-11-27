@@ -1,8 +1,9 @@
 # The theory's kernel: its files and what each gives the others
 
-The kernel of notes/coc-plan.md (sections 6 and 7) lies in `wap/kernel/` (terms.wap to numbers.wap below); the door,
-the elaborator, the prelude and the rest of this table lie in `wap/extensions/theory/`, a module of its own beside the
-compiler. This note is the contract between its files: what each holds, the functions the others call, and the rules
+The kernel of notes/coc-plan.md (sections 6 and 7) lies in `wap/kernel/` (terms.wap to integer_laws.wap below);
+core typing writes a program's terms into it (`wap/core/analyze/terms.wap`), the verify door
+(`wap/extensions/verify/`) judges a program's laws with it, and the export and the second checker lie in
+`wap/extensions/theory/`. This note is the contract between its files: what each holds, the functions the others call, and the rules
 all of them keep. The plan says what the rules are; this note says where they live.
 
 ## Files
@@ -15,24 +16,22 @@ all of them keep. The plan says what the rules are; this note says where they li
 | `compute.wap` | a term computed to its head: beta, zeta, delta, iota (with K) | 6.4, 7 | theory-computing |
 | `equal.wap` | definitional equality | 6.5 | theory-equality |
 | `typing.wap` | a term's type; a declaration checked and added | 6.3, 6.6 | theory-typing |
-| `explicit.wap` | a program in the explicit spellings read into terms and declarations | below | theory-explicit |
 | `show.wap` | a term shown in wap notation | below | theory-explicit |
-| `check.wap` | the door: a program checked statement by statement | below | theory-explicit |
 | `inductive.wap` | an inductive block checked | 7, checks 1 to 5 | theory-inductive-checks |
 | `nested.wap` | a block nested in another inductive type made plain | 7, nested types | theory-inductive-checks |
 | `recursors.wap` | recursors made, their computation rules | 7, checks 6 and 7 | theory-recursors |
 | `quotients.wap` | the statement `quotients(Equal)`: the quotient and its ways out | 6.4, 6.6 | theory-quotients |
 | `numbers.wap` | the statements `numbers(…)` and `shortcut(…)`: number literals and the seven shortcuts | 6.7 | theory-numbers |
-| `below.wap` | the statement `products(Pair, Unit)`: each enum's below and course | 8, E2 | theory-below |
-| `bindings.wap` | the statements that bind names, read and sent to their files | below | theory-below |
-| `prelude/logic.wap` | the logic as an explicit program: False, True, And, Or, Not, Equal, Exists, bool, Decidable | L1 | theory-prelude-logic |
-| `prelude/quotient.wap` | the quotients bound, their axiom, function extensionality proved | K5 | theory-quotients |
-| `prelude/numbers.wap` | nat with its shortcuts and the theorems that license them, the comparisons, int with its sum and product | L2 | theory-prelude-numbers |
-| `prelude/effects.wap` | the effect sets, the one opaque family of computation types `Eff`, `never`, `pure`, `bind`, Error and `Fallible` (`T or Error`) | L4 | theory-prelude-effects |
-| `prelude/checked.wap` | the checked types as subsets and quotients of plain carriers: `Subset`, rationals, i64, sets and maps | L5 | prelude-collections-rationals |
-| `elaborate/` | the elaborator, which is not trusted: notes/elaborate.md | 8 | theory-arguments-found and after |
-| `export.wap` | what the environment accepted written as an export, one record a line | K7 | theory-second-opinion |
-| `second/` | the second checker: an export checked again by rules of its own | K7 | theory-second-opinion |
+| `equality.wap` | `Equal` and `Equal.refl`, the equality laws state, and the laws the provers glue proofs with | T5 | |
+| `logic.wap` | the proposition with no proof and the one with one, and the first laws of the truths | T5 | |
+| `counting.wap` | the count int's cases carry, its functions and shortcuts; int, its meanings and the bridge between its two equalities | T5 | |
+| `integer_laws.wap` | int's laws the linear prover builds its proofs of, declared before the first goal | T5 | |
+| `core/analyze/courses.wap` | core's products, Pair and Unit, and each enum's below and course | 8, T5c | |
+| `core/analyze/holes.wap`, `unify.wap` | holes and unification, which are not trusted: notes/elaborate.md | 8 | |
+| `extensions/verify/` | the door: a program's laws judged by the kernel (below) | P1 | |
+| `extensions/prove/` | the provers, whose proofs the kernel checks | P2 | |
+| `extensions/theory/export.wap` | what the environment accepted written as an export, one record a line | K7 | theory-second-opinion |
+| `extensions/theory/second/` | the second checker: an export checked again by rules of its own | K7 | theory-second-opinion |
 
 The files use each other freely: computing, equality and typing call one another.
 
@@ -151,17 +150,19 @@ The files use each other freely: computing, equality and typing call one another
 - `quotients_declared(e, equality)`: the statement `quotients(Equal)`. Equality must have the shape of `Equal`; the
   four constants `quotient`, `quotient.of`, `quotient.lift` and `quotient.induct` are checked by typing and added,
   resting on nothing. Computing (compute.wap) takes lift or induct applied to `quotient.of(T, r, a)` to the function
-  applied to `a`. That joined values are equal is the prelude's axiom `quotient_sound` (prelude/quotient.wap), from
-  which `function_extensionality` is proved.
+  applied to `a`. That joined values are equal is no rule of the kernel: it is an axiom, `quotient_sound`.
 
-**explicit.wap, show.wap, check.wap**
-- `statement_read(e, statement)`: one statement of an explicit program as a `Statement`: `Declares(declaration)`,
-  `AsksType(of)` or `Quotients(equality)`. A block `{…}` is read as its bindings and the term they lead to, so a
-  value written on the lines below its head reads as that one term.
+**show.wap**
 - `shown(t)`: a term in wap notation; reading that text gives the same term again. A binder whose variable the rest
   does not use is shown without its name, `a -> b`; arrows nest to the right without brackets, and a function type
   as a domain has them, `(a -> b) -> c`.
-- `check.wap` is the program `wap wap/extensions/theory/check.wap program.wap`, run from the tree's root.
+
+**equality.wap, logic.wap, counting.wap, integer_laws.wap**
+- Blocks and theorems core declares into every compile's environment (core/type_notation.wap `core_environment`),
+  each checked as it is declared: `equality_declared`, `logic_declared`, `count_declared`, `int_declared`. Their own
+  names carry the mark `·`, so no program writes or meets them; `Equal` is the one a law states.
+- `equated(e, level, type, a, b)`: `Equal(type, a, b)`; `truth_stated(e, value)`: the proposition that a bool is yes.
+- `integer_laws_ready(e)`: int's laws declared once, before the first goal a prover is given (prove/goals.wap).
 
 ## Rules every file keeps
 
@@ -177,9 +178,9 @@ The files use each other freely: computing, equality and typing call one another
 - **Nothing is guessed.** The kernel finds no level, no argument and no conversion. What is missing is a refusal.
 - **Results kept by term.** A result is kept (`remember`) for the life of the checker, one declaration: `computed`
   keeps it for a term without free variables, `type_of` and `equal` for any term, since a free variable is never
-  made twice. The elaborator fills a hypothesis's type in place (elaborate/read.wap `bound_over`): `type_of` looks a
-  free variable alone up each time, and a kept type of a larger term still holds the unfilled hole, which every
-  reader of the elaborator fills in; `equal` keeps only pairs found equal, which a filled hole leaves equal.
+  made twice. A hypothesis's type is filled as it is read (`Checker.filled_in`, set by core/analyze/holes.wap):
+  `type_of` looks a free variable alone up each time, and a kept type of a larger term still holds the unfilled hole,
+  which every reader of the elaboration fills in; `equal` keeps only pairs found equal, which a filled hole leaves equal.
 - **No library word.** No file names a type or function of the prelude. A rule that needs one gets it by a
   declaration (plan 5.4).
 - **Never `==` on a term.** Terms and levels are compared by `same`, `level_same` and `levels_equal`, and a map is
@@ -191,43 +192,10 @@ The files use each other freely: computing, equality and typing call one another
   the caller. What a walk gathers it gives back as its result, or puts into a map or a field of a class, which the
   caller shares.
 
-## The explicit spellings
-
-A program for the door writes every argument and every type. Nothing is found for it: these spellings are a corner
-of the language, and each is read as its term directly.
-
-| written | term |
-|---|---|
-| `Prop`, `Type`, `Type(u)`, `Sort(u)` | `Sort`: at level 0, 1, u + 1, u |
-| a level: `0`, `2`, `u`, `u + 1`, `max(u, v)`, `imax(u, v)` | `Level` |
-| `(x: A) -> B`, `A -> B` | `Pi` |
-| `(x: A) => b` | `Lambda` |
-| `f(a, b)` | `Apply(Apply(f, a), b)` |
-| `f[u, v]` | `Constant` at those levels; a constant without level parameters is written bare |
-| `{ x: A = v; b }` | `LetIn` |
-| `axiom name: type`, `axiom name(x: A): B` | an axiom; parameters make a function type |
-| `name(x: A): B := value`, `name: B := value` | a definition; parameters make a function type and a function |
-| `law name(x: A): statement := proof` | a theorem |
-| `opaque name(x: A): B := value` | an opaque constant |
-| `enum Name(p: A): I -> Sort(u) { case(x: B): Name(p, i) }` | a type of an inductive block: what stands after the name are the parameters, the same in every case; the result type holds the indices; each case writes its fields and its result in full. Inside its own block a type stands without levels. Enum statements that stand next to each other and name one another are one block |
-| `Name.recursor[v, u](parameters, motive, one minor premise per case, indices, major premise)` | the recursor: the motive's level first, where the type may compute into any universe; a minor premise takes the case's fields and then the induction hypothesis of each field of the type itself |
-| `projection(Pair, 1, p)` | `Projection`: the first field of p, a value of the structure Pair (K4) |
-| `type of e` | the question for e's type |
-
-A level name in a declaration that nothing binds is a level parameter of it, in the order of first appearance. A
-name is looked up among the binders around it, innermost first, then among the declarations; anything else is the
-refusal "unknown name".
-
-Read by the elaborator's door, a prelude file's declaration of a name taken is an overload of it, by the key the
-elaborator gives its own (the name and its own binders' types after the found ones). The binders an elaborated program's call finds of an
-explicit declaration are its leading sorts that a later binder's type names (the letters of an elaborated header);
-a call giving every binder its header has, as an explicit program does, finds none, and a result that is itself a
-function type takes no part in that count.
-
 ## The declarations that bind names
 
-The kernel names no type of the prelude (plan 5.4). Four statements of the explicit corner bind the ones a
-mechanism needs (bindings.wap), and `texts` a fifth. Each is checked; `quotients` and `numbers` stand once, and a later `products`
+The kernel names no type of the prelude (plan 5.4). Four statements bind the ones a
+mechanism needs, and `texts` a fifth. Each is checked; `quotients` and `numbers` stand once, and a later `products`
 stands instead of an earlier one, as a below already made keeps the pair it was made of.
 
 **`quotients(Equal)`** (K5, plan 6.6). `Equal` must have the shape of equality: a block of one type with one level
@@ -291,10 +259,21 @@ axiom rested on, a function bound already or needed and not bound).
 
 ## The door
 
-`check.wap` reads a program and takes its statements in order. A declaration is checked and added; nothing is said
-when it is accepted. `type of e` prints the type. The first refusal is printed as its one line, `refused by <rule>:
-<what was found>`, and ends the run with a failing exit code. The output is the test: test/wap/test_theory.wap gives
-a program and compares what the door says. A line for a refusal compares the part before the colon only.
+`wap verify program.wap` (wap/extensions/verify/verify.wap, run as `verify.wasm --seed <seed folder> program.wap` by
+the native wap, or with `--tree <root>`, options.wap) reads a program in plain wap. The program goes through the
+compile's front and core typing (laws.wap `laws_typed`): each law becomes the bool function of its binders
+(extensions/law_statements.wap), and core enters each pure function into the compile's environment as a kernel
+definition (core/analyze/terms.wap); any other stays an opaque constant, an assumption. Each law then gets one
+verdict, in the order the program states them:
+- a law without binders is computed: `Proved` where it computes to yes, `FAILED` where it computes to no;
+- a law with binders is `Proved` where the provers prove `Equal(f(x…), yes)` for every value of its binders, under
+  its hypotheses and the conditions of its binders' subtypes, and the kernel checks the proof as a theorem of the law's name, so a
+  later proof uses it;
+- any other is `Untested`, and the run's verdict stands in its place (native/driver.wap).
+
+A law whose function the kernel only assumes is refused, naming the first function its body calls that the kernel
+only assumes. A refusal is printed in its law's place; the first refusal of the program ends the run. The run fails
+when a law does. test/wap/test_theory_verify.wap gives programs and compares what the door says.
 
 ## The run trust base
 
