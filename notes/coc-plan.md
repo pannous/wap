@@ -21,7 +21,8 @@ cut and what is open.
 - The rules are those of Lean 4's kernel, the best-tested rules for exactly this list of features, with four
   stated departures (section 6). Nothing of Lean itself is used: syntax, elaborator, library and provers are wap's
   own, written in wap.
-- Cost: the compiler grows from about 12,300 lines to about 17,020, near the ballpark of 17,000, about 2,500 of them trusted.
+- Cost: the compiler grows from about 12,300 lines (16,067 measured now) to about 17,100 once T5 deletes the analyze
+  files it replaces, near the ballpark of 17,000, about 2,500 of them trusted.
 
 ## 1 What is asked
 
@@ -395,7 +396,7 @@ run/erase.wap (315); an overrun in any of them is taken as needed; each step rep
 
 Outside the compiler, in wap/extensions/proof, which only `wap check` and proofs load: the provers (951 lines today,
 2,000 to 3,000 with P3 and P4), the second opinion and its export (1,309), the arithmetic proofs, and the door
-`wap check` on the explicit spellings (441). wap/extensions/theory (8,425 lines today) is gone after T7: its kernel
+`wap check` on the explicit spellings (441). wap/extensions/theory (5,957 lines today) is gone after T7: its kernel
 moved in, its elaborator deleted file by file as analyze takes each job over. The kernel has no unbounded
 arithmetic: its numbers are i64 with an overflow check (6.7). The size limit of wap's source
 (test/wap/ratchet_census.sh) is raised by hand with each step that lands, by what the step measured.
@@ -750,7 +751,10 @@ function writes (`nonlocal`, `global`) is a cell, which is State, as a `shared` 
 
 ### 9.7 What runs
 
-Each constant runs by its statements as written, the ones the emitter reads. For most constants that is their
+Each constant runs by its statements as written, the ones the emitter reads with their checked facts; the
+kernel checks their translation (9.5), never runs it. A loop runs as a loop, an assignment and a write as a store,
+not as the fold and the new bindings the kernel checked: that the statements do what the translation says is
+believed for what runs, and tested by every law run on values (10.2). For most constants the statements are their
 value. Three kinds differ:
 - a recursive function runs by its recursion as written, not by its term over recursors. The emitter takes that body
   only with a theorem the kernel checked: that the constant equals the body, where the body's calls of itself are
@@ -812,10 +816,13 @@ the plan claims none.
 | the model of the rules | yes | yes |
 | the kernel with its i64 arithmetic under an overflow check, the compiler that built it, the wasm engine it runs on | yes | yes |
 | reader, sugar rules, elaborator, provers, types module | no | no: a statement is shown as it was checked, printed from the term, and a body other than a constant's value runs only with its checked theorem (9.7) |
-| emit; which host operation or layout a `prim` stands for; that a recursion proved to end does end when run | no | yes |
+| emit; 9.5's translation of loops, assignments and writes; which host operation or layout a `prim` stands for; that a recursion proved to end does end when run | no | yes |
 
 Every proved law is still run on test values against the compiled program. A prelude function that disagrees with
 the host operation it runs by shows as FAILED beside its Proved.
+
+Until T8, `int` runs as an i64 that wraps: a law proved of the theory's `int`, `x + 1 > x`, is false for the running
+program at the i64 maximum. The second column holds for `int` only within the i64 range until then.
 
 ### 10.3 Known defects of the rules, accepted
 
@@ -969,8 +976,8 @@ step, measured against the step before; more goes to the user.
 | TM one environment per module | each module is read with its own environment, built from the modules it `use`s: the language record splits into the language, the tables kept per file, one compile's caches and the build; an operator, alias, rule or phrase word declared in a file applies from its declaration on, in that file and in the files that use it, never in a file read later that does not; a file's text is scanned once, not three times for its uses; the restart after a standard module is brought in goes (notes/audit/2026-11-25-2.md R1) | a rule declared in one file does not fire in a file that does not use it; an operator used above its declaration in the same file is refused; `--stage 2` a fixed point |
 | T3 numbers and arguments found | the typer's types are kernel terms, one representation, compared by computing and shown as notation only in messages and `format`; analyze's readers of the notation read terms. analyze types each function once: a recursive function's header is typed first, an assignment of another type is a new binding, and the retypings and the fresh start on a retype go, since a discarded round would leave checked judgements behind (the dispatcher's restart goes with T6, the restart for a standard module brought in with TM4). A kind rule's output is typed in place, at the node's position, as that node, and never fires on its own output. analyze types numbers through the kernel: a numeral has the type its place wants, else `int`; `i32` and `i64` the wrapping words; `#xs` an `int`; letters and `_` found by unification (E1); the readings typing chose stay the compile's table, keyed by the source place `format` prints. Until T5 a function analyze typed enters the kernel as an opaque constant by its signature, counted by the census as assumed; the numbers prelude is read in the explicit spelling | `0 - 3` is -3; `#xs - 1` is -1 on an empty list; `type of 3` is `int`; `identity(3)` and `identity(int)`; a recursive function's result is written, or found once its other arm gives the type, else refused with the fix-it naming it; a kind rule's error names the line of the phrase it rewrote |
 | T4 subtypes | `where`, `type X < T`, the declared conversions; `nat` is `int where it >= 0`; an obligation proved by computing or by facts in scope, else a check with the effect Fail (E4, 3.2, 3.3, 3.9) | `d: char = "a"` accepted and `d: char = "ab"` refused by `condition`; `char` is `text where #it == 1` and nothing else; `effects of` a function with a check left is Fail |
-| T5 definitions, statements and inductive types | enums, classes, functions, `match`, blocks, variables, loops and exits become kernel declarations and terms as analyze types them: inductive blocks, recursors, structural recursion, a measure, else Div; unions, optional values and `any`; classes with type arguments, `class Pair<A, B> { first: A; second: B }` (wiki/type.md), as inductive types with parameters: each use an instance of the record, as T3f instances functions (about 40–80 lines in types, fits and declarations, the letters handed on by a records.wap rule); `extends` as the closed sum, built by analyze from the class declarations while the `inherited` rule keeps copying the fields; a compiled library carries, beside its signatures, the bodies that may unfold (definitions a type or a proof computes with), as a Lean module does, which replaces the signatures-only format of notes/compile_inputs.md; a compiled library's declarations are; the theory's doors read analyze's typed nodes, so read.wap takes analyze's choice in place of `nearest`, TRIAL_LIMIT and the numeral special cases (extension −40); letters.wap and ROUNDS_LIMIT go
-carried once, as the kernel accepted them when it was built (13); the emitter erases types, levels and proofs from the checked terms (E2, E5's statements, E6, E7), and the erasure stage chooses the build's strategies, the emitter's branches on a build that keeps its values in the memory (GC structs or C structs, call_ref or a table, struct.get or a load) | a `match` that misses a case is refused by `covering`; `effects of fact` is Pure; `effects of` a `while` without a measure is Div and it still runs; `speak` over a list of an animal and a dog picks each one's method |
+| T5 definitions, statements and inductive types | enums, classes, functions, `match`, blocks, variables, loops and exits become kernel declarations and terms as analyze types them: inductive blocks, recursors, structural recursion, a measure, else Div; unions, optional values and `any`; classes with type arguments, `class Pair<A, B> { first: A; second: B }` (wiki/type.md), as inductive types with parameters: each use an instance of the record, as T3f instances functions (about 40–80 lines in types, fits and declarations, the letters handed on by a records.wap rule); `extends` as the closed sum, built by analyze from the class declarations while the `inherited` rule keeps copying the fields; a compiled library carries, beside its signatures, the bodies that may unfold (definitions a type or a proof computes with), as a Lean module does, which replaces the signatures-only format of notes/compile_inputs.md; a compiled library's declarations are; the theory's doors read analyze's typed nodes, so read.wap takes analyze's choice in place of `nearest`, TRIAL_LIMIT and the numeral special cases (extension −40); letters.wap, fits.wap, conditions.wap and ROUNDS_LIMIT go
+carried once, as the kernel accepted them when it was built (13); the emitter reads the statements and their checked facts, types, levels and proofs left out (E2, E5's statements, E6, E7), and the erasure stage chooses the build's strategies, the emitter's branches on a build that keeps its values in the memory (GC structs or C structs, call_ref or a table, struct.get or a load) | a `match` that misses a case is refused by `covering`; `effects of fact` is Pure; `effects of` a `while` without a measure is Div and it still runs; `speak` over a list of an animal and a dog picks each one's method |
 | T6 laws, effects and instances | a law is a theorem; a plain compile proves by computing, else the law is Tested; effects are computation types and a proof refuses an impure function; traits are structures and instances come from overloads, a protocol (a class with a required word) is such a trait (E3, E5's effects, P1, P2); `wap check` loads the proof extension | `law double(3) == 6` Proved; `wap check` proves a law from two earlier laws; a proof using an impure function refused naming the chain; `sort` on a class without `compare` refused naming the trait |
 | T7 the theory extension retires | what is left of wap/extensions/theory goes: its run door and its prelude, whose words now live once in wap/types; the provers (P3, P4), the second opinion (K7), the export, the arithmetic proofs and the door `wap check` live in wap/extensions/proof, which only `wap check` and proofs load | every test as before; `wap check` and the second opinion from wap/extensions/proof; the trust base listed by a command |
 | T8 storage by context (cuttable) | an `int` is stored as i32 or i64 where computing or a fact in scope shows it fits (the plain compile loads no provers), else as a big number; the big numbers come from a library only the programs that need them load; `int` no longer wraps | `2 ^ 62 * 4` prints 18446744073709551616; a loop counter stays an i64 and the benchmarks keep their guardrails; the compiler's build holds no big numbers (13) |
@@ -993,15 +1000,17 @@ follow the theory extension's elaborator, which does the same work today:
 | T1b | 53 core, 18 kernel (the runtime words, the value layouts as rows), 58 types (texts in wap) | 96 core (five text routines, the layout tables), 46 types (the twins of the two builds) | | -13 |
 | T2 | 2,300 kernel (moved, show.wap included, the unbounded numbers left behind), 60 kernel (judgements), 40 kernel (the environment by id, persistent) | 0 | | +2,400 |
 | TM | measured | measured (the audit counts about −70: the pre-scans, the restart, language.wap's mixed fields) | | ≈ −70 |
-| T3 | 350 analyze (unification 180, numerals at their expected type 170), 100 analyze (types as terms, the notation's readers), 40 analyze (one pass: headers first, assignments as bindings), 20 rules (kind rules in place), 200 types (the numbers prelude) | 524 (504 analyze: the 464 below and 40 of restarts and retypings; 20 rules: the refiring) | letters.wap (235), fits.wap (189), typed_readings and analyze's own numerals (40) | +186 |
-| T4 | 450 analyze (conditions, obligations, conversions, below), 100 types | 141 analyze | conditions.wap (141) | +409 |
-| T5 | 1,000 analyze (declarations, match, recursion, blocks, statements, sums), 200 types (data), 200 emit (erasure) | 341 (191 analyze, 150 emit) | matching.wap (191); emit's shape guessing that erasure replaces (150) | +1,059 |
+| T3 | 350 analyze (unification 180, numerals at their expected type 170), 100 analyze (types as terms, the notation's readers), 40 analyze (one pass: headers first, assignments as bindings), 20 rules (kind rules in place), 200 types (the numbers prelude) | 100 (80 analyze: the 40 below and 40 of restarts and retypings; 20 rules: the refiring) | typed_readings and analyze's own numerals (40); letters.wap and fits.wap stay, T5 deletes them | +610 |
+| T4 | 450 analyze (conditions, obligations, conversions, below), 100 types | 0 | conditions.wap stays and grows, T5 deletes it | +550 |
+| T5 | 1,000 analyze (declarations, match, recursion, blocks, statements, sums), 200 types (data), 200 emit (erasure) | 967 (817 analyze, 150 emit) | matching.wap (192), letters.wap (286), fits.wap (196), conditions.wap (143); emit's shape guessing that erasure replaces (150) | +433 |
 | T6 | 500 analyze (effects, instances, laws, tested), 30 analyze (protocols as traits), 150 types (logic, effects) | 227 analyze | dispatch.wap (227): overloads become instances | +453 |
 | T7 | 0 | 0 in the compiler; the rest of the extension | | 0 |
 | T8 | 200 emit and types | 20 | | +180 |
-| **all** | **6,000** | **1,433** | **1,023 of analyze** | **+4,567** |
+| **all** | **6,000** | **1,494** | **1,084 of analyze** | **+4,506** |
 
-The compiler ends at about 16,891 lines, near the ballpark of 17,000, with the deletions above (5.3). A step that
+Measured, the compiler is at 16,067 lines with T4 underway; with the rest of T4, T5, T6 and T8 as estimated it ends
+near 17,700 if T5 keeps the analyze files, about 17,100 with the four deleted as its row says, near the ballpark of
+17,000 (5.3). A step's deletions belong in its gate, measured by a script (the file is gone), as its tests are. A step that
 needs more lines takes them and reports its measured lines; only a jump far above the ballpark goes to the
 interviewer.
 
