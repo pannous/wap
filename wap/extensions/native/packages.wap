@@ -11,8 +11,7 @@ use "compiler.wap"
 # the default registry, one folder per package (`--registry <git url or folder>` names another), and where a clone of
 # one is kept: the cache of fetched packages beside it, ~/.cache/wap/packages/
 REGISTRY := "https://github.com/pannous/warp-packages.git"
-CACHE_FOLDER_IN_HOME := "/.cache/wap/packages"
-REGISTRY_CLONE := "/.registry"
+REGISTRY_CLONE_IN_HOME := "/.cache/wap/registry"
 PACKAGES_FOLDER := "/packages/"
 # the pins and redirects beside a program (the compiler reads them, extensions/packages.wap)
 PINS_FILE := "packages.wap"
@@ -27,7 +26,7 @@ SOURCE_ENDINGS := [".wap", ".warp"]
 REGISTRY_TAG_MARK := "@"
 REPOSITORY_TAG_MARK := "v"
 
-registry_given = REGISTRY
+registry_given: text = REGISTRY
 
 # the packages the compile of a program (its file, or code for "-") stopped at, fetched and linked: whether it stopped
 # so, and compiles again
@@ -38,41 +37,58 @@ packages_fetched(program: text, code: text, module: text): bool := {
 	yes
 }
 # each package a program uses that it does not hold, as the compiler says where it comes from (into the file
-# `listed`), fetched and linked
+# `listed`), fetched and linked, then each package's own the same way, each main file once
 packages_linked(program: text, code: text, listed: text) := {
 	registry = registry_folder()
-	if not module_ran(module_loaded(compiler_path), [compiler_path, USES_COMMAND, program, registry, listed], compiler_path, code) { exit(1) }
-	for line in file_text(listed).split("\n").filter(line => line != "") { package_linked(line, registry, listed, if code == "" then folder_of(program) else ".") }
+	users = [program]
+	done = 0
+	while done < #users {
+		user = users#(done + 1)
+		given = if done == 0 then code else ""
+		if not module_ran(module_loaded(compiler_path), [compiler_path, USES_COMMAND, user, registry, listed], compiler_path, given) { exit(1) }
+		for line in file_text(listed).split("\n").filter(line => line != "") {
+			main = package_linked(line, registry, if given == "" then folder_of(user) else ".")
+			if main != "" and not users.contains(main) { users.add(main) }
+		}
+		done += 1
+	}
 	unlink(listed)
 }
-# a package's line `<name> <source> <version>` fetched and linked as <folder>/packages/<name>, then the packages its
-# main file uses
-package_linked(line: text, registry: text, listed: text, folder: text) := {
+# a package's line `<name> <source> <version>` fetched and linked as <folder>/packages/<name>: its main file, "" for
+# none
+package_linked(line: text, registry: text, folder: text): text := {
 	parts = line.split(" ")
 	name = parts#1
 	fetched = if parts#2 == REGISTRY_SOURCE then registry_package(name, parts#3, registry) else repository_package(name, parts#2, parts#3, registry)
 	system("mkdir -p '${folder}${PACKAGES_FOLDER}' && ln -sfn '${fetched}' '${folder}${PACKAGES_FOLDER}${name}'")
-	main = SOURCE_ENDINGS.map(ending => fetched + "/" + name + ending).find(path => access(path, EXISTS) == 0)
-	if main != ø { packages_linked(main!, "", listed) }
+	SOURCE_ENDINGS.map(ending => fetched + "/" + name + ending).find(path => access(path, EXISTS) == 0) ?? ""
 }
 # the registry's folder of the package, at the registry's tag of the version where one is asked
-registry_package(name: text, version: text, registry: text): text := if version == "" then registry + "/" + name else cloned(registry, name + REGISTRY_TAG_MARK + version, cached(registry, name + REGISTRY_TAG_MARK + version)) + "/" + name
+registry_package(name: text, version: text, registry: text): text := if version == "" then held(registry + "/" + name, name, registry) else cloned(registry, at_version(name, version), cached(registry, at_version(name, version))) + "/" + name
+# the registry's folder of a package, a name it has no folder of ends the run, said
+held(folder: text, name: text, registry: text): text := {
+	if access(folder, EXISTS) != 0 { eprint("wap: no package ${name}: neither a module beside the program nor the library holds it, nor the registry ${registry}"); exit(1) }
+	folder
+}
 # a repository (owner/repo on GitHub, a git url or a folder) at the tag of the version, else its default branch
 repository_package(name: text, repository: text, version: text, registry: text): text := {
 	place = if repository.contains(":") or repository.starts_with("/") then repository else GITHUB + repository + GIT_ENDING
-	if version == "" then cloned(place, "", cached(registry, name)) else cloned(place, REPOSITORY_TAG_MARK + version, cached(registry, name + REGISTRY_TAG_MARK + version))
+	cloned(place, if version == "" then "" else REPOSITORY_TAG_MARK + version, cached(registry, at_version(name, version)))
 }
-# a fetched package's folder in the cache, which is the registry's own folder's
-cached(registry: text, named: text): text := folder_of(registry) + "/" + named
+# a package's name at a version, `colors@1.0.0`, the registry's tag of it and its folder in the cache; the name alone
+# for the newest
+at_version(name: text, version: text): text := if version == "" then name else name + REGISTRY_TAG_MARK + version
+# a fetched package's folder in the cache, packages/ beside the registry's folder: ~/.cache/wap/packages/
+cached(registry: text, named: text): text := folder_of(registry) + PACKAGES_FOLDER + named
 # a repository cloned once into the folder at a tag, or its default branch for "": the folder; a clone that fails
 # ends the run, said
 cloned(place: text, tag: text, folder: text): text := {
 	if access(folder, EXISTS) == 0 { return folder }
 	if system("mkdir -p '${folder_of(folder)}' && git clone -q --depth 1 ${if tag == "" then "" else "--branch '${tag}'"} '${place}' '${folder}' 2>/dev/null") != 0 {
-		eprint("wap: cannot fetch ${file_name(folder)} from ${place}${if tag == "" then "" else " at ${tag}"}")
+		eprint("wap: cannot fetch ${place}${if tag == "" then "" else " at ${tag}"}")
 		exit(1)
 	}
 	folder
 }
 # the registry's folder: a folder --registry names as it is, else its clone in the cache, made once
-registry_folder(): text := if access(registry_given, EXISTS) == 0 then registry_given else cloned(registry_given, "", getenv("HOME") + CACHE_FOLDER_IN_HOME + REGISTRY_CLONE)
+registry_folder(): text := if access(registry_given, EXISTS) == 0 then registry_given else cloned(registry_given, "", getenv("HOME") + REGISTRY_CLONE_IN_HOME)

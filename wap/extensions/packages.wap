@@ -5,6 +5,10 @@
 # `<name> <source> <version>`, the source "registry" or a repository, the version "" for the newest.
 use "../core/pipeline.wap"
 use "../core/analyze/declarations.wap"
+use "../core/paths.wap"
+use "../core/parse/cascade.wap"
+use "../core/parse/reader.wap"
+use "../core/format.wap"
 
 PINS_FILE = "packages.wap"
 MANIFEST_FILE = "package.wap"
@@ -20,26 +24,29 @@ PACKAGES_WANTED = 3
 # the lines of the packages a program uses, or the pins file names: each by its pin, else by the registry's folder of
 # its name
 packages_wanted(language: Language, program: text, registry: text) as list<text> := {
-	pins = fields_of(language, beside(program, PINS_FILE))
-	(if file_name(program) == PINS_FILE then pins.keys else unfound_uses(language, program)).map(name => package_line(language, name, pins.get(name), registry))
+	pins_file = beside(program, PINS_FILE)
+	pins = fields_of(language, pins_file)
+	(if pins_file == normalized_path(program) then pins.keys else unfound_uses(program)).map(name => package_line(language, name, pins.get(name), registry))
 }
-# the names the program's `use name` lines give that no module beside it nor the library holds
-unfound_uses(language: Language, program: text) as list<text> := {
-	statements = top_level_statements(read_notation(language, program))
-	statements.filter(statement => phrase_part(statement, USE_WORD) is symbol and not module_found(text(phrase_part(statement, USE_WORD)!), statement, program)).map(statement => text(phrase_part(statement, USE_WORD)!))
+# the names the program's `use name` lines give that no module beside it nor the library holds, its use lines read
+# alone: reading it whole would refuse at the first such use (core/pipeline.wap line_told)
+unfound_uses(program: text) as list<text> := {
+	uses = read(program).split("\n").filter(line => line.starts_with(USE_WORD + " ")).join("\n")
+	names = top_level_statements(notation(uses, program)).map(statement => phrase_part(statement, USE_WORD)).filter(named => named is symbol)
+	names.filter(named => not module_found(named!, program)).map(named => text(named!))
 }
-module_found(name: text, statement: Node, program: text) as bool := try { module_named(name, statement, program); yes } catch e { no }
+module_found(named: Node, program: text) as bool := try { module_named(text(named), named, program); yes } catch e { no }
 # where a package comes from: a pin `name: 1.0.0` is the registry's at that tag, `name: owner/repo@1.2.3` or a git url
 # that repository, `{repository: …, version: …}` both; no pin: the registry's folder, or the repository its manifest
 # names at the manifest's version (a proxy)
 package_line(language: Language, name: text, pin: Node?, registry: text) as text := {
 	if pin == ø {
 		manifest = fields_of(language, registry + "/" + name + "/" + MANIFEST_FILE)
-		return if manifest.has(REPOSITORY_FIELD) then fields_line(name, manifest) else line_of(name, REGISTRY_SOURCE, "")
+		return if manifest.has(REPOSITORY_FIELD) then fields_line(language, name, manifest) else line_of(name, REGISTRY_SOURCE, "")
 	}
 	match pin! {
-		List(fields, bracket, separator) => fields_line(name, fields_from(fields))
-		_ => repository_line(name, text(pin!))
+		List(fields, Bracket.Curly, separator) => fields_line(language, name, fields_from(fields))
+		_ => repository_line(name, as_written(language, pin!))
 	}
 }
 # `owner/repo@1.2.3`, a git url, or a version of the registry's package
@@ -47,8 +54,10 @@ repository_line(name: text, written: text) as text := {
 	parts = written.split(VERSION_MARK)
 	if not written.contains("/") then line_of(name, REGISTRY_SOURCE, written) else line_of(name, parts#1, if #parts > 1 then parts#2 else "")
 }
-fields_line(name: text, fields: map<text, Node>) as text := line_of(name, field_text(fields, REPOSITORY_FIELD), field_text(fields, VERSION_FIELD))
-field_text(fields: map<text, Node>, key: text) as text := text(fields.get(key) ?? Text(""))
+fields_line(language: Language, name: text, fields: map<text, Node>) as text := line_of(name, field_text(language, fields, REPOSITORY_FIELD), field_text(language, fields, VERSION_FIELD))
+field_text(language: Language, fields: map<text, Node>, key: text) as text := as_written(language, fields.get(key) ?? Text(""))
+# a value as the file wrote it, a text's own letters: `1.0.0` too, which reads as a number glued to .0
+as_written(language: Language, value: Node) as text := match value { Text(letters) => letters; _ => formatted(language, value) }
 line_of(name: text, source: text, version: text) as text := "${name} ${source} ${version}"
 # a file of `key: value` lines as a map of its values by key; empty for no file
 fields_of(language: Language, file: text) as map<text, Node> := if exists(file) then fields_from(top_level_statements(read_notation(language, file))) else {}
