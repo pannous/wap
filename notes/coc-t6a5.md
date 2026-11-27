@@ -56,12 +56,21 @@ reads them and adds nothing there.
 2. **False** (types). `False` is a types word naming the kernel's ·False, declared in types/logic.wap beside the
    kernel names T6a6 brings (coc-t6a.md "T6a5 re-read": +2 here, not +8). With it, `loop(): False := loop()` is
    typed at the kernel's False, and `law oops: False := loop()` meets part 1's claim.
-3. **Exists** (types + sugar). A one-case structure with a parameter and no index, so it needs no T6a3:
+3. **Exists** (types + sugar), after T6a3's enum header. Exists is a one-case structure over two parameters,
    `enum Exists(T: Type, P: T -> Prop): Prop { intro(witness: T, holds: P(witness)) }` in types/logic.wap
-   (types +1). `exists n: nat where body` is a sugar rule, `Exists(nat, (n: nat) => body)`, in sugar/ (a spelling
-   plain wap cannot parse: the binder after a word, spec: wiki/proposition.md). T5b2's blocks declare an enum with
-   parameters already; a field whose type applies a parameter, `P(witness)`, is the one thing to check first. If
-   blocks refuse it, this part waits for T6a3's dependent fields and parts 1, 2 and 4 land without it.
+   (types +1), and `exists n: nat where body` a sugar rule, `Exists(nat, (n: nat) => body)` (spec:
+   wiki/proposition.md). Checked on unify 5495afde with T6a7's compiler: no enum with a header compiles yet, even
+   without the dependent field. `enum Boxed(T: Type): Type { box(item: T) }` is refused "wap does not lower this
+   form yet". Three places stop it:
+   - sugar/records.wap:80, `rule enum $name { $cases... }`, reads only a bare name; `enum Pick: Prop { … }` is
+     refused "nothing defines this name".
+   - rules/lowering.wap:76 lowers `Key(head, Op.None, {…})` only where head is a name, so `Exists(…): Prop {…}`
+     reaches not_lowered.
+   - analyze/inductives.wap:60 declares every block with no parameters, `InductiveBlock([], 0, types)`, each block
+     type at Type (DATA_TERM): no parameter, no Prop, no field over a parameter.
+   These are T6a3's "header and cases with indices" (+50 of its +100): the header's parameters and sort read,
+   lowered and given to the block. With them Exists needs no index and no further core. So part 3 lands after
+   T6a3, and parts 1, 2 and 4 land without it. test_proposition_wanted.wap:8 (some_sum) stays red until then.
 4. **The undecided `if`** (analyze, conditions.wap). condition_typed refuses a condition whose type is a
    proposition (its universe is Prop, universe_of from T6a7) with "refused by undecidable condition: wap cannot
    decide whether …; prove it, or compute a bool". The rule word goes beside part 1's in the kernel's rule list.
@@ -75,12 +84,12 @@ reads them and adds nothing there.
 - Core files: core/analyze/effects.wap (+2), core/analyze/conditions.wap (+6), kernel/environment.wap (+2, two rule
   words). Extension: extensions/laws.wap (+2). Types: types/logic.wap (+3, new unless T6a6 is first). Sugar: one
   rule for exists.
-- It waits for t5b-effects on main (the facts and the claim check) and T6a7 (universe_of for part 4). Part 3 checks
-  T5b2's blocks first.
+- Parts 1, 2 and 4 wait for t5b-effects on main (the facts and the claim check) and T6a7 (universe_of for part 4).
+  Part 3 waits for T6a3's enum header.
 
-## Open
+## Decided
 
-- Part 1 makes a proof a program definition on every build, so a program can call `oops()`. proof.md:47 wants
-  that ("a proved law is used by calling it"). Its value is the proof, which a plain compile never runs.
-- Whether the claim refusal's new "refused by effect:" prefix reads well on a plain function's claim too, or only
-  on a proof's. The plan gives it to every claim refusal (one rule, no special case): a claim is the effect rule.
+- A proved law is a callable `! Pure` definition on every build (proof.md:47, "a proved law is used by calling
+  it"). Its value is the proof, which a plain compile never runs.
+- Every claim refusal gets the effect rule's prefix, a proof's and a plain function's alike: one rule, no special
+  case. Its words stay plain English, printed as a sentence.
