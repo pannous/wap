@@ -111,8 +111,8 @@ The languages, each a set of Node shapes:
   A function value is typed `fn<key, captures…>`, its own type, and called directly while it stays one; where it meets
   a typed place or another value it is typed by its signature `(A…) -> R` and carries the facts `adapted` (the
   instance typed for that signature; a λ's instance takes its closure as `any` and casts it itself) and
-  `function_value` (its own type). The emitter makes such a value a funcref with a captures struct and calls it by
-  call_ref (card signature-function-values).
+  `function_value` (its own type). The emitter makes such a value a funcref with a captures struct and calls it through
+  the module's table by `call_indirect`, in both layouts (core/emit/function_values.wap value_call_code).
 - **emit** reads the typed kernel's `type` and `binding` facts and decides nothing about them: it may choose its code
   by them, but computes no type (test_guardrails.wap emit-infers-type).
 
