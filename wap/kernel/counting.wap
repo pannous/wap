@@ -1,0 +1,178 @@
+# The count core declares (notes/unify-provers.md "count_declared and int_declared"): the natural numbers int's cases
+# carry, `enum ·count { zero; successor(c: ·count) }`, the functions on them int's meanings are made of, and their
+# shortcuts, so a function on two literals computes at once. Each shortcut is fixed by theorems the kernel checks:
+# those computing proves are made from the statements the shortcut needs, the rest proved by the count's recursor.
+# Every name carries the mark `·`, so no program writes or meets it.
+
+use "terms.wap"
+use "levels.wap"
+use "environment.wap"
+use "typing.wap"
+use "inductive.wap"
+use "recursors.wap"
+use "numbers.wap"
+use "equality.wap"
+use "logic.wap"
+
+COUNT := "·count"
+COUNT_ZERO := "·count.zero"
+COUNT_SUCCESSOR := "·count.successor"
+PREDECESSOR := "·predecessor"
+IS_ZERO := "·is_zero"
+ADD := "·add"
+SUBTRACT := "·subtract"
+MULTIPLY := "·multiply"
+COMPARED := "·compared"
+EQUALS := "·equals"
+AT_MOST := "·at_most"
+# int's cases under its word: zero, n + 1 and -(n + 1) of a count n
+INT_CASES := ["zero", "positive", "negative"]
+UPS := "·ups"
+DOWNS := "·downs"
+DIFFERENCE := "·difference"
+MINUS := "·minus"
+SUM := "·sum"
+TIMES := "·times"
+EQUAL_INTEGERS := "·equal_integers"
+NOT_ABOVE := "·not_above"
+BELOW := "·below"
+ABOVE := "·above"
+NOT_BELOW := "·not_below"
+SUBTRACTED := "·subtracted"
+UNEQUAL := "·unequal"
+# the meaning of each host operation on two ints, the function its row is defined as (core/analyze/terms.wap)
+INT_MEANINGS := {"i64.add": SUM, "i64.sub": SUBTRACTED, "i64.mul": TIMES, "i64.eq": EQUAL_INTEGERS, "i64.ne": UNEQUAL, "i64.le_s": NOT_ABOVE, "i64.lt_s": BELOW, "i64.gt_s": ABOVE, "i64.ge_s": NOT_BELOW}
+# the name of a shortcut's fixing theorem: its function's name and its place among them
+FIXED := " fixed "
+
+# A term builder over one checker: a function of a binder, its body made from the binder's variable
+class Building { e: Environment; c: Checker }
+function_of(b: Building, name: text, type: Term, body: (Term) -> Term): Term := {
+	x = entered(b.c, name, type)
+	lambdas([x], body(x.variable))
+}
+named(b: Building, name: text): Term := constant_of(b.e, name, [])
+called(b: Building, name: text, arguments: list<Term>): Term := apply_all(named(b, name), arguments)
+# the count's recursor at a level: into the motive's type of each count, from the base at zero and the step from each
+# count and the motive at it
+counted(b: Building, level: Level, motive: (Term) -> Term, base: Term, step: (Term, Term) -> Term, major: Term): Term := {
+	count = named(b, COUNT)
+	arms = [function_of(b, "t", count, motive), base, function_of(b, "k", count, k => function_of(b, "r", motive(k), r => step(k, r)))]
+	apply_all(constant_of(b.e, recursor_name(COUNT), [level]), arms + [major])
+}
+# a definition of binders of one type, its value made from their variables
+defined_over(b: Building, name: text, domain: Term, binders: list<text>, result: Term, value: (list<Term>) -> Term) := {
+	locals = binders.map(binder => entered(b.c, binder, domain))
+	declared(b.e, Declaration(name, [], pis(locals, result), Defined(lambdas(locals, value(variables(locals))))))
+}
+
+count_declared(e: Environment) := {
+	header = universe(TYPE_LEVEL)
+	inductive_declared(e, InductiveBlock([], 0, [BlockType(COUNT, header, [WrittenCase(COUNT_ZERO, pi(COUNT, header, bound(0))), WrittenCase(COUNT_SUCCESSOR, pi(COUNT, header, pi("c", bound(0), bound(1))))])]))
+	numbers_declared(e, constant_of(e, COUNT, []), e.literals!.yes_case, constant_of(e, EQUAL, []))
+	b = Building(e, checker(e, []))
+	count = named(b, COUNT)
+	truths = e.literals!
+	to_count = (t: Term) => count
+	to_truth = (t: Term) => truths.truth
+	next = (t: Term) => apply(named(b, COUNT_SUCCESSOR), t)
+	defined_over(b, PREDECESSOR, count, ["n"], count, x => counted(b, TYPE_LEVEL, to_count, named(b, COUNT_ZERO), (k, r) => k, x#1))
+	defined_over(b, IS_ZERO, count, ["n"], truths.truth, x => counted(b, TYPE_LEVEL, to_truth, truths.yes_case, (k, r) => truths.no_case, x#1))
+	defined_over(b, ADD, count, ["m", "n"], count, x => counted(b, TYPE_LEVEL, to_count, x#1, (k, r) => next(r), x#2))
+	defined_over(b, SUBTRACT, count, ["m", "n"], count, x => counted(b, TYPE_LEVEL, to_count, x#1, (k, r) => called(b, PREDECESSOR, [r]), x#2))
+	defined_over(b, MULTIPLY, count, ["m", "n"], count, x => counted(b, TYPE_LEVEL, to_count, named(b, COUNT_ZERO), (k, r) => called(b, ADD, [r, x#1]), x#2))
+	# m compared with every count: at zero the answer for each n, past zero the step that compares m's successor with n
+	# by comparing m with the count before n; zero is never a successor
+	comparison = pi("_", count, truths.truth)
+	at_zero = entered(b.c, "at_zero", comparison)
+	m = entered(b.c, "m", count)
+	compared = counted(b, TYPE_LEVEL, t => comparison, at_zero.variable, (k, before) => function_of(b, "n", count, n => counted(b, TYPE_LEVEL, to_truth, truths.no_case, (j, r) => apply(before, j), n)), m.variable)
+	declared(e, Declaration(COMPARED, [], pis([at_zero, m], comparison), Defined(lambdas([at_zero, m], compared))))
+	defined_over(b, EQUALS, count, ["m", "n"], truths.truth, x => apply(called(b, COMPARED, [named(b, IS_ZERO), x#1]), x#2))
+	defined_over(b, AT_MOST, count, ["m", "n"], truths.truth, x => apply(called(b, COMPARED, [function_of(b, "k", count, k => truths.yes_case), x#1]), x#2))
+	shortcut_fixed(b, Shortcut.Add, ADD)
+	shortcut_fixed(b, Shortcut.Subtract, SUBTRACT)
+	shortcut_fixed(b, Shortcut.Multiply, MULTIPLY)
+	shortcut_fixed(b, Shortcut.Equal, EQUALS)
+	shortcut_fixed(b, Shortcut.AtMost, AT_MOST)
+}
+
+# A shortcut bound to a function, each statement fixing it declared a theorem: proved by computing where both sides
+# compute to one count, else by the count's recursor (subtract's two, counting down to zero)
+shortcut_fixed(b: Building, kind: Shortcut, function: text) := {
+	statements = shortcut_statements(b.e.numbers!, kind, [named(b, function)])
+	names = (1 to #statements).map(at => "${function}${FIXED}${at}")
+	for at in 1 to #statements { declared(b.e, Declaration(names#at, [], statements#at, Theorem(fixing_proof(b, kind, at, statements#at)))) }
+	shortcut_bound(b.e, kind, [named(b, function)] + names.map(name => named(b, name)))
+}
+fixing_proof(b: Building, kind: Shortcut, at: int, statement: Term): Term := if kind == Shortcut.Subtract and at == 2 then zero_subtract_proof(b) else if kind == Shortcut.Subtract and at == 3 then successors_subtract_proof(b) else computed_proof(b, statement)
+# a proof by computing of `Π binders. Equal(T, left, right)`: refl of the right side under the same binders
+computed_proof(b: Building, statement: Term): Term := match statement.shape {
+	Pi(binder, domain, body) => lambda(binder, domain, computed_proof(b, body))
+	_ => {
+		sides = arguments(statement)
+		reflexive(b.e, TYPE_LEVEL, sides#1, sides#3)
+	}
+}
+# `subtract(zero, n) == zero`, by the count's recursor: each step takes the count before both sides
+zero_subtract_proof(b: Building): Term := {
+	zero = named(b, COUNT_ZERO)
+	stated = (k: Term) => counts_equal(b, called(b, SUBTRACT, [zero, k]), zero)
+	function_of(b, "n", named(b, COUNT), n => counted(b, Zero, stated, reflexive(b.e, TYPE_LEVEL, named(b, COUNT), zero), (k, h) => before_both(b, called(b, SUBTRACT, [zero, k]), zero, h), n))
+}
+# `subtract(successor(m), successor(n)) == subtract(m, n)`, by the count's recursor on n
+successors_subtract_proof(b: Building): Term := {
+	count = named(b, COUNT)
+	next = (t: Term) => apply(named(b, COUNT_SUCCESSOR), t)
+	function_of(b, "m", count, m => function_of(b, "n", count, n => {
+		stated = (k: Term) => counts_equal(b, called(b, SUBTRACT, [next(m), next(k)]), called(b, SUBTRACT, [m, k]))
+		counted(b, Zero, stated, reflexive(b.e, TYPE_LEVEL, count, m), (k, h) => before_both(b, called(b, SUBTRACT, [next(m), next(k)]), called(b, SUBTRACT, [m, k]), h), n)
+	}))
+}
+counts_equal(b: Building, left: Term, right: Term): Term := equated(b.e, TYPE_LEVEL, named(b, COUNT), left, right)
+# from `left == right`, `predecessor(left) == predecessor(right)`
+before_both(b: Building, left: Term, right: Term, h: Term): Term := apply_all(constant_of(b.e, EQUAL_CONGRUENT, [TYPE_LEVEL, TYPE_LEVEL]), [named(b, COUNT), named(b, COUNT), named(b, PREDECESSOR), left, right, h])
+
+# `enum int { zero; positive(n: ·count); negative(n: ·count) }`, filling the word core names int by: positive(n) is
+# n + 1 and negative(n) is -(n + 1), so each int has one form. Its functions go by its two counts, an int x being
+# ups(x) - downs(x): only ups, downs, minus and difference see its cases
+int_declared(e: Environment, word: text) := {
+	header = universe(TYPE_LEVEL)
+	count = constant_of(e, COUNT, [])
+	cases = INT_CASES.map(case => WrittenCase("${word}.${case}", if case == INT_CASES#1 then pi(word, header, bound(0)) else pi(word, header, pi("n", count, bound(1)))))
+	inductive_declared(e, InductiveBlock([], 0, [BlockType(word, header, cases)]))
+	b = Building(e, checker(e, []))
+	int = named(b, word)
+	truth = e.literals!.truth
+	case = (at: int) => named(b, "${word}.${INT_CASES#at}")
+	zero = named(b, COUNT_ZERO)
+	next = (t: Term) => apply(named(b, COUNT_SUCCESSOR), t)
+	split = (result: Term, x: Term, at_zero: Term, at_positive: (Term) -> Term, at_negative: (Term) -> Term) => apply_all(constant_of(e, recursor_name(word), [TYPE_LEVEL]), [function_of(b, "t", int, t => result), at_zero, function_of(b, "n", count, at_positive), function_of(b, "n", count, at_negative), x])
+	defined_over(b, UPS, int, ["x"], count, x => split(count, x#1, zero, next, n => zero))
+	defined_over(b, DOWNS, int, ["x"], count, x => split(count, x#1, zero, n => zero, next))
+	defined_over(b, MINUS, int, ["x"], int, x => split(int, x#1, case(1), n => apply(case(3), n), n => apply(case(2), n)))
+	# m - n of two counts in its one form: negative where n passes m, else zero or positive
+	defined_over(b, DIFFERENCE, count, ["m", "n"], int, x => counted(b, TYPE_LEVEL, t => int, counted(b, TYPE_LEVEL, t => int, case(1), (k, r) => apply(case(2), k), called(b, SUBTRACT, [x#1, x#2])), (k, r) => apply(case(3), k), called(b, SUBTRACT, [x#2, x#1])))
+	ups = (t: Term) => called(b, UPS, [t])
+	downs = (t: Term) => called(b, DOWNS, [t])
+	add = (l: Term, r: Term) => called(b, ADD, [l, r])
+	multiply = (l: Term, r: Term) => called(b, MULTIPLY, [l, r])
+	# two ints' counts crossed: ups(a) + downs(b) against ups(b) + downs(a)
+	crossed = (name: text, a: Term, c: Term) => called(b, name, [add(ups(a), downs(c)), add(ups(c), downs(a))])
+	defined_over(b, SUM, int, ["a", "b"], int, x => called(b, DIFFERENCE, [add(ups(x#1), ups(x#2)), add(downs(x#1), downs(x#2))]))
+	defined_over(b, TIMES, int, ["a", "b"], int, x => called(b, DIFFERENCE, [add(multiply(ups(x#1), ups(x#2)), multiply(downs(x#1), downs(x#2))), add(multiply(ups(x#1), downs(x#2)), multiply(downs(x#1), ups(x#2)))]))
+	defined_over(b, EQUAL_INTEGERS, int, ["a", "b"], truth, x => crossed(EQUALS, x#1, x#2))
+	defined_over(b, NOT_ABOVE, int, ["a", "b"], truth, x => crossed(AT_MOST, x#1, x#2))
+	defined_over(b, BELOW, int, ["a", "b"], truth, x => called(b, NOT_ABOVE, [called(b, SUM, [x#1, apply(case(2), zero)]), x#2]))
+	defined_over(b, ABOVE, int, ["a", "b"], truth, x => called(b, BELOW, [x#2, x#1]))
+	defined_over(b, NOT_BELOW, int, ["a", "b"], truth, x => called(b, NOT_ABOVE, [x#2, x#1]))
+	defined_over(b, SUBTRACTED, int, ["a", "b"], int, x => called(b, SUM, [x#1, called(b, MINUS, [x#2])]))
+	defined_over(b, UNEQUAL, int, ["a", "b"], truth, x => called(b, NEGATED, [called(b, EQUAL_INTEGERS, [x#1, x#2])]))
+}
+# the function a host operation on two ints means, ø for any other
+int_meaning(e: Environment, operation: text): Term? := if INT_MEANINGS.has(operation) then constant_of(e, INT_MEANINGS[operation], []) else ø
+# a whole number as int's case, its payload a count literal
+int_numeral(e: Environment, word: text, value: int): Term := {
+	case = (at: int) => constant_of(e, "${word}.${INT_CASES#at}", [])
+	if value == 0 then case(1) else if value > 0 then apply(case(2), numeral(value - 1)) else apply(case(3), numeral(-1 - value))
+}
