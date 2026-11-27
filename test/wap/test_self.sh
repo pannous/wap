@@ -48,7 +48,7 @@ check "wap built by itself is a fixed point: wap2 is wap1's bytes" "$(wap1_built
 measured="$stage/self/measured.txt"
 self_compile_time() {
 	wap1_built || return
-	/usr/bin/time -lp $wap "$wap1" "$source_compiler" "$stage/self/compiled.wasm" >"$stage/self/compiled.txt" 2>"$measured" || { cat "$stage/self/compiled.txt" "$measured"; return; }
+	"$tree/scripts/job-slot.sh" --alone /usr/bin/time -lp $wap "$wap1" "$source_compiler" "$stage/self/compiled.wasm" >"$stage/self/compiled.txt" 2>"$measured" || { cat "$stage/self/compiled.txt" "$measured"; return; }
 	seconds=$(awk '$1 == "user" || $1 == "sys" { cpu += $2 } END { printf "%d", cpu }' "$measured")
 	[ $seconds -lt $SELF_COMPILE_SECONDS ] && echo "under a minute" || echo "$seconds s CPU"
 }
