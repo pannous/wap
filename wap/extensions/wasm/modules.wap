@@ -1,7 +1,8 @@
-# A compiled module used as source (wiki/wasm-representation.md "Export names"): `use "m.wasm"` reads m's export
-# section, where each function's name is its header line, `add(a: int, b: int = 1) → int`, and declares each as a
-# function of m, a foreign primitive the host links by m's path (core/emit/host.wap foreign_imported). What wasm erases
-# travels in m's wap section as wap source, read before the exports' declarations.
+# A compiled module used as its code (wiki/wasm-representation.md "Format"): `use "m.wasm"` brings in m's wap section,
+# its files as the compiler read them, packed (extensions/packed.wap) as the warm state packs the compiler's own
+# (extensions/warm.wap): what wasm erases (rules, classes, the bodies that travel along) and a definition of each
+# function and value m exports under its header line, `add(a: int, b: int = 1) → int`, a foreign primitive the host
+# links by m's path (core/emit/host.wap foreign_imported). No source is read, so m needs none beside it.
 use "../../kernel/forms.wap"
 use "../../core/parse/cascade.wap"
 use "../../core/analyze/calls.wap"
@@ -13,18 +14,25 @@ use "../../core/stage.wap"
 use "../../core/paths.wap"
 use "../../core/errors.wap"
 use "../../core/parse/reader.wap"
+use "../../core/parse/operators.wap"
+use "../../core/language.wap"
+use "../../core/pipeline.wap"
+use "../packed.wap"
+use "../warm.wap"
 
 # the bytes before the first section (magic and version)
 PREAMBLE_BYTES = 8
 # what a header line writes before its result type, and the high bit of a LEB128 byte, set on all but the last
 RESULT_ARROW = " → "
 MORE_BYTES = 128
-# the ending of a source file, and the name of a carried file's section before its name
+# the ending of a source file
 SOURCE_ENDING = ".wap"
-PART_SECTION = "wap "
+# what a module's wap section writes for its own path, a file inside it after it (`<module>/host.wap`), and for the
+# name a host links it by (linked_name)
+MODULE_MARK = "<module>"
+LINKED_MARK = "<linked>"
 # the custom section holding the folder of the held modules a module imports by their file names
 LIBRARY_SECTION = "wap.library"
-# the parts of the names of wasm's instructions on the linear memory
 
 # the modules the compiler holds in its own bytes (the library, library.wap) by the path each stands for; each is
 # written once beside that path, named by its hash, where a host links it
@@ -44,15 +52,22 @@ held_written() := for path in held_modules.keys {
 	if not exists(file) { write_bytes(file, held_modules[path].bytes) }
 }
 
-# the source a compiled module stands for: its wap section, then a definition of each function and value it exports
-# under its header line, the module named as the host finds it (linked_name)
-wasm_source(path: text) as text := {
-	bytes = module_read(path)
-	named = linked_name(path)
-	exports = exports_of(bytes)
-	# its values first: the code of its wap section reads them
-	(exports.filter(item => item.kind == GLOBAL_KIND).map(item => foreign_value(named, item.header)) + [custom_text(bytes, WAP_SECTION)] + exports.filter(item => item.kind != GLOBAL_KIND).map(item => foreign_definition(named, item.header))).join("\n")
+# a compiled module brought in as its wap section holds it, each of its files operated already, those it carries
+# inside it (`m.wasm/host.wap`); a section of no packed code is refused, as a module built before packing
+module_brought(language: Language, path: text) as bool := {
+	section = custom_text(module_read(path), WAP_SECTION)
+	if section == "" { raise "${path} holds no wap code: compile it again" }
+	match unpack(section, written => in_module(written, path)) {
+		List(files, bracket, separator) => for file in files { match file {
+			Key(Text(at), op, List(kept, square, comma)) => file_brought(language, at, kept)
+			_ => raise "${path}: its wap section holds no file: compile it again"
+		} }
+		_ => raise "${path}: its wap section holds no files: compile it again"
+	}
+	yes
 }
+# a path the section writes, as the module at the path stands for it
+in_module(written: text, path: text) as text := if written == LINKED_MARK then linked_name(path) else if written.starts_with(MODULE_MARK) then path + written[#MODULE_MARK ..] else written
 # `x: int = prim foreign("m.wasm", "x: int")`: m's global, the one x every module using m shares
 foreign_value(path: text, header: text) as text := "${header} = prim foreign(\"${path}\", \"${header}\")"
 
@@ -78,18 +93,36 @@ library_exports(modules: list<Module>) as list<Signature> := {
 }
 compiled_body(statement: Node) as bool := match statement { Call(called, arguments) => not arguments#2 is Prim; _ => no }
 defined_by(statement: Node, ids: list<text>) as bool := declaration_of(statement) != ø and ids.contains(definer_id(declaration_name(declaration_of(statement)!)))
-# the wap section's source: the module's files as written, each top-level statement but the definitions compiled
-# once, which their export names declare, and the includes, whose files follow in their place
-header_source(file: text, module: Module, exported: list<Signature>, container: text, carried: list<text> = []) as text := {
+# the wap section: the module's file as read, without the definitions compiled once, a definition of each export under
+# its header line in their place, its values' first, as the code reads them; then each file it carries. Each path in
+# them, a place's or a use's, is written inside the module, so a use reads no file beside it
+module_section(language: Language, file: text, module: Module, exported: list<Signature>, exports: list<ModuleExport>, carried: list<text>) as text := {
 	cut = exported.map(signature => line_place(defining_statement(module.code, signature)!))
-	written_files(file).map(written => kept_lines(written, cut, container, carried)).join("")
+	code = language.operated[file].code
+	kept = top_level_statements(code).filter(statement => not cut.contains(line_place(statement_place(statement)))).map(statement => carried_used(language, file, statement, carried))
+	values = operated_lines(language, file, exports.filter(item => item.kind == GLOBAL_KIND).map(item => foreign_value(LINKED_MARK, item.header)))
+	functions = operated_lines(language, file, exports.filter(item => item.kind != GLOBAL_KIND).map(item => foreign_definition(LINKED_MARK, item.header)))
+	own = Operated(with_facts_of(List(values + kept + functions, Bracket.None, Separator.Newline), code), language.operated[file].words)
+	inside = written_files(file)
+	pack(List([file_entry(file, own)] + carried.map(path => file_entry(path, language.operated[path])), Bracket.Square, Separator.Comma), written => module_written(written, inside, carried))
 }
+# lines of wap read as the file's code
+operated_lines(language: Language, file: text, lines: list<text>) as list<Node> := if lines is empty then [] else top_level_statements(read_in(language, file, () => operated_program(language, notation(lines.join("\n"), file))))
+# a use of a file the module carries, written by the file's whole path, which the section writes inside the module
+carried_used(language: Language, file: text, statement: Node, carried: list<text>) as Node := {
+	path = beside(file_of(statement) ?? file, phrase_text(statement, USE_WORD) ?? return statement)
+	if carried.contains(path) then with_facts_of(operated_lines(language, file, ["${USE_WORD} \"${path}\""])#1, statement) else statement
+}
+# a path as the section writes it: the module's file its mark, a file it includes or carries inside it by its name
+module_written(written: text, inside: list<text>, carried: list<text>) as text := if written == inside#1 then MODULE_MARK else if inside.contains(written) or carried.contains(written) then MODULE_MARK + "/" + file_name(written) else written
+# the functions and values a module exports, each under its header line
+module_exports(m: WasmModule) as list<ModuleExport> := m.exports.flat_map(entry => item_export(WasmReader(bytes_text(entry), 0)))
 line_place(statement: Node) as text := "${file_of(statement)}:${line_of(statement)}"
 # a file and the files it includes, in their order
 written_files(file: text) as list<text> := [file] + files_named(notation(read(file), file), INCLUDE_WORD).flat_map(written_files)
-# A compiled module may carry the source files it uses and those they use, each in a custom section of its own by its
-# name (`wap host.wap`), its wap section then using them inside it, `use "types.wasm/host.wap"`, where a carried file's
-# own use finds the one beside it, so reading it reads no file beside it (the library, library.wap)
+# A compiled module may carry the source files it uses and those they use, each an entry of its wap section by its name,
+# its own code then using them inside it, `use "types.wasm/host.wap"`, where a carried file's own use finds the one
+# beside it, so reading it reads no file beside it (the library, library.wap)
 carried_files(file: text) as list<text> := {
 	carried: list<text> = []
 	more = sources_used(written_files(file))
@@ -103,34 +136,8 @@ carried_files(file: text) as list<text> := {
 }
 # the source files the files use, each once
 sources_used(files: list<text>) as list<text> := files.flat_map(file => files_named(notation(read(file), file), USE_WORD)).filter(used => used.ends_with(SOURCE_ENDING)).unique
-carried_sections(files: list<text>) as list<int> := files.flat_map(file => custom_section(PART_SECTION + file_name(file), read(file).bytes))
 file_name(path: text) as text := path.split("/").last
 library_section(folder: text) as list<int> := custom_section(LIBRARY_SECTION, folder.bytes)
-# the source of a file, or of a file a module carries, its path led by the module's: `types.wasm/host.wap`
-part_source(path: text) as text := {
-	parts = path.split("/")
-	at = index_where(parts.take(#parts - 1), part => part.ends_with(MODULE_ENDING))
-	if at == 0 { return read(path) }
-	container = parts.take(at).join("/")
-	name = parts.drop(at).join("/")
-	carried = custom_text(module_read(container), PART_SECTION + name)
-	if carried is empty { raise "${container} carries no ${name}" }
-	carried
-}
-# a file's text without the lines of the statements cut and of its includes, each statement up to the next one, a
-# use of a carried file as from inside the container
-kept_lines(file: text, cut: list<text>, container: text, carried: list<text>) as text := {
-	lines = read(file).split("\n")
-	statements = top_level_statements(notation(read(file), file)).filter(statement => line_of(statement) != ø)
-	starts = statements.map(statement => line_of(statement)!) + [#lines + 1]
-	kept = ""
-	for at in 0 to #statements - 1 {
-		used = phrase_text(statements[at], USE_WORD)
-		if used != ø and carried.contains(beside(file, used!)) { kept += "use \"${container}/${file_name(used!)}\"\n" }
-		else if not cut.contains(line_place(statements[at])) and phrase_text(statements[at], INCLUDE_WORD) == ø { kept += lines[starts[at] - 1 .. starts[at + 1] - 1].join("\n") + "\n" }
-	}
-	kept
-}
 # where a top-level statement is written: its own place, a class's that of its name
 statement_place(statement: Node) as Node := if line_of(statement) == ø and declaration_of(statement) != ø then declaration_name(declaration_of(statement)!) else statement
 
@@ -156,19 +163,9 @@ custom_text(bytes: text, name: text) as text := {
 	}
 	""
 }
-# the functions and values a module's bytes export, read from its export section: each one's header line and its kind
+# a module's bytes read from a place, and a function or value it exports: its header line and its kind
 class WasmReader { bytes: text; at: int = PREAMBLE_BYTES }
 class ModuleExport { header: text; kind: int }
-exports_of(bytes: text) as list<ModuleExport> := {
-	r = WasmReader(bytes)
-	while r.at < byte_count(bytes) {
-		id = next_byte(r)
-		size = unsigned_read(r)
-		if id == EXPORT_SECTION { return (0 upto unsigned_read(r)).flat_map(each => item_export(r)) }
-		r.at += size
-	}
-	[]
-}
 # one export: its name, its kind and its index; kept when its name is a function's header line (main's is none) or a
 # value's
 item_export(r: WasmReader) as list<ModuleExport> := {
