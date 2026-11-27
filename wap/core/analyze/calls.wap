@@ -299,7 +299,7 @@ chosen_definition(n: Node, called: Node, scopes: list, given: list, expected: Te
 	if #fitting > 1 { fitting = most_specific(fitting, types, s) }
 	if #fitting > 1 { fitting = innermost(fitting, scopes) }
 	if #fitting > 1 and wants_value(expected) { fitting = fitting.filter(definition => definition.result != ø and (definition.result) == expected!) }
-	if fitting is empty { refused(n, "no ${called} takes (${types_text(types)}): ${candidates_text(candidates, s)}${words_missing(candidates, types, s)}; define ${called}(${(1 to #types).map(at => "${PARAMETER_NAMES#at}: ${type_text(types#at)}").join(", ")}) to take them") }
+	if fitting is empty { refused(n, words_missing(candidates, types, "${called}", s) ?? "no ${called} takes (${types_text(types)}): ${candidates_text(candidates, s)}; define ${called}(${parameters_proposed(types)}) to take them") }
 	if #fitting > 1 { refused(n, "this reads as a call of each of ${candidates_text(fitting, s)}; write the arguments' types or the type wanted") }
 	fitting#1
 }
@@ -439,29 +439,34 @@ taken_alike(word: Signature, signature: Signature, s: TypingState) as bool := {
 either_takes(a: Term?, b: Term?, s: TypingState) as bool := a == ø or b == ø or [[a!, b!], [b!, a!]].any(pair => conversion(pair#2, pair#1, s) in STATIC_CONVERSIONS or unified(pair#1, pair#2, [], s) != ø or conforms(pair#2, pair#1, s))
 # whether a written type names one of these types, inside list<…>, an optional or a function type too
 mentions_type(type: Term?, names: list<text>) as bool := type != ø and (names.contains(type_text(type!)) or (type_parts(type) ?? []).any(part => mentions_type(part, names)))
-# the protocol words these types lack for these definitions' protocol parameters, as a refusal's fix-it
-words_missing(definitions: list<Signature>, types: list, s: TypingState) as text := {
+# the protocol words these types lack for these definitions' protocol parameters, each once, as the refusal of the call
+# that needs them; ø where none is lacking
+words_missing(definitions: list<Signature>, types: list, caller: text, s: TypingState) as text? := {
 	lacking = []
 	for definition in definitions {
 		if #definition.parameters == #types {
 			for at in 1 to #types {
 				protocol = protocol_named(s.records, definition.parameters#at)
-				if protocol != ø { lacking += words_lacking(types#at, protocol, s) }
+				if protocol != ø { lacking += words_lacking(types#at, protocol, caller, s) }
 			}
 		}
 	}
-	if lacking is empty then "" else "; " + lacking.join("; ")
+	if lacking is empty then ø else lacking.unique.join("; ")
 }
 # a function named as a protocol is its conversion, `x as shape`, and a class's claim of it, `class square: shape {…}`:
 # it takes a typed value whose type does the protocol's words
 claim_checked(claim: Signature, s: TypingState) := {
 	protocol = if #claim.parameters == 1 then protocol_named(s.records, word_term(claim.name)) else ø
 	given = if protocol == ø then ø else claim.parameters#1 ?? refused(claim.definer, "a function named as the protocol ${claim.name} takes a type doing it: `${claim.name}(x: square)`")
-	lacking = if given == ø then [] else words_lacking(given!, protocol!, s)
+	lacking = if given == ø then [] else words_lacking(given!, protocol!, claim.name, s)
 	if lacking is not empty { refused(claim.definer, lacking.join("; ")) }
 }
-# the required words of a protocol a type does not do, each as the fix-it defining it
-words_lacking(given: Term, protocol: Record, s: TypingState) as list<text> := fields_of(protocol).filter(word => not does_word(given, word, s)).map(word => "${type_text(given)} is no ${record_name(protocol)}: define ${declared_name(word)}(x: ${type_text(given)}${", …" * (parameter_count(word) - 1)})")
+# the required words of a protocol a type does not do, each as wiki/trait.md "Conforming" says what the caller needs,
+# with the fix-it defining it: `dot is not Comparable: < needs compare(a: dot, b: dot); define compare(a: dot, b: dot) := …`
+words_lacking(given: Term, protocol: Record, caller: text, s: TypingState) as list<text> := fields_of(protocol).filter(word => not does_word(given, word, s)).map(word => word_lacking(type_text(given), record_name(protocol), caller, "${declared_name(word)}(${parameters_proposed((1 to parameter_count(word)).map(_ => given))})"))
+word_lacking(type: text, protocol: text, caller: text, word: text) as text := "${type} is not ${protocol}: ${caller} needs ${word}; define ${word} := …"
+# the parameters a fix-it proposes for values of these types, `a: dot, b: dot`
+parameters_proposed(types: list) as text := (1 to #types).map(at => "${PARAMETER_NAMES#at}: ${type_text(types#at)}").join(", ")
 does_word(given: Term, word: Node, s: TypingState) as bool := definitions_named(text(declared_name(word)), s).any(definition => does_as(definition, shaped(given, s), parameter_count(word), s))
 # how many parameters a protocol's required word takes, the value's own first
 parameter_count(word: Node) as int := #((function_parts(written_type(declared_type(word))) ?? refused(word, "a protocol's word is a function type")).parameters)
