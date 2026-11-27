@@ -35,7 +35,11 @@ FULL_ENDING := ".full.wasm"
 # Binaryen's features; its compact import section and custom descriptors left out, which wasmtime does not read yet
 # (drop each once it does)
 BINARYEN_FEATURES := "--all-features --disable-compact-imports --disable-custom-descriptors"
+# app.wasm's trim, wasm-opt's passes: all of them by default, `--trim=unused` only drops what nothing reaches,
+# `--trim=none` keeps the module as linked
+TRIM_OPTION := "--trim="
 TRIMMED := "-O2"
+TRIM_PASSES := {"unused": "--remove-unused-module-elements", "none": ""}
 # the name the program itself is merged under, which nothing imports
 PROGRAM_NAME := "program"
 BINARYEN_MISSING := "wap build --wasm: linking or trimming failed; it runs Binaryen's wasm-merge and wasm-opt (brew install binaryen)"
@@ -55,20 +59,35 @@ module_path(name: text, importer: text): text := {
 section_text(path: text, name: text): text := {
 	size_at = host_block(8)
 	bytes = file_read(path, size_at)
-	if bytes == 0 { return "" }
-	at = bytes + WASM_HEADER_BYTES
-	while at < bytes + long_at(size_at) {
-		id = host_byte(at)
-		size = leb_at(at + 1)
-		content = leb_end(at + 1)
-		if id == CUSTOM_SECTION and c_copied(leb_end(content), leb_at(content)) == name {
-			name_end = leb_end(content) + leb_at(content)
-			return c_copied(name_end, content + size - name_end)
-		}
-		at = content + size
-	}
-	""
+	at = if bytes == 0 then 0 else section_at(bytes, long_at(size_at), name)
+	if at == 0 { return "" }
+	content = leb_end(at + 1)
+	name_end = leb_end(content) + leb_at(content)
+	c_copied(name_end, section_end(at) - name_end)
 }
+# the module at the path written again without its custom section of that name
+section_dropped(path: text, name: text) := {
+	size_at = host_block(8)
+	bytes = file_read(path, size_at)
+	at = if bytes == 0 then 0 else section_at(bytes, long_at(size_at), name)
+	if at == 0 { return }
+	file = fopen(path, "wb")
+	fwrite(bytes, 1, at - bytes, file)
+	fwrite(section_end(at), 1, bytes + long_at(size_at) - section_end(at), file)
+	fclose(file)
+}
+# where a module's custom section of that name starts, its id byte, among the module's bytes; 0 where it has none
+section_at(bytes: int, size: int, name: text): int := {
+	at = bytes + WASM_HEADER_BYTES
+	while at < bytes + size {
+		content = leb_end(at + 1)
+		if host_byte(at) == CUSTOM_SECTION and c_copied(leb_end(content), leb_at(content)) == name { return at }
+		at = section_end(at)
+	}
+	0
+}
+# where the section starting at `at` ends
+section_end(at: int): int := leb_end(at + 1) + leb_at(at + 1)
 # the unsigned LEB128 number at the host's address; where the bytes after it start
 leb_at(at: int): int := if host_byte(at) < LEB_PAYLOAD then host_byte(at) else host_byte(at) - LEB_PAYLOAD + LEB_PAYLOAD * leb_at(at + 1)
 leb_end(at: int): int := if host_byte(at) < LEB_PAYLOAD then at + 1 else leb_end(at + 1)
