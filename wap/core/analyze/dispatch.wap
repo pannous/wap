@@ -21,6 +21,7 @@ RAISE_WORD = "raise"
 FIELD_MARK = "."
 # the function that narrows a value to a shape is named after it, `narrowed(Record)`
 NARROWING_WORD = "narrowed"
+UNFAILED_WORD = "unfailed"
 # the obligations left to the run, a line each as `wap check` lists them (wiki/type.md "Proved or checked")
 obligations: list<text> = []
 OBLIGATION_LEFT = "is checked when the program runs"
@@ -215,7 +216,8 @@ tested_places(definition: Signature, types: list, s: TypingState) as list<int> :
 	wanted = definition.parameters#at
 	wanted != ø and dispatchable(wanted, s.records) and tested_fit(wanted, types#at, s)
 })
-tested_fit(wanted: Term, given: Term, s: TypingState) as bool := boxed_fit(wanted, given) or conversion(given, wanted, s) == Conversion.Narrowed
+# a part of a union, or the type a shape among its parts narrows, `Node` of an `int or Error`, is tested for
+tested_fit(wanted: Term, given: Term, s: TypingState) as bool := wanted != given and (boxed_fit(wanted, given) or is_union(given) and union_parts(given).any(part => narrowed_type(part) == wanted)) or conversion(given, wanted, s) == Conversion.Narrowed
 # the arguments as a definition's call reads them once its tests pass: each tested one of its parameter's type
 tested_reads(definition: Signature, reads: list, types: list, s: TypingState) as list := {
 	places = tested_places(definition, types, s)
@@ -230,7 +232,7 @@ named_call(word: text, definitions: list<Signature>, arguments: list, at: Node, 
 	placed_like(Call(called, arguments), at)
 }
 raised(message: text, at: Node, s: TypingState) as Node := raising(Text(message), at, s)
-raising(message: Node, at: Node, s: TypingState) as Node := named_call(RAISE_WORD, definitions_named(RAISE_WORD, s), [message], at, s)
+raising(raised: Node, at: Node, s: TypingState) as Node := named_call(RAISE_WORD, definitions_named(RAISE_WORD, s), [raised], at, s)
 
 # A value where a narrowing of its type is wanted, `Record` where a Node is given (core/analyze/shapes.wap) or a
 # subtype where its parent is, as a call of the function the typing stage writes once for it: the value when it is of
@@ -246,6 +248,19 @@ narrowed_call(n: Node, wanted: Term, at: Node, s: TypingState) as Node := {
 	obliged(at, wanted)
 	word_called(n, text(name), [n, with_type(placed_like(Text(other_shape(wanted, at, s)), at), TEXT_TYPE)], wanted, s)
 }
+# A value of a union holding an Error where a type is wanted that holds none: the Error raised, any other value checked
+# as an any's is (wiki/Error.md: no other variable holds an Error), one function for each pair of types
+unfailed_call(n: Node, given: Term, wanted: Term, s: TypingState) as Node := {
+	name = name_once("${UNFAILED_WORD}(${type_text(given, yes)}, ${type_text(wanted, yes)})", n, s)
+	if definitions_named(text(name), s) is empty {
+		read = parameters_of(name, [given])#1
+		error = error_part(given)!
+		cast = type => with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [read]), name), type)
+		dispatcher_made(name, [read], placed_like(If(narrowing_test(read, error, name, s), raising(cast(error), name, s), cast(wanted)), name), [wanted], s)
+	}
+	word_called(n, text(name), [n], wanted, s)
+}
+error_part(type: Term) as Term? := union_parts(type).find(part => narrowed_type(part) == NODE_TERM and type_text(part) == ERROR_CASE)
 # a narrowing left to the run at a place, its line in the obligations once: a subtype's condition as written, a shape
 # by its name
 obliged(at: Node, type: Term) := {
