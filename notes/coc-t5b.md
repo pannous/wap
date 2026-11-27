@@ -105,8 +105,20 @@ The audit's R3, migration steps 2 to 4.
   "API"). The two questions become one table of the compiler's questions in calls.wap (a word and its answer
   function), so the second one adds no special case.
 - **The claim:** `… ! IO` after a function's body is checked against the fact: an effect beyond the claim is refused
-  naming the call that brings it. How the reader reads `body ! IO` today is to be checked before T5b1 starts (a
-  postfix `!` unwraps); where it reads as an unwrap, the claim is a sugar rule on the definition's value place.
+  naming the call that brings it.
+- **How the reader reads `body ! IO` today** (from source, core/parse/operators.wap `operator_after_operand` and
+  types/operators.wap): `!` has a postfix row only, `required` in the superscript group, and a prefix alias `not`.
+  After an operand the reader takes a spaced `!` as infix where it has an infix reading, and since it has none it
+  falls through to the postfix, though the function's own comment says spaced on both sides is infix. So
+  `print(t) ! IO` is `required(print(t))` followed by `IO` in a space list, the shape the theory's
+  elaborate/effects.wap `effect_marked` reads (a space list whose first item is the `!` call). `double(x) := x * 2 !
+  Pure` is worse: the superscript group binds tighter than `*`, so `!` lands on the `2`, `x * required(2)` then
+  `Pure`, and neither analyze nor `effect_marked` sees a claim.
+- **The claim's reading, recommended:** a table row, no reader branch: `!` gets an infix reading in a group of its
+  own between `arrow` and `assignment` (types/operators.wap), so `f(x) := x * 2 ! Pure` is the claim applied to the
+  whole body and `x!` stays `required(x)`. The reader then does what its comment says (spaced on both sides is
+  infix). types +2, core 0; the claim's check +10 in analyze (in T5b1's +120). The theory's `effect_marked` reads the
+  infix call instead of the space list (−5 extension).
 - **What reads it:** terms.wap enters only a Pure function (or Fail with T5d's `T or Error`) as a definition; the
   census prints how many functions have each effect, and T5's gate becomes "every function defined, Div, or opaque by
   a named effect".
@@ -123,7 +135,7 @@ normal path.
 | T5b2 enums | an enum's declaration fills its word with an inductive block, cases its constructors; mutual enums one block; a case's value a constructor term; open or refused enums stay assumed, counted | core +80 (analyze/inductives.wap: block of a record +50, grouping +15, case terms in terms.wap +15), kernel 0 (A1's fill) | the door finds a program's enum filled and elaborates it no more (declare.wap's block path for programs, about −15); blocks.wap stays for indexed families and propositions | the census counts enums defined and assumed, a ratchet; every test as before (an enum's equality, a law's `Dime == Dime`, needs the decidable equality coc-plan.md 7 adds per block: T6) |
 | T5b3 bool | `enum bool { no, yes }` in wap/types fills core's bool and its truths; `if` is bool's recursor | core −5 (literals_declared's choice, choice_term names the recursor), kernel −12 (DeclarationKind.Choice, `choice_step`, its `stated` arm), types +2 | logic.wap's `bool` and its `runs` lines go once the prelude is read on core's words (A1 already defines bool in its place) | every test as before; test_law_runs' "a law without binders that holds is Proved by computing it" still Proved |
 | T5b4 match | a match on a filled enum with case arms is the recursor's case split, the catch-all filling the cases left; literal arms are choices on the row's equality | core +60 (terms.wap `match_term` +45, literal arms +15) | match.wap's program path: the door takes analyze's term; `arm_of`, `names_case`, `pattern_name`, `pattern_fields` and `minor_elaborated`'s non-dependent half, about −50; the dependent motive (`motive_made`) stays for T6, the course (`course_elaborated`) goes with T5c | wiki/law.md and enum.md: `enum Coin { Penny, Nickel, Dime }`, `cents(c: Coin) := match c { Penny: 1; Nickel: 5; Dime: 10 }`, `law dime: cents(Dime) == 10` prints `dime: Proved` (test_law_runs, a new line); `effects of cents` is Pure (coc-t5.md T5b row); "match on Coin misses Dime" unchanged |
-| T5b5 the recursor | `E.recursor(minors…, value)` typed with its motive found; it runs by the definition analyze adds to the enum | core +50 (calls.wap: the recursor's type for a filled enum +30, the added definition +20) | match.wap `recursor_given`, about −8 | wiki/enum.md: `enum nat { zero, successor(n: nat) }`, `double(n: nat): nat := nat.recursor(0, (k, double_k) => double_k + 2, n)`, `double(3)` is 6 (test_enum_wanted, then test_enum_page) |
+| T5b5 the recursor | `E.recursor(minors…, value)` typed with its motive found; it runs by the definition analyze adds to the enum | core +50 (calls.wap: the recursor's type for a filled enum +30, the added definition +20) | match.wap `recursor_given`, about −8 | the form of wiki/enum.md on an enum of the program, `enum Tree { leaf, node(left: Tree, right: Tree) }`, `leaves(t: Tree): int := Tree.recursor(1, (l, r, below_l, below_r) => below_l + below_r, t)`, `leaves(node(leaf, leaf))` is 2 (test_enum_wanted); enum.md's own `double(3)` is 6 needs the numerals at nat, so it goes green with T6c |
 
 Order: T5b1 can start at once (it needs neither the fill nor the door for its core half); its theory deletion waits
 for the door (A2). T5b2 needs A1 on main. T5b3 and T5b4 follow T5b2 in either order; T5b3 first is recommended,
@@ -150,15 +162,13 @@ T5b is done when:
 - the whole suite has no new red, `--stage 2` is a fixed point; the self-compile and memory are measured and reported
   (soundness, never a limit).
 
-## Open for the supervisor
+## Decided (wap-supervisor 2026-11-27)
 
-- **The door's dependency:** T5b's theory deletions need A2 (the theory's door reading analyze's typed nodes and
-  environment) on main. Without it the two typers both type a program's enums, matches and effects: recommended,
-  T5b1's core half lands first and its deletion lands with A2.
-- **elaborate/match.wap whole at T5b** (coc-t5.md's row) would need analyze to make dependent motives, which needs
-  indexed families (`Even`, `Equal`) and `Prop` in analyze: that is T6's prelude move (below). Recommended: three
-  parts as above. Core cost the same; the deletion lands later.
-- **The `!` claim's reading:** to check against the reader before T5b1 (no compiler run in this planning task).
+- T5b1's core half lands first; its deletion in elaborate/effects.wap lands with A2, the door reading analyze's nodes.
+- elaborate/match.wap goes in three parts: the plain arms here, the course with T5c, the dependent motive with T6.
+- nat is one type: an inductive for the kernel, int's layout when it runs, converting up to int for free; this reads
+  wiki/number.md and wiki/enum.md alike, so no wiki text changes.
+- analyze finds levels itself.
 
 # T6 and T7: what the law statements ask of analyze
 
@@ -179,8 +189,9 @@ T7 retires the extension, so by then every one of these statements is read by an
 them in wap spelling (`law four: 2 + 2 == 4`), or let analyze read the explicit spelling. The second is free once
 the words are wap/types words: `Equal(nat, add(2, 2), 4)` is a call of an indexed enum with a function in it, an
 ordinary call. Only three things in it are no wap: `Sort(u)`, a level argument `[1]`, and `Prop` as a sort.
-Recommended: analyze finds levels and never reads `[u]` (6.3: levels are found); the prelude files, which write
-them, become wap/types files in wap spelling; a test that writes a level drops it (its own commit, saying why).
+Decided (wap-supervisor 2026-11-27): analyze finds levels and never reads `[u]` (6.3: levels are found); the prelude files, which write
+them, become wap/types files in wap spelling. A test that writes a level is an existing test: dropping its level
+goes to wap-interviewer when that step comes up, never a free commit.
 
 ## What moves to wap/types, and what analyze needs for each
 
