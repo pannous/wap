@@ -1,0 +1,103 @@
+# The laws of a program as analyze types them (wiki/law.md "Checking a law", notes/coc-t5.md): the program goes
+# through the compile's front, each law the bool function of its binders (extensions/law_statements.wap), and analyze
+# enters each pure function into its environment as a kernel definition (core/analyze/terms.wap). A law whose
+# function the kernel holds defined gets the kernel's verdict; one whose function the kernel only assumes is refused
+# naming the first function it calls that the kernel only assumes; one analyze refuses says why and gets none.
+use "../../core/pipeline.wap"
+use "../wasm/modules.wap"
+use "../../core/bindings.wap"
+use "../../core/stage.wap"
+use "../../core/errors.wap"
+use "../../core/language.wap"
+use "../../core/type_notation.wap"
+use "../../kernel/terms.wap"
+use "../../kernel/environment.wap"
+use "../../kernel/typing.wap"
+use "../../kernel/compute.wap"
+use "../../kernel/show.wap"
+use "../../kernel/numbers.wap"
+use "../../kernel/forms.wap"
+use "../prove/prove.wap"
+use "../../core/analyze/holes.wap"
+use "../../core/analyze/terms.wap"
+
+# the rules the front reads laws by, and the name each law's function takes
+LAW_STATEMENT_RULES := "extensions/law_statements.wap"
+LAW_FUNCTION := "law_"
+# the refusal of a law that names what the kernel only assumes
+ASSUMED_NAMED := "assumed function"
+# the name of the theorem a proved law's proof is declared as
+LAW_HOLDS := " holds"
+
+# a law analyze typed: its name, its function's key and id in the environment, and the first function its body calls
+# that the kernel only assumes, all found while analyze's names are in scope
+class TypedLaw { name: text; key: text; id: int?; assumed: text? }
+# the laws of a program, in the order they are stated; a law analyze refuses says why on standard error
+laws_typed(wap_folder: text, program: text): list<TypedLaw> := {
+	front = base_language()
+	modules_bringable(front)
+	rules_files_loaded(front, wap_folder)
+	based(front, in_folder(wap_folder, LAW_STATEMENT_RULES))
+	types = types_declared(front, wap_folder)
+	code = program_operated(front, program)
+	TYPES.refused = {}
+	typed = typed_modules(front, [declared_module(front, code)], types, program)
+	refused = TYPES.refused!
+	TYPES.refused = ø
+	laws: list<TypedLaw> = []
+	for statement in statements_in(typed) {
+		if not (statement is Define and text(defined_name(statement)).starts_with(LAW_FUNCTION)) { continue }
+		name = text(defined_name(statement))[#LAW_FUNCTION ..]
+		key = function_key(statement)
+		if refused.has(key) { eprint "law ${name}: ${refused[key]}"; continue }
+		laws += [TypedLaw(name, key, named_id(TYPES.environment, key), assumed_callee(TYPES.environment, statement))]
+	}
+	laws
+}
+
+# A typed law's verdict, the kernel's: a law without binders holds where its function computes to yes and breaks
+# where it computes to no; one with binders holds where the provers prove its statement yes for every value of them,
+# the proof checked by the kernel; any other is left open, for the run to test. Refused where its function is only
+# assumed, naming the first function its body calls that the kernel only assumes
+enum TypedVerdict { Holds, Breaks, Open }
+typed_verdict(law: TypedLaw): TypedVerdict := {
+	e = TYPES.environment
+	id = law.id ?? refused(ASSUMED_NAMED, "law ${law.name} is not typed")
+	d = declared_at(e, id)!
+	if d.kind is Axiom { refused(ASSUMED_NAMED, "law ${law.name} names ${law.assumed ?? law.key}, which the kernel only assumes: it may write, raise or act, so no law states it") }
+	if d.type.shape is Pi { return if law_proved(e, law.name, d) then Holds else Open }
+	value = computed(checker(e, []), constant(id, law.key, []))
+	if is_constant(value, e.literals!.yes_case) then Holds else if is_constant(value, e.literals!.no_case) then Breaks else Open
+}
+# whether the provers prove a law's statement yes for every value of its binders, the proof declared as its theorem;
+# never without an equality to state it with
+law_proved(e: Environment, name: text, d: Declaration): bool := {
+	statement = law_statement(e.numbers ?? return no, d.type, unfolding(d)!)
+	proof = proof_found(elaboration(e, []), statement, []) ?? return no
+	declared(e, Declaration(name + LAW_HOLDS, [], statement, Theorem(proof)))
+	yes
+}
+# `statement == yes` for every value of the binders of the law's function type, the statement its function's value
+# at a variable for each binder, each variable then bound by its binder
+law_statement(n: Numbers, type: Term, value: Term): Term := {
+	parts = arrow_parts(type)
+	names = binder_names(type)
+	count = #parts - 1
+	holds = equation(n, n.truth, beta(value, (1 to count).map(at => free(at))), n.yes_case)
+	(1 to count).reverse.fold(holds, (body, at) => pi(names#at, parts#at, abstracted(body, at)))
+}
+# the first function a typed body calls whose instance the kernel only assumes, by its written name
+assumed_callee(e: Environment, body: Node): text? := {
+	for n in nodes_in(body) {
+		found = callee_assumed(e, n)
+		if found is not ø { return found }
+	}
+	ø
+}
+callee_assumed(e: Environment, call: Node): text? := match call {
+	Call(called, arguments) => {
+		id = named_id(e, place_key(fact_of(called, DEFINED_AT) ?? return ø)) ?? return ø
+		if declared_at(e, id)!.kind is Axiom then text(called) else ø
+	}
+	_ => ø
+}
