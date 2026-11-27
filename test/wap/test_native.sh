@@ -388,4 +388,11 @@ TEMP_RUNS=48
 printf '%s\n' 'use file' 'print temp_file()' >"$stage/temp_name.wap" && $wap "$compiler" "$stage/temp_name.wap" "$stage/temp_name.wasm" >/dev/null 2>&1 && mkdir -p "$stage/temp_names"
 for run in $(seq $TEMP_RUNS); do "$native_wap" "$stage/temp_name.wasm" >"$stage/temp_names/$run.txt" 2>&1 & done; wait
 check "runs at the same moment get $TEMP_RUNS temporary files of their own" "$(cat "$stage/temp_names"/*.txt | grep '^/' | sort -u | wc -l | tr -d ' ')" "$TEMP_RUNS"
+# `wap format check <file>` lists what the format would change, `file:line: layout: …`, and exits 1 if anything would
+# (wiki/cli.md "Other programs")
+printf '%s\n' 'x = 1' >"$stage/formatted.wap"
+check "wap format check exits 0 when nothing would change" "$(cd "$stage" && "$native_wap" format check formatted.wap 2>&1; echo $?)" "0"
+check "wap format check lists each line that would change and exits 1" "$(cd "$stage" && "$native_wap" format check unformatted.wap 2>&1; echo $?)" "unformatted.wap:1: layout: x = 1 + 2
+unformatted.wap:2: layout: f(a) = a * 2
+1"
 exit $((failures > 0))
