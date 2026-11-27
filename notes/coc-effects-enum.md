@@ -43,3 +43,5 @@ reads). The claim group's name is `claim_group` beside compound_assignment_group
 Should turn green (unbuilt): test/wap/test_effects.wap "several effects claimed are written with commas", and in
 test/wap/test_theory_effects.wap "several effects are written with commas" and "a bound of several effects is written
 with commas".
+
+Card-worthy: an enum's cases as a list (sugar/records.wap could emit it beside `indexed`) would replace EFFECT_ORDER's written-out list. The table is two operation lists, not an enum-keyed map: core has no map keyed by an enum.
