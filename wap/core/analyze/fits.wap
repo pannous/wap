@@ -34,12 +34,12 @@ parts_fitted(parts: list, s: TypingState, expected: Term? = ø) as list := {
 	type = parts_type(parts, s, expected)
 	parts.map(part => as_wanted(part, type, s))
 }
-# the type that holds all of these, ø for none: two at a time, or where two only meet in any, the one of them that
-# holds every other, whatever their order: `"one"`, `2` and a Symbol meet in Node
+# the type that holds all of these, ø for none: two at a time, or where two only meet in any or a union, the one of
+# them that holds every other, whatever their order: `"one"`, `2` and a Symbol meet in Node
 joined_all(types: list, s: TypingState) as Term? := {
 	if types is empty { return ø }
 	folded = types.drop(1).fold(types#1, (a, b) => joined_settling(a, b, s))
-	if folded != ANY_TERM { return folded }
+	if folded != ANY_TERM and not is_union(folded) { return folded }
 	types.find(holder => types.all(type => conversion(type, holder, s) in STATIC_CONVERSIONS)) ?? folded
 }
 # the type that holds both: either when they are one, `T?` for a T and ø (or a T?), the type two shapes of it narrow,
@@ -55,6 +55,14 @@ joined_type(a: Term?, b: Term?, s: TypingState) as Term? := {
 	if shared != (shape_base(b) ?? return wider(a, b, s)) { return wider(a, b, s) }
 	# two shapes of one type join as that type, `Define` and `Fn?` as a Node?
 	if base_of_optional(a) != ø or base_of_optional(b) != ø then optional_type(shared) else shared
+}
+# whether a list or a map is as it is where one of its word is wanted whose parts its own parts are as they are:
+# `[Call(…)]` where a list<Node> is, `{a: 1, b: "x"}` where a map<text, any> is
+parts_as_they_are(given: Term, wanted: Term, s: TypingState) as bool := {
+	if not type_word(given) in COLLECTION_WORDS or type_word(given) != type_word(wanted) { return no }
+	own = parts_of(given)
+	wanted_parts = parts_of(wanted)
+	#own == #wanted_parts and (1 to #own).all(at => conversion(own#at, wanted_parts#at, s) == Conversion.Same)
 }
 # the type of two where one fits the other: the wider, else their union; any while a type is still unknown
 wider(a: Term, b: Term, s: TypingState) as Term := if conversion(b, a, s) in STATIC_CONVERSIONS then a else if conversion(a, b, s) in STATIC_CONVERSIONS then b else if has_unknowns(a) or has_unknowns(b) then ANY_TERM else union_type([a, b])
@@ -101,10 +109,10 @@ conversion(given: Term?, wanted: Term?, s: TypingState) as Conversion? := {
 	# a shape's value is a value of the type it narrows: a Record where a Node is
 	narrows = narrowed_type(given)
 	if narrows != ø and conversion(narrows, wanted, s) == Conversion.Same { return Conversion.Same }
-	# a list of a shape's values is a list of the type it narrows, its items those values as they are
+	# a list of a shape's values is a list of the type it narrows, its items those values as they are, and so a map's
 	given_item = item_type(given)
 	wanted_item = item_type(wanted)
-	if given_item != ø and wanted_item != ø and conversion(given_item, wanted_item, s) == Conversion.Same { return Conversion.Same }
+	if parts_as_they_are(given, wanted, s) { return Conversion.Same }
 	# a union's value is held as an any's is, so it is as it is where an any is, a wider union, or where each of its
 # parts is
 	if is_union(given) and (wanted == ANY_TERM or is_union(wanted) and boxed_fit(given, wanted) or union_parts(given).all(part => conversion(part, wanted, s) == Conversion.Same)) { return Conversion.Same }
@@ -159,7 +167,7 @@ repacked(n: Node, way: Conversion, wanted: Term, s: TypingState) as Node := matc
 # a list or a map put into an any or a union, its type kept for the dispatches that choose among generic definitions by it
 boxing_noted(n: Node, wanted: Term, s: TypingState) as Node := {
 	given = value_type(n) ?? return n
-	if wanted == ANY_TERM or is_union(wanted) { for part in union_parts(given) { if type_word(part) in [LIST_TYPE, MAP_TYPE] and not s.boxed.any(type => type == part) { s.boxed.add(part) } } }
+	if wanted == ANY_TERM or is_union(wanted) { for part in union_parts(given) { if type_word(part) in COLLECTION_WORDS and not s.boxed.any(type => type == part) { s.boxed.add(part) } } }
 	n
 }
 # a plain value put where a reference is wanted, an any, a number or an optional, in its box: `prim box(3)`; any
