@@ -1163,7 +1163,10 @@ Net: core about +52, kernel −8, types +75, emit +150, native +10, about +280 i
 row of +180. The difference is T8c's storage choice and the big int in wap/types, which the row counted inside
 "emit and types".
 
-**Order.** T8a after exact-big-literals lands (it needs Large). T8b after Q1 (the quotient) and T4's computed range
+**Order.** First of T8, after exact-big-literals lands: whole()'s sign. `whole` tests the digits' length without the
+sign, so `-9223372036854775808`, the smallest i64, reads as a float. Testing the signed value against the i64 range
+(core about +1) turns test_number_wanted:35 and test_quotient_wanted:14 green at once; it is the first commit of T8a.
+The rest of T8a follows (it needs Large). T8b after Q1 (the quotient) and T4's computed range
 conditions. T8c after T8a and T5's erasure stage (the int layout is one of its build strategies), last of track T.
 
 **Beside the other work.**
@@ -1173,15 +1176,12 @@ conditions. T8c after T8a and T5's erasure stage (the int layout is one of its b
 - T8c touches the emitter's value layouts. It is the one T8 step no other careful landing may share (C2 included),
   and it reports the self-compile time and the benchmarks against main.
 
-**Open for the supervisor.**
+**Open for the user (via wap-interviewer).**
 - **The compiler's own ints under T8c.** The decision is that the compiler's source writes `i64` where it means a
   machine word, so its build holds no big numbers. That is a source edit across most of wap/ (indices, counts,
   positions). The alternative is that the compiler builds with `wap fast`: every int is a wrapping i64, as today, so
   it needs no source edit and no seed risk. Recommended: build with `wap fast`, as the one rule for any program that
-  wants machine ints throughout. It changes the decision's wording, so it goes to the user via wap-interviewer.
-- **The kernel's Large against the decision "No unbounded arithmetic in core or kernel"** (13). exact-big-literals
-  puts `use magnitude` into kernel/numbers.wap. The decision's line should say what is now true: unbounded counts in
-  the kernel, through lib/magnitude, for exact laws; none in core. As a decision's wording, it goes to the user.
+  wants machine ints throughout. It changes the decision's wording, so it waits for the user.
 
 K7 any time after K2, in the proof extension.
 
@@ -1270,8 +1270,8 @@ Decided by the user (2026-11-25), the basis of track T:
   The census and the seed guard each step.
 - **The kernel is the only maker of checked facts** (LCF). The elaborator builds its results only through it, so no
   pass checks them again; the facts the stages write on nodes are those checked facts.
-- **No unbounded arithmetic in core or kernel.** Kernel numbers are i64 with an overflow check; reasoning about
-  larger numbers in proofs comes from a module only proofs load.
+- **Unbounded counts live in the kernel for exact laws; none in core.** A kernel count below 2^63 is an i64, one
+  at or past it a `Large` through lib/magnitude.wap; core and the compiler's build hold no big numbers.
 - **The provers (P3, P4), the second opinion (K7) and the arithmetic proofs** live in an extension that only
   `wap check` and proofs load.
 - **Size.** About 17,000 lines for the whole compiler is a ballpark, not a gate (5.3): "If someone needs more, give
