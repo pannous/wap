@@ -1,0 +1,65 @@
+# A structural recursion enters the kernel (notes/coc-t5c3.md): a function matching a parameter of a program's enum
+# and calling itself on that value's fields is the enum's course, `Tree·course(motive, step, t)`. The motive gives the
+# other parameters' function type, so a call may change them; the step is the match on the value, the values below it
+# riding the match, and a call on a field of the case is the field's hypothesis in them (courses.wap).
+
+use folder
+use "../stage.wap"
+use "../bindings.wap"
+use "../type_notation.wap"
+use "../../kernel/terms.wap"
+use "../../kernel/environment.wap"
+use "../../kernel/inductive.wap"
+use "courses.wap"
+use "terms.wap"
+
+# the function being read and the place of the parameter matched
+class Recursion { key: text; place: int }
+# the binders a course's step takes: the value and its values below, which the match rides; the hypothesis of a field
+# is named by that field
+BELOW_BINDER = "·below"
+HYPOTHESIS = "·hypothesis "
+
+# a function whose body matches one of its parameters, as the course of that parameter's enum; ø for any other
+course_defined(typed: TypedFunction, names: list<Node>, body: Node, by_key: map<text, TypedFunction>, s: TypingState) as Term? := match body {
+	Case(subject, arms) => {
+		keys = names.map(name => place_key(name))
+		place = keys.index_of(place_key(fact_of(subject, DEFINED_AT) ?? return ø))
+		if place <= 0 { return ø }
+		domain = kernel_settled(typed.arguments#place, s)
+		if TYPES.enums.get(word_id(domain)) != ENUM_DEFINED or block_of(TYPES.environment, domain, "course").block.parameters != 0 { return ø }
+		match course_of(TYPES.environment, constant_name(domain)) {
+			Through(name) => course_applied(typed, keys, place, domain, arms, by_key, s)
+			Without(reason) => ø
+		}
+	}
+	_ => ø
+}
+course_applied(typed: TypedFunction, keys: list<text>, place: int, domain: Term, arms: list, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
+	result = kernel_settled(typed.result ?? return ø, s)
+	others = (1 to #keys).list().filter(at => at != place)
+	motive = lambda("x", domain, others.reverse.fold(result, (body, at) => pi("_", kernel_settled(typed.arguments#at, s), body)))
+	below_of = (value: Term) => apply_all(constant_of(TYPES.environment, constant_name(domain) + BELOW_SUFFIX, [TYPE_LEVEL]), [motive, value])
+	riding = lambda("y", domain, pi("below", below_of(bound(0)), result))
+	inside = Entering([keys#place, NO_BINDER] + others.map(at => keys#at), by_key, s, Recursion(instance_key(typed), place))
+	minors = block_of(TYPES.environment, domain, "course").block.types#1.cases.map(case => case_minor(named_id(TYPES.environment, case.name)!, arms, domain, riding, value => below_of(value), inside))
+	if minors.any(minor => minor == ø) { return ø }
+	count = #others
+	step = lambda("x", domain, lambda("below", below_of(bound(0)), others.reverse.fold(apply(recursor_applied(domain, riding, minors.map(minor => minor!) + [bound(count + 1)]), bound(count)), (inner, at) => lambda("_", kernel_settled(typed.arguments#at, s), inner))))
+	course = apply_all(constant_of(TYPES.environment, constant_name(domain) + COURSE, [TYPE_LEVEL]), [motive, step, bound(#keys - place)])
+	apply_all(course, others.map(at => bound(#keys - at)))
+}
+# a call of the function being read on a field of the case matched: that field's hypothesis in the values below, given
+# the other arguments; ø for any other call
+recursive_called(called: Node, arguments: list, x: Entering) as Term? := {
+	r = x.recursion ?? return ø
+	if place_key(fact_of(called, DEFINED_AT) ?? return ø) != r.key or #arguments < r.place { return ø }
+	field = arguments#(r.place)
+	at = x.binders.index_of(HYPOTHESIS + place_key(fact_of(field, REBOUND) ?? fact_of(field, DEFINED_AT) ?? return ø))
+	if at <= 0 { return ø }
+	below = x.binders.index_of(BELOW_BINDER)
+	earlier = #(x.binders.take(at - 1).filter(key => key.starts_with(HYPOTHESIS)))
+	pair = TYPES.environment.products!.pair
+	rest = (1 to earlier).list().fold(bound(#x.binders - below), (path, step) => projection(pair, 2, path))
+	terms_applied(projection(pair, 1, projection(pair, 1, rest)), arguments.take(r.place - 1) + arguments.drop(r.place), x)
+}
