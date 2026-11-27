@@ -21,4 +21,10 @@ check "a command past the time cap is killed, its children too" \
 status 137"
 check "a script of short runs may take longer than the time cap" "$("$guarded" --seconds 2 bash -c 'for run in 1 2 3 4; do sleep 1; done; echo done'; echo "status $?")" "done
 status 0"
+# a test cut short, its runner killed with it, as a guard kills a runaway's whole tree, is red, never green by the
+# checks it printed before (test/wap/run.sh ended; card test-killed)
+runner="$(dirname "$0")/run.sh"
+cut_short="$(cd "$(dirname "$0")/../.." && pwd)/data/wap-tests/cut-short/test_cut_short.sh"
+mkdir -p "$(dirname "$cut_short")" && printf '%s\n' 'echo "✓ a check before the cut"' 'kill -9 $PPID "$(ps -o ppid= -p $PPID)" $$' 'echo "✓ a check never reached"' >"$cut_short"
+check "a test killed partway with its runner is red: it did not run to its end" "$(bash "$runner" all_run "" no no "$cut_short" | grep -c 'test_cut_short.sh: test_cut_short.sh ran to its end')" "1"
 exit $((failures > 0))
