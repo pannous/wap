@@ -14,6 +14,12 @@ Indices, a sort that is a function type (`enum Even: nat -> Prop`, `enum Equal(a
 their cases each give their own result type, the next step. Such a header is read, and its enum stays the assumption
 it is today, counted open.
 
+## Order
+The sort comes first and alone: `enum False: Prop {}`, `enum True: Prop { intro }`, `enum Single: Type { star }`. The
+sort goes onto the name as `@inductive(Prop)`, the record's word is declared in that sort (core/type_notation.wap
+record_sort), and its block's header is that sort. The parameters need generic records first, `enum Boxed<T>` with T
+filled at each use (notes/coc-generic-records.md): today a header with parameters is not read at all.
+
 ## Where it stops today
 - sugar/records.wap's enum rule reads only `enum $name { … }`, a bare name or `list<T>`.
 - core/rules/lowering.wap lowers a curly Key only under a bare name, so a header left unread is refused there.
