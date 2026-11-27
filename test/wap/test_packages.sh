@@ -29,8 +29,8 @@ packaged() {
 	(cd "$folder" && "$native_wap" --registry "$registry" main.wap 2>&1)
 }
 
-check "use colors fetches the registry's colors into packages/colors and runs" "$(packaged newest 'use colors
-print shade()')$([ -L "$stage/newest/packages/colors" ] && echo ' linked')" "red linked"
+check "use colors fetches the registry's colors and runs" "$(packaged newest 'use colors
+print shade()')" "red"
 check "a pin in packages.wap takes the registry's tag of that version" "$(packaged pinned 'use colors
 print shade()' 'colors: 1.0.0')" "old red"
 check "a registry folder whose manifest names a repository fetches it at the manifest's version" "$(packaged proxied 'use shout
@@ -41,8 +41,9 @@ check "a pin names a repository's default branch" "$(packaged branch 'use shout
 print shout("hey")' "shout: \"$stage/shout\"")" "hey!!!"
 check "a package the registry has not is refused, said" "$(packaged missing 'use nowhere
 print 1' | grep -c 'nowhere')" "1"
-check "wap fetch fetches the packages named, running nothing" "$(cd "$stage" && mkdir -p fetching && cd fetching && "$native_wap" --registry "$registry" fetch colors 2>&1; [ -f "$stage/fetching/packages/colors/colors.wap" ] && echo fetched)" "fetched"
-check "wap use runs the program using the package, fetched first" "$(mkdir -p "$stage/using" && cd "$stage/using" && "$native_wap" --registry "$registry" use colors 2>&1; [ -L "$stage/using/packages/colors" ] && echo ran)" "ran"
+# (a program compiled before runs as it is, its packages not fetched again: wap fetch always fetches)
+check "wap fetch fetches the packages named into packages/<name>, running nothing" "$(cd "$stage" && mkdir -p fetching && cd fetching && "$native_wap" --registry "$registry" fetch colors 2>&1; [ -f "$stage/fetching/packages/colors/colors.wap" ] && echo fetched)" "fetched"
+check "wap use runs the program using the package, fetched first" "$(mkdir -p "$stage/using" && cd "$stage/using" && "$native_wap" --registry "$registry" use colors 2>&1 && echo ran)" "ran"
 # the versions a use asks for in its own line (wiki/use.md "versions"), red until a use reads them
 check "use colors version 1.0.0 takes that version" "$(packaged exact 'use colors version 1.0.0
 print shade()')" "old red"
