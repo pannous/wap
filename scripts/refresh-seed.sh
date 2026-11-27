@@ -30,22 +30,23 @@ mkdir -p "$tree/data" && scratch=$(cd -P "$(mktemp -d "$tree/data/refresh-seed.X
 trap 'rm -rf "$scratch"' EXIT
 source "$(dirname "$0")/lib/wap-beside.sh"
 # every stage runs in the scratch folder on its own copy of the tree, the compiler's source included, as the tests build
-# it (test/wap/compile.sh folder_built): the warm state written there names the files its compiler reads
-wap_beside_copied "$tree" "$scratch" && (cd "$tree/wap" && cp -R "${WAP_SOURCE[@]}" "$scratch/") || exit 2
+# it (test/wap/compile.sh folder_built), on paths relative to it: the warm state written there names the files its
+# compiler reads, each by one spelling
+wap_beside_copied "$tree" "$scratch" && (cd "$tree/wap" && cp -R "${WAP_SOURCE[@]}" "$scratch/") && cd "$scratch" || exit 2
 # the seed runs from the scratch folder, reading the tree's library there (scripts/lib/wap-beside.sh wap_seed_linked)
 seed_run=$(wap_seed_linked "$seed" "$scratch") || exit 2
 
 echo 'print "Hello"' >"$scratch/hello.wap"
 # prepared <compiler>: what the compiler built from the tree holds, written beside the tree's source first
 # (scripts/lib/wap-beside.sh wap_stage_prepared)
-prepared() { wap_stage_prepared "$1" "$seed_run" "$scratch" >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: $(basename "$1" .wasm) wrote no library or warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }; }
+prepared() { wap_stage_prepared "$1" "$seed_run" . >"$scratch/stage.log" 2>&1 || { echo "refresh-seed: $(basename "$1" .wasm) wrote no library or warm state: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }; }
 # timed <compiler> <output> <seed>: the prepared compiler compiling wap's source, as a program where it is the seed,
 # else as sources (none: every compiler reads it as sources); its cost in user + system CPU seconds in
 # $cost, timed warm: a first hello lets the host compile a new module's machine code before the clock starts, else a
 # new compiler pays for it
 timed() {
 	wap_ran "$1" "$scratch/hello.wap" "$scratch/warm.wasm" >/dev/null 2>&1
-	cost=$( { TIMEFORMAT="%U %S"; time wap_stage_compiled "$1" "$3" "$scratch" "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
+	cost=$( { TIMEFORMAT="%U %S"; time wap_stage_compiled "$1" "$3" . "$2" >"$scratch/stage.log" 2>&1; } 2>&1 | awk '{ printf "%.1f", $1 + $2 }')
 	[ -f "$2" ] || { echo "refresh-seed: $(basename "$2" .wasm) FAILED: $(tail -3 "$scratch/stage.log")" >&2; exit 1; }
 }
 # stage <compiler> <output>: the compiler compiling wap's source, prepared and timed
@@ -60,10 +61,10 @@ least() { awk -v a="$1" -v b="${2:-$1}" 'BEGIN { printf "%.1f", (a < b ? a : b) 
 runner=$seed_run
 previous=$seed_run
 for name in $STAGES; do
-	stage "$previous" "$scratch/$name.wasm"
-	if [ "$previous" != "$seed_run" ] && cmp -s "$previous" "$scratch/$name.wasm"; then echo "refresh-seed: $name is the same bytes as the stage before: a fixpoint"; fi
+	stage "$previous" "$name.wasm"
+	if [ "$previous" != "$seed_run" ] && cmp -s "$previous" "$name.wasm"; then echo "refresh-seed: $name is the same bytes as the stage before: a fixpoint"; fi
 	runner=$previous
-	previous=$scratch/$name.wasm
+	previous=$name.wasm
 done
 chosen=$previous
 
