@@ -23,6 +23,7 @@ use "../../kernel/show.wap"
 use "../../kernel/counting.wap"
 use "../../kernel/numbers.wap"
 use "../../kernel/recursors.wap"
+use "../../kernel/inductive.wap"
 
 ROW_MARK = "prim"
 
@@ -93,6 +94,7 @@ term_of(n: Node, x: Entering) as Term? := match n {
 	Call(called, arguments) => called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
 	Prim(operation, arguments) => row_term(n, text(operation), arguments, x)
 	If(condition, then_part, else_part) => choice_term(n, condition, then_part, else_part, x)
+	Case(subject, arms) => match_term(n, subject, arms, x)
 	Block(statements) => lets_term(statements, x)
 	_ => ø
 }
@@ -115,11 +117,15 @@ row_term(n: Node, operation: text, arguments: list, x: Entering) as Term? := {
 	if not FOLDED_ROWS.contains(operation) { return ø }
 	types = (arguments + [n]).map(part => kernel_value(part))
 	if types.any(type => type == ø) { return ø }
+	terms_applied(row_constant(operation, types), arguments, x)
+}
+# a host operation's constant of the types it takes and gives, declared once
+row_constant(operation: text, types: list<Term?>) as Term := {
 	type = types.take(#types - 1).reverse.fold(types.last!, (body, parameter) => pi("_", parameter!, body))
 	name = row_name(operation, type)
 	meaning = if types.take(2).all(part => part == INT_TERM) then int_meaning(TYPES.environment, operation) else ø
 	if named_id(TYPES.environment, name) == ø { added(TYPES.environment, Declaration(name, [], type, if meaning == ø then Row(operation) else Defined(meaning!))) }
-	terms_applied(constant(named_id(TYPES.environment, name)!, name, []), arguments, x)
+	constant(named_id(TYPES.environment, name)!, name, [])
 }
 # the name a row's constant takes: its operation and the types it takes and gives, `prim i64.add int -> int -> int`
 row_name(operation: text, type: Term) as text := "${ROW_MARK} ${operation} ${arrow_parts(type).map(part => shown(part)).join(" -> ")}"
@@ -132,8 +138,59 @@ arrow_parts(type: Term) as list<Term> := match type.shape {
 choice_term(n: Node, condition: Node, then_part: Node, else_part: Node, x: Entering) as Term? := {
 	type = kernel_value(n) ?? return ø
 	if kernel_value(condition) != BOOL_TERM or kernel_value(then_part) != type or kernel_value(else_part) != type { return ø }
-	name = recursor_name(BOOL_TYPE)
-	terms_applied(apply(constant(named_id(TYPES.environment, name)!, name, [TYPE_LEVEL]), lambda("_", BOOL_TERM, type)), [else_part, then_part, condition], x)
+	terms = [else_part, then_part, condition].map(part => term_of(part, x))
+	if terms.any(term => term == ø) then ø else recursor_applied(BOOL_TERM, type, terms.map(term => term!))
+}
+# a type's recursor into a constant motive, the result type, applied to its minor premises and then the major premise
+recursor_applied(type: Term, result: Term, arguments: list<Term>) as Term := {
+	name = recursor_name(constant_name(type))
+	apply_all(apply(constant(named_id(TYPES.environment, name)!, name, [TYPE_LEVEL]), lambda("_", type, result)), arguments)
+}
+# a `match` with every arm's result of its type: on a defined enum, a minor premise for each case of its recursor, on
+# whole numbers a chain of choices (guards and nested patterns give no term)
+match_term(n: Node, subject: Node, arms: list, x: Entering) as Term? := {
+	type = kernel_value(n) ?? return ø
+	domain = kernel_value(subject) ?? return ø
+	if arms.any(arm => kernel_value(arm_result(arm)) != type) { return ø }
+	if domain == INT_TERM { return literals_term(subject, arms, type, x) }
+	if TYPES.enums.get(word_id(domain)) != ENUM_DEFINED { return ø }
+	block = block_of(TYPES.environment, domain, "match").block
+	if #block.types != 1 { return ø }
+	minors = block.types#1.cases.map(case => case_minor(named_id(TYPES.environment, case.name)!, arms, domain, type, x))
+	major = term_of(subject, x) ?? return ø
+	if minors.any(minor => minor == ø) then ø else recursor_applied(domain, type, minors.map(minor => minor!) + [major])
+}
+arm_result(arm: Node) as Node := match arm { Arm(pattern, result) => result }
+arm_pattern(arm: Node) as Node := match arm { Arm(pattern, result) => pattern }
+# the constructor a pattern names, ø for a name or `_`
+pattern_constructor(pattern: Node) as int? := TYPES.constructors.get(place_key(fact_of(case_name(pattern), DEFINED_AT) ?? return ø))
+# a case's minor premise: the fields, then a hypothesis for each field of the enum itself, under the first arm that names
+# the case or fits any value, a name there holding the case's value
+NO_BINDER = "·unnamed"
+case_minor(id: int, arms: list, domain: Term, type: Term, x: Entering) as Term? := {
+	constructor = declared_at(TYPES.environment, id)!
+	fields = arrow_parts(constructor.type).take(#arrow_parts(constructor.type) - 1)
+	arm = arms.find(arm => pattern_constructor(arm_pattern(arm)) == id or pattern_constructor(arm_pattern(arm)) == ø) ?? return ø
+	pattern = arm_pattern(arm)
+	named = pattern_constructor(pattern) == id
+	names = if named then case_fields(pattern) else fields.map(field => symbol(NO_BINDER))
+	if #names != #fields or names.any(name => not name is symbol) { return ø }
+	hypotheses = fields.filter(field => field == domain).map(field => type)
+	keys = names.map(name => place_key(name)) + hypotheses.map(hypothesis => NO_BINDER)
+	inner = Entering(x.binders + keys, x.by_key, x.s)
+	body = if named or pattern == symbol(WILDCARD) then term_of(arm_result(arm), inner) else let_in(text(pattern), domain, apply_all(constant(id, constructor.name, []), (1 to #fields).list().map(at => bound(#keys - at))), term_of(arm_result(arm), Entering(inner.binders + [place_key(pattern)], x.by_key, x.s)))
+	binders = fields + hypotheses
+	if body == ø then ø else (1 to #binders).reverse.fold(body!, (inner_term, at) => lambda(if at <= #names then text(names#at) else NO_BINDER, binders#at, inner_term))
+}
+# whole-number arms, `0 => a; 1 => b; _ => c`, as chained choices on their equality, the last arm fitting any value
+literals_term(subject: Node, arms: list, type: Term, x: Entering) as Term? := {
+	pattern = arm_pattern(arms#1)
+	result = term_of(arm_result(arms#1), x) ?? return ø
+	if #arms == 1 { return if pattern == symbol(WILDCARD) then result else ø }
+	literal = term_of(pattern, x) ?? return ø
+	rest = literals_term(subject, arms.drop(1), type, x) ?? return ø
+	given = term_of(subject, x) ?? return ø
+	recursor_applied(BOOL_TERM, type, [rest, result, apply_all(row_constant("i64.eq", [INT_TERM, INT_TERM, BOOL_TERM]), [given, literal])])
 }
 # a block of lets, each a name new to it given its value, ending in the value it gives
 lets_term(statements: list, x: Entering) as Term? := {
