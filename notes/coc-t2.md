@@ -81,11 +81,6 @@ class Environment {
   names, where `added` names a declaration and refuses a name declared twice, and `outer`, the names it sees from
   outside, which its own hide. A declaration stays live by id whatever the scope (`taken_back` marks the ids taken
   back), so two modules may declare the same name, each one's uses meaning its own.
-- **The seam with TM** (notes/coc-tm.md): the elaborator's door reads each module in its scope (elaborate/file.wap
-  `in_scope`): outside it, what the prelude and the language every program gets declare, then the own names of the
-  modules it uses, by core's module key. Core declares nothing for it: it reads only the key and the uses (each
-  module's Grammar `uses` once TM lands, modules_of until then). Once the elaborator files go (T3 on), the two maps
-  leave the environment for the reader's scopes.
 - **Ids, not names.** `Constant(id: int, levels)` replaces `Constant(name: text, levels)`. Hashing and comparing
   a constant becomes one integer operation. `show` prints `log.entries[id]`'s name, so a name's text is used only
   for showing. `Numbers`, `RecursorFacts`, `InductiveFacts` and `QuotientPart` hold ids. The kernel no longer has a
@@ -160,7 +155,7 @@ Checker.judgements: list<Checked>
 The kernel stops using lib/magnitude (`use magnitude` in terms, typing, show and numbers; 12 call sites).
 
 - `Numeral(value: i64)`, written with the wrapping word: `int` is the unbounded whole numbers (wiki/number.md,
-  test/test_number_wanted.wap), and the kernel's bound is 6.7's, not storage's. Literals from source already arrive as `value as int` (explicit.wap, elaborate/read.wap).
+  test/test_number_wanted.wap), and the kernel's bound is 6.7's, not storage's.
   A literal the reader cannot hold is the reader's refusal.
 - The seven shortcuts compute on int, and only when the result fits. Every numeral is non-negative, so the check is
   `a <= MAX - b` for add, `b == 0 or a <= MAX ÷ b` for multiply, and nothing for subtract, divide, remainder and the

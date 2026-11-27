@@ -123,9 +123,7 @@ A name's bindings live in core/analyze/flow.wap. These forms are refused with a 
 - **No weights are ported** (audit finding 5). read.wap's `nearest` (five weights), TRIAL_LIMIT and the numeral
   special cases (`numeral_in_cases`, `declares_case`, the `literals` and `result` counts of Trial) are not copied
   into analyze. T5 replaces them in read.wap with analyze's choice, so the two typers choose alike and the weights
-  are gone from the tree: the theory's doors read a program as written and lower it themselves, so no fact analyze
-  writes reaches the elaborator until it reads analyze's typed nodes, and the overloads it chooses among are the
-  theory environment's declarations, not the compile's signatures.
+  are gone from the tree.
 - **The readings typing chose stay the compile's table:** `typed_readings` (calls.wap, read by format.wap) is keyed
   by the source place, as TYPES is one table for the run: `format` prints the code as parsed, which a fact on the
   typed call never reaches.

@@ -16,6 +16,11 @@ use "../kernel/forms.wap"
 use "../kernel/primitives.wap"
 use "../kernel/terms.wap"
 use "../kernel/environment.wap"
+use "../kernel/equality.wap"
+use "../kernel/logic.wap"
+use "../kernel/counting.wap"
+use "../kernel/inductive.wap"
+use "analyze/courses.wap"
 
 # a written `block`: code run by its call, a function of no parameters (wiki/block.md)
 BLOCK_WORD = "block"
@@ -54,7 +59,7 @@ NARROWS = "narrows"
 LIST_TYPE = "list"
 RANGE_TYPE = "Range"
 # the types of the literals, as a program writes them
-INT_TYPE = "int"
+INT_TYPE = INT_WORD
 FLOAT_TYPE = "float"
 TEXT_TYPE = "text"
 CHAR_TYPE = "char"
@@ -75,10 +80,14 @@ FUNCTION_WORD = "function"
 # the item type of an array of n items, `40⋅byte` a number times a type (wiki/number.md)
 ARRAY_TIMES = "*"
 # the universe of data types, the type of every type word without parts and of every hole a type stands for
-DATA_TERM = type_at(Zero)
-# the words of the truths and of the choice, the terms the kernel forms True, False and If stand for (literals_declared)
-TRUTH_WORDS = ["yes", "no"]
-CHOICE_WORD = "if"
+DATA_TERM = universe(TYPE_LEVEL)
+# the words of the truths, bool's cases in their order, the terms the kernel forms False and True stand for
+# (literals_declared)
+TRUTH_WORDS = ["no", "yes"]
+# a case's constructor is named by its enum's key, this mark and the case's name, `bool.yes`: two enums may each have
+# a case so named
+CASE_MARK = "."
+case_constructed(key: text, case: text) as text := "${key}${CASE_MARK}${case}"
 # the words core builds types of and the number of parts each takes, each declared at its place here, its id
 class CoreWord { word: text; parts: int = 0 }
 // todo turn all of these into Enum(s) AFTER The theory is done. This is a big refactoring for all files to replace all magic keywords with enums!
@@ -115,36 +124,50 @@ TYPE_WORDS = ATOM_TYPES + [BOOL_TYPE, ANY_TYPE, LIST_TYPE, MAP_TYPE, ENUM_TYPE, 
 # by key, the declaration a record's own word names (two records of one name are two words, the first word of each
 # name kept and the words sharing one marked, so their texts tell them apart), the type a shape's word narrows
 # (core/analyze/shapes.wap), the condition a subtype's word holds, the subtypes met so far, the key of the function a
-# function value's word calls and how many typed functions the environment holds as assumptions and as definitions
-# (core/analyze/terms.wap). It is the compile's own, as a
+# function value's word calls, how many typed functions the environment holds as assumptions and as definitions
+# (core/analyze/terms.wap), what became of each enum, by its word's id, and each case's constructor, by its
+# definer's place (core/analyze/inductives.wap). It is the compile's own, as a
 # symbol table is: every stage reads a type fact through it, so it is one value for the whole run, not handed down
 # every call
-class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; shared: map<int, bool> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {}; conditions: map<int, Node> = {}; subsets: list<Term> = []; assumed: int = 0; defined: int = 0 }
+# (refused: where a compile keeps what it typed beside the functions it refuses, each refusal's message by the
+# function's key, as wap verify's laws do; ø where a refusal ends the compile)
+class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; shared: map<int, bool> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {}; conditions: map<int, Node> = {}; subsets: list<Term> = []; assumed: int = 0; defined: int = 0; enums: map<int, text> = {}; constructors: map<text, int> = {}; refused: map<text, text>? = ø }
 TYPES: TypeTerms = TypeTerms()
 core_environment() as Environment := {
 	e = Environment()
 	for core in CORE_WORDS { word_declared(e, core.word, core.parts) }
 	literals_declared(e)
+	products_declared(e)
+	equality_declared(e)
+	logic_declared(e)
+	count_declared(e)
+	int_declared(e)
 	e
 }
-# the truths and the choice the kernel forms True, False and If stand for as terms (core/analyze/terms.wap), and the
-# types of the literals: a whole number an int, a text a text, a truth a bool
+# bool, the block of its two truths, the terms the kernel forms True and False stand for (core/analyze/terms.wap),
+# filling core's word: an `if` is its recursor's case split. And the types of the literals: a whole number an int, a
+# text a text, a truth a bool
 literals_declared(e: Environment) := {
-	truths = TRUTH_WORDS.map(word => constant(axiom_added(e, word, BOOL_TERM), word, []))
-	# the choice of a type T: a bool, the arm where it is yes, the arm where it is no, a T
-	added(e, Declaration(CHOICE_WORD, [], pi("T", DATA_TERM, pi("_", BOOL_TERM, pi("_", bound(1), pi("_", bound(2), bound(3))))), DeclarationKind.Choice))
-	e.literals = Literals(INT_TERM, TEXT_TERM, BOOL_TERM, truths#1, truths#2)
+	truths = truths_declared(e)
+	e.literals = Literals(INT_TERM, TEXT_TERM, BOOL_TERM, truths#2, truths#1)
+}
+# bool's block, its cases no and yes, filling bool's word where it is declared; the truths' constructors
+truths_declared(e: Environment) as list<Term> := {
+	names = TRUTH_WORDS.map(word => case_constructed(BOOL_TYPE, word))
+	inductive_declared(e, InductiveBlock([], 0, [BlockType(BOOL_TYPE, DATA_TERM, names.map(name => WrittenCase(name, pi(BOOL_TYPE, DATA_TERM, bound(0)))))]))
+	names.map(name => constant(named_id(e, name)!, name, []))
 }
 # a type word declared, an opaque type of its parts' types; its id, its place in the environment. Its type is a
 # type by construction, so it is added unchecked
-word_declared(e: Environment, key: text, parts: int) as int := axiom_added(e, key, (1 to parts).fold(DATA_TERM, (kind, at) => pi("_", DATA_TERM, kind)))
-axiom_added(e: Environment, name: text, type: Term) as int := {
-	added(e, Declaration(name, [], type, DeclarationKind.Axiom))
+word_declared(e: Environment, key: text, parts: int) as int := axiom_added(e, key, (1 to parts).fold(DATA_TERM, (kind, at) => pi("_", DATA_TERM, kind)), yes)
+# an axiom added, in core's scope for a word of core's own, seen from every scope (word_keyed)
+axiom_added(e: Environment, name: text, type: Term, core: bool = no) as int := {
+	added(e, Declaration(name, [], type, DeclarationKind.Axiom), core)
 	size(e)
 }
 # a type word's term, the word declared by its key the first time
 word_term(word: text) as Term := word_keyed(word, word)
-word_keyed(word: text, key: text, parts: int = 0) as Term := constant(named_id(TYPES.environment, key) ?? word_declared(TYPES.environment, key, parts), word, [])
+word_keyed(word: text, key: text, parts: int = 0) as Term := constant(TYPES.environment.core.get(key) ?? word_declared(TYPES.environment, key, parts), word, [])
 # a written word's term: a record's own by its declaration, a shape's with the type it narrows known
 word_named(n: Node) as Term := {
 	declared = fact_of(n, DECLARED_BY)
@@ -175,7 +198,11 @@ narrowing(word: Term, type: Term) as Term := {
 subset_term(parent: Term, condition: Node) as Term := {
 	# shown as the program wrote it, `int where it > 0`, keyed by its code, so two spacings of a condition are one type
 	shown = "${type_text(parent)} ${WHERE_WORD} ${condition_shown(condition)}"
-	word = word_keyed(shown, "${type_text(parent)} ${WHERE_WORD} ${text(condition_of(condition))}")
+	key = "${type_text(parent)} ${WHERE_WORD} ${text(condition_of(condition))}"
+	# the kernel's subtype is its parent by definition: a value of it is one of the parent's, its condition a law's
+	# hypothesis (extensions/verify/laws.wap)
+	if not TYPES.environment.core.has(key) { added(TYPES.environment, Declaration(key, [], DATA_TERM, Defined(parent)), yes) }
+	word = word_keyed(shown, key)
 	if not TYPES.conditions.has(word_id(word)) { TYPES.subsets.add(narrowing(word, parent)) }
 	TYPES.conditions[word_id(word)] = condition
 	narrowing(word, parent)

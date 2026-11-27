@@ -1,0 +1,75 @@
+# kernel-length: the shrinks, read on int-takes
+
+Card kernel-length takes the counts route (decided; the case route was measured at +85 and rejected). It is built
+after unify-typers and int-takes land. These shrinks were read on int-takes 22c1211b. Code lines, comments and blanks
+left out: integer_laws.wap 360, counting.wap 202, equality.wap 89, logic.wap 68, extensions/prove/linear.wap 320.
+The estimates are code lines.
+
+int-takes has already removed what the two cases made removable: the zero and positive arms went in fdb551e0. One
+leftover is listed under counting.wap below. `unshifted` (counting.wap:241-245) stays. A negative's downs is a
+successor and `·add` recurses on its second count, so `add(zero, successor(n))` stays stuck and needs `zero_added`
+in either order of the crossed counts.
+
+## Copies
+
+| where | what | lines |
+|---|---|---|
+| integer_laws.wap:153, :157, :160, :176, :240; counting.wap:221, :222 | Seven single inductions of one shape, `theorem_declared(b.e, NAME, [], binders, motive(v), induced(b, motive, base, step, v))`, each with its motive on a line of its own. They become `inducted(b, name, binders, motive, base, step)` on the last binder, motive inline | −8 |
+| integer_laws.wap:181-192 (at_most_split), :195-202 (at_most_beyond); counting.wap:224-232 (count_equals_sound) | Three paired inductions under a hypothesis. Each writes `X_at = (i, j) => pis([h: premise(i, j)], conclusion(i, j))`, the hypothesis local, `every = paired(…)`, `apply(apply(every, n), h)`, and arms that each open with `assuming(b, premise(…), h => …)`. They become one `paired_law(b, name, m, n, premise, conclusion, at_zero, at_first, at_both)` whose arms take h | −5 |
+| integer_laws.wap `applied` at :136 (twice), :165, :169, :241, :253, :256, :292, :297, :300, :319, :423; linear.wap `law_equated` at :150, :248, :325, :333, :343, :366, :368, :370 (twice), :372 | Each law's two sides are written twice: once in its declaration, again at every use. Instead, `instance_of(e, name, given): Identity` instantiates the declared statement with the arguments and reads its type and sides. That is kernel +5. The one-line wrappers it replaces go: successor_added, at_most_shifted, parts, differences_equal, the `shift` lambda, added_zero, associated, minus_cancelled. A use can then never restate a law differently from its declaration | −8 |
+| integer_laws.wap:304-305 `complete`, `sound`; linear.wap:380-381 | The same two functions, over a Building and over Sums. One pair reads `e.integers`' equals_sound and equals_complete | −2 |
+| integer_laws.wap:302 `zero_of(b)`; linear.wap:384 `zero_of(s)` | Both are `e.integers.zero`, which int_declared sets (counting.wap:179) | −2 |
+| integer_laws.wap:134-137 `count_sums`; linear.wap:370 `int_sums` | Two Monoids built the same way from three law names. They become one `monoid_of(c, type, zero, addition, zero_law, grouping_law, order_law)` with `instance_of` | −1 |
+| linear.wap:386 `sum_term` | Identical to `summed` (:385) | −1 |
+| linear.wap:325 | Restates int_sums' zero law (:370); `int_sums(s).zero_law(atom)` instead | −1 |
+| counting.wap:116, :126-138 | `fixing_proof` picks a proof by comparing names, and its two recursor proofs have one shape: `counted(b, Zero, stated, refl, (k, h) => before_both(b, left(k), right(k), h), n)`. One `by_predecessors(b, sides, base)`, and a list of (statement, proof) per shortcut in place of the name test | −4 |
+| equality.wap:79-83, :91-95 | symmetric and transitive open with the same five lines: the level, the checker, T, a, b. One `equal_binders(e)` | −3 |
+
+## A helper used once, or nothing using it
+
+| where | what | lines |
+|---|---|---|
+| integer_laws.wap:23, :347 `·add_swapped` | No caller (the card's note). linear.wap's regrouper does without it | −2 |
+| logic.wap:18, :29, :54-61 `·yes_is_not_no`; :19, :30, :62-75 `·bool_cases` | No caller on int-takes, t6a3a or unify-linear. unify-provers.md:80-81 and :100 plan them only for the divide laws, which are not built. Both go and come back with divide | −16 |
+| integer_laws.wap:232 `parts_zero` | An induction inside paired's zero arm. paired's at_zero takes a step (the card's note) | −2 |
+
+## Parameters always passed the same
+
+- `theorem_declared(b.e, …, [], …)`: every call in integer_laws.wap and counting.wap passes `b.e` and no levels.
+  A `theorem(b, name, binders, statement, proof)` on the Building makes the lines shorter, not fewer (0).
+- `b.e.literals!.truth` is spelled at integer_laws.wap:70, :165, :167, :172, :259, :318, :396, :407, :430. A
+  `truth(b)` makes the lines shorter (0).
+- `int_numeral(s.c.environment, v)` appears 7 times in linear.wap; a `number(s, v)` does the same (0).
+
+## Speed, no lines
+
+`count_sums(b)` is rebuilt at 13 calls and `int_sums(s)` at 3. Building each once, as a field of Building and Sums,
+saves the rebuild in every regrouping. This counts toward a "standing OK speed" only if measured at ≥ 1%.
+
+## Dead code across wap/ (wap-tree-wap's caller scan, on the card)
+
+wap-tree-wap scanned origin/int-takes for names with no caller; the scan is a todo note on card kernel-length. 12
+names, about 37 lines, are dead and go in the same card: seen_ids, declared_named, REFUSED_DECLARATION,
+RUNNING, shown_for, is_sort, shortcut_kind with DECLARED_SHORTCUTS, written_parts_of, language_loaded, library_path,
+instantiate_all.
+
+These stay:
+- CALL_REF, an opcode row.
+- Names called from outside wap/: declared_code and enums_shown (scripts/wap-census.warp); host_word,
+  host_word_answered and caller_memory (main.c).
+- axioms_shown, which V1 calls for `axioms of` (notes/coc-v1.md).
+- Gaps waiting on a caller: courses.wap (T5c3), texts_declared (T4d3's text rows), the quotients (Q1) and
+  condition_proof (T4d1's to check).
+
+## Total
+
+About −55 code lines in the five files, against the card's measured −12, plus the dead code's about 37 elsewhere:
+- integer_laws.wap about −24;
+- counting.wap about −8;
+- logic.wap −16;
+- equality.wap −3;
+- linear.wap about −5;
+- kernel +5 for `instance_of`.
+
+integer_laws.wap ends near 336 code lines. One builder, normal path. The census and the provers' test lines
+(test_theory_arithmetic, test_induction, test_verify, wap/test_law_runs) stay as they were.
