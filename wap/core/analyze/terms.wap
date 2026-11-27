@@ -77,16 +77,25 @@ definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 		# a body converted to the result, an int given where an int? is, is no term yet
 		if kernel_value(body) != kernel_settled(typed.result ?? return ø, s) { return ø }
 		names = items_of(parameters).map(parameter => declared_name(parameter))
-		value = term_of(body, Entering(names.map(place_key), by_key, s)) ?? course_defined(typed, names, body, by_key, s) ?? return ø
-		(1 to #names).reverse.fold(value, (inner, at) => lambda(text(names#at), settled_type(typed.arguments#at, s), inner))
+		reading = Entering([], [], checker(TYPES.environment, []), by_key, s)
+		parameters_entered = (1 to #names).list().map(at => entered(reading.c, text(names#at), settled_type(typed.arguments#at, s)))
+		inside = reading.under(parameters_entered, names.map(place_key))
+		lambdas(parameters_entered, term_of(body, inside) ?? course_defined(typed, body, inside) ?? return ø)
 	}
 	_ => ø
 }
-# what a body is read in: the binders around it by their keys, the innermost last
-class Entering { binders: list<text>; by_key: map<text, TypedFunction>; s: TypingState; recursion: Recursion? = ø }
-# the same reading under more binders
+# what a body is read in, locally nameless (kernel/terms.wap): the binders around it by their keys, the innermost last,
+# each the free variable of the checker c it was entered with; a term read under them is closed over them with `lambdas`
+class Entering { binders: list<text>; variables: list<Term>; c: Checker; by_key: map<text, TypedFunction>; s: TypingState; recursion: Recursion? = ø }
+# the same reading under more binders, entered as locals under these keys
 # (a course's case names the keys of the fields its values below hold hypotheses of)
-under(x: Entering, keys: list<text>, fields: list<text> = []) as Entering := Entering(x.binders + keys, x.by_key, x.s, if fields is empty or x.recursion == ø then x.recursion else Recursion(x.recursion!.key, x.recursion!.place, fields))
+under(x: Entering, locals: list<Local>, keys: list<text>, fields: list<text> = []) as Entering := Entering(x.binders + keys, x.variables + variables(locals), x.c, x.by_key, x.s, if fields is empty or x.recursion == ø then x.recursion else Recursion(x.recursion!.key, x.recursion!.place, fields))
+# a let of a name: its body read with the name a free variable of the type, closed over it again
+let_read(x: Entering, name: Node, type: Term, given: Term, body: (Entering) -> Term?) as Term? := {
+	local = entered(x.c, text(name), type)
+	read = body(x.under([local], [place_key(name)])) ?? return ø
+	let_in(text(name), type, given, abstracted(read, variable_id(local.variable)))
+}
 # a typed node's term, ø where it is not pure
 term_of(n: Node, x: Entering) as Term? := match n {
 	Number(value) => if value is int and kernel_value(n) == INT_TERM then int_numeral(TYPES.environment, value) else ø
@@ -101,11 +110,11 @@ term_of(n: Node, x: Entering) as Term? := match n {
 	Block(statements) => lets_term(statements, x)
 	_ => ø
 }
-# a name a binder around it holds, by its distance to it
+# a name a binder around it holds, its free variable
 binder_term(n: Node, x: Entering) as Term? := {
 	definer = fact_of(n, REBOUND) ?? fact_of(n, DEFINED_AT) ?? return ø
 	at = x.binders.index_of(place_key(definer))
-	if at <= 0 then ø else bound(#x.binders - at)
+	if at <= 0 then ø else x.variables#at
 }
 # a call of a typed function the kernel took in, each argument of its parameter's own type, giving its own result
 called_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
@@ -181,14 +190,16 @@ case_minor(id: int, arms: list, domain: Term, motive: Term, riding: (Term) -> Te
 	names = if named then case_fields(pattern) else fields.map(field => symbol(NO_BINDER))
 	if #names != #fields or names.any(name => not name is symbol) { return ø }
 	recursive = (1 to #fields).list().filter(at => fields#at == domain)
-	hypotheses = (1 to #recursive).list().map(at => apply(motive, bound(#fields + at - 1 - recursive#at)))
-	value_at = (depth: int) => apply_all(constant(id, constructor.name, []), (1 to #fields).list().map(at => bound(depth - at)))
-	below = riding(value_at(#fields + #recursive))
+	field_locals = (1 to #fields).list().map(at => entered(x.c, text(names#at), fields#at))
+	value = apply_all(constant(id, constructor.name, []), variables(field_locals))
+	hypothesis_locals = recursive.map(at => entered(x.c, NO_BINDER, apply(motive, (field_locals#at).variable)))
+	below = riding(value)
+	below_locals = if below == ø then [] else [entered(x.c, NO_BINDER, below!)]
+	locals = field_locals + hypothesis_locals + below_locals
 	keys = names.map(name => place_key(name)) + recursive.map(at => NO_BINDER) + (if below == ø then [] else [BELOW_BINDER])
-	inner = x.under(keys, recursive.map(at => place_key(names#at)))
-	body = if named or pattern == symbol(WILDCARD) then term_of(arm_result(arm), inner) else let_in(text(pattern), domain, value_at(#keys), term_of(arm_result(arm), inner.under([place_key(pattern)])))
-	binders = fields + hypotheses + (if below == ø then [] else [below!])
-	if body == ø then ø else (1 to #binders).reverse.fold(body!, (inner_term, at) => lambda(if at <= #names then text(names#at) else NO_BINDER, binders#at, inner_term))
+	inside = x.under(locals, keys, recursive.map(at => place_key(names#at)))
+	body = if named or pattern == symbol(WILDCARD) then term_of(arm_result(arm), inside) else let_read(inside, pattern, domain, value, bound_in => term_of(arm_result(arm), bound_in))
+	if body == ø then ø else lambdas(locals, body!)
 }
 # whole-number arms, `0 => a; 1 => b; _ => c`, as chained choices on their equality, the last arm fitting any value
 literals_term(subject: Node, arms: list, type: Term, x: Entering) as Term? := {
@@ -208,8 +219,7 @@ lets_term(statements: list, x: Entering) as Term? := {
 			if #statements == 1 or not place is Symbol or fact_of(place, DEFINER) == ø or x.binders.contains(place_key(place)) { return ø }
 			type = kernel_value(value) ?? return ø
 			given = term_of(value, x) ?? return ø
-			rest = lets_term(statements.drop(1), x.under([place_key(place)])) ?? return ø
-			let_in(text(place), type, given, rest)
+			let_read(x, place, type, given, inside => lets_term(statements.drop(1), inside))
 		}
 		_ => if #statements == 1 then term_of(statements#1, x) else ø
 	}
@@ -247,9 +257,11 @@ conditions_entered(conditions: list<Condition>, by_key: map<text, TypedFunction>
 condition_entered(condition: Condition, by_key: map<text, TypedFunction>, s: TypingState) := match condition.typed.define {
 	Define(name, parameters, body) => {
 		keys = items_of(parameters).map(parameter => place_key(declared_name(parameter)))
-		value = term_of(body, Entering(keys, by_key, s)) ?? return
+		reading = Entering([], [], checker(TYPES.environment, []), by_key, s)
 		parent = narrowed_type(condition.type)!
-		added(TYPES.environment, Declaration(condition_name(TYPES.environment, condition.type)!, [], pi("_", parent, BOOL_TERM), Defined(lambda(IT_WORD, parent, value))))
+		it = entered(reading.c, IT_WORD, parent)
+		value = term_of(body, reading.under([it], keys)) ?? return
+		added(TYPES.environment, Declaration(condition_name(TYPES.environment, condition.type)!, [], pi("_", parent, BOOL_TERM), Defined(lambdas([it], value))))
 	}
 	_ => ø
 }
