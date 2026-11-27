@@ -73,9 +73,9 @@ wabt="$(cd -P "$(dirname "$(readlink -f "$wasm2c")")/.." && pwd -P)"
 building="$executable.build"
 mkdir -p "$building" && building="$(cd -P "$building" && pwd -P)"
 source "$here/../../../scripts/lib/wap-beside.sh"
-# (the library the compiler compiled once, types.wasm, and its warm state are the GC ones: a native build reads its
-# library anew, from its sources, --sources)
-wap_ran "$compiler" --sources native "$program" "$building/$MODULE_NAME.wasm"
+# (the library the compiler compiled once, types.wasm, is the GC one: a native build compiles the types module's files
+# anew, from their code in the warm state, its own files for texts and lists among them)
+wap_ran "$compiler" native "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
 seed=()
 if [ -n "$standalone" ]; then
