@@ -302,7 +302,7 @@ What runs is believed where the kernel cannot see it (notes/coc-plan.md 9.7, 10.
 (from T2b its shortcuts on i64 with the overflow check, and a text literal opened into its code points), and
 the layouts of the prelude, each a `runs(…)` statement after the declaration it is about, which erase reads in place
 of the declaration's value (`elaborate/file.wap` layout_noted). Only the prelude writes them: every door refuses a
-program's own. Erase checks each before a program's terms run (`run/erase.wap` layouts_checked). A spelling that
+program's own. Nothing checks them before a program's terms run: `run/erase.wap` layouts_checked has no caller. A spelling that
 is a host operation, `prim i64.add(m, n)`, is checked against its row in the table of the host's operations
 (wap/kernel/primitives.wap): its operands, the parameters it names at the wasm types their values run as (`nat`'s as an
 int, an i64), numbers and the operations inside it, are exactly the wasm types the row takes, and the row gives the
