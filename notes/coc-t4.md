@@ -63,7 +63,7 @@ on main ade14e3b.
 
 ## The migration in landable sub-steps
 
-T4a and T4b add a type form, so they take the careful path; T4c changes the value layout of `char`, so it does too.
+T4a and T4b add a type form, so they take the careful path; T4c changes how a char converts, so it does too.
 
 | step | what | core lines (estimate) | checks |
 |---|---|---|---|
@@ -71,10 +71,10 @@ T4a and T4b add a type form, so they take the careful path; T4c changes the valu
 | T4b facts | a parameter's condition holds in its body; an `if` condition equal to a subset's condition at a variable is a finding, ended by an assignment to it | +30 (conditions.wap `found`) | normal; the `if #line == 1` line |
 | T5a | definitions and pure expressions as kernel terms (notes/coc-t5.md) | T5's | T5's |
 | T4d computed | an obligation whose value and predicate compute is decided when compiling: no is refused by condition, yes needs no check | +30 (the predicate's constant given its body by T5a; `computed` at the value) | normal plus the census; the two compile-time refusal lines of test/wap/test_subtype_wanted |
-| T4c char | `char` is `text where #it == 1`, stored as its text; today's i32 code point is `codepoint` (wiki/char.md); core's char conversions go (char_text, the READS row, the place-typed `'a'`, `is_plain`'s char, about 49 uses); `type Port < int where …` once c-type-names has `<` | −30 core, +30 types | careful (value layout), the speed gate measured at this step; test_subtype_page and test_char_page unchanged; the run-time check line of test/wap/test_subtype_wanted; the Port line |
+| T4c char | `char` is `text where #it == 1`, kept as its code point (user 2026-11-27: the i32 stays, a declared conversion takes a char up to text, wiki/char.md:7 unchanged); core's char conversions go (char_text, the READS row, the place-typed `'a'`, `is_plain`'s char, about 49 uses) for that one conversion; `type Port < int where …` once c-type-names has `<` | about −10 core, +30 types | careful, the speed gate measured at this step; test_subtype_page and test_char_page unchanged; `[1, "a"]` is a `list<int or text>` (with T5u's unions it is `list<char or int>` while "a" is a char); the run-time check line of test/wap/test_subtype_wanted; the Port line |
 | T4e value arguments | a type alias of value parameters, `vector(T, n: nat)`, `index(xs)`; its arguments found by unification and compared by computing | +60 | careful; the vector and index lines; test_type_wanted's `dot` and `append` lines |
 
-Order: T4a, T4b, then T5a (definitions and pure expressions as kernel terms), then T4d, T4c (after c-type-names
+Order: T4a, T4b, then T5u (unions, coc-plan's T5u row), then T5a (definitions and pure expressions as kernel terms), then T4d, T4c (after c-type-names
 lands) and T4e. A char literal is a char by computing (`#"a" == 1`), so T4c follows T4d: before it, every char
 literal would be checked at run time, or the place-typed `'a'` kept under another name. T4 closes after T5a.
 

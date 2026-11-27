@@ -148,6 +148,9 @@ class TypedFunction {
 result_given(typed: TypedFunction) as Term? := typed.result ?? (if typed.done then EMPTY_TERM else ø)
 # What a condition finds of a variable: its key, the arm it holds in (1 then, 2 else), the type it reads as there
 class Finding { key: text; arm: int; type: Term }
+# what a variable that holds a condition finds, `present = x != ø`, as the condition itself would: an If over the
+# variable finds it, until the variable or a path the findings name is given a new value
+class HeldCondition { key: text; findings: list<Finding> }
 # The function whose body is being typed: its variables' types and its written result type
 class TypeFrame {
 	variables: list<Binding> = []
@@ -159,6 +162,7 @@ class TypeFrame {
 	# what the conditions around find of their variables: an optional one present, read as its value; one any or a
 	# number holds, of the type tested, read as that (core/analyze/conditions.wap if_typed)
 	present: list<Finding> = []
+	held: list<HeldCondition> = []
 	# the name of the function typed, ø for the program
 	function: Node? = ø
 	# the globals it reads before the statements that give them their values (TypedFunction late)
@@ -427,7 +431,9 @@ name_set_typed(n: Node, place: Node, value: Node, s: TypingState, f: TypeFrame, 
 	if changes_capture(name, s) { refused(n, "a function value made before reads ${name}, which this changes") }
 	# the name keeps the type it holds, `found: Node? = ø` a Node? whatever it is given
 	held = if fitted == ø then type else wanted ?? type
+	findings = if value_type(given) == BOOL_TERM then found(value, given, s, f) else []
 	remembered(name, held, s, f)
+	if findings is not empty { f.held = f.held + [HeldCondition(key, findings)] }
 	with_type_of(refitted(Set(with_name_fact(bound_place(place, name, f), TYPE, type_fact(held)), fitted ?? given), n), held)
 }
 
@@ -501,13 +507,15 @@ read_before_given(n: Node, s: TypingState, f: TypeFrame) as Term? := {
 	type
 }
 # A path's read as a condition around finds it: an optional's value where it is known present, `x!`, a boxed value of
-# the type it is known to hold, a value of a type read as that one read so, `text(c)` of a char found a text; as it is
+# the type it is known to hold (both, for an int?? known an int), a value of a type read as that one read so, `text(c)` of a char found a text; as it is
 # where nothing finds it
 as_found(n: Node, read: Node, s: TypingState, f: TypeFrame) as Node := {
 	known = found_type(path_key(n) ?? return read, f.present) ?? return read
-	if base_of_optional(value_type(read)) != ø { return with_type_of(word_called(n, REQUIRED_WORD, [read], ø, s), known) }
+	held = base_of_optional(value_type(read))
+	present = if held == ø then read else with_type_of(word_called(n, REQUIRED_WORD, [read], ø, s), held!)
+	if value_type(present) == known { return present }
 	readers = passing_types(known).filter(given => given != known and read_of(given) != ø)
-	readers.fold(unboxed(read, known, n), (otherwise, given) => with_type_of(placed_like(If(boxed_tested(read, given, n), as_read(unboxed(read, given, n), known, s), otherwise), n), known))
+	readers.fold(unboxed(present, known, n), (otherwise, given) => with_type_of(placed_like(If(boxed_tested(present, given, n), as_read(unboxed(present, given, n), known, s), otherwise), n), known))
 }
 unboxed(read: Node, type: Term, at: Node) as Node := with_type_of(placed_like(Prim(symbol(OPTIONAL_VALUE), [read]), at), type)
 # A path a condition may find, its key: a variable's own, `x`, a field of a path, `m.pattern`, and an item of a path at
@@ -529,7 +537,10 @@ ITEM_STEP = "#"
 # whether a path is this one or part of it, `x.inner` and `x#1` within `x`
 within(key: text, path: text) as bool := key == path or [FIELD_STEP, ITEM_STEP].any(step => key.starts_with(path + step))
 # what conditions found, without this path and the paths within it, which a new value changes
-forgotten(key: text, f: TypeFrame) := { f.present = f.present.filter(known => not within(known.key, key)) }
+forgotten(key: text, f: TypeFrame) := {
+	f.present = f.present.filter(known => not within(known.key, key))
+	f.held = f.held.filter(held => not within(held.key, key) and not held.findings.any(known => within(known.key, key)))
+}
 # whether a function's name, where no function is wanted, is a call: it names a definition without parameters, `n := 5`
 names_constant(n: Node, expected: Term?, s: TypingState) as bool := function_parts(expected) == ø and scoped_definitions(n, s).flat_map(scope => scope).any(definition => #definition.parameters == 0)
 # the variables a name's binding keeps: the program's globals, or the frame's locals and parameters

@@ -21,13 +21,27 @@ RAISE_WORD = "raise"
 FIELD_MARK = "."
 # the function that narrows a value to a shape is named after it, `narrowed(Record)`
 NARROWING_WORD = "narrowed"
+UNFAILED_WORD = "unfailed"
+# the obligations left to the run, a line each as `wap check` lists them (wiki/type.md "Proved or checked")
+obligations: list<text> = []
+OBLIGATION_LEFT = "is checked when the program runs"
 
 # The dispatching function a call of these definitions with arguments of these types means; ø when no argument is an
 # any or a number that some definition wants of a type it may hold
 dispatching(called: Node, candidates: list<Signature>, types: list, s: TypingState) as Signature? := {
 	counted = candidates.filter(definition => takes_count(definition, #types, s))
 	if not counted.any(definition => tested_places(definition, types, s) != [] or generic_place(definition, types, s) != ø) { return ø }
+	for at in 1 to #types { untaken_part(called, counted, types#at, at, s) }
+	# a value of a parent given where a definition wants its narrowing is tested when the program runs
+	for definition in counted { for at in tested_places(definition, types, s) { if conversion(types#at, definition.parameters#at!, s) == Conversion.Narrowed { obliged(called, definition.parameters#at!) } } }
 	dispatching_named(dispatcher_name(called, counted, types, s), called, counted, types, s)
+}
+# a union given where no definition takes one of its parts is refused when compiling, naming the part (wiki/type.md
+# "Optional values and unions")
+untaken_part(called: Node, counted: list<Signature>, type: Term, at: int, s: TypingState) := {
+	if not is_union(type) { return }
+	untaken = union_parts(type).find(part => not counted.any(definition => has_letters(definition.parameters#at) or conversion(part, definition.parameters#at, s) in STATIC_CONVERSIONS))
+	if untaken != ø { refused(called, "this may be given ${type_text(untaken)}, which no ${called} takes: define ${called} for ${type_text(untaken)}") }
 }
 dispatcher_name(called: Node, counted: list<Signature>, types: list, s: TypingState) as Node := name_for("${called}(${types_text(types)})", defined_name(define_of(counted#1, s)), called)
 # the dispatching function of that name over the definitions that take the arguments' count
@@ -38,7 +52,7 @@ dispatching_named(name: Node, called: Node, counted: list<Signature>, types: lis
 	order = ranked(counted, types, s)
 	dispatch = Dispatch(called, name, order, types, reads)
 	generic = order.filter(definition => generic_place(definition, types, s) != ø)
-	made = dispatcher_made(name, reads, dispatch_body(dispatch, s), (taking_of(dispatch, s) + generic).map(definition => if has_letters(definition.result) then ø else definition.result), s)
+	made = dispatcher_made(name, reads, dispatch_body(dispatch, s), dispatch_results(dispatch, s), s)
 	if generic is not empty { s.dispatches.add(dispatch) }
 	made
 }
@@ -75,26 +89,50 @@ dispatch_body(dispatch: Dispatch, s: TypingState) as Node := {
 	types = dispatch.types
 	taking = taking_of(dispatch, s)
 	untested = taking.filter(definition => tested_places(definition, types, s) == [])
-	last = if untested is empty then raised("${dispatch.called}: no definition takes these values' types", dispatch.name, s) else named_call(text(dispatch.called), untested, reads, dispatch.name, s)
-	tried = taking.filter(definition => tested_places(definition, types, s) != []).map(definition => Choice(tests_of(definition, reads, types, s, dispatch.name), named_call(definition.name, [definition], reads, dispatch.name, s)))
+	tested = taking.filter(definition => tested_places(definition, types, s) != [])
+	last = if untested is empty then raised("${dispatch.called}: ${refusal(dispatch, tested, s)}", dispatch.name, s) else named_call(text(dispatch.called), untested, reads, dispatch.name, s)
+	tried = tested.map(definition => Choice(tests_of(definition, reads, types, s, dispatch.name), named_call(definition.name, [definition], reads, dispatch.name, s)))
 	chained(tried + dispatch.order.flat_map(definition => generic_choices(definition, dispatch, s)), last, dispatch.name)
+}
+# why no definition took the values: the one place tested, `initial("")` refused by its parameter's condition, wanted
+# at the definition (a dispatcher serves every call of its types), else that none takes their types
+refusal(dispatch: Dispatch, tested: list<Signature>, s: TypingState) as text := {
+	places = if #tested == 1 then tested_places(tested#1, dispatch.types, s) else []
+	if #places == 1 then other_shape(tested#1.parameters#(places#1)!, tested#1.definer, s) else "no definition takes these values' types"
 }
 # the definitions that take the values once their tests pass
 taking_of(dispatch: Dispatch, s: TypingState) as list<Signature> := dispatch.order.filter(definition => takes_fitting(definition, tested_reads(definition, dispatch.reads, dispatch.types, s), s))
 # the place where a definition takes a list or a map of its own letters, `xs: list<T>`, or any list or map, `xs: list`,
-# that an any is given at; ø where it takes none
+# that an any or a union is given at; ø where it takes none
 generic_place(definition: Signature, types: list, s: TypingState) as int? := (1 to #types).find(at => {
 	wanted = definition.parameters#at
-	types#at == ANY_TERM and (has_letters(wanted) or names_bare_kind(wanted)) and type_word(wanted ?? ANY_TERM) in [LIST_TYPE, MAP_TYPE]
+	held_boxed(types#at) and (has_letters(wanted) or names_bare_kind(wanted)) and type_word(wanted ?? ANY_TERM) in COLLECTION_WORDS
 })
+# whether a value of the type is held boxed, of a type known when the program runs: an any's or a union's
+held_boxed(type: Term?) as bool := type == ANY_TERM or is_union(type)
 # a generic definition's choices: one for each boxed type its parameter takes, tested and passed on as that type
 generic_choices(definition: Signature, dispatch: Dispatch, s: TypingState) as list<Choice> := {
 	at = generic_place(definition, dispatch.types, s) ?? return []
-	# every place an any is given at whose parameter is that one's type, `ys: list<T>` beside `xs: list<T>`
-	places = (1 to #dispatch.reads).filter(place => dispatch.types#place == ANY_TERM and (definition.parameters#place ?? ANY_TERM) == (definition.parameters#at ?? ANY_TERM))
+	# every place an any or a union is given at whose parameter is that one's type, `ys: list<T>` beside `xs: list<T>`
+	places = (1 to #dispatch.reads).filter(place => held_boxed(dispatch.types#place) and (definition.parameters#place ?? ANY_TERM) == (definition.parameters#at ?? ANY_TERM))
 	read_as = type => (1 to #dispatch.reads).map(place => if place in places then with_type_of(dispatch.reads#place, type) else dispatch.reads#place)
 	taking = taken(definition, at, boxed_known(s), s).filter(type => takes_fitting(definition, read_as(type), s))
 	taking.map(type => Choice(places.map(place => test_of(dispatch.reads#place, type, dispatch.name, s)), named_call(definition.name, [definition], read_as(type), dispatch.name, s)))
+}
+# what each choice gives: a definition's written result, a generic one's for each boxed type it takes, `list<text>`
+# of keys(m: map<K, V>) for a map<text, int>; ø where its letters stay open
+dispatch_results(dispatch: Dispatch, s: TypingState) as list<Term?> := {
+	plain = taking_of(dispatch, s).filter(definition => generic_place(definition, dispatch.types, s) == ø)
+	plain.map(definition => if has_letters(definition.result) then ø else definition.result) + dispatch.order.flat_map(definition => generic_results(definition, dispatch, s))
+}
+generic_results(definition: Signature, dispatch: Dispatch, s: TypingState) as list<Term?> := {
+	at = generic_place(definition, dispatch.types, s) ?? return []
+	taken(definition, at, boxed_known(s), s).map(type => generic_result(definition, at, type, s))
+}
+generic_result(definition: Signature, at: int, type: Term, s: TypingState) as Term? := {
+	bound = unified(parameters_holed(definition, s)#at ?? return ø, type, [], s) ?? return ø
+	result = answered(substituted(definition.result, letter_holes(definition, s)) ?? return ø, bound)
+	if has_letter_holes(result, s) then ø else result
 }
 # the boxed types a definition's generic parameter takes
 taken(definition: Signature, at: int, boxed: list<Term>, s: TypingState) as list<Term> := {
@@ -172,12 +210,18 @@ parameters_of(name: Node, types: list) as list := (1 to #types).map(at => {
 # The dispatching function, kept with the typing stage's definitions and placed with the program's functions; its
 # result written when every choice writes its own, so a choice calling back through the dispatch finds it
 dispatcher_made(name: Node, reads: list, body: Node, results: list<Term?>, s: TypingState) as Signature := {
-	# joined_type is ø where either is: a choice without a written result writes none
-	result = if results is empty then ø else results.drop(1).fold(results#1, (a, b) => held_joined(a, b, s))
-	written = if result == ø then name else Key(name, Op.Colon, written_of(result!))
-	dispatcher = placed_like(Define(written, List(reads.map(read => Key(read, Op.Colon, written_of(value_of(read, "for a dispatcher's parameter")))), Bracket.Round, Separator.Comma), body), name)
+	dispatcher = placed_like(Define(dispatcher_written(name, reads, results, s), List(reads.map(read => Key(read, Op.Colon, written_of(value_of(read, "for a dispatcher's parameter")))), Bracket.Round, Separator.Comma), body), name)
 	s.dispatchers += [dispatcher]
 	function_added(dispatcher, s)
+}
+# a dispatcher's name with its result written where every choice writes one: joined_type is ø where either is. A
+# choice among an any's types gives an any where the choices give unlike types, or where no type it takes is boxed
+# yet: its result stays as written while later boxed types add choices
+dispatcher_written(name: Node, reads: list, results: list<Term?>, s: TypingState) as Node := {
+	reads_any = reads.any(read => value_type(read) == ANY_TERM)
+	joined = if results is empty then (if reads_any then ANY_TERM else ø) else results.drop(1).fold(results#1, (a, b) => held_joined(a, b, s))
+	result = if is_union(joined) and reads_any then ANY_TERM else joined
+	if result == ø then name else Key(name, Op.Colon, written_of(result!))
 }
 # the results of choices made when the program runs, each kept as it is: an int's and a float's a number, not a float
 held_joined(a: Term?, b: Term?, s: TypingState) as Term? := if a != ø and b != ø and a != b and boxed_fit(a!, NUMBER_TERM) and boxed_fit(b!, NUMBER_TERM) then NUMBER_TERM else joined_type(a, b, s)
@@ -195,7 +239,8 @@ tested_places(definition: Signature, types: list, s: TypingState) as list<int> :
 	wanted = definition.parameters#at
 	wanted != ø and dispatchable(wanted, s.records) and tested_fit(wanted, types#at, s)
 })
-tested_fit(wanted: Term, given: Term, s: TypingState) as bool := tested_when_run(wanted, given, s.records) or conversion(given, wanted, s) == Conversion.Narrowed
+# a part of a union, or the type a shape among its parts narrows, `Node` of an `int or Error`, is tested for
+tested_fit(wanted: Term, given: Term, s: TypingState) as bool := wanted != given and (tested_when_run(wanted, given, s.records) or is_union(given) and union_parts(given).any(part => narrowed_type(part) == wanted)) or conversion(given, wanted, s) == Conversion.Narrowed
 # the arguments as a definition's call reads them once its tests pass: each tested one of its parameter's type
 tested_reads(definition: Signature, reads: list, types: list, s: TypingState) as list := {
 	places = tested_places(definition, types, s)
@@ -203,25 +248,47 @@ tested_reads(definition: Signature, reads: list, types: list, s: TypingState) as
 }
 tests_of(definition: Signature, reads: list, types: list, s: TypingState, at: Node) as list<Node> := tested_places(definition, types, s).map(place => test_of(reads#place, definition.parameters#place ?? refused(at, "a tested parameter has its type"), at, s))
 # whether an any's value is of the type, `x is int`, or a value of a shape (core/analyze/shapes.wap)
-test_of(read: Node, type: Term, at: Node, s: TypingState) as Node := if narrowed_type(type) != ø then shape_test(read, type, at, s) else with_fact(with_type_of(placed_like(Prim(symbol(BOXED_TEST), [read]), at), BOOL_TERM), TESTED, type_fact(type))
+test_of(read: Node, type: Term, at: Node, s: TypingState) as Node := if narrowed_type(type) != ø then narrowing_test(read, type, at, s) else with_fact(with_type_of(placed_like(Prim(symbol(BOXED_TEST), [read]), at), BOOL_TERM), TESTED, type_fact(type))
 # a call of one of these definitions, chosen among them as any call is
 named_call(word: text, definitions: list<Signature>, arguments: list, at: Node, s: TypingState) as Node := {
 	called = with_fact(with_binding(placed_like(symbol(word), at), DefinitionKind.Function), CANDIDATES, data_list([data_list(definitions.map(definition => defined_name(define_of(definition, s))))]))
 	placed_like(Call(called, arguments), at)
 }
 raised(message: text, at: Node, s: TypingState) as Node := raising(Text(message), at, s)
-raising(message: Node, at: Node, s: TypingState) as Node := named_call(RAISE_WORD, definitions_named(RAISE_WORD, s), [message], at, s)
+raising(raised: Node, at: Node, s: TypingState) as Node := named_call(RAISE_WORD, definitions_named(RAISE_WORD, s), [raised], at, s)
 
-# A value where a shape of its type is wanted, `Record` where a Node is given (core/analyze/shapes.wap), as a call of
-# the function the typing stage writes once for the shape: the value when it is of the shape, else a raise naming the
-# place that wanted it
+# A value where a narrowing of its type is wanted, `Record` where a Node is given (core/analyze/shapes.wap) or a
+# subtype where its parent is, as a call of the function the typing stage writes once for it: the value when it is of
+# the narrowing, else a raise naming the place that wanted it
 narrowed_call(n: Node, wanted: Term, at: Node, s: TypingState) as Node := {
 	name = name_once("${NARROWING_WORD}(${type_text(wanted, yes)})", n, s)
 	# one for each shape, wherever it is wanted
 	if definitions_named(text(name), s) is empty {
 		reads = parameters_of(name, [narrowed_type(wanted) ?? NODE_TERM, TEXT_TERM])
-		body = placed_like(Case(reads#1, [Arm(shape_pattern(wanted, s), with_type_of(reads#1, wanted)), Arm(symbol(WILDCARD), raising(reads#2, name, s))]), name)
+		body = placed_like(If(narrowing_test(reads#1, wanted, name, s), reads#1, raising(reads#2, name, s)), name)
 		dispatcher_made(name, reads, body, [wanted], s)
 	}
-	word_called(n, text(name), [n, with_type(placed_like(Text(other_shape(wanted, at)), at), TEXT_TYPE)], wanted, s)
+	obliged(at, wanted)
+	word_called(n, text(name), [n, with_type(placed_like(Text(other_shape(wanted, at, s)), at), TEXT_TYPE)], wanted, s)
+}
+# A value of a union holding an Error where a type is wanted that holds none: the Error raised, any other value checked
+# as an any's is (wiki/Error.md: no other variable holds an Error), one function for each pair of types
+unfailed_call(n: Node, given: Term, wanted: Term, s: TypingState) as Node := {
+	name = name_once("${UNFAILED_WORD}(${type_text(given, yes)}, ${type_text(wanted, yes)})", n, s)
+	if definitions_named(text(name), s) is empty {
+		read = parameters_of(name, [given])#1
+		error = error_part(given)!
+		cast = type => with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [read]), name), type)
+		dispatcher_made(name, [read], placed_like(If(narrowing_test(read, error, name, s), raising(cast(error), name, s), cast(wanted)), name), [wanted], s)
+	}
+	word_called(n, text(name), [n], wanted, s)
+}
+error_part(type: Term) as Term? := union_parts(type).find(is_error)
+is_error(type: Term) as bool := narrowed_type(type) == NODE_TERM and type_text(type) == ERROR_CASE
+# a narrowing left to the run at a place, its line in the obligations once: a subtype's condition as written, a shape
+# by its name
+obliged(at: Node, type: Term) := {
+	condition = subset_condition(type)
+	line = "${place_of(at)}${if condition == ø then type_text(type) else condition_shown(condition!)} ${OBLIGATION_LEFT}"
+	if not obligations.contains(line) { obligations.add(line) }
 }
