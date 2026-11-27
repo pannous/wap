@@ -70,7 +70,7 @@ What a program writes, and what it is in the theory:
 | the condition of an `if` | a proposition that can be decided; its branch knows that it holds |
 | `law` | a proposition; with its proof a theorem |
 | a trait | a structure of operations and their laws, found by the compiler |
-| `f(x) := …` with an effect | a function into a computation type, `B ! IO` |
+| `f(x) := …` with an effect | a function with its effects as facts (`effects of f`), a claim `! IO` checked against them |
 | `quotient(T, same)` | the quotient type |
 | `axiom` | an axiom: the only way to add one, and always reported |
 
@@ -983,7 +983,7 @@ step, measured against the step before; more goes to the user.
 | T5u unions (before T5a) | `A or B` (also `A \| B`, written `or`) is a sum type, flat, without order or repeats, `T or ø` being `T?`; its value is boxed as an `any`'s, so a part converts into the union as into any (Boxed) and the union narrows to a part by its `is` test (Narrowed, T4's check); unlike types join to their union; a call on a union picks each case's definition when the program runs, a case with none refused; `T or Error` is a failable value: `failed` is `is Error`, and narrowing an Error out raises it. Steps T5u1 types, T5u2 calls, T5u3 failable; T5a (definitions and pure expressions as kernel terms) follows, and T4d waits for T5a | the lines of wiki/type.md "Optional values and unions"; `type of [1, "a"]` is `list<int or text>`; `describe(s)` picks by the case; `r failed` of a `T or Error` |
 | T5 definitions, statements and inductive types (steps: notes/coc-t5.md) | enums, classes, functions, `match`, blocks, variables, loops and exits become kernel declarations and terms as analyze types them: inductive blocks, recursors, structural recursion, a measure, else Div; unions, optional values and `any`; classes with type arguments, `class Pair<A, B> { first: A; second: B }` (wiki/type.md), as inductive types with parameters: each use an instance of the record, as T3f instances functions (about 40–80 lines in types, fits and declarations, the letters handed on by a records.wap rule); `extends` as the closed sum, built by analyze from the class declarations while the `inherited` rule keeps copying the fields; a compiled library carries, beside its signatures, the bodies that may unfold (definitions a type or a proof computes with), as a Lean module does, which replaces the signatures-only format of notes/compile_inputs.md; a compiled library's declarations are; the theory's doors read analyze's typed nodes, so read.wap takes analyze's choice in place of `nearest`, TRIAL_LIMIT and the numeral special cases (extension −40); letters.wap, fits.wap, conditions.wap and ROUNDS_LIMIT go
 carried once, as the kernel accepted them when it was built (13); the emitter reads the statements and their checked facts, types, levels and proofs left out (E2, E5's statements, E6, E7), and the erasure stage chooses the build's strategies, the emitter's branches on a build that keeps its values in the memory (GC structs or C structs, call_ref or a table, struct.get or a load) | a `match` that misses a case is refused by `covering`; `effects of fact` is Pure; `effects of` a `while` without a measure is Div and it still runs; `speak` over a list of an animal and a dog picks each one's method |
-| T6 laws, effects and instances | a law is a theorem; a plain compile proves by computing, else the law is Tested; effects are computation types and a proof refuses an impure function; traits are structures and instances come from overloads, a protocol (a class with a required word) is such a trait (E3, E5's effects, P1, P2); `wap check` loads the proof extension | `law double(3) == 6` Proved; `wap check` proves a law from two earlier laws; a proof using an impure function refused naming the chain; `sort` on a class without `compare` refused naming the trait |
+| T6 laws, effects and instances | a law is a theorem; a plain compile proves by computing, else the law is Tested; a function's effects are facts and a proof refuses an impure function; traits are structures and instances come from overloads, a protocol (a class with a required word) is such a trait (E3, E5's effects, P1, P2); `wap check` loads the proof extension | `law double(3) == 6` Proved; `wap check` proves a law from two earlier laws; a proof using an impure function refused naming the chain; `sort` on a class without `compare` refused naming the trait |
 | T7 the theory extension retires | what is left of wap/extensions/theory goes: its run door and its prelude, whose words now live once in wap/types; the provers (P3, P4), the second opinion (K7), the export, the arithmetic proofs and the door `wap check` live in wap/extensions/proof, which only `wap check` and proofs load | every test as before; `wap check` and the second opinion from wap/extensions/proof; the trust base listed by a command |
 | T8 storage by context (cuttable) | an `int` is stored as i32 or i64 where computing or a fact in scope shows it fits (the plain compile loads no provers), else as a big number; the big numbers come from a library only the programs that need them load; `int` no longer wraps. Three layers stop at 2^63 and all three change here: the reader (a literal past i64 reads as an int, not a float), the runtime (the storage above), and the kernel (a count at or past 2^63 is `Large(Magnitude)`, `Numeral(int)` below it; ROW_OVERFLOW goes with the wrap; notes/unify-provers.md "Exact int literals past 2^63") | `2 ^ 62 * 4` prints 18446744073709551616; a loop counter stays an i64 and the benchmarks keep their guardrails; the compiler's build holds no big numbers (13); test_theory_prelude_numbers' `big: Proved` (4294967296² exact) green |
 
@@ -1008,13 +1008,13 @@ follow the theory extension's elaborator, which does the same work today:
 | T3 | 350 analyze (unification 180, numerals at their expected type 170), 100 analyze (types as terms, the notation's readers), 40 analyze (one pass: headers first, assignments as bindings), 20 rules (kind rules in place), 200 types (the numbers prelude) | 100 (80 analyze: the 40 below and 40 of restarts and retypings; 20 rules: the refiring) | typed_readings and analyze's own numerals (40); letters.wap and fits.wap stay, T5 deletes them | +610 |
 | T4 | 450 analyze (conditions, obligations, conversions, below), 100 types | 0 | conditions.wap stays and grows, T5 deletes it | +550 |
 | T5 | 1,000 analyze (declarations, match, recursion, blocks, statements, sums), 200 types (data), 200 emit (erasure) | 967 (817 analyze, 150 emit) | matching.wap (192), letters.wap (286), fits.wap (196), conditions.wap (143); emit's shape guessing that erasure replaces (150) | +433 |
-| T6 | 500 analyze (effects, instances, laws, tested), 30 analyze (protocols as traits), 150 types (logic, effects) | 227 analyze | dispatch.wap (227): overloads become instances | +453 |
+| T6 | 500 analyze (effects, instances, laws, tested), 30 analyze (protocols as traits), 150 types (logic, effects) | 90 analyze | dispatch.wap's rounds (about 90): generic dispatch goes through instances; calls on an `any` keep their `is` chains, the dispatch of a union | +590 |
 | T7 | 0 | 0 in the compiler; the rest of the extension | | 0 |
 | T8 | 200 emit and types | 20 | | +180 |
-| **all** | **6,000** | **1,494** | **1,084 of analyze** | **+4,506** |
+| **all** | **6,000** | **1,357** | **947 of analyze** | **+4,643** |
 
 Measured, the compiler is at 16,067 lines with T4 underway; with the rest of T4, T5, T6 and T8 as estimated it ends
-near 17,700 if T5 keeps the analyze files, about 17,100 with the four deleted as its row says, near the ballpark of
+near 17,850 if T5 keeps the analyze files, about 17,250 with the four deleted as its row says, near the ballpark of
 17,000 (5.3). A step's deletions belong in its gate, measured by a script (the file is gone), as its tests are. A step that
 needs more lines takes them and reports its measured lines; only a jump far above the ballpark goes to the
 interviewer.
@@ -1038,8 +1038,7 @@ are counted apart, since a plain compile does not load them.
 
 Net: core about +100 (L +50, C +50), types +25, emit +20, kernel 0; the proof extension +85.
 Against the cost table's T6 row: the 500 analyze for "effects, instances, laws, tested" are T6a's +355 plus these
-+100; the 30 for protocols is C1. The table's 227 deleted for "dispatch.wap: overloads become instances" is about
-90: an `any` keeps its `is` chain, which is the dispatch of a union, not of an overload.
++100; the 30 for protocols is C1; the 90 deleted are C4's.
 
 **Order.** L1, then L2, then L3. C1, then C2, then C3 and C4 in either order. L and C run side by side, one builder
 each. L3 needs T6a2 (hypotheses), and the law.md example needs the provers to prove `x > 0 and y > 0 implies
@@ -1064,10 +1063,9 @@ trait.md already; a trait carrying laws ("a structure of operations and their la
 it is not built in T6.
 
 **Not in T6.**
-- Effects as computation types (`B ! IO` as `Eff(IO, B)`, section 2). Every wiki line about effects (effects.md: a
-  claim checked, `effects of`, a proof refusing an impure function) is met by the effect facts (T5b1) and T6a5's
-  check, so the computation types add core lines that no line needs. Recommended: cut, and section 2's row reads "a
-  function with its effects as facts".
+- Effects as computation types (`B ! IO` as `Eff(IO, B)`): cut. Every wiki line about effects (effects.md: a claim
+  checked, `effects of`, a proof refusing an impure function) is met by the effect facts (T5b1) and T6a5's check.
+  The computation types of 9.2 stay the theory extension's and leave with it at T7.
 - `map default ListMap` (trait.md "Protocol and default class"): a declaration rule, not an instance.
 - A trait with laws (above).
 
