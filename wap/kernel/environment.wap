@@ -117,6 +117,8 @@ class InductiveFacts {
 	any_motive: bool
 	structure: bool
 	k: bool
+	# each type's cases by their ids, in order
+	cases: list<list<int>> = []
 }
 
 # What iota reads of a recursor: its type and that type's cases, each a constant at the block's level parameters, with each case's count of fields; the
@@ -136,9 +138,8 @@ class RecursorFacts {
 
 # a type's place in its block, 0 for a constant of none of its types
 type_place(facts: InductiveFacts, type: Term): int := facts.types.index_where(own => is_constant(own, type))
-# a case of a block's type at the type's levels, by its place: a block declares each type with its cases right after
-# it, so a case's id is its type's and its place
-block_case(facts: InductiveFacts, type: Term, place: int): Term := constant(constant_id(type) + place, facts.block.types#(type_place(facts, type)).cases#place.name, constant_levels(type))
+# a case of a block's type at the type's levels, by its place, at the id its block gave it
+block_case(facts: InductiveFacts, type: Term, place: int): Term := constant(facts.cases#(type_place(facts, type))#place, facts.block.types#(type_place(facts, type)).cases#place.name, constant_levels(type))
 
 # A declaration: its name, the names of its level parameters, its type, and what it is
 class Declaration { name: text; levels: list<text>; type: Term; kind: DeclarationKind }
@@ -162,7 +163,8 @@ unfolding(d: Declaration): Term? := match d.kind {
 
 # The declarations accepted so far, by id: the id is the place in the order of declaring, from 1, so of two
 # definitions the later one unfolds first (6.5). Ids are never given twice: a declaration taken back (`back_to`) keeps
-# its place in the log and is never found again
+# its place in the log and is never found again. An axiom is filled where a declaration of its name and type arrives:
+# the declaration takes its place, so every term naming the assumed word means the definition from then on
 class Environment {
 	log: list<Declaration> = []
 	# the ids taken back
@@ -188,7 +190,10 @@ class Environment {
 	courses: list<int> = []
 	# what it accepted, in order, as it was given: what an export writes (export.wap)
 	accepted: list<Accepted> = []
+	# the axioms filled, in order, each with the assumption it replaced, which a take-back puts back
+	fills: list<Fill> = []
 }
+class Fill { id: int; assumed: Declaration }
 # A statement the kernel accepted: a declaration, an inductive block as written, or a binding statement
 enum Accepted {
 	AcceptedDeclaration(d: Declaration)
@@ -204,6 +209,18 @@ class Quotients { former: Term; made: Term }
 declaration(e: Environment, name: text): Declaration? := e.log#(named_id(e, name) ?? return ø)
 # the id a name means in the scope being read
 named_id(e: Environment, name: text): int? := e.ids.get(name) ?? e.outer.get(name)
+# the id each name the scope being read sees means, its own names over those from outside
+seen_ids(e: Environment): map<text, int> := {
+	seen = copy(e.outer)
+	seen.update(e.ids)
+	seen
+}
+# the environment a module is read in on top of these declarations: they are its outside, which its own names hide
+opened(e: Environment): Environment := {
+	e.outer = seen_ids(e)
+	e.ids = {}
+	e
+}
 # the declaration of a name that must be declared, else refused
 # the declaration of an id while it is live; ø for an id taken back or never given
 declared_at(e: Environment, id: int): Declaration? := if id >= 1 and id <= #e.log and not e.taken_back.has(id) then e.log#id else ø
@@ -217,7 +234,11 @@ declaration_of(e: Environment, constant: Term): Declaration := match constant.sh
 # before it are added. Where making or a check refuses, none is added
 declared_together(e: Environment, names: list<text>, made: (list<int>) -> list<Declaration>, checked: (Declaration) -> T): list<Declaration> := kept_if_given(e, () => {
 	size = #e.log
-	declarations = made((1 to #names).list().map(at => size + at))
+	declarations = made(ids_given(e, names, name => assumed_id(e, name)))
+	# a name meaning an axiom of another type fills nothing: made again, it takes a new id, so it is refused as taken or,
+	# in a module's scope, hides the assumption
+	unfilling = declarations.filter(d => assumed_id(e, d.name) is not ø and filled_id(e, d) is ø).map(d => d.name)
+	if unfilling is not empty { declarations = made(ids_given(e, names, name => if unfilling.contains(name) then ø else assumed_id(e, name))) }
 	if #e.log != size or declarations.map(d => d.name) != names { raise "declarations made together are added by declared_together alone, in the order of their names" }
 	for d in declarations {
 		added(e, d)
@@ -225,6 +246,23 @@ declared_together(e: Environment, names: list<text>, made: (list<int>) -> list<D
 	}
 	declarations
 })!
+# the ids declarations of these names take: an assumption's own where it is to be filled, else the next new ones
+ids_given(e: Environment, names: list<text>, kept: (text) -> int?): list<int> := {
+	ids: list<int> = []
+	for name in names { ids += [kept(name) ?? #e.log + #ids.filter(id => id > #e.log) + 1] }
+	ids
+}
+# the id of the axiom a name means, ø where it means none
+assumed_id(e: Environment, name: text): int? := {
+	id = named_id(e, name) ?? return ø
+	if (declared_at(e, id) ?? return ø).kind is Axiom then id else ø
+}
+# the id of the axiom a declaration fills: one of its name, levels and type
+filled_id(e: Environment, d: Declaration): int? := {
+	id = assumed_id(e, d.name) ?? return ø
+	assumed = e.log#id
+	if assumed.type == d.type and assumed.levels == d.levels then id else ø
+}
 # a declaration by its name as a constant at these levels
 constant_of(e: Environment, name: text, levels: list<Level>): Term := constant(place(e, name), name, levels)
 declared_named(e: Environment, name: text): Declaration := {
@@ -266,9 +304,16 @@ stated(d: Declaration): bool := match d.kind {
 # a declaration becomes part of the environment, checked first by typing.wap's `declared` or inductive.wap, its name
 # new in the scope being read; one stated as written is recorded for an export
 added(e: Environment, d: Declaration) := {
-	if e.ids.has(d.name) { refused(NAME_TAKEN, "${d.name} is declared already") }
-	e.log += [d]
-	e.ids[d.name] = #e.log
+	filled = filled_id(e, d)
+	if filled is not ø {
+		e.fills += [Fill(filled!, e.log#filled!)]
+		at = filled!
+		e.log#at = d
+	} else {
+		if e.ids.has(d.name) { refused(NAME_TAKEN, "${d.name} is declared already") }
+		e.log += [d]
+	}
+	e.ids[d.name] = filled ?? #e.log
 	if stated(d) { e.accepted += [AcceptedDeclaration(d)] }
 }
 
@@ -282,8 +327,9 @@ class Reach {
 	texts: Texts? = ø
 	products: Products? = ø
 	quotients: Quotients? = ø
+	fills: int = 0
 }
-mark(e: Environment): Reach := Reach(#e.log, #e.accepted, #e.courses, e.numbers, e.texts, e.products, e.quotients)
+mark(e: Environment): Reach := Reach(#e.log, #e.accepted, #e.courses, e.numbers, e.texts, e.products, e.quotients, #e.fills)
 # the environment taken back to a reach: each declaration made since is taken back and loses its name, its id stays
 # given, so a term or a kept answer naming it finds nothing; the bindings and the courses are what they were then
 back_to(e: Environment, reach: Reach) := {
@@ -299,6 +345,12 @@ back_to(e: Environment, reach: Reach) := {
 	e.texts = reach.texts
 	e.products = reach.products
 	e.quotients = reach.quotients
+	for fill in e.fills.drop(reach.fills).reverse {
+		at = fill.id
+		e.log#at = fill.assumed
+		e.axioms[fill.id] = [fill.id]
+	}
+	e.fills = e.fills.take(reach.fills)
 }
 # Every take-back is this: what an attempt gives, kept with what it declared; where it gives ø or refuses, the
 # environment taken back to where it was before it, never by hand
