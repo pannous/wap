@@ -1049,8 +1049,8 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | TM | landed (TM1 to TM3); TM4, the restart after a standard module, folded into T5 | 10bd563b (TM1), f9c06b41 (TM2, TM3) | |
 | T3 | landed, closed with machine-words | 896823f3 (T3a), 551ffd93 and 471a8882 (T3e), e0dea1d8 (T3f), d3791cd3, f5d9d5a8 | |
 | T4a, T4b | landed | 3410aa94 | |
-| T4d computed obligations | open, no branch: T5a's bodies are in | | |
-| T4c char | waits, no branch | | T4d |
+| T4d computed obligations | planned (notes/coc-t4d.md: T4d1 decided, T4d2 no check, T4d3 texts), no branch | | unify-typers (`conditions_entered`); T4d3 the user's answer on text rows |
+| T4c char | waits, no branch | | T4d1 to T4d3 |
 | T5u | landed | 3410aa94, d0b3c9e8 (failable values, `T??`) | |
 | T5a | A1 landed; A2 (a typed law's verdict from analyze's environment) in progress | 4112fe55, c43b08e3; t5a-pure-definitions-a2 b5442eea, wap-theory-reads-types | |
 | unify-typers (M2, M2b) | in progress: core declares count, int and logic, the theory reader and prelude go, int's kernel laws in; unify-dedup 77e07344 merged into it | unify-typers bf69c6b8; wap-theory-reads-types | |
