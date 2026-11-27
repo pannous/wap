@@ -1052,7 +1052,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T4d computed obligations | open, no branch: T5a's bodies are in | | |
 | T4c char | waits, no branch | | T4d |
 | T5u | landed | 3410aa94, d0b3c9e8 (failable values, `T??`) | |
-| T5a | A1 landed; A2 (a typed law's verdict from analyze's environment) in progress | 4112fe55, c43b08e3; t5a-pure-definitions-a2 b5442eea, wap-theory-reads-types | |
+| T5a | A1 landed; A2 (a typed law's verdict from analyze's environment) lands with unify-typers | 4112fe55, c43b08e3; unify-typers | |
 | unify-typers (M2, M2b) | in progress: core declares count, int and logic, the theory reader and prelude go, int's kernel laws in; unify-dedup 77e07344 merged into it | unify-typers bf69c6b8; wap-theory-reads-types | |
 | exact-big-literals | in progress: the kernel's counts past 2^63 exact as `Large` (decision 13) | exact-big-literals df289030; wap-native-no-layout-any | merging onto unify-typers |
 | T5b1 effects | in progress | t5b-effects 9e6cf1d2; wap-primitive-lookup-tables | |
