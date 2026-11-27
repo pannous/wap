@@ -8,30 +8,30 @@ all of them keep. The plan says what the rules are; this note says where they li
 
 ## Files
 
-| file | holds | plan | card |
-|---|---|---|---|
-| `terms.wap` | levels and terms, building them, substitution, sameness | 6.1 | theory-terms |
-| `levels.wap` | levels compared: equal, at most, the level of a function type | 6.2 | theory-terms |
-| `environment.wap` | declarations, the environment, the state of a check, refusals | 6.6 | theory-terms |
-| `compute.wap` | a term computed to its head: beta, zeta, delta, iota (with K) | 6.4, 7 | theory-computing |
-| `equal.wap` | definitional equality | 6.5 | theory-equality |
-| `typing.wap` | a term's type; a declaration checked and added | 6.3, 6.6 | theory-typing |
-| `show.wap` | a term shown in wap notation | below | theory-explicit |
-| `inductive.wap` | an inductive block checked | 7, checks 1 to 5 | theory-inductive-checks |
-| `nested.wap` | a block nested in another inductive type made plain | 7, nested types | theory-inductive-checks |
-| `recursors.wap` | recursors made, their computation rules | 7, checks 6 and 7 | theory-recursors |
-| `quotients.wap` | the statement `quotients(Equal)`: the quotient and its ways out | 6.4, 6.6 | theory-quotients |
-| `numbers.wap` | the statements `numbers(…)` and `shortcut(…)`: number literals and the seven shortcuts | 6.7 | theory-numbers |
-| `equality.wap` | `Equal` and `Equal.refl`, the equality laws state, and the laws the provers glue proofs with | T5 | |
-| `logic.wap` | the proposition with no proof and the one with one, and the first laws of the truths | T5 | |
-| `counting.wap` | the count int's cases carry, its functions and shortcuts; int, its meanings and the bridge between its two equalities | T5 | |
-| `integer_laws.wap` | int's laws the linear prover builds its proofs of, declared before the first goal | T5 | |
-| `core/analyze/courses.wap` | core's products, Pair and Unit, and each enum's below and course | 8, T5c | |
-| `core/analyze/holes.wap`, `unify.wap` | holes and unification, which are not trusted: notes/elaborate.md | 8 | |
-| `extensions/verify/` | the door: a program's laws judged by the kernel (below) | P1 | |
-| `extensions/prove/` | the provers, whose proofs the kernel checks | P2 | |
-| `extensions/theory/export.wap` | what the environment accepted written as an export, one record a line | K7 | theory-second-opinion |
-| `extensions/theory/second/` | the second checker: an export checked again by rules of its own | K7 | theory-second-opinion |
+| file | holds | plan |
+|---|---|---|
+| `terms.wap` | levels and terms, building them, substitution, sameness | 6.1 |
+| `levels.wap` | levels compared: equal, at most, the level of a function type | 6.2 |
+| `environment.wap` | declarations, the environment, the state of a check, refusals | 6.6 |
+| `compute.wap` | a term computed to its head: beta, zeta, delta, iota (with K) | 6.4, 7 |
+| `equal.wap` | definitional equality | 6.5 |
+| `typing.wap` | a term's type; a declaration checked and added | 6.3, 6.6 |
+| `show.wap` | a term shown in wap notation | below |
+| `inductive.wap` | an inductive block checked | 7, checks 1 to 5 |
+| `nested.wap` | a block nested in another inductive type made plain | 7, nested types |
+| `recursors.wap` | recursors made, their computation rules | 7, checks 6 and 7 |
+| `quotients.wap` | the statement `quotients(Equal)`: the quotient and its ways out | 6.4, 6.6 |
+| `numbers.wap` | the statements `numbers(…)` and `shortcut(…)`: number literals and the seven shortcuts | 6.7 |
+| `equality.wap` | `Equal` and `Equal.refl`, the equality laws state, and the laws the provers glue proofs with | T5 |
+| `logic.wap` | the proposition with no proof and the one with one, and the first laws of the truths | T5 |
+| `counting.wap` | the count int's cases carry, its functions and shortcuts; int, its meanings and the bridge between its two equalities | T5 |
+| `integer_laws.wap` | int's laws the linear prover builds its proofs of, declared before the first goal | T5 |
+| `core/analyze/courses.wap` | core's products, Pair and Unit, and each enum's below and course | 8, T5c |
+| `core/analyze/holes.wap`, `unify.wap` | holes and unification, which are not trusted: notes/elaborate.md | 8 |
+| `extensions/verify/` | the door: a program's laws judged by the kernel (below) | P1 |
+| `extensions/prove/` | the provers, whose proofs the kernel checks | P2 |
+| `extensions/theory/export.wap` | what the environment accepted written as an export, one record a line | K7 |
+| `extensions/theory/second/` | the second checker: an export checked again by rules of its own | K7 |
 
 The files use each other freely: computing, equality and typing call one another.
 
@@ -81,8 +81,8 @@ The files use each other freely: computing, equality and typing call one another
 - `refused(rule, found)` and the rules' names.
 - `axioms_of(e, name)`: every axiom a declaration rests on. `rests_on(e, name, terms, own)` records it when a
   declaration is added: an axiom rests on itself, any other declaration on what the names in its terms rest on.
-- `names_new(e, names)`, `levels_distinct(levels)`, `closed(t, name)`: the checks every declaration passes before
-  its type is read. `copied(e)`: another environment holding the same declarations.
+- `levels_distinct(levels)`, `closed(t, name)`: the checks every declaration passes before its type is read; that
+  its name is new, `added` checks. `copied(e)`: another environment holding the same declarations.
 
 **compute.wap**
 - `computed(c, t)`: t computed until its head is no beta, zeta or delta step (6.4).
@@ -150,7 +150,8 @@ The files use each other freely: computing, equality and typing call one another
 - `quotients_declared(e, equality)`: the statement `quotients(Equal)`. Equality must have the shape of `Equal`; the
   four constants `quotient`, `quotient.of`, `quotient.lift` and `quotient.induct` are checked by typing and added,
   resting on nothing. Computing (compute.wap) takes lift or induct applied to `quotient.of(T, r, a)` to the function
-  applied to `a`. That joined values are equal is no rule of the kernel: it is an axiom, `quotient_sound`.
+  applied to `a`. That joined values are equal is no rule of the kernel: it is an axiom, `quotient_sound`, which the program that
+  needs it declares.
 
 **show.wap**
 - `shown(t)`: a term in wap notation; reading that text gives the same term again. A binder whose variable the rest
@@ -185,7 +186,7 @@ The files use each other freely: computing, equality and typing call one another
   declaration (plan 5.4).
 - **Never `==` on a term.** Terms and levels are compared by `same`, `level_same` and `levels_equal`, and a map is
   keyed by a term's `hash` through `Memory`, never by the term: `==` on a program's own recursive enum and a map's
-  hash of one are what "Costs" below measures. An optional value is tested with `is ø`.
+  hash of one are two of the limits of "Costs" below. An optional value is tested with `is ø`.
 - **Each file names what it uses.** `use` is not transitive: a file that names a `Shape` case uses terms.wap
   itself, even when it also uses a file that does.
 - **A list is a value.** A list handed to a function is the function's own: `found += [x]` there never reaches
@@ -194,9 +195,8 @@ The files use each other freely: computing, equality and typing call one another
 
 ## The declarations that bind names
 
-The kernel names no type of the prelude (plan 5.4). Four statements bind the ones a
-mechanism needs, and `texts` a fifth. Each is checked; `quotients` and `numbers` stand once, and a later `products`
-stands instead of an earlier one, as a below already made keeps the pair it was made of.
+The kernel names no type of the prelude (plan 5.4). Statements bind the ones a mechanism needs, each checked and
+each standing once; core declares the products itself.
 
 **`quotients(Equal)`** (K5, plan 6.6). `Equal` must have the shape of equality: a block of one type with one level
 parameter `u`, the parameters `T: Sort(u)` and `a: T`, one index of type `T`, in `Prop`, and one case without
@@ -211,11 +211,12 @@ fields whose result is `Equal(T, a, a)`. The statement adds four constants:
 
 Computing (6.4), the last argument computed first: `quotient.lift[u, v](T, r, B, f, h, quotient.of[u](T, r, a))` is
 `f(a)`, and `quotient.induct[u](T, r, motive, h, quotient.of[u](T, r, a))` is `h(a)`. That joined values are equal is
-an axiom of the prelude, written like any other: `axiom quotient_sound(T: Sort(u), r: T -> T -> Prop, a: T, b: T):
+an axiom the program that needs it declares, written like any other: `axiom quotient_sound(T: Sort(u), r: T -> T -> Prop, a: T, b: T):
 r(a, b) -> Equal[u](quotient[u](T, r), quotient.of[u](T, r, a), quotient.of[u](T, r, b))`.
 
-**`products(Pair, Unit)`** (E2). `Pair` must have the shape of `enum Pair(A: Sort(u), B: Sort(v)): Sort(max(1, max(u,
-v))) { intro(first: A, second: B) }`, `Unit` of `enum Unit: Sort(u) { unit }`. From then on an enum of one type that
+**The products** (core/analyze/courses.wap `products_declared(e)`). Core declares two blocks into every compile's
+environment, `enum Pair(A: Sort(u), B: Sort(v)): Sort(max(1, max(u, v))) { intro(first: A, second: B) }` and
+`enum Unit: Sort(u) { unit }`. From then on an enum of one type that
 eliminates into any sort, with no field a function into it, gets two definitions the first time a recursion asks:
 `T.below[u, …](params, motive, indices, t): Sort(max(1, u))`, by the recursor into types, each case the pairs of its
 recursive fields' motive and their own below, ending in Unit; and `T.course[u, …](params, motive, step, indices, t):
@@ -227,13 +228,12 @@ or level parameters, in `Type`, with a case without fields and then a case with 
 case of a block of one type with two cases without fields, in `Type`; `Equal` as above. From then on a number has
 the type `nat`, and where a rule asks for a case, 0 is the first case and n + 1 the second applied to the number n.
 
-**`texts(text_of, list.empty, list.item)`** (L3, plan 5.4, notes/coc-t2.md, from T2b). A text literal is the
-kernel's second literal. `list` must have the shape of prelude/data.wap's: one type with one level parameter `u` and
-one parameter `T: Sort(u)`, in `Sort(max(1, u))`, a case without fields, then a case of a `T` and a list of `T`;
-`text_of` must be `list[1](nat) -> X` without level parameters, after the numbers statement. From then on a text
-literal has the type `X`, and where a rule asks for a case it is `text_of` applied to the list of its code points,
-each a number. Until T2b the statement is `texts(text_of)`, and a literal is `text_of` of the number that spells it:
-a 1 and then its code points, base 0x110000.
+**`texts(text_of, list.empty, list.item)`** (plan 5.4), numbers.wap `texts_declared(e, function, empty_case,
+item_case)`. A text literal is the kernel's second literal. The block of `empty_case` must have the shape of
+`enum list(T: Sort(u)): Sort(max(1, u)) { empty: list(T), item(first: T, rest: list(T)): list(T) }`, with
+`empty_case` its first case and `item_case` its second; `text_of` must be `list[1](nat) -> X` without level
+parameters, and the statement comes after the numbers statement and stands once. From then on a text literal has
+the type `X`, and where a rule asks for a case it is `text_of` applied to the list of its code points, each a number.
 
 **`shortcut(kind, function, theorems…)`**, one per shortcut, in the order of this table. `N` is the number type, `Z`
 and `S` its cases, `yes` and `no` the truth values. The kernel builds each statement as written here, the `==`
@@ -300,33 +300,25 @@ rules of a warm state are believed as built.
 
 `export.wap` writes an environment out in Lean 4's export format with wap's own names, one JSON record a line,
 described at its top: a declaration as stated, a block as written, a binding statement with its names. A block's
-cases, recursors and the quotients' constants are never written: the reader makes them again. No door calls it yet.
+cases, recursors and the quotients' constants are never written: the reader makes them again. No door calls it.
 
 `second/` checks an export again, `wap second/check.wap <export> [<name>…]`, silent when it accepts and printing the
 first refusal otherwise; each name given prints the axioms it rests on. It shares no function with the kernel and
 reads only the export, so a mistake in one is caught by the other unless both make it. It is kept as small as it can
-be: no elaboration, no caches, a term compared by its tree. Its files: `expressions.wap` (levels and terms),
+be: no elaboration, no caches, a term compared by its tree. Its files: `check.wap` (the command: the export read and
+checked, the names' axioms printed), `expressions.wap` (levels and terms),
 `read.wap` (the export read, a record out of order or of no known kind refused), `judge.wap` (typing, computing,
 equality, a declaration admitted), `blocks.wap` (a block checked, its recursors and their computation, structures),
-`bindings.wap` (numbers, shortcuts and quotients).
+`nested.wap` (a nested block made plain, apart from the kernel's), `bindings.wap` (numbers, shortcuts and
+quotients).
 
 ## Costs
 
-What the kernel's shapes cost in wap as it compiles today, measured by the probes in data/k0/ (native wap, one run
-each, 10 million steps unless said):
-
-| measured | time |
-|---|---|
-| a term built, `App(Var, Lit)` | 119 ms |
-| a match over twelve cases | 190 ms; each case built and matched, 161 ms |
-| recursion 100,000 deep | 1 ms |
-| a loop written as a call of itself in last place, 100 × 100,000 | 93 ms, against 6 ms for `while` |
-
-Three limits follow, and the kernel is written around them:
+Three limits of wap's shapes, and the kernel is written around them:
 - **The stack** holds between 200,000 and 400,000 frames, and a call of itself in last place is not made a loop:
   chains are walked in loops, and recursion stays below 100,000 deep.
 - **`==` on a recursive enum** costs twice as much per level of depth, so a term is never compared with `==`:
   `same(a, b)` compares the hash first, then the tree.
 - **A map keyed by an enum value** hashes the case name only, so terms that share a head share a slot: caches are
   keyed by a term's int `hash`.
-No two terms are made one (interning) yet: `same` stays the one place that would change when shared terms cost too much.
+No two terms are made one (interning): `same` stays the one place that would change when shared terms cost too much.
