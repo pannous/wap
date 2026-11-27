@@ -1,0 +1,97 @@
+# Enums as kernel inductive blocks (notes/coc-t5b.md "Enums as inductive blocks"): at the end of typing every enum
+# the program and its library declare becomes a block of the compile's environment, its cases the block's
+# constructors, and its word, the axiom every typed node already names, is filled by it (kernel/environment.wap
+# declared_together): no typed node changes. Enums that name each other are one block. An enum stays the axiom it is
+# where a field's type is open (a bare field, a letter) or where the kernel refuses its block (a field of the enum
+# inside another type's parts), each counted by why.
+
+use folder
+use "../stage.wap"
+use "../type_notation.wap"
+use "../../kernel/terms.wap"
+use "../../kernel/environment.wap"
+use "../../kernel/inductive.wap"
+use "groups.wap"
+
+# what became of an enum, by its word's id (TYPES.enums), as the census counts it
+ENUM_DEFINED = "defined"
+ENUM_OPEN = "open"
+ENUM_REFUSED = "refused"
+
+# an enum as a block reads it: its word, its key in the environment, and its cases
+class EnumRead { word: Term; key: text; cases: list<CaseTyped> }
+# every enum not met before entered, each with the enums it names that name it back, the ones it names first
+enums_entered(records: list<Node>) := {
+	enums: map<text, EnumRead> = {}
+	for record in records.filter(record => cases_of(record) is not empty) {
+		enum = enum_read(record)
+		if not TYPES.enums.has(word_id(enum.word)) and assumed_word(enum.word) { enums[enum.key] = enum }
+	}
+	keys = enums.keys
+	named = (key: text) => enums[key].cases.flat_map(case => case.fields).flat_map(field => constants_in(field ?? DATA_TERM).map(word => word_key(constant_id(word)))).filter(other => keys.contains(other))
+	for group in groups_of(keys, named) { block_entered(group.map(key => enums[key])) }
+}
+enum_read(record: Node) as EnumRead := {
+	word = record_term(record)
+	EnumRead(word, word_key(word_id(word)), enum_cases(record))
+}
+# a word's key, the name the environment declares it by
+word_key(id: int) as text := declared_at(TYPES.environment, id)!.name
+# whether a word is still the axiom core declared it as, not yet filled by a block (bool is core's own)
+assumed_word(word: Term) as bool := match declared_at(TYPES.environment, word_id(word))!.kind {
+	Axiom => yes
+	_ => no
+}
+# an enum's case as the kernel reads it: its name, its definer's place, its fields' names and types, ø for a field
+# whose type is open
+class CaseTyped { name: text; definer: text; binders: list<text>; fields: list<Term?> }
+enum_cases(enum: Node) as list<CaseTyped> := cases_of(enum).map(case => CaseTyped(text(case_name(case)), place_key(case_name(case)), case_fields(case).map(field => text(declared_name(field))), case_fields(case).map(field => closed_type(written_type(declared_type(field))))))
+closed_type(type: Term?) as Term? := if type == ø or has_letters(type) or has_unknowns(type) then ø else type
+# One block of enums declared, filling their words, each case's definer then naming its constructor, or each left the
+# axiom it is, counted by why
+block_entered(enums: list<EnumRead>) := {
+	ids = enums.map(enum => word_id(enum.word))
+	keys = enums.map(enum => enum.key)
+	if enums.flat_map(enum => enum.cases).any(case => case.fields.any(field => field == ø)) { return enums_counted(ids, ENUM_OPEN) }
+	types = enums.map(enum => BlockType(enum.key, DATA_TERM, enum.cases.map(case => WrittenCase(case_constructed(enum.key, case.name), case_type(case, enum.word, ids, keys)))))
+	try {
+		inductive_declared(TYPES.environment, InductiveBlock([], 0, types))
+	} catch refusal {
+		refusal_only(refusal)
+		return enums_counted(ids, ENUM_REFUSED)
+	}
+	enums_counted(ids, ENUM_DEFINED)
+	for enum in enums { for case in enum.cases { TYPES.constructors[case.definer] = named_id(TYPES.environment, case_constructed(enum.key, case.name))! } }
+}
+enums_counted(ids: list<int>, why: text) := for id in ids { TYPES.enums[id] = why }
+# a case's type as a block writes it: a function of its fields giving its enum, under a binder for each type of the
+# block, which stands where a field names one
+case_type(case: CaseTyped, enum: Term, ids: list<int>, keys: list<text>) as Term := {
+	fields = (1 to #case.fields).list().reverse.fold(enum, (body, at) => pi(case.binders#at, case.fields#at!, body))
+	keys.reverse.fold(block_named(fields, ids, 0), (body, key) => pi(key, DATA_TERM, body))
+}
+# a term with each type of the block, named by its word's id, the binder standing for it this deep
+block_named(t: Term, ids: list<int>, depth: int) as Term := match t.shape {
+	Constant(name, levels, id) => if ids.contains(id) then bound(depth + #ids - ids.index_of(id)) else t
+	Apply(function, argument) => apply(block_named(function, ids, depth), block_named(argument, ids, depth))
+	Pi(binder, domain, body) => pi(binder, block_named(domain, ids, depth), block_named(body, ids, depth + 1))
+	_ => t
+}
+
+# A case's value as a term: the constructor of the case it names applied to its fields, where its enum is a block,
+# each field given a value of its own type and the whole of the type the node has
+case_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
+	id = TYPES.constructors.get(place_key(fact_of(called, DEFINED_AT) ?? return ø)) ?? return ø
+	constructor = declared_at(TYPES.environment, id)!
+	if fields_given(constructor.type, arguments) != value_type(n) { return ø }
+	terms_applied(constant(id, constructor.name, []), arguments, x)
+}
+# the type a constructor gives for these values, each of its field's own type; ø where they are other values
+fields_given(type: Term, arguments: list) as Term? := match type.shape {
+	Pi(binder, domain, body) => if arguments is not empty and value_type(arguments#1) == domain then fields_given(body, arguments.drop(1)) else ø
+	_ => if arguments is empty then type else ø
+}
+# the enums met so far by what became of them, as the census prints them, the assumed ones named
+enums_shown() as text := "${enums_were(ENUM_DEFINED)} enums defined in the kernel, ${enums_were(ENUM_OPEN) + enums_were(ENUM_REFUSED)} assumed: ${enums_were(ENUM_OPEN)} with a field of an open type, ${enums_were(ENUM_REFUSED)} refused${enums_named(ENUM_OPEN)}${enums_named(ENUM_REFUSED)}"
+enums_were(why: text) as int := #TYPES.enums.values().filter(each => each == why)
+enums_named(why: text) as text := TYPES.enums.keys().filter(id => TYPES.enums[id] == why).map(id => "; ${why}: ${word_key(id)}").join("")
