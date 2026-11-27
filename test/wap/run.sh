@@ -28,6 +28,11 @@ OTHER_SYSTEM=$(printf '%s\n' "${SYSTEMS[@]}" | grep -vx "$SYSTEM")
 # two cores stay free for the user's apps
 cores=$(( $(getconf _NPROCESSORS_ONLN) - 2 ))
 job_slot="$here/../../scripts/job-slot.sh"
+# a _wanted program compiles without at most this many of its statements, each red, and how much of one names its red
+WANTED_REFUSALS=60
+RED_NAME_LENGTH=120
+# a statement starts at the margin; an indented line, a closing bracket or a comment there is none
+STATEMENT_START='^[^] \t})#]'
 
 # the outputs of the tests run, each data/wap-tests/<test key>.txt
 outputs() { for test in "$@"; do echo "$results/$(test_key "$test").txt"; done; }
@@ -92,10 +97,26 @@ known() {
 # one test given the compiler under test (one_run <test> <module or "">): a test program, test/test_<area>.wap,
 # compiled by it and run; a test script run with it, a wap one, test/wap/test_<area>.wap, compiled by it and given the
 # wap binary, it, the script's folder in the tree's data/ and the tree as arguments
+# a _wanted program compiled into $stage/test.wasm without each statement the compiler refuses, that statement red with
+# the refusal, so the forms it does build still run: a statement is a line at the margin and the lines indented or
+# closing under it, blanked so the other lines keep their numbers; a refused check is red by its name, as when it runs
+wanted_compiled() {
+	local program="$stage/$(basename "$1")" refusals=0 line start
+	cp "$1" "$(dirname "$1")/check.wap" "$stage/"
+	until $wap "$compiler" "$program" "$stage/test.wasm" >"$stage/refused.txt" 2>&1; do
+		line=$(sed -n "s|^$program line \([0-9]*\):.*|\1|p" "$stage/refused.txt" | head -1)
+		[ -n "$line" ] && [ $((refusals += 1)) -le $WANTED_REFUSALS ] || { cat "$stage/refused.txt"; return 1; }
+		start=$(awk -v refused="$line" -v statement="$STATEMENT_START" 'NR <= refused && $0 ~ statement { start = NR } END { print start }' "$program")
+		[ -n "$start" ] && [ -n "$(sed -n "${start}p" "$program")" ] || { cat "$stage/refused.txt"; return 1; }
+		echo "✗ $(sed -n "${start}p" "$program" | sed 's/^check("\([^"]*\)".*/\1/' | cut -c1-$RED_NAME_LENGTH): got $(head -1 "$stage/refused.txt" | sed "s|^$program ||"), expected it compiles"
+		awk -v start="$start" -v statement="$STATEMENT_START" 'NR > start && $0 ~ statement { start = 0 } start { $0 = "" } 1' "$program" >"$program.blanked" && mv "$program.blanked" "$program"
+	done
+}
 one_run() {
 	in_scripts "$1" && case $1 in *.wap) set -- "$here/$(basename "$1")" "$2" ;; esac
 	case $1 in
 		"$here"/*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/script.wasm" 2>&1 && $wap $HEADLESS "$stage/script.wasm" "$wap" "$compiler" "$stage" "$tree" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
+		*_wanted.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && wanted_compiled "$1" && $wap $HEADLESS "$stage/test.wasm" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
 		*.wap) source "$here/compile.sh" ${2:+--compiler "$2"} && $wap "$compiler" "$1" "$stage/test.wasm" 2>&1 && $wap $HEADLESS "$stage/test.wasm" 2>&1 || echo "✗ $(basename "$1") compiled and ran" ;;
 		*) bash "$1" ${2:+--compiler "$2"} ;;
 	esac
