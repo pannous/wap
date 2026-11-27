@@ -1078,7 +1078,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | V1 one verdict per law | planned (notes/coc-v1.md; the plain-compile report cut, no wiki passage); builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
 | V2 `wap check`, V3 proved laws as facts | wait | | V1 (V3 also T6a2 and unify-dedup) |
 | C1 traits | planned (notes/coc-c1.md: C1a now, the structures with C2); builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
-| C2 instances passed, C4 generic dispatch | wait | | C1 (C2 also T5e's type arguments) |
+| C2 instances passed, C4 generic dispatch | planned (notes/coc-c2.md: B, a trait value as the union of its conformers, core +15, recommended; A, instances with C4, at T5g) | | C1 (C2 also T5e's type arguments) |
 | Q1 quotients | waits | | C1, T6a3, T6a4 |
 | T7 the theory extension retires | waits | | T6 |
 | T8a the reader | waits; its first commit is whole()'s sign | | exact-big-literals |
