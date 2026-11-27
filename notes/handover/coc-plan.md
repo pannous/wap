@@ -114,4 +114,4 @@ those of holes and unification in notes/elaborate.md. Not written elsewhere:
 - A block's types, cases and recursors each rest on the axioms their own type names. Inside a mutual block a case
   is recorded before a later type of the block; no program was found where that loses an axiom, since a case that
   names the type also writes its indices' types.
-- K7, the second opinion, has no export format yet. It needs one before any checker can read it.
+- K7, the second opinion: export.wap writes the format (notes/theory.md "A second opinion"); no door calls it.
