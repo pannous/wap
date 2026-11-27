@@ -81,24 +81,42 @@ code_of(argument: text): text := if argument == STANDARD_INPUT_PATH then input_r
 
 # the tests of the areas named after `test`, run by test/wap/run.sh; its exit status is this run's
 tested(words: list<text>) := script_ran(followed(TESTS_RUN, words, 2))
-# the program's laws verified: the verify program's verdicts, the kernel's, joined with those of the laws run, the
-# program compiled by the compiler's laws command and its laws called (run.wap laws_ran), never its main. The run exits
-# 1 when a law fails
+# the program's laws verified (laws_checked), each verdict a line, what was said beside them on standard error; the run
+# exits 1 when a law fails
 verified(words: list<text>) := {
-	program = words#2
+	checked = laws_checked(words#2)
+	for line in checked.said { eprint(line) }
+	for line in checked.verdicts { print line }
+	exit(if checked.verdicts.any(line => line.contains(VERDICT_SEPARATOR + FAILED_VERDICT)) then 1 else 0)
+}
+# What checking a program's laws found: the verify program's verdicts, the kernel's, joined with those of the laws run
+# (the program compiled by the compiler's laws command and its laws called, run.wap laws_ran, never its main), then the
+# laws of each module it uses by their stamps (wap build --wasm writes them); and what was said beside: the theory's
+# refusal, and why the laws did not run where a law needed the run, one left Untested or none given a verdict
+class LawsChecked { verdicts: list<text>; said: list<text> }
+laws_checked(program: text): LawsChecked := {
 	proved = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
 	ran = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
 	module = temporary_made(MODULE_TEMPLATE, MODULE_SUFFIX)
 	compiling = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
 	system("'${executable_path}' '${seed_part(VERIFY_PART)}' ${SEED_OPTION} '${seed_part("")}' '${program}' >'${proved}'")
 	compiled = system("'${executable_path}' '${compiler_path}' ${LAWS_COMMAND} '${program}' '${module}' 2>'${compiling}'") == 0
-	if compiled { laws_ran(module_compiled(module), module, ran) }
-	shown = verdicts_joined(lines_of(file_text(proved)), lines_of(file_text(ran)))
-	# why the laws did not run, said where a law needed the run: one left Untested, or none given a verdict
-	if not compiled and (shown is empty or shown.any(line => line.ends_with(VERDICT_SEPARATOR + UNTESTED_VERDICT))) { eprint(file_text(compiling)) }
+	laws = if compiled then module_compiled(module) else 0
+	if laws != 0 { laws_ran(laws, program, ran) }
+	kernel = lines_of(file_text(proved))
+	shown = verdicts_joined(kernel, lines_of(file_text(ran)))
+	unran = not compiled and (shown is empty or shown.any(line => line.ends_with(VERDICT_SEPARATOR + UNTESTED_VERDICT)))
+	said = kernel.filter(line => verdict_read(line) == ø) + (if unran then [file_text(compiling)] else [])
+	used = if laws == 0 then [] else imported_modules(laws).map(name => module_path(name, program))
+	stamped = used.filter(path => path != "" and not path.starts_with(seed_part(""))).flat_map(stamps_of)
 	for path in [proved, ran, module, compiling] { unlink(path) }
-	for line in shown { print line }
-	exit(if shown.any(line => line.contains(VERDICT_SEPARATOR + FAILED_VERDICT)) then 1 else 0)
+	LawsChecked(shown + stamped, said)
+}
+# the laws of a module the program uses, one of its own and not wap's (the library in the seed folder), by their
+# stamps, its section's lines; a module without the section was never checked, so its laws are Untested
+stamps_of(path: text): list<text> := {
+	stamps = section_text(path, LAWS_SECTION)
+	if stamps is empty then [path.split("/").last + VERDICT_SEPARATOR + UNTESTED_VERDICT] else lines_of(stamps)
 }
 # a law's verdict as `wap verify` prints it, `positive: Tested`
 class Verdict { law: text; said: text }
@@ -110,10 +128,8 @@ verdict_read(line: text): Verdict? := {
 }
 # the kernel's verdict of each law, and beside it the run's: a run that failed says so whatever the kernel says (a
 # Proved law that fails when it runs shows its translation is wrong), one that held makes an Untested law Tested; a law
-# only the run gave a verdict, the theory having refused the file, after them. What the kernel said that is no verdict
-# goes to standard error
+# only the run gave a verdict, the theory having refused the file, after them
 verdicts_joined(kernel: list<text>, run: list<text>): list<text> := {
-	for line in kernel.filter(line => verdict_read(line) == ø) { eprint(line) }
 	proved = kernel.map(verdict_read).compact()
 	tried = run.map(verdict_read).compact()
 	shown = proved.map(verdict => Verdict(verdict.law, verdict_beside(verdict.said, tried.find(trial => trial.law == verdict.law))))
@@ -164,6 +180,8 @@ wasm_built(program: text, base: text, passes: text) := {
 		eprint(BINARYEN_MISSING)
 		exit(1)
 	}
+	# app.wasm, compiled for others to use, carries its laws' verdicts, checked once here: a use never checks them again
+	section_added(base + MODULE_SUFFIX, LAWS_SECTION, laws_checked(program).verdicts.join("\n"))
 	# a linked module imports no module, so it names no folder to find one in
 	for linked in [full, base + MODULE_SUFFIX] { section_dropped(linked, LIBRARY_SECTION) }
 }
