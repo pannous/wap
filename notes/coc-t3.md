@@ -191,15 +191,13 @@ T3 is done when all of these hold:
 - typed_among's retyping round is gone (typed_readings stays the compile's table), and so are the five ranking words
   in calls.wap; letters.wap, ROUNDS_LIMIT and `nearest`'s weights in read.wap go in T5.
 
-What the gate still lacks, and the step that brings each:
-- `type of 3` is `int`, and `identity(int)`: red. `type of` is no word of the compile, and `int` in a value's place
-  names its conversion functions, so `identity(int)` is refused as several functions. Both wait for the user's
-  answer on `type of` (types as values in an expression's place).
-- `i32` and `i64` as the wrapping words: e3, waiting for the user's answer (core +8, kernel +2). `0 - 3` and
-  `#xs - 1` are green already.
+What the gate still lacks, and the step that brings each (T3 closes when machine-words lands, wap-supervisor
+2026-11-27):
+- `type of 3` is `int` and `identity(int)`: types as values in an expression's place, with T5's kernel forms.
+  `type of x` gives the type as text until then.
+- a kind rule's error naming the line of its phrase: its test line comes with T5.
 - the loop red (test_type_wanted, a loop that gives a carried name another type): a typing that can be discarded,
   listed after T3 in coc-plan, measured before building.
-- a kind rule's error naming the line of its phrase: no test line holds it yet.
 - letters.wap (its letter holes) and ROUNDS_LIMIT (shape rules refiring on their own output, core/rules/stages.wap)
   go in T5.
 - speed: the self-compile takes 12.5 s CPU and a warm hello 0.11 to 0.13 s, against 18.3 s and 130 ms before T3a.
