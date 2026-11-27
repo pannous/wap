@@ -26,3 +26,15 @@ run (its typing call moves to one place both use), about +10 lines, the rules' `
 ## The hypothesis runs first
 A trial evaluates each hypothesis on the values before the conclusion, and a trial whose hypothesis computes to no holds
 without the conclusion ever running: `h: b != 0` guards `a / b`, so the run never divides by zero.
+
+## Handing the typed split to the run's rules (design, not yet code)
+Typing (verify's `laws_typed`, run on its own front language) gives each law its accepted hypotheses, `TypedLaw.given`
+(binder names). The laws command has to turn that into the run's code before its rules fire, and rules cannot ask. The
+one hook that takes data is `rule_added(language, written, pattern, template, fact)` (core/rules/stages.wap:108), which
+takes Nodes: for each law with hypotheses the command adds a rule of its own, pattern the law as the sugar rules leave it
+(`law(f: ((binders) -> statement))`, the form both `law f(…): …` and `law f: {for …}` reach), template the same law with
+the hypothesis binders removed and the statement `hypothesis implies statement`, so `law_trials` meets only ordinary
+binders. A rule of a literal name beats the generic one by specificity, no special case per law. Unknown to settle by
+building: the exact Node of the canonical form (read it from a built compile, not from the shape rules' text), and
+whether compiler.wap may `use` verify/laws.wap for `laws_typed` (it grows the compiler by the verify extension; the
+alternative is the native driver running verify first and passing the hypothesis names in a file the laws command reads).
