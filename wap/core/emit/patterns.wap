@@ -42,7 +42,7 @@ arm_taken(form: Node, pattern: Node, result: Node, held: Placed, p: Emission, f:
 }
 # a pattern that fits any value: a name, or _
 names_any(pattern: Node) as bool := pattern is symbol and not is_case(pattern)
-only_names(pattern: Node, p: Emission) as bool := field_parts(pattern, [], p).all(part => names_any(part.pattern))
+only_names(pattern: Node, p: Emission) as bool := fact_of(pattern, INVERSE) == ø and field_parts(pattern, [], p).all(part => names_any(part.pattern))
 
 # A part of a value a pattern takes apart: the field's pattern, the code that gives the field's value, its layout
 class Part {
@@ -55,6 +55,8 @@ class Part {
 field_parts(pattern: Node, value: list<int>, p: Emission) as list<Part> := match pattern {
 	List(items, Bracket.Square, separator) => item_parts(items, value, type_of(pattern), p)
 	Call(called, patterns) => {
+		inverse = fact_of(pattern, INVERSE)
+		if inverse != ø { return patterns.map(field => Part(field, value + optional_value(inverse!, p), typed_layout(inverse!, p))) }
 		record = enum_declaring(p.records, called)
 		cast = case_struct_of(record, case_declaring(p.records, called), p.m, p.records)
 		types = case_fields(case_declaring(p.records, called)).map(field => known_layout(field_declared(field), p))
@@ -90,6 +92,7 @@ pattern_test(pattern: Node, written: list<int>, type: list<int>, p: Emission, f:
 }
 # the test of a case pattern's tag or a list pattern's count, ø for any other pattern
 shape_test(pattern: Node, value: list<int>, p: Emission) as list<int>? := {
+	if fact_of(pattern, INVERSE) != ø { return value + missing_tested(p.m) + I32_EQZ }
 	# a missing value, an optional's ø, is no case
 	if is_case(case_name(pattern)) {
 		tag_test = value + tagged(p.m) + i32_const(tag_of(case_name(pattern), p)) + I32_EQ
@@ -111,6 +114,7 @@ names_held(pattern: Node, value: list<int>, type: list<int>, p: Emission, f: Fra
 # taken out once, into a local of its own, which every test and part of the pattern then reads
 class Seen { before: list<int>; value: list<int> }
 seen(pattern: Node, value: list<int>, p: Emission, f: Frame) as Seen := {
+	if fact_of(pattern, INVERSE) != ø { return inverse_seen(boxed_operand(fact_of(pattern, INVERSE)!), value, p, f) }
 	if not is_case(case_name(pattern)) or text(case_name(pattern)) == META_CASE or record_name(enum_declaring(p.records, case_name(pattern))) != NODE_TYPE { return Seen([], value) }
 	slot = slotted(f, "node seen in slot ${#f.slots}", known_layout(NODE_TERM, p)).index
 	node = local_get(slot)
@@ -118,6 +122,12 @@ seen(pattern: Node, value: list<int>, p: Emission, f: Frame) as Seen := {
 	unwrapped = BLOCK + VOID_BLOCK + meta_left(node, 0, p) + node + helper_call(p, "meta_unwrapped", meta_unwrapped_function) + local_set(slot) + END
 	Seen(value + local_set(slot) + unwrapped, node)
 }
+# A pattern by inverse sees what its inverse gives the value, ø where it does not fit, kept in a local of its own
+inverse_seen(given: Call, value: list<int>, p: Emission, f: Frame) as Seen := match given { Call(called, arguments) => {
+	function = called_function(given, called, p)
+	slot = slotted(f, "inverse seen in slot ${#f.slots}", function.type).index
+	Seen(value + instruction(CALL, [function.index]) + local_set(slot), local_get(slot))
+} }
 # The helper taking a node out of its Meta wrappers, ø as it is. Its local: 0 the node.
 meta_unwrapped_function(p: Emission) as int := {
 	node = node_record(p, "a Node pattern looks through Meta")
