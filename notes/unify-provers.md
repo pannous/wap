@@ -41,8 +41,9 @@ count_equals_sound, count_equals_itself, count_add_zero …  theorems by count's
   - `negative(k)` computes `0 <= x` to no, ruled out by apart over bool.
   - `zero` is the base.
   - `positive(k)` goes by count's recursor on k. At `·count.zero`, `positive(·count.zero)` is `zero + 1`, so the step
-    from the base gives it. At `·count.successor(k)`, the step from `positive(k)` gives it, carried by the lemma
-    `positive_next: positive(k) + 1 == positive(·count.successor(k))`.
+    from the base gives it. At `·count.successor(k)`, the step from `positive(k)` gives it, carried by `successor_sum`
+    (`x + 1 == int.successor(x)`, section "int's step functions"), since `int.successor(positive(k))` computes to
+    `positive(·count.successor(k))`.
 
   It is stated and proved once, and induction.wap uses it for a nat binder. A law is `Π binders, Equal(bool, body, yes)` (typed_laws.wap `law_statement`).
 
@@ -119,7 +120,7 @@ theorems. All are checked as declared, and none is an axiom.
 | `·parts_back` (new) | theorem: `difference(ups(x), downs(x)) == x` | int's recursor at level 0, three arms, each by computation |
 | `·difference_equal` (new) | theorem: `m + q == p + n → difference(m, n) == difference(p, q)` | count's recursor, `·zero_subtract`, `·subtract_successors`, `·add_cancel` |
 | `·equal_integers_itself` (N230, rewritten) | theorem | `·equals_itself(ups(x) + downs(x))`, no case split |
-| `·positive_next` (new) | theorem: `positive(k) + 1 == positive(·count.successor(k))` | `·add_zero`, `·zero_subtract`, by computation |
+| `int.successor`, `int.predecessor`, `·successor_sum`, `·predecessor_sum` and the two step theorems | definitions and theorems by cases (section "int's step functions") | int's recursor, count's recursor in one arm |
 | `·equals_sound`, `·equals_complete` for int | theorems (section "The bridge") | as there |
 
 Division on int (`i64.div_s`, `rem_s`) gets no meaning yet: the prelude had none for int. Those rows stay opaque,
@@ -127,8 +128,8 @@ so a law dividing an int computes only on literals, which `row_step` folds.
 
 **One change to the decided placement.** int cannot be declared in wap/types: its cases' payload `·count` has no
 name wap can write. So int, its functions and the rows' meanings are core_environment's (int_declared), and wap/types
-keeps only types/integers.wap's laws, stated in wap over int's operators. Cost: kernel and core about +80 lines of
-declarations (count_declared about 45, copied; int_declared about 35, rewritten for the three cases). No new
+keeps only types/integers.wap's laws, stated in wap over int's operators. Cost: kernel and core about +95 lines of
+declarations (count_declared about 45, copied; int_declared about 50, rewritten for the three cases and with the step functions). No new
 mechanism.
 
 ### Three cases against two: the honest cost
@@ -147,7 +148,7 @@ function goes from 2×2 to 3×3 arms:
 | `ups`, `downs` | — | — | 3 arms each (new) |
 | equals_sound's proof | 4 cases: 2 apart, 2 congruence | 9 cases: 6 apart, 1 refl, 2 congruence | no cases: count_equals_sound, then `difference_equal` and `parts_back` twice |
 | `equal_integers_itself` | 2 cases | 3 cases | none |
-| nat's induction | of_nat(k) by count's recursor, the step by computation | + the zero case and `positive_next` | the same |
+| nat's induction | of_nat(k) by count's recursor, the step by computation | + the zero case and `successor_sum` | the same |
 | linear.wap's numerals | 2 arms read, 2 written | 3 read, 3 written | 3 read, 3 written |
 
 - **By cases** costs about +25 lines over the two-case shape: int_declared's functions about +18, the proofs about +7.
@@ -160,10 +161,60 @@ function goes from 2×2 to 3×3 arms:
   plain swap, and linear.wap pushes minus everywhere (`a − b` is `sum(a, minus(b))`).
 - **What it costs in computing.** A sum of two literals computes through `difference` and the count's shortcuts.
   That is as fast as before, since the payloads are count literals. A sum over a variable does not compute to a case
-  by itself: `positive(k) + 1` needs `positive_next`, where the two-case `of_nat(k) + of_nat(1)` computed to
+  by itself: `positive(k) + 1` needs `successor_sum`, where the two-case `of_nat(k) + of_nat(1)` computed to
   `of_nat(k + 1)` directly. This is the one lemma the count route adds for induction.
 - **What does not change.** linear.wap reads `sum`, `minus`, `not_above` and `equal_integers` as opaque Defined
   constants and never their arms. The provers' cost is the same in every shape; only the int lemmas' proofs see it.
+
+### int's step functions: successor and predecessor
+
+int has the step functions `successor` and `predecessor`, with `next` and `previous` as aliases: `next(3)` is 4 and
+`previous(0)` is −1. Their kernel meanings are int_declared's definitions by cases:
+
+```
+int.successor(x)    zero → positive(·count.zero)
+                    positive(n) → positive(·count.successor(n))
+                    negative(n) → n by count's cases: ·count.zero → zero; ·count.successor(k) → negative(k)
+int.predecessor(x)  zero → negative(·count.zero)
+                    negative(n) → negative(·count.successor(n))
+                    positive(n) → n by count's cases: ·count.zero → zero; ·count.successor(k) → positive(k)
+```
+
+- **The two step theorems** are proved by cases, not given as constructor rules:
+  `int.successor(int.predecessor(n)) == n` and `int.predecessor(int.successor(n)) == n`.
+  - Each goes by int's recursor at level 0, with count's recursor at level 0 in the one arm that steps across zero
+    (positive for the first, negative for the second).
+  - Every arm then computes to n, so each arm's proof is refl.
+  - No induction hypothesis is used, so the provers' apart and computing find them as they are.
+- **The program's words.** types/integers.wap writes them as plain wap:
+  ```
+  successor(x: int): int := x + 1
+  predecessor(x: int): int := x - 1
+  next(x: int): int := successor(x)
+  previous(x: int): int := predecessor(x)
+  ```
+  Each runs as one i64 operation. Their kernel values are `sum(x, positive(·count.zero))` and the like.
+  - Two theorems join them to the definitions by cases: `·successor_sum: x + 1 == int.successor(x)` and
+    `·predecessor_sum: x + −1 == int.predecessor(x)`, each by int's cases. The positive arm of successor_sum is the old
+    `positive(k) + 1 == positive(·count.successor(k))`, through `·zero_subtract`.
+  - The wap laws `law next_previous(n: int): next(previous(n)) == n` and `law previous_next(n: int): …` go into
+    integers.wap's list. Each is proved by the two join theorems and the step theorem.
+  - The definitions by cases are what the theorems and nat's induction are about, and the wap function is what runs.
+- **The names never meet.**
+  - The count's constructor is `·count.successor`, and its inverse is `·predecessor`. Both carry the mark `·`, so no
+    program can write them.
+  - int's step functions are `int.successor` and `int.predecessor`, dotted under int as its cases are.
+  - The program's words `successor`, `predecessor`, `next` and `previous` are types functions.
+  - In the kernel these are three different names, so none is found in place of another. A program that writes
+    `successor(3)` meets only the types function. wap/types and lib hold no other `successor`, `predecessor`, `next`
+    or `previous` word today.
+  - Open, decided by the plan's default here: the wap words are not core's case definitions themselves. Giving a
+    core definition a runtime body would need a mechanism that does not exist (only `prim` rows join a host
+    operation to a kernel meaning). So the join theorems carry the link, with no new mechanism.
+- **Lines.**
+  - int_declared: about +16 (the two definitions 2 each, the two step theorems 3 each, the two join theorems 3 each).
+    `positive_next` goes into successor_sum, −2. Net about +14.
+  - types/integers.wap: +4 functions and +2 laws.
 
 ## linear.wap over int only
 
@@ -388,13 +439,13 @@ not prove is no theorem, and the linear prover's `sums_of` refuses with the miss
 
 | step | what | lines | gate |
 |---|---|---|---|
-| 1 | bool's block, count_declared, int_declared with `e.integers` (wap-theory-reads-types) | core and kernel +about 90 | test_hello, test_law_runs unchanged |
+| 1 | bool's block, count_declared, int_declared with `e.integers` (wap-theory-reads-types) | core and kernel +about 105 | test_hello, test_law_runs unchanged |
 | 2 | hypothesis Π and binder conditions in law_statement; integers.wap's laws proved first, declared by name | laws.wap +about 25 | the 14 laws Proved by verify on integers.wap alone |
 | 3 | Sums over int: reading, writing, minus atoms, no differences, no unit rows | linear.wap about −40 +35 | `regrouped` Proved |
 | 4 | bounds: the role table, the Bound's nonnegative proof, gap_bound, both_* | linear.wap about −15 +30 | `lt` Proved; test_theory_arithmetic's five with `h:`; law_runs 11–15 |
 | 5 | bool equality goals by `equals_complete` and `equal_integers_itself` | linear.wap +about 6 | test_theory_connectives' `==` laws |
 
-linear.wap net about +15 (416 → about 430); laws.wap about +25; core and kernel about +90 (step 1). No reds are
+linear.wap net about +15 (416 → about 430); laws.wap about +25; core and kernel about +105 (step 1). No reds are
 expected along the way. Since the deletion, linear.wap proves nothing (`sums_of` finds no `e.numbers`), so nothing
 green depends on it.
 
