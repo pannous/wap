@@ -14,8 +14,11 @@ proofs load. Read on unify-typers 2b0e87be.
   - extensions/prove/ (9 files: goals, computing, apart, facts, rewriting, introduction, induction, linear, prove);
   - extensions/verify/ (verify.wap, laws.wap, options.wap);
   - extensions/theory/.
-- The kernel's arithmetic proofs are in wap/kernel/ (counting.wap, integer_laws.wap). They are part of the trust
-  base, since the kernel checks them at every compile that declares int, so they stay in kernel/.
+- The kernel's arithmetic is in wap/kernel/. counting.wap (count and int with their definitions and shortcut
+  licences) is declared at every compile by core_environment, so it stays in kernel/. integer_laws.wap is declared only
+  before a prover's first goal (integer_laws_ready), and no compiler file uses it, so it moves to
+  extensions/proof/prove/ with its two users, goals.wap and linear.wap. Its proofs are still checked by the kernel
+  when they are declared; only the census and the compiler's sources lose it (unify-cost's N1).
 
 ## The plan
 
