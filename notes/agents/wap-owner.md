@@ -196,6 +196,20 @@ wap/
       run.wap                 modules run by wasmtime's C API, their .wasm imports linked; the program's memory
     packed.wap                a Node as compact bytes and back, pack and unpack: each text and repeated subtree once
     warm.wap                  the compiler's warm state: the files it reads before a program, operated, packed
+    rules.wap                 the rule files a build loads beyond every program's: foreign lines, laws
+    verify_rules.wap          the rule files `wap verify` loads in their place: foreign lines, each law a function
+    laws.wap, law_runs.wap    a law a hint verify tests: `law` read as a function, each law run on trial values
+    theory/                   the dependent type theory beside the compiler (notes/theory.md "Files", notes/elaborate.md)
+      explicit.wap            a program in the explicit spellings read into the kernel's terms and declarations
+      check.wap, options.wap  the theory's door: `wap check.wap --tree <root> program.wap`, its arguments
+      bindings.wap, below.wap the statements that bind names (numbers, shortcut, texts, quotients, products), below and course
+      export.wap, second/     what the kernel accepted written as lean4export records, and the second checker that reads them
+      elaborate/              the elaborator, not trusted: a lowered program read into terms, holes answered by unification
+      prelude/                the logic, numbers, quotients, effects and checked types as explicit programs
+      run/                    erase: what a program the theory accepted runs, its types and proofs gone
+    prove/                    the provers: a goal to a proof term, tried in order (notes/coc-plan.md 3.5 and 8)
+      goals.wap, prove.wap    the goal and the order the provers run in
+      facts, computing, rewriting, introduction, induction, linear, apart   the ways to prove (wiki/proof.md)
     wasm/                     a compiled wap module used as its source
       library.wap             the library compiled once, types.wasm: read in place of its source when its stamp fits
       modules.wap             use "m.wasm": its functions declared from their export names, the rest (rules, enums,
