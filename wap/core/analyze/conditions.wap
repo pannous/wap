@@ -56,17 +56,21 @@ found(condition: Node, tested: Node, s: TypingState, f: TypeFrame) as list<Findi
 # then-arm, `missing(x)` in the else-arm (`x != ø` and `x == ø`, sugar/conditions.wap); ø for any other
 # condition
 present_tested(condition: Node, tested: Node, s: TypingState, f: TypeFrame) as Finding? := match condition {
-	Symbol(name) => if is_variable(condition) then found_present(condition, 1, variable_type(condition, s, f)) else ø
-	Call(called, arguments) => if #arguments != 1 then ø else if text(called) == MISSING_WORD then found_present(arguments#1, 2, first_argument_type(tested)) else if text(called) == NOT_WORD then flipped(present_tested(arguments#1, first_argument(tested), s, f)) else ø
+	Symbol(name) => if is_variable(condition) then found_present(condition, 1, variable_type(condition, s, f), part => is_missing(part) or is_error(part)) else ø
+	Call(called, arguments) => if #arguments != 1 then ø else if text(called) == MISSING_WORD then found_present(arguments#1, 2, first_argument_type(tested), is_missing) else if text(called) == NOT_WORD then flipped(present_tested(arguments#1, first_argument(tested), s, f)) else ø
 	_ => ø
 }
-# a path found present in that arm, of the value an optional of this type holds; ø for a path of no optional's type
-found_present(path: Node, arm: int, type: Term?) as Finding? := {
+# a path found present in that arm, of its type's parts but the ones found away (ø, and an Error where its truth is
+# tested); ø for a path of no such parts
+found_present(path: Node, arm: int, type: Term?, away: (Term) -> bool) as Finding? := {
 	key = path_key(path) ?? return ø
-	held = base_of_optional(type) ?? return ø
-	if has_unknowns(held) { return ø }
-	Finding(key, arm, held)
+	if type == ø or has_unknowns(type) { return ø }
+	parts = union_parts(type!)
+	present = parts.filter(part => not away(part))
+	if present is empty or #present == #parts { return ø }
+	Finding(key, arm, union_type(present))
 }
+is_missing(type: Term) as bool := type == EMPTY_TERM
 # the type of a typed call's first argument, `m.pattern` of `m.pattern != ø`
 first_argument_type(tested: Node) as Term? := match tested {
 	Call(called, arguments) => if arguments is empty then ø else value_type(arguments#1)
@@ -114,7 +118,7 @@ condition_typed(condition: Node, s: TypingState, f: TypeFrame) as Node := {
 	if not typed_bool(tested) { refused(condition, "a condition is yes or no") }
 	tested
 }
-# A value as a condition reads it (wiki/truthiness.md): a bool as it is, a choice by its parts' truth, `xs and o` is
+# A value as a condition reads it (wiki/truthiness.md): a bool as it is, a choice by its parts' truth, a block by its last's, `xs and o` is
 # If(xs, o, no), a boxed value by the value it holds, any other value by the types module's truthy, an empty list, text,
 # 0 or ø no
 TRUTHY = "truthy"
@@ -128,6 +132,7 @@ truth_of(given: Node, s: TypingState) as Node := {
 	if typed_bool(typed) { return typed }
 	match typed {
 		If(condition, then_part, else_part) => with_type(refitted(If(condition, truth_of(then_part, s), truth_of(else_part, s)), typed), BOOL_TYPE)
+		Block(items) => if items is empty then typed else with_type(refitted(Block(items.take(#items - 1) + [truth_of(items.last, s)]), typed), BOOL_TYPE)
 		_ => if value_type(typed) == ø then typed else word_called(typed, TRUTHY, [typed], ø, s)
 	}
 }
