@@ -11,6 +11,7 @@ use "../../../kernel/forms.wap"
 use "../../../core/analyze/holes.wap"
 use "../../../core/analyze/unify.wap"
 use "../../../core/stage.wap"
+use "../../../core/type_notation.wap"
 use "read.wap"
 use "match.wap"
 use "recursion.wap"
@@ -33,24 +34,31 @@ SEARCH_DEPTH := 8
 # how many values deep a choice inside a recursion is taken apart by the cases of what its condition waits on
 CASE_DEPTH := 8
 
+# `A or B` written where a type is, not lowered (core/type_notation.wap union_written), read as the choice If(A, yes,
+# B); ø for other code
+written_or(x: Elaborating, n: Node, wanted: Term?): Term? := {
+	parts = union_written(n) ?? return ø
+	if_elaborated(x, parts#1, True, parts#2, wanted)
+}
 # A choice: a match on the condition's bool, or on the decision of its proposition
-if_elaborated(x: Elaborating, condition: Node, then_part: Node, else_part: Node, wanted: Term?): Term := {
+if_elaborated(x: Elaborating, condition: Node, written_then: Node, else_part: Node, wanted: Term?): Term := {
 	tested = filled(x.el, elaborated(x, condition, ø))
-	kept = then_part is True or same_name(then_part, condition)
-	written = union_written(x, tested, kept, else_part) ?? connective_written(x, tested, kept, then_part, else_part, wanted)
+	# `a or b` keeps a where a holds (sugar/conditions.wap), which for a condition is yes
+	then_part = if same_name(written_then, condition) then True else written_then
+	written = union_written(x, tested, then_part, else_part) ?? connective_written(x, tested, then_part, else_part, wanted)
 	if written is not ø { return written! }
 	if x.recursing is not ø { return choice_by_cases(x, tested, condition, then_part, else_part, wanted) ?? truth_matched(x, tested, then_part, else_part, wanted) }
 	truth_matched(x, tested, then_part, else_part, wanted)
 }
 # `A and B` and `A or B` reach the elaborator as the choices sugar/conditions.wap writes, If(A, B, no) and
-# `{ held = A; If(held, held, B) }` (kept: the then-part is the condition): where A is a proposition nothing decides
-# and a type is wanted, they are And(A, B) and Or(A, B)
+# `{ held = A; If(held, held, B) }`, read as If(A, yes, B): where A is a proposition nothing decides and a type is
+# wanted, they are And(A, B) and Or(A, B)
 # (wiki/proposition.md), the other part a proposition too. ø for any other choice, so a choice of data by such a
 # condition stays refused, and `if A then yes else no` is no connective
-connective_written(x: Elaborating, tested: Term, kept: bool, then_part: Node, else_part: Node, wanted: Term?): Term? := {
+connective_written(x: Elaborating, tested: Term, then_part: Node, else_part: Node, wanted: Term?): Term? := {
 	if (then_part is True and else_part is False) or (wanted is not ø and not is_sort(computed(x.el.c, filled(x.el, wanted!)))) { return ø }
 	if not is_proposition_term(x, tested) or taken_back(x.el, () => decided(x, tested, SEARCH_DEPTH)) is not ø { return ø }
-	if kept { return joined_proposition(x, OR, tested, else_part) }
+	if then_part is True { return joined_proposition(x, OR, tested, else_part) }
 	if else_part is False { return joined_proposition(x, AND, tested, then_part) }
 	ø
 }
