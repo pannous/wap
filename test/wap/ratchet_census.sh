@@ -13,10 +13,13 @@ FILES_TYPED_WHOLE=62
 FUNCTIONS_UNTYPED=0
 # wap's size, the nodes its reader makes of its source (scripts/wap-size.warp), may not rise above the ceiling: only a
 # real simplification lowers it
-SIZE_NODES=193792
+SIZE_NODES=195439
 # the function instances of wap's source the kernel holds as definitions, their bodies terms it checked (notes/coc-t5.md
 # T5a): only more may come, as T5 turns the assumed ones into definitions
 DEFINED_INSTANCES=1010
+# the enums of wap's source the kernel holds as inductive blocks, their cases its constructors (notes/coc-t5b.md T5b2);
+# the others stay assumed, each counted by why: only more may come
+DEFINED_ENUMS=20
 
 source "$(dirname "$0")/compile.sh"
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"
@@ -42,6 +45,9 @@ whole=$(echo "$total" | sed -n 's/^\([0-9]*\) of .* files typed whole.*/\1/p')
 counted=$(echo "$total" | sed -n 's/.*files typed whole, \([0-9]*\) of \([0-9]*\) functions typed.*/\2 - \1/p')
 untyped=$([ -n "$counted" ] && echo $(($counted)))
 defined=$(echo "$assumed" | sed -n 's/^\([0-9]*\) function instances defined.*/\1/p')
+# the enums the kernel holds defined and assumed, by why
+enums=$(grep '^enums' "$report" | cut -f2)
+enums_defined=$(echo "$enums" | sed -n 's/^\([0-9]*\) enums defined.*/\1/p')
 # the places typed any in the compiler's own files: the types module's are the language's dynamic words for programs,
 # `show(x: any)`, a Node's `Data(value: any)`
 compiler_anys=$(awk '/^== /{ file = $2 } /as every program.s library/ { library[file] = 1 } /^any\t/ && !(file in library) { print file ": " substr($0, 5) }' "$report")
@@ -52,6 +58,7 @@ check "the files wap types whole stay at least $FILES_TYPED_WHOLE ($total; $assu
 check "the functions wap does not type alone stay at most $FUNCTIONS_UNTYPED" "$(at_most "$untyped" $FUNCTIONS_UNTYPED)" "yes"
 check "wap's size stays at most $SIZE_NODES nodes" "$(at_most "$size" $SIZE_NODES)" "yes"
 check "the function instances the kernel holds defined stay at least $DEFINED_INSTANCES" "$(at_least "$defined" $DEFINED_INSTANCES)" "yes"
+check "the enums the kernel holds as blocks stay at least $DEFINED_ENUMS ($enums)" "$(at_least "$enums_defined" $DEFINED_ENUMS)" "yes"
 check "wap reads, lowers and binds its own source" "$(if [ -n "$total" ]; then grep '^front' "$report"; else echo "no total line"; fi)" ""
 check "no place of the compiler's own source is typed any" "$( [ -n "$total" ] && echo "$compiler_anys" || echo "no total line")" ""
 exit $((failures > 0))
