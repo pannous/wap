@@ -18,12 +18,14 @@ ENUM_DEFINED = "defined"
 ENUM_OPEN = "open"
 ENUM_REFUSED = "refused"
 
-# an enum as a block reads it: its word, its key in the environment, its sort, the indices' types first for a family (`enum Even: nat -> Prop`), ø for a sort not understood, and its cases
-class EnumRead { word: Term; key: text; sort: Term?; cases: list<CaseTyped> }
+# an enum as a block reads it: its word, its type as its cases give it (the word applied to its letters, the block's
+# parameters), its key in the environment, its sort, the indices' types first for a family (`enum Even: nat -> Prop`),
+# ø for a sort not understood, and its cases
+class EnumRead { word: Term; whole: Term; key: text; sort: Term?; cases: list<CaseTyped> }
 # every enum not met before entered, each with the enums it names that name it back, the ones it names first
 enums_entered(records: list<Node>) := {
 	enums: map<text, EnumRead> = {}
-	for record in records.filter(record => cases_of(record) is not empty) {
+	for record in records.filter(record => cases_of(record) is not empty or is_structure(record)) {
 		enum = enum_read(record)
 		if not TYPES.enums.has(word_id(enum.word)) and assumed_word(enum.word) { enums[enum.key] = enum }
 	}
@@ -31,9 +33,12 @@ enums_entered(records: list<Node>) := {
 	named = (key: text) => enums[key].cases.flat_map(case => case.fields).flat_map(field => constants_in(field ?? DATA_TERM).map(word => word_key(constant_id(word)))).filter(other => keys.contains(other))
 	for group in groups_of(keys, named) { block_entered(group.map(key => enums[key])) }
 }
+# GUESS (C1b, notes/coc-c2.md): a class is a one-case block, its constructor taking its fields; a protocol is no structure
+is_structure(record: Node) as bool := cases_of(record) is empty and fields_of(record) is not empty and not is_protocol(record)
 enum_read(record: Node) as EnumRead := {
-	word = record_term(record)
-	EnumRead(word, word_key(word_id(word)), record_sort(record_declared(record)), enum_cases(record))
+	whole = record_term(record)
+	word = head_of(whole)
+	EnumRead(word, whole, word_key(word_id(word)), record_sort(record_declared(record)), enum_cases(record, parts_of(whole)))
 }
 # a word's key, the name the environment declares it by
 word_key(id: int) as text := declared_at(TYPES.environment, id)!.name
@@ -45,17 +50,22 @@ assumed_word(word: Term) as bool := match declared_at(TYPES.environment, word_id
 # an enum's case as the kernel reads it: its name, its definer's place, its fields' names and types, ø for a field
 # whose type is open
 class CaseTyped { name: text; definer: text; binders: list<text>; fields: list<Term?> }
-enum_cases(enum: Node) as list<CaseTyped> := cases_of(enum).map(case => CaseTyped(text(case_name(case)), place_key(case_name(case)), case_fields(case).map(field => text(declared_name(field))), case_fields(case).map(field => closed_type(written_type(declared_type(field))))))
-closed_type(type: Term?) as Term? := if type == ø or has_letters(type) or has_unknowns(type) then ø else type
+enum_cases(record: Node, letters: list<Term>) as list<CaseTyped> := if is_structure(record) then [case_read(record_declared(record), fields_of(record), letters)] else cases_of(record).map(case => case_read(case_name(case), case_fields(case), letters))
+case_read(name: Node, fields: list<Node>, letters: list<Term>) as CaseTyped := CaseTyped(text(name), place_key(name), fields.map(field => text(declared_name(field))), fields.map(field => closed_type(written_type(declared_type(field)), letters)))
+# a field's type, ø where it is open: an unknown in it, or a letter that is none of its enum's
+closed_type(type: Term?, letters: list<Term>) as Term? := if type == ø or has_unknowns(type) or letters_in(type).any(letter => not letters.any(own => type_text(own) == letter)) then ø else type
 # One block of enums declared, filling their words, each case's definer then naming its constructor, or each left the
 # axiom it is, counted by why
 block_entered(enums: list<EnumRead>) := {
 	ids = enums.map(enum => word_id(enum.word))
 	keys = enums.map(enum => enum.key)
+	counts = enums.map(enum => #parts_of(enum.whole)).unique()
+	if #counts > 1 { hint("${keys.join(", ")} take ${counts.join(" and ")} letters: a block's enums take as many each, so their cases have no recursor"); return enums_counted(ids, ENUM_OPEN) }
 	if enums.any(enum => enum.sort == ø or enum.cases.any(case => case.fields.any(field => field == ø))) { return enums_counted(ids, ENUM_OPEN) }
-	types = enums.map(enum => BlockType(enum.key, enum.sort!, enum.cases.map(case => WrittenCase(case_constructed(enum.key, case.name), case_type(case, enum.word, ids, keys)))))
+	headers = enums.map(header_of)
+	types = enums.map(enum => BlockType(enum.key, header_of(enum), enum.cases.map(case => WrittenCase(case_constructed(enum.key, case.name), case_type(case, enum, ids, keys, headers)))))
 	try {
-		inductive_declared(TYPES.environment, InductiveBlock([], 0, types))
+		inductive_declared(TYPES.environment, InductiveBlock([], #parts_of(enums#1.whole), types))
 	} catch refusal {
 		refusal_only(refusal)
 		# a refused enum is counted by the census, and a law over it says Tested, never Proved
@@ -65,14 +75,18 @@ block_entered(enums: list<EnumRead>) := {
 	enums_counted(ids, ENUM_DEFINED)
 	for enum in enums { for case in enum.cases { TYPES.constructors[case.definer] = named_id(TYPES.environment, case_constructed(enum.key, case.name))! } }
 }
+# an enum's header, the type its word was declared at: a function of its letters' types giving its sort
+header_of(enum: EnumRead) as Term := declared_at(TYPES.environment, word_id(enum.word))!.type
 enums_counted(ids: list<int>, why: text) := for id in ids { TYPES.enums[id] = why }
-# a case's type as a block writes it: a function of its fields giving its enum, under a binder for each type of the
-# block, which stands where a field names one
-case_type(case: CaseTyped, enum: Term, ids: list<int>, keys: list<text>) as Term := {
-	fields = (1 to #case.fields).list().reverse.fold(enum, (body, at) => pi(case.binders#at, case.fields#at!, body))
-	keys.reverse.fold(block_named(fields, ids, 0), (body, key) => pi(key, DATA_TERM, body))
+# a case's type as a block writes it: a function of its fields giving its enum, under a binder for each of the enum's
+# letters, its parameters, under one for each type of the block; each binder stands where a field names its type
+case_type(case: CaseTyped, enum: EnumRead, ids: list<int>, keys: list<text>, headers: list<Term>) as Term := {
+	fields = (1 to #case.fields).list().reverse.fold(enum.whole, (body, at) => pi(case.binders#at, case.fields#at!, body))
+	letters = parts_of(enum.whole)
+	parameters = letters.reverse.fold(block_named(fields, ids + letters.map(letter => word_id(letter)), 0), (body, letter) => pi(type_text(letter), DATA_TERM, body))
+	(1 to #keys).list().reverse.fold(parameters, (body, at) => pi(keys#at, headers#at, body))
 }
-# a term with each type of the block, named by its word's id, the binder standing for it this deep
+# a term with each type of the block and each parameter, named by its word's id, the binder standing for it this deep
 block_named(t: Term, ids: list<int>, depth: int) as Term := match t.shape {
 	Constant(name, levels, id) => if ids.contains(id) then bound(depth + #ids - ids.index_of(id)) else t
 	Apply(function, argument) => apply(block_named(function, ids, depth), block_named(argument, ids, depth))
@@ -80,13 +94,16 @@ block_named(t: Term, ids: list<int>, depth: int) as Term := match t.shape {
 	_ => t
 }
 
-# A case's value as a term: the constructor of the case it names applied to its fields, where its enum is a block,
+# A case's value as a term: the constructor of the case it names applied to its enum's parameters, read off the
+# value's type, and to its fields, where its enum is a block,
 # each field given a value of its own type and the whole of the type the node has
 case_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
 	id = TYPES.constructors.get(place_key(fact_of(called, DEFINED_AT) ?? return ø)) ?? return ø
 	constructor = declared_at(TYPES.environment, id)!
-	if fields_given(constructor.type, arguments) != value_type(n) { return ø }
-	terms_applied(constant(id, constructor.name, []), arguments, x)
+	parameters = parts_of(value_type(n) ?? return ø)
+	if parameters.any(part => has_letters(part) or has_unknowns(part)) { return ø }
+	if fields_given(parameters.fold(constructor.type, (type, part) => match type.shape { Pi(binder, domain, body) => instantiated(body, part); _ => type }), arguments) != value_type(n) { return ø }
+	terms_applied(apply_all(constant(id, constructor.name, []), parameters), arguments, x)
 }
 # the type a constructor gives for these values, each of its field's own type; ø where they are other values
 fields_given(type: Term, arguments: list) as Term? := match type.shape {
