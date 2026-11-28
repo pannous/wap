@@ -114,9 +114,10 @@ conversion(given: Term?, wanted: Term?, s: TypingState) as Conversion? := {
 	# a union's value is held as an any's is, so it is as it is where an any is, a wider union, or where each of its
 # parts is
 	if is_union(given) and (wanted == ANY_TERM or is_union(wanted) and boxed_fit(given, wanted, s.records.reads) or union_parts(given).all(part => conversion(part, wanted, s) == Conversion.Same)) { return Conversion.Same }
-	# a value of what a narrowing narrows, or of what narrows to that, is narrowed: an int to an index through nat
+	# a value of what a narrowing narrows, of what narrows to that, or of what reads as it, is narrowed: an int to an
+	# index through nat, a char to the program's `type char = text where #it == 1` through text(c: char)
 	narrowing = narrowed_type(wanted)
-	if narrowing != ø and conversion(given, narrowing!, s) in [Conversion.Same, Conversion.Narrowed] { return Conversion.Narrowed }
+	if narrowing != ø and conversion(given, narrowing!, s) in [Conversion.Same, Conversion.Narrowed, Conversion.Read] { return Conversion.Narrowed }
 	if boxed_fit(given, wanted, s.records.reads) { return Conversion.Boxed }
 	if subtype_base(wanted, s.records) == given { return Conversion.Subtyped }
 	if narrowed_part(given, wanted, s) != ø { return Conversion.Narrowed }
@@ -148,16 +149,18 @@ converted(n: Node, wanted: Term, s: TypingState, at: Node, place: text) as Node 
 	# a function value converts by its function, typed for the wanted function type
 	way = conversion(given, wanted, s) ?? refused(at, "this gives ${type_text(given)}, ${place} ${type_text(wanted)}" + (if counted(given, wanted) then ": a bool counts as 1 or 0 only in a call, write it `as int`" else ""))
 	if way == Conversion.Settled { settles(given, wanted, s) }
-	if way == Conversion.Narrowed { return if narrowed_part(given, wanted, s) == ø then narrowed_call(n, wanted, at, s) else converted(narrowed_call(n, narrowed_part(given, wanted, s)!, at, s), wanted, s, at, place) }
+	if way == Conversion.Narrowed { return if narrowed_part(given, wanted, s) == ø then narrowed_call(parent_read(n, wanted, s, at, place), wanted, at, s) else converted(narrowed_call(n, narrowed_part(given, wanted, s)!, at, s), wanted, s, at, place) }
 	if way == Conversion.Checked and error_part(given) != ø and error_part(wanted) == ø { return unfailed_call(n, given, wanted, s) }
 	if way != Conversion.Checked { return repacked(n, way, wanted, s) }
 	# a value is tested for the types that pass as the wanted one and read so, as a condition's found value is
 	# (types.wap as_found), so a cast after a passing `is` never raises: a path as it is, any other value held first, so
 	# it is computed once
-	if path_key(n) != ø { return tested_reads(n, wanted, checked_cast(n, wanted), n, s) }
+	if path_key(n) != ø or readers_of(wanted, s) is empty { return tested_reads(n, wanted, checked_cast(n, wanted), n, s) }
 	kept = held_value(n, s)
 	with_type_of(placed_like(Block([kept#1, tested_reads(kept#2, wanted, checked_cast(kept#2, wanted), n, s)]), n), wanted)
 }
+# a value read as the parent of the narrowing wanted where it reads as that parent, as it is otherwise
+parent_read(n: Node, wanted: Term, s: TypingState, at: Node, place: text) as Node := if conversion(value_type(n), narrowed_type(wanted), s) == Conversion.Read then converted(n, narrowed_type(wanted)!, s, at, place) else n
 checked_cast(n: Node, wanted: Term) as Node := with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [n]), n), wanted)
 # code giving no value gives ø wherever a value is wanted, `answer(f())` and `y: int? = f()` of an f giving nothing;
 # a call whose result is not known yet waits
