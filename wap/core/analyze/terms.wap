@@ -520,19 +520,23 @@ match_term(n: Node, subject: Node, arms: list, x: Entering) as Term? := {
 	if domain == INT_TERM { return literals_term(subject, arms, type, x) }
 	if TYPES.enums.get(word_id(domain)) != ENUM_DEFINED { return ø }
 	if #block_of(TYPES.environment, domain, "match").block.types != 1 { return ø }
-	taken_apart_into(domain, type, (id, r) => arm_minor(id, arms, r, value => ø, x), term_of(subject, x) ?? return ø, x)
+	if x.recursion != ø and x.recursion!.measured != ø {
+		measured = measured_match(subject, arms, domain, x.recursion!.measured!, x)
+		if measured != ø { return measured }
+	}
+	taken_apart_into(domain, lambda("_", domain, type), (id, r) => arm_minor(id, arms, r, value => ø, x), term_of(subject, x) ?? return ø, x)
 }
 # The types a recursor takes motives for and the motives: the type taken apart, then each container it nests in
 # (kernel/nested.wap), list(Node) for Node's list<Node>
 class Recursed { types: list<Term>; motives: list<Term> }
-# a type taken apart by its recursor into a result: a minor premise for each of its cases, then for each container it
+# a type taken apart by its recursor into a motive: a minor premise for each of its cases, then for each container it
 # nests in the container's cases, each giving its value again, the motive at a container the container itself; ø
 # where a case gives none, or the type takes parameters its containers are functions of
-taken_apart_into(domain: Term, result: Term, minor_for: (int, Recursed) -> Term?, major: Term, x: Entering) as Term? := {
+taken_apart_into(domain: Term, motive: Term, minor_for: (int, Recursed) -> Term?, major: Term, x: Entering) as Term? := {
 	facts = block_of(TYPES.environment, domain, "match")
 	# a type of a generic function's letters is taken apart in each instance, where they are known
 	if has_letters(domain) or has_unknowns(domain) or facts.block.parameters != 0 and facts.nested is not empty { return ø }
-	r = Recursed([domain] + facts.nested, [lambda("_", domain, result)] + facts.nested.map(container => lambda("_", container, container)))
+	r = Recursed([domain] + facts.nested, [motive] + facts.nested.map(container => lambda("_", container, container)))
 	again = (1 to #facts.nested).list().flat_map(place => block_of(TYPES.environment, r.types#(place + 1), "match").cases#1.map(id => minor_of(id, ø, r, value => ø, x, (inside, value) => value, place + 1)))
 	minors = facts.block.types#1.cases.map(case => minor_for(named_id(TYPES.environment, case.name)!, r)) + again
 	if minors.any(minor => minor == ø) then ø else recursor_applied(domain, r.motives#1, r.motives.drop(1) + minors.map(minor => minor!) + [major])
@@ -541,11 +545,12 @@ arm_pattern(arm: Arm) as Node := match arm { Arm(pattern, result) => pattern }
 # the constructor a pattern names, ø for a name or `_`
 pattern_constructor(pattern: Node) as int? := TYPES.constructors.get(place_key(fact_of(case_name(pattern), DEFINED_AT) ?? return ø))
 # a case's minor premise from the arm that names the case or fits any value, a name there holding the case's value
-arm_minor(id: int, arms: list, r: Recursed, riding: (Term) -> Term?, x: Entering) as Term? := {
+# (`within` reads the arm inside what the minor takes beyond the fields, a measured match's premise)
+arm_minor(id: int, arms: list, r: Recursed, riding: (Term) -> Term?, x: Entering, within: (Entering, Term, (Entering) -> Term?) -> Term? = (inside, value, read) => read(inside)) as Term? := {
 	arm = arms.find(arm => [id, ø].contains(pattern_constructor(arm_pattern(arm)))) ?? return ø
 	pattern = arm_pattern(arm)
 	named = pattern_constructor(pattern) == id
-	minor_of(id, if named then case_fields(pattern) else ø, r, riding, x, (inside, value) => if named or pattern == symbol(WILDCARD) then term_of(arm_result(arm), inside) else let_read(inside, pattern, r.types#1, value, bound_in => term_of(arm_result(arm), bound_in)))
+	minor_of(id, if named then case_fields(pattern) else ø, r, riding, x, (inside, value) => within(inside, value, reading => if named or pattern == symbol(WILDCARD) then term_of(arm_result(arm), reading) else let_read(reading, pattern, r.types#1, value, bound_in => term_of(arm_result(arm), bound_in))))
 }
 # a case's minor premise: the fields (named by the pattern, else unnamed), then a hypothesis for each field of the enum
 # itself, the motive at it, then what riding gives for the case's value (a course's values below); what body reads is
