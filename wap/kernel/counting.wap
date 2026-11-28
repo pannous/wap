@@ -40,6 +40,7 @@ SUM := "·sum"
 TIMES := "·times"
 EQUAL_INTEGERS := "·equal_integers"
 NOT_ABOVE := "·not_above"
+IS_NATURAL := "·is_natural"
 BELOW := "·below"
 ABOVE := "·above"
 NOT_BELOW := "·not_below"
@@ -146,8 +147,9 @@ counts_equal(b: Building, left: Term, right: Term): Term := equated(b.e, TYPE_LE
 before_both(b: Building, left: Term, right: Term, h: Term): Term := apply_all(constant_of(b.e, EQUAL_CONGRUENT, [TYPE_LEVEL, TYPE_LEVEL]), [named(b, COUNT), named(b, COUNT), named(b, PREDECESSOR), left, right, h])
 
 # `enum int { natural(n: ·count); negative(n: ·count) }`, filling core's int: natural(n) is
-# n and negative(n) is -(n + 1), so each int has one form. Its functions go by its two counts, an int x being
-# ups(x) - downs(x): only ups, downs, minus and difference see its cases
+# n and negative(n) is -(n + 1), so each int has one form, Lean's Int.ofNat and Int.negSucc. Sum, times and
+# not_above go by both cases as Lean's Int.add, Int.mul and Int.le do, so a theorem of Lean's Int is one of wap's;
+# equal_integers compares an int x by its two counts, x being ups(x) - downs(x)
 int_declared(e: Environment) := {
 	header = universe(TYPE_LEVEL)
 	count = constant_of(e, COUNT, [])
@@ -159,22 +161,33 @@ int_declared(e: Environment) := {
 	zero = named(b, COUNT_ZERO)
 	defined_over(b, UPS, int, ["x"], count, x => int_split(b, TYPE_LEVEL, t => count, (at, n) => if at == 1 then n else zero, x#1))
 	defined_over(b, DOWNS, int, ["x"], count, x => int_split(b, TYPE_LEVEL, t => count, (at, n) => if at == 2 then successor(b, n) else zero, x#1))
-	# -n of a count in its one form: zero, then the negative of the count before
-	from_zero = function_of(b, "n", count, n => counted(b, TYPE_LEVEL, t => int, valued(b, 1, zero), (k, r) => valued(b, 2, k), n))
+	# -n of a count in its one form, Lean's negOfNat: zero, then the negative of the count before
+	from_zero = function_of(b, "n", count, n => count_split(b, zero, n))
 	defined_over(b, MINUS, int, ["x"], int, x => int_split(b, TYPE_LEVEL, t => int, (at, n) => if at == 1 then apply(from_zero, n) else valued(b, 1, successor(b, n)), x#1))
-	# m - n of two counts in its one form, by both counts at once, so the difference of two successors is the
-	# difference of the counts before them
-	defined_over(b, DIFFERENCE, count, ["m", "n"], int, x => apply(paired(b, TYPE_LEVEL, (i, j) => int, from_zero, j => valued(b, 1, successor(b, j)), (j, k, before) => before, x#1), x#2))
+	# m - n of two counts in its one form, Lean's subNatNat: natural(m - n) where n - m is zero, else the negative of
+	# the count before n - m
+	defined_over(b, DIFFERENCE, count, ["m", "n"], int, x => count_split(b, called(b, SUBTRACT, [x#1, x#2]), called(b, SUBTRACT, [x#2, x#1])))
 	ups = (t: Term) => called(b, UPS, [t])
 	downs = (t: Term) => called(b, DOWNS, [t])
 	add = (l: Term, r: Term) => called(b, ADD, [l, r])
 	multiply = (l: Term, r: Term) => called(b, MULTIPLY, [l, r])
-	# two ints' counts crossed: ups(a) + downs(b) against ups(b) + downs(a)
-	crossed = (name: text, a: Term, c: Term) => called(b, name, [add(ups(a), downs(c)), add(ups(c), downs(a))])
-	defined_over(b, SUM, int, ["a", "b"], int, x => called(b, DIFFERENCE, [add(ups(x#1), ups(x#2)), add(downs(x#1), downs(x#2))]))
-	defined_over(b, TIMES, int, ["a", "b"], int, x => called(b, DIFFERENCE, [add(multiply(ups(x#1), ups(x#2)), multiply(downs(x#1), downs(x#2))), add(multiply(ups(x#1), downs(x#2)), multiply(downs(x#1), ups(x#2)))]))
-	defined_over(b, EQUAL_INTEGERS, int, ["a", "b"], truth, x => crossed(EQUALS, x#1, x#2))
-	defined_over(b, NOT_ABOVE, int, ["a", "b"], truth, x => crossed(AT_MOST, x#1, x#2))
+	# a function of two ints by both their cases, each pair's arm made from the cases' indexes and counts
+	by_cases = (name: text, result: Term, arm: (int, Term, int, Term) -> Term) => defined_over(b, name, int, ["a", "b"], result, x => int_split(b, TYPE_LEVEL, t => result, (at, m) => int_split(b, TYPE_LEVEL, t => result, (other, n) => arm(at, m, other, n), x#2), x#1))
+	# the magnitude of an int's case: n of natural(n), n + 1 of negative(n)
+	magnitude = (at: int, n: Term) => if at == 1 then n else successor(b, n)
+	natural = (n: Term) => valued(b, 1, n)
+	difference = (m: Term, n: Term) => called(b, DIFFERENCE, [m, n])
+	# naturals add, negatives add one count past, a natural and a negative are the difference of their magnitudes
+	by_cases(SUM, int, (at, m, other, n) => if at == 1 and other == 1 then natural(add(m, n)) else if at == other then valued(b, 2, successor(b, add(m, n))) else if at == 1 then difference(m, magnitude(other, n)) else difference(n, magnitude(at, m)))
+	# the product of the magnitudes, natural where the signs agree and its negation where they differ
+	by_cases(TIMES, int, (at, m, other, n) => {
+		product = multiply(magnitude(at, m), magnitude(other, n))
+		if at == other then natural(product) else apply(from_zero, product)
+	})
+	defined_over(b, EQUAL_INTEGERS, int, ["a", "b"], truth, x => called(b, EQUALS, [add(ups(x#1), downs(x#2)), add(ups(x#2), downs(x#1))]))
+	defined_over(b, IS_NATURAL, int, ["x"], truth, x => int_split(b, TYPE_LEVEL, t => truth, (at, n) => if at == 1 then e.literals!.yes_case else e.literals!.no_case, x#1))
+	# a <= b where b - a is natural, Lean's Int.le
+	defined_over(b, NOT_ABOVE, int, ["a", "b"], truth, x => called(b, IS_NATURAL, [called(b, SUM, [x#2, called(b, MINUS, [x#1])])]))
 	defined_over(b, BELOW, int, ["a", "b"], truth, x => called(b, NOT_ABOVE, [called(b, SUM, [x#1, valued(b, 1, successor(b, zero))]), x#2]))
 	defined_over(b, ABOVE, int, ["a", "b"], truth, x => called(b, BELOW, [x#2, x#1]))
 	defined_over(b, NOT_BELOW, int, ["a", "b"], truth, x => called(b, NOT_ABOVE, [x#2, x#1]))
@@ -184,6 +197,9 @@ int_declared(e: Environment) := {
 	e.bridges += [Bridge(int, named(b, EQUAL_INTEGERS), named(b, EQUALS_SOUND), named(b, EQUALS_COMPLETE))]
 	e.integers = Integers(int, case_of(b, 1), case_of(b, 2), named(b, SUM), named(b, MINUS), named(b, NOT_ABOVE))
 }
+# Lean's subNatNat by the subtraction it is split by: natural(base) where major is zero, negative(k) where it is
+# successor(k)
+count_split(b: Building, base: Term, major: Term): Term := counted(b, TYPE_LEVEL, t => named(b, INT_WORD), valued(b, 1, base), (k, r) => valued(b, 2, k), major)
 # int's case at an index of INT_CASES
 case_of(b: Building, at: int): Term := named(b, int_case(at))
 # an int's case at an index, its count n
