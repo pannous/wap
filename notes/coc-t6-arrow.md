@@ -87,3 +87,13 @@ test_proposition_wanted.
 - None of them is changed, only called.
 - The one risk is in scope: the compiler's own `(T) -> U` types now take the same path, with anonymous binders. Their
   terms must stay what function_type_of gives today, a non-dependent pi, so test_self and the census check it.
+
+## A test this changes
+
+test/wap/test_functions.wap:34 pins the refusal that goes: "a function value written with -> is refused saying =>
+writes it", on `add = (a, b) -> a + b; add(1, 2)`.
+- Under the amended rule, add is a type, and `add(1, 2)` is refused as a type's call of two values ("a type makes its
+  value of one other"). A and b are no types either.
+- So the line goes red. Changing it is an edit of an existing test, so it goes to warp-interviewer first.
+- Options: drop the line, since the form is no longer refused for that reason, or pin what the general rule gives.
+  Recommendation: drop it. A test pins only behavior we want, and a hint about `=>` is a special case the ruling removes.
