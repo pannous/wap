@@ -38,12 +38,13 @@ class Callee { key: text; caught: bool }
 # parameters it writes into (their places), its State only where a caller gives it what the caller holds; the locals
 # it made itself, a literal or its own allocation, whose writes stay inside it, and those given anything else; the
 # parameters it lets out of a reading place, aliased, given back, stored, captured or given to an unknown callee, which
-# anything may change; the parameters it gives on to callees, and the arguments it shares as their parent's lists
-class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = []; escaped: list<int> = []; passes: list<Pass> = []; shared: list<Shared> = [] }
+# anything may change; the parameters it gives on to callees, and the arguments it shares as their parent's lists; the
+# locals given a list of a subtype as their parent's, by key, each the value shared (fits.wap shared_argument)
+class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = []; escaped: list<int> = []; passes: list<Pass> = []; shared: list<Shared> = []; sharing: map<text, Node> = {} }
 # an argument given to a callee at its place there: what the callee changes or lets out of it, the giver does to it too
 class Pass { key: text; at: int; argument: Node; caught: bool }
 # an argument shared as its parent's list or map (fits.wap shared_argument), at its callee's place
-class Shared { argument: Node; key: text; at: int }
+class Shared { argument: Node; key: text; at: int; given: Node }
 # The effects of the typed functions, joined over the groups of functions that call each other round (groups.wap):
 # each function's own part and the effects found, each group's alike
 class Joining {
@@ -185,7 +186,10 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		match unwrapped(n) { Set(place, value) => {
 			escaped(value, own)
 			own.assigned += [parameter_at(place, own)]
-			if place is Get or is_kind_word(fact_of(place, BINDING), DefinitionKind.Capture) then written_into(place, caught, own) else local_set(place, value, own)
+			if place is Get or is_kind_word(fact_of(place, BINDING), DefinitionKind.Capture) {
+				if has_fact(value, SHARED_ARGUMENT) { unshared(value, place, "as ${declared_name(place)}, which is let out here, where anything may change it") }
+				written_into(place, caught, own)
+			} else { local_set(place, value, own) }
 		}; _ => ø }
 		effects_in_each(direct_parts(unwrapped(n)), caught, own, x)
 	}
@@ -203,6 +207,7 @@ divisor_met(divisor: Node, caught: bool, own: Own) as bool := {
 # through its first operand, `items_at(of) + k` of): a parameter's the function writes into, one a local it made itself
 # holds stays inside it; any other, a captured or global variable's or a local given anything else, is State
 written_into(target: Node, caught: bool, own: Own) := {
+	unshared_local(target, own, "which this changes")
 	root = written_root(target)
 	at = if root == ø then 0 else parameter_at(root!, own)
 	if at > 0 { own.written = (own.written + [at]).unique; return }
@@ -220,6 +225,14 @@ written_root(n: Node) as Node? := match n {
 local_set(place: Node, value: Node, own: Own) := {
 	key = place_key(fact_of(declared_name(place), DEFINED_AT) ?? declared_name(place))
 	if is_made(unwrapped(value)) then own.made += [key] else own.given += [key]
+	if has_fact(value, SHARED_ARGUMENT) { own.sharing[key] = value }
+}
+# the value a local shares as its parent's list, which the root of a place names; ø for any other place
+sharing_of(n: Node, own: Own) as Node? := own.sharing.get(place_key(fact_of(written_root(n) ?? return ø, DEFINED_AT) ?? return ø))
+# a local sharing a list of a subtype, refused where it may change: written into, or let out where anything may
+unshared_local(n: Node, own: Own, how: text) := {
+	shared = sharing_of(n, own) ?? return
+	unshared(shared, n, "as ${written_root(n)!}, a ${type_text(value_type(shared)!)}, ${how}")
 }
 is_made(value: Node) as bool := match value { List(items, bracket, separator) => yes; Text(t) => yes; Call(called, arguments) => is_bound(called, DefinitionKind.Record) or is_bound(called, DefinitionKind.Case); _ => no }
 # which of the function's parameters a name is, 0 for none
@@ -229,6 +242,7 @@ parameter_at(n: Node, own: Own) as int := {
 }
 # a parameter let out of a reading place, which anything may then change
 escaped(value: Node, own: Own) := {
+	unshared_local(unwrapped(value), own, "which is let out here, where anything may change it")
 	at = parameter_at(unwrapped(value), own)
 	if at > 0 { own.escaped = (own.escaped + [at]).unique }
 }
@@ -236,13 +250,15 @@ escaped(value: Node, own: Own) := {
 # change; else kept, with an argument shared as its parent's list, to be judged once what the callee changes is known
 # (shares_judged)
 passed(argument: Node, at: int, key: text, called: text, caught: bool, own: Own) := {
+	# a local sharing a list of a subtype is judged as the value it shares
+	shared = if has_fact(argument, SHARED_ARGUMENT) then argument else sharing_of(argument, own)
 	if key == "" {
+		if shared != ø { callee_unshared(shared!, argument, called) }
 		escaped(argument, own)
-		if has_fact(argument, SHARED_ARGUMENT) { unshared(argument, called) }
 		return
 	}
 	own.passes += [Pass(key, at, argument, caught)]
-	if has_fact(argument, SHARED_ARGUMENT) { own.shared += [Shared(argument, key, at)] }
+	if shared != ø { own.shared += [Shared(shared!, key, at, argument)] }
 }
 # the values a body gives back: its last statement's, each arm's of an if
 given_back(n: Node) as list<Node> := match unwrapped(n) {
@@ -267,14 +283,17 @@ shares_judged(group: list<text>, x: Joining) := {
 			if #touched(own) != before { changed = yes }
 		}
 	}
-	for member in group { for shared in own_of(member, x).shared { if touched(own_of(shared.key, x)).contains(shared.at) { unshared(shared.argument, text(defined_name(x.by_key[shared.key].define))) } } }
+	for member in group { for shared in own_of(member, x).shared { if touched(own_of(shared.key, x)).contains(shared.at) { callee_unshared(shared.argument, shared.given, text(defined_name(x.by_key[shared.key].define))) } } }
 }
 # what a callee does to its parameter at a place, done to the argument given there
 taken(pass: Pass, callee: Own, own: Own) := {
 	if callee.written.contains(pass.at) { written_into(pass.argument, pass.caught, own) }
 	if callee.escaped.contains(pass.at) { escaped(pass.argument, own) }
 }
-unshared(argument: Node, callee: text) := refused(argument, "this ${text_of(fact_of(argument, SHARED_ARGUMENT))} is shared where ${callee} takes a ${type_text(value_type(argument)!)}, which ${callee} may change: write `${argument} as ${type_text(value_type(argument)!)}` for a copy")
+# a list of a subtype shared where it may change, refused at the place that may change it, the fix a copy of the value
+# shared: `ps as list<int>`
+unshared(shared: Node, at: Node, how: text) := refused(at, "this ${text_of(fact_of(shared, SHARED_ARGUMENT))} is shared ${how}: write `${shared} as ${type_text(value_type(shared)!)}` for a copy")
+callee_unshared(shared: Node, at: Node, callee: text) := unshared(shared, at, "where ${callee} takes a ${type_text(value_type(shared)!)}, which ${callee} may change")
 # an effect a body does itself, none where it is ø, a Fail none where a `try` catches it
 effect_added(effect: Effect?, caught: bool, own: Own) := if effect != ø and not (caught and effect == Effect.Fail) {
 	own.effects += [effect!]
