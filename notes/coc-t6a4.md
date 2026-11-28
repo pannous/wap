@@ -114,8 +114,9 @@ counting it.
 
 (4) needs apart's term builder (apart.wap:31-55) in reach of core's match reading. Today it sits in
 extensions/prove. Two ways:
-- **A (recommended):** move the builder into wap/kernel/, beside recursors.wap. That is kernel +25 and prove −25,
-  net 0. The prover stays in apart.wap and calls it. It goes to warp-interviewer, since kernel is semi-frozen.
+- **A (decided, track T):** move the builder into wap/kernel/, beside recursors.wap. That is kernel +25 and prove
+  −25, net 0. The prover stays in apart.wap and calls it. The builder only makes a proof term: the kernel's checker
+  judges it like any other value (typing.wap `declared`), so the trust base stays where it is.
 - **B:** leave the arm open and let verify's provers fill it. That keeps a written proof's check split across two
   layers, so a program's `type of double_even(3)` would fail without verify.
 
@@ -126,107 +127,3 @@ kernel-length drops `·yes_is_not_no` and `·bool_cases` (no caller). T6a4 needs
 
 T6a4 lands after T5c3 and T5c4, and after unify-dedup. The own-enum part (motive, course, covering) can land first, on
 T5c3 alone, and turns the theory tests green. The nat part (1)-(4) and the linear reading follow on T5c4.
-
-## Read on t5c4-fix ed626a2c: what stands between the row and its red lines
-
-The row's "own-enum part lands first on T5c3 alone" does not hold for the red lines: each is a `law … := match` over an
-indexed family (`Even(double(n))`), which needs T6a1 (a law with a written proof typed by analyze) and T6a3 (found
-fields and indices; inductives.wap:56 declares every enum at DATA_TERM). Neither is an ancestor of this base. The source
-`motive_made` is gone with the extension elaborator, so the "+35 ported" row is stale: the work sits in analyze.
-
-Where the dependency lives, each a guess until built:
-1. matching.wap `arm_typed` gives every arm the same expected type; an arm must be expected at the result type with the
-   subject replaced by that case's value. terms.wap `match_term` then only abstracts a typed node (the check at :170
-   cannot move: the case's value exists inside `minor_of`).
-2. Three gates compare syntactically and want the kernel's `equal` under substitution: `kernel_signature` (:72, folds
-   `pi("_", …)`, so a result cannot name a parameter), `definition_of` (:78) and `called_term` (:125).
-3. Levels: `recursor_applied` and the course and below constants hardcode `[TYPE_LEVEL]`; a Prop-valued motive needs the
-   result's sort (courses.wap:70-71 says the pairs' level is never Prop). Possibly a kernel question.
-4. course_applied (recursion.wap:109) abstracts the recursed value in the motive, `riding` and the other parameters'
-   types as a telescope; one parameter is trivial, `others` is a guess. `abstracted` works only when the subject is a
-   bare binder; otherwise the constant motive stays.
-5. Covering: matching.wap:24 refuses a missing case already; only the rule word "covering" (kernel/environment.wap:16)
-   is missing, a line or two.
-
-## The substitutions, read on 5285eb86 and on this branch's base
-
-**Where a parameter stands inside a written result type.**
-- On 5285eb86 it stands nowhere. `law even_double(n: nat): Even(double(n))` gets its result at calls.wap:595
-  (`written = substituted(written_type(declared_type(name)), letters)`). type_term (type_notation.wap:386) reads
-  `Even(double(n))` as a Call: not a written part, not `⋅`, so it raises "… is no type".
-- It is not a letter: is_letter takes one capital (letters.wap:15-16), and `n` is a value.
-- It is no key of Entering either: on 5285eb86 Entering keys bound indices (terms.wap:110, `bound(#binders - at)`), and
-  only the body is read through it, never the result.
-- The one parameter that does stand inside a type is a universe binder (type_notation.wap:441-451): a kernel Free
-  variable, `hypothesis` on a checker, handed to type_term as a TYPE fact on the name and abstracted after.
-- terms-nameless (e27109d1, carried by this branch's base through T5c3) makes Entering hold Free variables
-  (`variables`, `c`). A binder is opened with `entered` and closed with `lambdas` and `pis` (kernel/recursors.wap:28-33).
-  So a parameter is a Free variable in the body, but definition_of (terms.wap:80-81) enters fresh Locals on a fresh
-  checker of its own. A result type read anywhere else would name other ids.
-
-**The one decision underneath all four.**
-- Each TypedFunction gets its parameters' Locals once, on one checker, where its result is read (calls.wap:549-550 here):
-  `typed.reading: Entering`, built by one `parameters_reading(typed, s)`.
-- The result type is read under them: a value inside a type (T6a3's indices) goes through `term_of` with that Entering
-  and comes back holding the parameters' Free variables.
-- definition_of, kernel_signature, arm_typed and course_applied all take `typed.reading` instead of entering their own.
-- Every substitution below is then the kernel's `replaced_by(t, id, value)` (kernel/terms.wap:262), or `instantiated` and
-  `instantiated_all`, on Free ids that are the same everywhere. No renaming, no index arithmetic.
-- A function whose result names no parameter gives the same terms as today, equal up to binder names, which are hints.
-
-1. **matching.wap arm_typed (:42), the per-arm expected type.**
-   - Only when the subject is a bare parameter (`is_variable(subject)`, its definer one of `typed.reading`'s keys) and
-     the arm's pattern is a case.
-   - The case's fields enter as Locals on `typed.reading.c` (the pattern's names, through pattern_typed's `remembered`).
-   - The arm is expected at `replaced_by(expected, variable_id(subject_local.variable), case_value)`, where
-     `case_value = apply_all(constant(case id), type parameters + variables(field_locals))`.
-   - Any other subject keeps the one expected type, as today; that is Lean's match without generalising.
-   - case_typed's `joined` (:31) then compares each arm with its own expected, by `equal`, not with one joined type.
-   - match_term (terms.wap :163-) reads the same field Locals through `under`, so its minors and the arms' expected
-     types name one variable.
-2. **kernel_signature (terms.wap:66-73), the named binders.**
-   - `pis(typed.reading locals, result)` replaces `parameters.reverse.fold(result, pi("_", …))`.
-   - pis (kernel/recursors.wap:32) abstracts each Free in turn, so `(n: nat) -> Even(double(n))` closes with the result
-     naming its binder.
-   - Each Local's domain is `settled_type(typed.arguments#at, s)`, as today. The has_letters and has_unknowns gate
-     stays.
-3. **The gates by `equal`.**
-   - definition_of (:78): `kernel_value(body) != kernel_settled(typed.result)` becomes
-     `not equal(typed.reading.c, kernel_value(body)!, result)` (kernel/equal.wap:15).
-     - The body's type and the result name the same Free variables, so `Even(n + n)` against `Even(double(n))` is
-       equal by unfolding double. That needs double entered first, which instance_entered's callees-first order gives.
-     - Then `lambdas(locals, term)` over `typed.reading`, not over fresh Locals.
-   - called_term (:125): the callee's parameter and result types under the arguments.
-     - `callee = type_of(x.c, function)`.
-     - Argument at: `equal(x.c, kernel_value(arguments#at)!, domain_at)`, where `domain_at` is the at-th Pi's domain of
-       `instantiated_all(peeled(callee, at - 1), earlier argument terms)` (kernel/recursors.wap:127-128, as
-       with_parameters does).
-     - Result: `equal(x.c, kernel_value(n)!, instantiated_all(peeled(callee, #arguments), argument terms))`.
-     - So the argument terms are read before the gate: term_of each, then check, then `terms_applied`.
-   - Cost: one `equal` per gate where there was a `!=`. A same-term pair returns at once (equal.wap:16), so the plain
-     functions pay a hash compare as today.
-4. **course_applied (recursion.wap:105), the telescope.**
-   - motive:
-     ```
-     m = entered(x.c, "x", domain)
-     lambdas([m], pis(others' locals, replaced_by(result, id(place's local), m.variable)))
-     ```
-     Here `result` is read under `typed.reading`, and the others' Locals are `typed.reading`'s, their domains replaced
-     the same way when they name the recursed parameter.
-   - riding: `lambdas([y], pi("below", below_of(y), apply(motive, y)))`. One spelling of the motive, so riding never
-     restates `result`.
-   - step_others (:115): `entered(x.c, "_", replaced_by(domain_at, place id, step_value.variable))`.
-   - inside (:118): the step's Locals keyed as today.
-   - The final `apply_all(course, others.map(at => x.variables#at))` (:123) stays.
-   - A subject that is not a bare parameter keeps the constant motive, as now.
-
-**Covering (wap-supervisor's ruling).**
-- A program's match keeps matching.wap's compile-error form (:24, "match on … misses …: add the missing arm or `_`"),
-  with only the rule word "covering" added. The kernel's "refused by" form stays internal.
-- test_proof_wanted:13 reads through `refused_by` (test/wap/scripted.wap:62). It keeps only lines that contain
-  "refused by ", so the line goes green only if the word lands as "refused by covering" inside that error's text.
-  Builder: place the word so that it does.
-
-Estimate: the shared reading is analyze +8 (parameters_reading, `typed.reading`, definition_of and condition_entered
-taking it). The four sites are about +6, +2, +6 and +5. That is about +27 core, on top of T6a3's value reader inside
-type_term.

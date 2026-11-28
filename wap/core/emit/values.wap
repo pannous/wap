@@ -55,11 +55,11 @@ constant(n: Node, m: WasmModule) as Code? := match n {
 # records (core/stage.wap record_named)
 # a shape, `Record`, laid out as the type it narrows (core/analyze/shapes.wap); a list or a class's instance in the
 # memory its address
-layout_of(type_name: Term, m: WasmModule, records: Records, at: Node? = ø) as list<int>? := memory_layout(m, type_word(type_name)) ?? memory_kept(type_name, at, m, if (is_word(type_name) or WORD_LAYOUTS.has(type_word(type_name))) and function_value_key(type_name) == ø then word_layout(narrowed_type(type_name) ?? subtype_base(type_name, records) ?? type_name, m, records) else compound_layout(type_name, at, m, records))
+layout_of(type_name: Term, m: WasmModule, records: Records, at: Node? = ø) as list<int>? := memory_layout(m, type_word(type_name)) ?? memory_kept(type_name, at, m, if (is_word(type_name) or WORD_LAYOUTS.has(type_word(type_name)) or universe_level(type_name) != ø) and function_value_key(type_name) == ø then word_layout(narrowed_type(type_name) ?? subtype_base(type_name, records) ?? type_name, m, records) else compound_layout(type_name, at, m, records))
 word_layout(type: Term, m: WasmModule, records: Records) as list<int>? := {
 	name = type_text(type)
 	record = record_named(records, type)
-	if WORD_LAYOUTS.has(type_word(type)) then WORD_LAYOUTS[type_word(type)] else if name == TEXT_TYPE then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == MAP_TYPE then nullable(map_base(m)) else if name == ENUM_TYPE then enum_layout(m) else if record == ø then ø else if plain_enums(m) and cases_of(record!).all(case => case_fields(case) is empty) then I32 else nullable(struct_of(record, m, records))
+	if WORD_LAYOUTS.has(type_word(type)) then WORD_LAYOUTS[type_word(type)] else if name == TEXT_TYPE or universe_level(type) != ø then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == MAP_TYPE then nullable(map_base(m)) else if name == ENUM_TYPE then enum_layout(m) else if record == ø then ø else if plain_enums(m) and cases_of(record!).all(case => case_fields(case) is empty) then I32 else nullable(struct_of(record, m, records))
 }
 # a compound type the memory lays out none of is refused whole, before its parts, which have no place of their own;
 # a function value in the memory is the address of what it captures, or of its function's table slot beside them;
@@ -79,7 +79,7 @@ memory_refused(type: Term, at: Node?) as list<int> := {
 # The GC type of a map, `map<text, int>`: a struct of three lists, its keys and its values of one count and its slots (lists.wap); ø
 # for a type that is no map. Every map's type extends the map base, so `x is map` tests any map at once
 map_index(type: Term, m: WasmModule, records: Records) as int? := if key_type(type) == ø then ø else added_type(m, open_type([map_base(m)], struct_type(map_parts(type).map(part => field_type(nullable(items_list(part, m, records) ?? refused_type(part, "the emitter has no value layout for this type yet")), MUTABLE)))))
-map_base(m: WasmModule) as int := added_type(m, open_type([], struct_type([])))
+map_base(m: WasmModule) as int := type_kept(m, MAP_TYPE, () => added_type(m, open_type([], struct_type([]))))
 # a map type's parts, each held as a list: its keys (field 0), its values (field 1) and its slots (field 2), the places
 # of its keys by their hash (types/maps.wap key_place)
 map_parts(type: Term) as list<Term> := [key_type(type), held_type(type)].map(part => part ?? refused_type(type, "a map type names its key and value types, `map<text, int>`")) + [word_term(SLOT_TYPE)]
@@ -136,10 +136,7 @@ signature_struct(m: WasmModule) as int := function_base(m) + 1
 # the type every function value's extends, so a test of an any tells a function value: declared in one recursion group
 # with a signature value's, which extends it, so it is no other empty struct (map_base); made once, kept by a name no
 # record's place key is, its group's types at #m.types in order (added_group), the signature value's next to it
-function_base(m: WasmModule) as int := {
-	if not m.named.has(FUNCTION_WORD) { m.named[FUNCTION_WORD] = added_group(m, [open_type([], struct_type([])), open_type([#m.types], struct_type([field_type(I32, IMMUTABLE), field_type(ANYREF, IMMUTABLE)]))]) }
-	m.named[FUNCTION_WORD]
-}
+function_base(m: WasmModule) as int := type_kept(m, FUNCTION_WORD, () => added_group(m, [open_type([], struct_type([])), open_type([#m.types], struct_type([field_type(I32, IMMUTABLE), field_type(ANYREF, IMMUTABLE)]))]))
 # the function a value of a signature refers to: what it captures, then the signature's parameters
 signature_function_index(parts: FunctionType, m: WasmModule, records: Records) as int := added_type(m, function_type([captures_layout(m)] + signature_parameters(parts, m, records), signature_results(parts, m, records)))
 # what a value of a signature captures: any struct, or in the memory its address
@@ -165,7 +162,7 @@ items_list(item: Term, m: WasmModule, records: Records) as int? := {
 	base = list_base(m)
 	added_type(m, open_type([base], struct_type([LIST_COUNT_FIELD, field_type(nullable(item_array(item, m, records) ?? return ø), MUTABLE)])))
 }
-list_base(m: WasmModule) as int := added_type(m, open_type([], struct_type([LIST_COUNT_FIELD])))
+list_base(m: WasmModule) as int := type_kept(m, LIST_TYPE, () => added_type(m, open_type([], struct_type([LIST_COUNT_FIELD]))))
 LIST_COUNT_FIELD = field_type(I32, MUTABLE)
 LIST_COUNT_AT = 0
 LIST_ITEMS_AT = 1
@@ -200,7 +197,7 @@ names_record(type: Term?, records: Records) as bool := record_named(records, typ
 class_tag(record: Record) as int := text(record_declared(record)).bytes.fold(0, (hash, byte) => (hash * TAG_BASE + byte) % TAG_RANGE)
 # the GC type every enum's extends: its case's tag, which the instructions of `tagged` read. In the memory (a native
 # build) a case of no fields is its tag alone, an i32, as a class's instance is its address
-enum_base(m: WasmModule) as int := added_type(m, open_type([], struct_type([TAG_FIELD])))
+enum_base(m: WasmModule) as int := type_kept(m, ENUM_TYPE, () => added_type(m, open_type([], struct_type([TAG_FIELD]))))
 enum_layout(m: WasmModule) as list<int> := memory_layout(m, ENUM_TYPE) ?? nullable(enum_base(m))
 # whether an enum's case of no fields is its tag alone
 plain_enums(m: WasmModule) as bool := memory_layout(m, ENUM_TYPE) != ø

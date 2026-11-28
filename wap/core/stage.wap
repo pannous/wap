@@ -57,7 +57,7 @@ refitted(built: Node, original: Node) as Node := {
 with_facts_of(n: Node, original: Node) as Node := {
 	if n is Empty { return n }
 	held = attributes_of(n)
-	for fact in attributes_of(original) { if (if fact_name(fact) == "" then not held.contains(fact) else not held.map(fact_name).contains(fact_name(fact))) { n = with_attribute(n, fact) } }
+	for fact in attributes_of(original) { if (if fact_name(fact) == "" then not held.contains(fact) else not held.any(other => fact_name(other) == fact_name(fact))) { n = with_attribute(n, fact) } }
 	n
 }
 
@@ -67,6 +67,8 @@ with_parts(n: Node, f: (Node) -> Node) as Node := match n {
 	List(items, bracket, separator) => List(items.map(f), bracket, separator)
 	_ => n
 }
+# code with each `name` in it read as another
+substituted(n: Node, name: text, value: Node) as Node := if n is symbol and text(n) == name then value else with_parts(n, part => substituted(part, name, value))
 # a node's direct parts: a key's two sides, a list's items; none of an atom
 direct_parts(n: Node) as list<Node> := match n {
 	Key(left, op, right) => [left, right]
@@ -80,6 +82,8 @@ nodes_in(n: Node) as list<Node> := [n] + direct_parts(n).flat_map(nodes_in)
 ANNOTATIONS = "meta"
 # the annotation naming the class a class extends
 EXTENDS_ANNOTATION = "extends"
+# the annotation naming the sort of an enum's values
+INDUCTIVE_ANNOTATION = "inductive"
 # the annotations written before a node, each one: `@final @protocol` two
 annotations_of(n: Node) as list<Node> := match fact_of(n, ANNOTATIONS) ?? Empty { Empty => []; List(items, Bracket.None, Separator.Space) => items; said => [said] }
 # the annotation of one word written before a node, `@protocol` or `@extends(A)`, ø without it
@@ -96,7 +100,7 @@ with_fact(n: Node, name: text, value: Node) as Node := with_attribute(n, Key(sym
 # a list as data writes it, `[a, b]`: a fact's items, a call's arguments as data
 data_list(items: list<Node>) as Node := List(items, Bracket.Square, Separator.Comma)
 # whether a stage has learned the fact of that name; one that holds ø is learned too, `o: text? = ø` a default
-has_fact(n: Node, name: text) as bool := match n { Meta(node, List(data, bracket, separator)) => (META_FACTS to #data).any(at => fact_name(data#at) == name); _ => no }
+has_fact(n: Node, name: text) as bool := fact_of(n, name) != ø
 # a fact's name, "" of an attribute that is no fact
 fact_name(fact: Node) as text := match fact { Key(Symbol(name), Op.Colon, value) => name; _ => "" }
 # the fact of that name, ø when no stage has learned it; both read a Meta's facts in place, never a copy of them
@@ -241,10 +245,14 @@ BOXED_TEST = "boxed_test"
 ERROR_CASE = "Error"
 # `prim cast(x)`, x an any: its value as the Prim's type, checked, raising with the place when it holds another type
 CHECKED_CAST = "cast"
+# `prim as_is(x)`: x as another type of its layout, a type value as the text it holds (types/prelude.wap): x itself
+READ_AS_IS = "as_is"
 # `prim box(x)`, x a plain value (int, float, bool, char) going into an any or an optional: x in its box, the Prim's
 # type the one wanted; only typing writes it (notes/decisions.md wap-boxed-any-debt)
 BOXED_VALUE = "box"
 TESTED = "tested"
+# on a word called through a type, `nat.recursor(…)`: that type's name, so the call takes only definitions taking it
+OWNER = "owner"
 OPTIONAL_VALUE = "optional_value"
 # on code that never finishes, a return, break or continue, a block ending in one, a choice all of whose arms jump, a
 # call of a function that never returns: it has no type, and a join of arms skips it
@@ -273,6 +281,10 @@ rest_named(item: Node) as Node? := match item {
 # The facts of the typing stage, core/analyze/types.wap: a value's TYPE, `int`, as a program writes types; a function's
 # SIGNATURE on its name, `(int, text) -> int`; a call's DEFINED_AT then names the one function it means
 TYPE = "type"
+# on a type as a value, `int` in `identity(int, 3)`: the type it is (core/analyze/types.wap type_value)
+DENOTES = "denotes"
+# on a function's name called at a level, `identity[1](…)`: the level written (core/analyze/calls.wap level_written_call)
+LEVEL_WRITTEN = "level"
 SIGNATURE = "signature"
 # A list's places by name, for a list that only grows or is changed in place, as the typing state's definitions and a
 # program's records are: indexed up to `count`, extended for the items added since
@@ -310,7 +322,11 @@ record_named(records: Records, type: Term?) as Node? := {
 record_name(record: Record) as text := text(record_declared(record))
 record_declared(record: Record) as Node := match record { Record(name, fields, variants) => name }
 # the class a class extends, `@extends(A)` on its name (wap/sugar/records.wap), ø for one extending none
-class_extended(record: Node) as Node? := match annotation(record_declared(record), EXTENDS_ANNOTATION) { Key(name, op, List(items, bracket, separator)) => items#1; _ => ø }
+class_extended(record: Node) as Node? := annotated(record_declared(record), EXTENDS_ANNOTATION)
+# the sort an enum's header names, `@inductive(Prop)` on its name (wap/sugar/records.wap), ø for an enum naming none
+enum_sort(name: Node) as Node? := annotated(name, INDUCTIVE_ANNOTATION)
+# what an annotation of one word says, `A` of `@extends(A)`; ø without it
+annotated(n: Node, word: text) as Node? := match annotation(n, word) { Key(name, op, List(items, bracket, separator)) => items#1; _ => ø }
 # the type a subtype is (wiki/alias.md), `int` of `type Color < int` (core/rules/stages.wap): the type its record
 # extends, which is no record; ø for any other type
 subtype_base(type: Term, records: Records) as Term? := {
