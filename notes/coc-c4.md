@@ -94,6 +94,17 @@ result. That counts as "standing OK speed" only once measured, and the lines go 
 - **On a union:** as on an any. Its parts are known, so its choices are already the union's parts (taken over
   `union_parts`). It is unchanged.
 
+## Before the builder starts: the precision check
+
+Unjoined results are a precision loss programs can see: `keys(any_map)` was list<text> and becomes list<any>.
+- Before building, the builder greps the wiki and the tests for a collection read through an any whose element type is
+  then used as written: a generic word's result on an any-held list or map, used where a text, int or record is
+  wanted with no `as`.
+- Places to read first: wiki/map.md:51 (`map<any, any>`), wiki/trait.md:120, test/test_dynamic.wap, test/test_json.wap
+  (parsed JSON is any-held maps and lists), test/test_conversion*.wap and test/test_types.wap.
+- Each hit goes to wap-interviewer with its example (code, today's type, the unjoined type) before any code changes.
+  None found: build.
+
 ## Gap lines (trait.md "Dispatch")
 
 - test_trait_wanted:
