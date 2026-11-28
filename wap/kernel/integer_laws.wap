@@ -51,6 +51,10 @@ AT_MOST_BEYOND := "·at_most_beyond"
 AT_MOST_STEP := "·at_most_step"
 DIVIDE := "·divide"
 DIVISION_IDENTITY := "·division_identity"
+AT_MOST_BELOW := "·at_most_below"
+SUCCESSOR_ABOVE := "·successor_above"
+REMAINDER_SMALL := "·remainder_small"
+WRAPPED_TWICE := "·wrapped_twice"
 REMAINDER := "·remainder"
 PARTS_BACK := "·parts_back"
 MINUS_PARTS := "·minus_parts"
@@ -87,6 +91,7 @@ integer_laws_declared(e: Environment) := {
 	order_laws_declared(b)
 	truth_laws_declared(b)
 	step_laws_declared(b)
+	word_laws_declared(b)
 }
 
 # --- equations as values
@@ -346,17 +351,68 @@ division_declared(e: Environment) := {
 	words_declared(b)
 }
 # A word's sums, differences and products wrap: the exact result's floor remainder by 2^64 above the smallest word,
-# put back past it. The floor remainder of a negative, -(c + 1), is 2^64 - (c % 2^64 + 1)
+# put back past it
 words_declared(b: Building) := {
 	int = int_of(b)
-	count = count_of(b)
-	modulus = count_literal(WORD_MODULUS)
-	smallest = int_numeral(b.e, WHOLE_SMALLEST)
-	remainder = (c: Term) => called(b, REMAINDER, [c, modulus])
-	floored = (x: Term) => int_split(b, TYPE_LEVEL, t => count, (at, c) => if at == NATURAL_CASE then remainder(c) else called(b, SUBTRACT, [modulus, successor(b, remainder(c))]), x)
-	defined_over(b, WORD_WRAPPED, int, ["x"], int, x => sum(b, valued(b, NATURAL_CASE, floored(called(b, SUBTRACTED, [x#1, smallest]))), smallest))
+	defined_over(b, WORD_WRAPPED, int, ["x"], int, x => put_back(b, floored(b, called(b, SUBTRACTED, [x#1, word_smallest(b)]))))
 	for operation in WORD_MEANINGS.keys() { defined_over(b, WORD_MEANINGS[operation], int, ["a", "b"], int, x => called(b, WORD_WRAPPED, [called(b, INT_MEANINGS[operation], x)])) }
 }
+word_smallest(b: Building): Term := int_numeral(b.e, WHOLE_SMALLEST)
+# a count below 2^64 as the word it stands for, put back past the smallest word
+put_back(b: Building, c: Term): Term := sum(b, valued(b, NATURAL_CASE, c), word_smallest(b))
+# 2^64 - 1 as a count, and the modulus a word wraps by, its successor
+word_largest(b: Building): Term := count_literal(WORD_LARGEST)
+word_modulus(b: Building): Term := successor(b, word_largest(b))
+# an int's floor remainder by 2^64: the remainder of a count below it at either case, for a negative -(c + 1)
+# 2^64 - 1 - c % 2^64, so the remainder's bound holds of both
+floored(b: Building, x: Term): Term := int_split(b, TYPE_LEVEL, t => count_of(b), (at, c) => called(b, REMAINDER, [below_word(b, at, c), word_modulus(b)]), x)
+below_word(b: Building, at: int, c: Term): Term := if at == NATURAL_CASE then c else called(b, SUBTRACT, [word_largest(b), called(b, REMAINDER, [c, word_modulus(b)])])
+# A word wrapped again is itself: its floor remainder is below 2^64, and a count below the modulus is its own
+# remainder. With the two count laws that needs: one count past another is at most it, and no count's successor is
+word_laws_declared(b: Building) := {
+	count = count_of(b)
+	zero = count_zero(b)
+	truths = b.e.literals!
+	# at_most(m + 1, n) -> at_most(m, n)
+	paired_law(b, AT_MOST_BELOW, (i, j) => [truth_stated(b.e, at_most(b, successor(b, i), j))], (i, j) => truth_stated(b.e, at_most(b, i, j)), (j, proofs) => yes_proved(b), (i, proofs) => absurd(b, truth_stated(b.e, at_most(b, successor(b, i), zero)), proofs#1), (i, j, before, proofs) => apply(before, proofs#1))
+	# at_most(k + 1, k) == no, by k
+	k = entered(b.c, "k", count)
+	above = (j: Term) => truths_equal(b.e, at_most(b, successor(b, j), j), truths.no_case)
+	inducted(b, SUCCESSOR_ABOVE, [k], above, reflexive(b.e, TYPE_LEVEL, truths.truth, truths.no_case), (j, h) => h, k.variable)
+	# at_most(r, k) -> r % (k + 1) == r, by r: below k + 1 the remainder never returns, since one that returns at j's
+	# successor makes j k, and k + 1 is never at most k
+	r = entered(b.c, "r", count)
+	divisor = successor(b, k.variable)
+	below = (j: Term) => truth_stated(b.e, at_most(b, j, k.variable))
+	small = (j: Term) => pis(premise_locals(b, [below(j)]), counts_equal(b, called(b, REMAINDER, [j, divisor]), j))
+	inducted(b, REMAINDER_SMALL, [r, k], small, assuming(b, below(zero), h => reflexive(b.e, TYPE_LEVEL, count, zero)), (j, before) => assuming(b, below(successor(b, j)), h => {
+		rest = called(b, REMAINDER, [j, divisor])
+		kept = Identity(count, rest, j, apply(before, called(b, AT_MOST_BELOW, [j, k.variable, h])))
+		stated = (y: Term) => counts_equal(b, branched(b, count, y, zero, successor(b, rest)), successor(b, j))
+		returned = (known: Term) => {
+			reached = followed(b.c, [flipped(b.c, kept), Identity(count, rest, k.variable, called(b, COUNT_EQUALS_SOUND, [rest, k.variable, known]))])
+			never = Identity(truths.truth, at_most(b, divisor, k.variable), truths.no_case, called(b, SUCCESSOR_ABOVE, [k.variable]))
+			past = followed(b.c, [flipped(b.c, yes_known(b, at_most(b, successor(b, j), k.variable), h)), mapped(b.c, truths.truth, z => at_most(b, successor(b, z), k.variable), reached), never])
+			absurd(b, stated(truths.yes_case), flipped(b.c, past).proof)
+		}
+		truth_cases(b, returns_at(b, j, divisor), stated, known => successors(b, kept).proof, returned)
+	}), r.variable)
+	# wrapped(wrapped(x)) == wrapped(x): the floor remainder f put back past the smallest word and taken off again is
+	# f, and f % 2^64 is f
+	int = int_of(b)
+	x = entered(b.c, "x", int)
+	smallest = word_smallest(b)
+	shifted = called(b, SUBTRACTED, [x.variable, smallest])
+	f = floored(b, shifted)
+	made = valued(b, NATURAL_CASE, f)
+	back = regrouped(b, sum(b, sum(b, made, smallest), minus(b, smallest)), made)
+	bounded = int_split(b, Zero, t => truth_stated(b.e, at_most(b, floored(b, t), word_largest(b))), (at, c) => called(b, fixing_name(DIVIDE, 3), [below_word(b, at, c), word_largest(b)]), shifted)
+	kept = Identity(count, called(b, REMAINDER, [f, word_modulus(b)]), f, called(b, REMAINDER_SMALL, [f, word_largest(b), bounded]))
+	twice = followed(b.c, [mapped(b.c, int, z => put_back(b, floored(b, z)), back), mapped(b.c, int, z => put_back(b, z), kept)])
+	wrapped = (t: Term) => called(b, WORD_WRAPPED, [t])
+	theorem(b, WRAPPED_TWICE, [x], told(b, wrapped(wrapped(x.variable)), wrapped(x.variable)), complete(b, twice))
+}
+
 # a count as an int, natural or negated
 signed(b: Building, positive: bool, c: Term): Term := if positive then valued(b, NATURAL_CASE, c) else minus(b, valued(b, NATURAL_CASE, c))
 # a value of a type by a truth: at_yes at yes, at_no at no
