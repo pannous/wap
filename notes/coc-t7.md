@@ -47,7 +47,7 @@ proofs load. Read on unify-typers 2b0e87be.
 
 None of its own: T7 moves files, and every test stays as it was. The row's lines are:
 - test_native's seedless hello (a gap line, (2));
-- the second opinion's tests (wap/test_theory_second.wap) run from the new folder;
+- the second opinion's tests (parked/theory-second/test_theory_second.wap) run from the new folder;
 - `wap trust`'s line, once cli.md shows it.
 
 ## Estimate

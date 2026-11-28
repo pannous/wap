@@ -243,7 +243,7 @@ message to wap-lead (the example, what lib/ could not do), and the worker goes o
 - symbol.md (67 lines): wap-wiki; asked (:symbols, = declarations)
 - symbolism.md (275 lines): moved to notes/symbolism.md
 - syntax.md (56 lines): wap-wiki, tests test_syntax_wanted.wap (colon if in test_bad_wanted); asked (bare class fields)
-- task.md (31 lines): ✓ 7b3f116 (lib/tasks.wap, test/test_tasks.wap 8 ✓; go of a call and overlapping tasks not yet, red in test/wap/test_tasks.sh)
+- task.md (31 lines): ✓ 7b3f116 (lib/tasks.wap, test/test_tasks.wap 8 ✓; go of a call and overlapping tasks not yet, red in test/wap/test_tasks.wap)
 - text.md (1 lines): wap-wiki, no forms
 - thread.md (49 lines): wap-wiki, tests test_thread_wanted.wap
 - time.md (51 lines): wap-wiki, tests test_time_wanted.wap; asked (date minus date)
