@@ -258,7 +258,7 @@ typed_among(program: Block, library: list, rules: KindRules, library_scopes: map
 	conditions_entered(conditions, entered, s)
 	obligations_entered(entered, s)
 	obligations.clear()
-	obligations.extend(s.obligations)
+	obligations.extend(s.obligations.filter(obligation => obligation.verdict == ø))
 	effects_written(s)
 	written = defines + s.lambdas.values() + s.dispatchers
 	# the records stand first, shaped: the program's own leave the statements
@@ -432,7 +432,35 @@ function_added(definition: Define, s: TypingState) as Signature := {
 # every unknown settled: instances one settling made alike are one (letters.wap distinct_instances)
 instances_placed(n: Node, s: TypingState) as Node := match n {
 	Block(statements) => refitted(Block(statements.flat_map(statement => if statement is Define then functions_typed_from([statement], s).map(define => instances_placed(define, s)) else [instances_placed(statement, s)])), n)
-	_ => refitted(with_parts(n, part => instances_placed(part, s)), n)
+	_ => decided_code(n, s) ?? refitted(with_parts(n, part => instances_placed(part, s)), n)
+}
+# Code whose obligations compiling decided, placed without the checks they need no more (wiki/type.md "Proved or
+# checked"): a narrowing decided yes as its value; a dispatcher's call as its choices tried in turn, one decided no
+# skipped, the first decided yes called directly, the dispatcher kept at the first undecided; ø, the code as it is
+decided_code(n: Node, s: TypingState) as Node? := match n {
+	Call(called, arguments) => {
+		records = fact_items(n, OBLIGATIONS).map(at => s.obligations#(match at { Number(value) => value; _ => 0 }))
+		if records is empty { return ø }
+		if records.all(record => record.choice == 0) { return if records.all(record => record.verdict == yes) then instances_placed(arguments#1, s) else ø }
+		dispatcher = typed_named(place_key(fact_of(called, DEFINED_AT) ?? return ø), s) ?? return ø
+		code = match dispatcher.define { Define(name, parameters, body) => chosen_code(n, arguments, body, 1, records); _ => ø }
+		if code == ø then ø else instances_placed(code!, s)
+	}
+	_ => ø
+}
+# the code a dispatcher's call runs, from its choice at this place on: a call of that choice's definition where its
+# obligations are decided yes, the next choice's where one is decided no, ø where any waits on the run; past the
+# choices, the dispatcher's refusal refused at the call, while compiling
+chosen_code(n: Node, arguments: list, choices: Node, at: int, records: list<Obligation>) as Node? := match choices {
+	If(test, code, rest) => {
+		mine = records.filter(record => record.choice == at)
+		if mine is empty or mine.any(record => record.verdict == ø) { return ø }
+		if mine.any(record => record.verdict == no) { return chosen_code(n, arguments, rest, at + 1, records) }
+		# the call keeps the dispatcher's call's type, never its obligations, which chose it
+		match code { Call(chosen, reads) => with_fact(refitted(Call(chosen, arguments), n), OBLIGATIONS, data_list([])); _ => ø }
+	}
+	Call(raise, [Text(message)]) => if text(raise) == RAISE_WORD then refused(n, message) else ø
+	_ => ø
 }
 # the Defines each of these definitions became, each definition's in the order typed
 functions_typed_from(definitions: list, s: TypingState) as list := definitions.flat_map(definition => instances_of(function_key(definition), s).map(typed => typed.define))

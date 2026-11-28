@@ -29,10 +29,14 @@ UNFAILED_WORD = "unfailed"
 # (core/analyze/terms.wap obligations_entered); ø where the argument or the type has no kernel term. A proof a call
 # leaves to the provers, its `by` at the place of a parameter's statement, is one too: the call and the place, no
 # argument or type, its statement the kernel's goal there (core/analyze/calls.wap
-# proofs_held). `check` is the code that checks it when the program runs, ø for one only a proof decides
-class Obligation { line: text; argument: Node?; type: Term?; within: text?; function_type: Term? = ø; value: Term? = ø; call: Node? = ø; place: int = 0; statement: Term? = ø; check: Node? = ø }
+# proofs_held). `check` is the code that checks it when the program runs, ø for one only a proof decides. `verdict` is
+# its condition computed while compiling, yes or no, ø where it does not compute (terms.wap obligation_entered); `choice`
+# the place among a dispatcher's choices of the definition it tests for (types.wap decided_code), CHOICE_UNDECIDED for a
+# dispatcher's the placing does not decide, 0 for a narrowing's, which alone a no refuses
+class Obligation { line: text; argument: Node?; type: Term?; within: text?; function_type: Term? = ø; value: Term? = ø; call: Node? = ø; place: int = 0; statement: Term? = ø; check: Node? = ø; choice: int = 0; verdict: bool? = ø }
 # (the program's: those of the pass of typing that completed it, core/analyze/types.wap typed_among)
 obligations: list<Obligation> = []
+CHOICE_UNDECIDED = -1
 OBLIGATION_LEFT = "is checked when the program runs"
 PROOF_LEFT = "needs a proof, which the run cannot check"
 
@@ -42,8 +46,15 @@ dispatching(called: Node, candidates: list<Signature>, arguments: list<Node>, ty
 	counted = candidates.filter(definition => takes_count(definition, #types, s))
 	if not counted.any(definition => tested_places(definition, types, s) != [] or generic_place(definition, types, s) != ø) { return ø }
 	for at in 1 to #types { untaken_part(called, counted, types#at, at, s) }
-	# a value of a parent given where a definition wants its narrowing is tested when the program runs
-	for definition in counted { for at in tested_places(definition, types, s) { if conversion(types#at, definition.parameters#at!, s) == Conversion.Narrowed { obliged(called, arguments#at, definition.parameters#at!, s) } } }
+	# a value of a parent given where a definition wants its narrowing is tested when the program runs; a choice whose
+	# every test is a subtype's condition is one the placing may decide, by its place among the choices
+	choices = tested_choices(ranked(counted, types, s), arguments, types, s)
+	for definition in counted {
+		places = tested_places(definition, types, s)
+		narrowed = places.filter(at => conversion(types#at, definition.parameters#at!, s) == Conversion.Narrowed)
+		choice = if #narrowed == #places and narrowed.all(at => subset_condition(definition.parameters#at!) != ø) and definition in choices then choices.index_of(definition) else CHOICE_UNDECIDED
+		for at in narrowed { obliged(called, arguments#at, definition.parameters#at!, s, choice: choice) }
+	}
 	dispatching_named(dispatcher_name(called, counted, types, s), called, counted, types, s)
 }
 # a union given where no definition takes one of its parts is refused when compiling, naming the part (wiki/type.md
@@ -97,9 +108,8 @@ dispatch_body(dispatch: Dispatch, s: TypingState) as Node := {
 	dispatch.covered = #boxed_known(s)
 	reads = dispatch.reads
 	types = dispatch.types
-	taking = taking_of(dispatch, s)
-	untested = taking.filter(definition => tested_places(definition, types, s) == [])
-	tested = taking.filter(definition => tested_places(definition, types, s) != [])
+	untested = taking_of(dispatch.order, reads, types, s).filter(definition => tested_places(definition, types, s) == [])
+	tested = tested_choices(dispatch.order, reads, types, s)
 	last = if untested is empty then raised("${dispatch.called}: ${refusal(dispatch, tested, s)}", dispatch.name, s) else named_call(text(dispatch.called), untested, reads, dispatch.name, s)
 	tried = tested.map(definition => Choice(tests_of(definition, reads, types, s, dispatch.name), named_call(definition.name, [definition], reads, dispatch.name, s)))
 	chained(tried + dispatch.order.flat_map(definition => generic_choices(definition, dispatch, s)), last, dispatch.name)
@@ -111,7 +121,9 @@ refusal(dispatch: Dispatch, tested: list<Signature>, s: TypingState) as text := 
 	if #places == 1 then other_shape(tested#1.parameters#(places#1)!, tested#1.definer, s) else "no definition takes these values' types"
 }
 # the definitions that take the values once their tests pass
-taking_of(dispatch: Dispatch, s: TypingState) as list<Signature> := dispatch.order.filter(definition => takes_fitting(definition, tested_reads(definition, dispatch.reads, dispatch.types, s), s))
+taking_of(order: list<Signature>, reads: list, types: list, s: TypingState) as list<Signature> := order.filter(definition => takes_fitting(definition, tested_reads(definition, reads, types, s), s))
+# those a dispatcher tries by their tests, in turn, before the one that takes the values untested
+tested_choices(order: list<Signature>, reads: list, types: list, s: TypingState) as list<Signature> := taking_of(order, reads, types, s).filter(definition => tested_places(definition, types, s) != [])
 # the place where a definition takes a list or a map of its own letters, `xs: list<T>`, or any list or map, `xs: list`,
 # that an any or a union is given at; ø where it takes none
 generic_place(definition: Signature, types: list, s: TypingState) as int? := (1 to #types).find(at => {
@@ -132,7 +144,7 @@ generic_choices(definition: Signature, dispatch: Dispatch, s: TypingState) as li
 # what each choice gives: a definition's written result, a generic one's for each boxed type it takes, `list<text>`
 # of keys(m: map<K, V>) for a map<text, int>; ø where its letters stay open
 dispatch_results(dispatch: Dispatch, s: TypingState) as list<Term?> := {
-	plain = taking_of(dispatch, s).filter(definition => generic_place(definition, dispatch.types, s) == ø)
+	plain = taking_of(dispatch.order, dispatch.reads, dispatch.types, s).filter(definition => generic_place(definition, dispatch.types, s) == ø)
 	plain.map(definition => if has_letters(definition.result) then ø else definition.result) + dispatch.order.flat_map(definition => generic_results(definition, dispatch, s))
 }
 generic_results(definition: Signature, dispatch: Dispatch, s: TypingState) as list<Term?> := {
@@ -281,7 +293,7 @@ narrowed_call(n: Node, wanted: Term, at: Node, s: TypingState) as Node := {
 	name = name_once("${NARROWING_WORD}(${type_text(wanted, yes)})", n, s)
 	# one for each shape, wherever it is wanted
 	written_once(name, [narrowed_type(wanted) ?? NODE_TERM, TEXT_TERM], reads => If(narrowing_test(reads#1, wanted, name, s), reads#1, raising(reads#2, name, s)), wanted, s)
-	check = word_called(n, text(name), [n, message_given(other_shape(wanted, at, s), at)], wanted, s)
+	check = with_fact(word_called(n, text(name), [n, message_given(other_shape(wanted, at, s), at)], wanted, s), OBLIGATIONS, data_list([Number(#s.obligations + 1)]))
 	obliged(at, n, wanted, s, check)
 	check
 }
@@ -298,14 +310,12 @@ unfailed_call(n: Node, given: Term, wanted: Term, s: TypingState) as Node := {
 }
 error_part(type: Term) as Term? := union_parts(type).find(is_error)
 is_error(type: Term) as bool := narrowed_type(type) == NODE_TERM and type_text(type) == ERROR_CASE
-# a narrowing left to the run at a place, its warning in the obligations once: a subtype's condition as written, a shape
-# by its name
-obliged(at: Node, argument: Node, type: Term, s: TypingState, check: Node? = ø) := {
+# a narrowing at a place, each one its own obligation with its own verdict, its warning a subtype's condition as written,
+# a shape by its name (two at one place share the line, which `wap check` lists once)
+obliged(at: Node, argument: Node, type: Term, s: TypingState, check: Node? = ø, choice: int = 0) := {
 	condition = subset_condition(type)
 	line = warning_of(at, "${if condition == ø then type_text(type) else condition_shown(condition!)} ${OBLIGATION_LEFT}")
-	obligation_kept(Obligation(line, argument, type, s.within, check: check), s)
+	s.obligations.add(Obligation(line, argument, type, s.within, check: check, choice: choice))
 }
-# an obligation kept once for its warning line, wherever typing meets its code again
-obligation_kept(obligation: Obligation, s: TypingState) := if not s.obligations.any(kept => kept.line == obligation.line) { s.obligations.add(obligation) }
 # a run's error message as an argument of the code that raises it
 message_given(message: text, at: Node) as Node := with_type(placed_like(Text(message), at), TEXT_TYPE)
