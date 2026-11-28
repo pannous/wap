@@ -248,7 +248,7 @@ each of `N`: `f(m, Z) == m` is `(m: N) -> …`, and `f(Z, Z) == yes` has no bind
 | `shortcut(equal, f, …)` | `f: N -> N -> bool` | `f(Z, Z) == yes`; `f(S(m), Z) == no`; `f(Z, S(n)) == no`; `f(S(m), S(n)) == f(m, n)` |
 | `shortcut(at_most, f, …)` | `f: N -> N -> bool` | `f(Z, n) == yes`; `f(S(m), Z) == no`; `f(S(m), S(n)) == f(m, n)` |
 | `shortcut(divide, d, r, …)` | `d`, `r: N -> N -> N`, after equal `e` | `d(Z, n) == Z`; `d(S(m), n) == if e(S(r(m, n)), n) then S(d(m, n)) else d(m, n)`; `r(Z, n) == Z`; `r(S(m), n) == if e(S(r(m, n)), n) then Z else S(r(m, n))` (the `if` the truth values' recursor) |
-| the kernel's own int difference `d` (no statement binds it) | `d: N -> N -> int` | `d(Z, Z) == zero`; `d(S(m), Z) == positive(m)`; `d(Z, S(n)) == negative(n)`; `d(S(m), S(n)) == d(m, n)` |
+| the kernel's own int difference `d` (no statement binds it) | `d: N -> N -> int` | `d(Z, Z) == natural(Z)`; `d(S(m), Z) == natural(S(m))`; `d(Z, S(n)) == negative(n)`; `d(S(m), S(n)) == d(m, n)` |
 
 A theorem licenses its shortcut when it is a declared theorem whose type is the built statement (`same`, so binder
 names aside) and neither it nor the function rests on an axiom (`axioms_of` is empty for both). A shortcut fires
