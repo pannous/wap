@@ -301,11 +301,15 @@ items_named(index: NameIndex, items: list<T>, name: text, name_of: (T) -> text) 
 class Records { items: list<Node> = [], names: NameIndex = NameIndex(), extending: list<text> = [], reads: list<Read> = [] }
 added_records(records: Records, added: list<Node>) as Records := {
 	kept = added.filter(statement => statement is Record)
-	Records(records.items + kept, records.names, records.extending + kept.filter(record => class_extended(record) != ø).map(record_name), records.reads + added.filter(statement => annotation(statement, READ_ANNOTATION) != ø).map(read_declared))
+	grown = Records(records.items + kept, records.names, records.extending + kept.filter(record => class_extended(record) != ø).map(record_name), records.reads + added.filter(statement => annotation(statement, READ_ANNOTATION) != ø).map(read_declared))
+	# each read marked again, as a record it reads from may come after it
+	grown.reads = grown.reads.map(read => Read(read.given, read.read, read.word, read.key, declared_below(read, grown)))
+	grown
 }
 # A type's values read as another's, `@read text(c: char): text` a char as a text: the type given, the type read, and
-# the word declared @read that reads it, by its name and key, so the read calls that word and no other of its name
-class Read { given: Term; read: Term; word: text; key: text }
+# the word declared @read that reads it, by its name and key, so the read calls that word and no other of its name;
+# whether an any's test for the type read passes the given one (declared_below)
+class Read { given: Term; read: Term; word: text; key: text; passes: bool = no }
 # a word declared @read, its types as its signature writes them (bindings.wap signature_from)
 read_declared(statement: Node) as Read := match statement {
 	Define(name, parameters, body) => {
@@ -332,13 +336,20 @@ record_name(record: Record) as text := text(record_declared(record))
 record_declared(record: Record) as Node := match record { Record(name, fields, variants) => name }
 # the class a class extends, `@extends(A)` on its name (wap/sugar/records.wap), ø for one extending none
 class_extended(record: Node) as Node? := match annotation(record_declared(record), EXTENDS_ANNOTATION) { Key(name, op, List(items, bracket, separator)) => items#1; _ => ø }
-# the type a subtype is (wiki/alias.md), `int` of `type Color < int` (core/rules/stages.wap): the type its record
-# extends, which is no record; ø for any other type
-subtype_base(type: Term, records: Records) as Term? := {
+# the type a record is declared below where that type is no record: `text` of `type char < text`, `list<int>` of
+# `class Range < list<int>`; ø for any other type
+declared_base(type: Term, records: Records) as Term? := {
 	if not records.extending.contains(word_of(type) ?? return ø) { return ø }
 	base = type_term(class_extended(record_named(records, type) ?? return ø) ?? return ø)
 	if record_named(records, base) == ø then base else ø
 }
+# the type a subtype is (wiki/alias.md), `int` of `type Color < int` (core/rules/stages.wap): a record of no fields
+# below a type of no record, whose values are the base's; a class of fields below one, `class Range < list<int>`, keeps
+# its own struct and is seen as its base through its read (declared_below)
+subtype_base(type: Term, records: Records) as Term? := if fields_of(record_named(records, type) ?? return ø) is empty then declared_base(type, records) else ø
+# whether a read passes an any's test for the type it reads as: its given type is declared below it, `char < text`,
+# `Range < list<int>`; a read of no such declaration, `float(n: int)`, converts where it is written and is no test's
+declared_below(read: Read, records: Records) as bool := same(declared_base(read.given, records) ?? return no, read.read)
 # a record as a type, its name bound to it, so it means this record wherever another of its name is declared too
 record_type(record: Record) as Node := with_fact(symbol(record_name(record)), DECLARED_BY, record_declared(record))
 # its term (core/type_notation.wap)
