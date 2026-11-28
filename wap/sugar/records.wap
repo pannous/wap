@@ -23,17 +23,14 @@ rule class $name < $base { $members... } => class $name extends $base { $members
 rule class $name extends $base: class { $members... } => inherited $name $base [$members...]
 # the class's name says what it extends, `@extends(A)`, so its values are values of A (wiki/class.md)
 rule inherited $name Record($base, [$fields...], []) [$members...] => class @extends($base) $name { $fields... $members... }
-# a protocol base, its record annotated so: the class claims it, the protocol's function of it, `shape(s)`, the class
-# itself, which the typing refuses where the class lacks a word of the protocol
-rule inherited $name @protocol Record($base, $fields, []) [$members...] => class $name { $members... }; Symbol("$base")(self: $name): Symbol("held_$base") := Symbol("held_$base")(self, Symbol("${base}_words")((claimed_word $name $fields)...))
-# a claim boxes its class as the held value does, each word of the protocol a lambda from the field's function type
-rule claimed_word $name ($word: (($base, $types...) -> $type)) => (word_lambda $word $name [$types...])
-rule claimed_word $name $field => ()
+# a protocol base, its record annotated so: the class claims it, the protocol's function of it, `shape(s)`, which the
+# typing refuses where the class lacks a word of the protocol, boxing the class as any other value of it is boxed
+rule inherited $name @protocol Record($base, $fields, []) [$members...] => class $name { $members... }; Symbol("$base")(self: $name): Symbol("held_$base") := Symbol("held_$base")(self)
 rule inherited $name Record($base, $fields, $cases) [$members...] => refuse "a class extends a class, never an enum: an enum's cases are its values"
 # a class with a required word is a protocol (wiki/trait.md), its record annotated so: it has no instances of its own,
 # so no constructor, text or show, and no fields, only words, some with a default body; any other class has its fields
 # and all three
-rule instances $name [$before..., ($word($parameters...): $type), $after...] => @protocol Record($name, [(required_field $name $before)..., (required_field $name ($word($parameters...): $type)), (required_field $name $after)...], []); (abstract $before)...; (abstract $after)...; held $name [$before..., ($word($parameters...): $type), $after...]
+rule instances $name [$before..., ($word($parameters...): $type), $after...] => trait_held $name Symbol("${name}_words") Symbol("held_$name") [$before..., ($word($parameters...): $type), $after...]
 rule instances $name [$members...] => Record($name, [(member_as "field" $members)...], []); constructed $name [$members...]; text(self: $name): text := "$name{" + join([(member_as "shown" $members)...] as list<text>, ", ") + "}"; show(self: $name): text := text(self); fields(self: $name): list<text> := [(member_as "named" $members)...]
 # a class with an init is made by it (wiki/class.md "init is the constructor"): its fields' defaults, then init run on
 # them with the call's arguments, `P(3)` of `init(v: int) := { x = v * 2 }`; any other class by its fields
@@ -46,31 +43,34 @@ rule member_as "method" $name ($method($parameters...) as $type := $body) => mem
 rule member_as "method" $name ($method($parameters...): $type := $body) => ($method(self: $name, $parameters...): $type := $body)
 rule member_as "method" $name ($method($parameters...) := $body) => ($method(self: $name, $parameters...) := $body)
 rule member_as "method" $name $member => ()
-# a required word is the protocol's field of the function type taking the protocol first, the conforming value's own
-rule required_field $name ($word($parameters...): $type) => $word: (($name, $parameters...) -> $type)
-rule required_field $name $member => ()
-# GUESS (C2's A, notes/coc-c2.md): a trait's value held with its words. The words class has a field per required word with
-# the trait's place made any, the held class a value and its words, the boxing `shape(x: T)` builds both (typed anew for
-# each T, so each lambda reaches T's own word or the trait's default), and a forwarder per word reads the field, so a word
-# called on a held value picks it as the most specific. The names `${name}_words` and `held_$name` and the lambdas'
-# `$parameters...` standing as both names and types are guesses
-rule held $name [$members...] => Record(Symbol("${name}_words"), [(words_field $members)...], []); constructed Symbol("${name}_words") [(words_field $members)...]; class Symbol("held_$name") { value: any; words: Symbol("${name}_words") }; Symbol("$name")(value: T): Symbol("held_$name") := Symbol("held_$name")(value, Symbol("${name}_words")((boxed_word $members)...)); (forwarded $name $members)...
-# a parameter's type and its name, an unwritten type being any: the words class takes the types, a call the names
-rule parameter_type ($n: $t) => $t
-rule parameter_type $n => any
-rule parameter_name ($n: $t) => $n
-rule parameter_name $n => $n
-rule words_field ($word($parameters...): $type) => $word: ((any, (parameter_type $parameters)...) -> $type)
-rule words_field $member => ()
-# the one lambda builder of a trait's words: a word's lambda over any and its written parameters, each by its own name (a bare
-# one is an any), given to the word on the held value `v as $held`; a member's parameters and a claim's function type both come here
-# GUESS (unbuilt): the parameters' names and types read in one sequence, `((parameter_name $parameters): (parameter_type $parameters))...`
-rule word_lambda $word $held [$parameters...] => ((v: any, ((parameter_name $parameters): (parameter_type $parameters))...) => $word(v as $held, (parameter_name $parameters)...))
-rule boxed_word ($word($parameters...): $type) => (word_lambda $word T [$parameters...])
-rule boxed_word $member => ()
-# the field is called as a value, so the call is the field's and no forwarder's
-rule forwarded $name ($word($parameters...): $type) => ($word(h: Symbol("held_$name"), $parameters...): $type := { word = h.words.$word; word(h.value, (parameter_name $parameters)...) })
-rule forwarded $name $member => ()
+# GUESS (C2's A, notes/coc-c2.md): a trait and its value held with its words. The protocol's record is a field per
+# required word, a function type taking the protocol first, the conforming value's own; it names its held class,
+# `@held(held_shape)`, which a trait in a value's place is (`list<shape>`, core/type_notation.wap). The words class
+# has a field per word, the trait's place made any; the held class a value and its words, naming the trait it holds,
+# `@holds(shape)`; its one-value maker `held_shape(x: T)` boxes any value (typed anew for each T, so each lambda
+# reaches T's own word or the trait's default), and a value of a type doing the trait is boxed by it where the held
+# class is wanted (core/analyze/fits.wap); a forwarder per word reads the field, so a word called on a held value
+# picks it as the most specific. A typed default body is a word of the held value too, so a type's own word replaces
+# it there as it does where the type is known; an untyped one reaches a held value through the forwarders
+rule trait_held $name $words $held [$members...] => @protocol Record(@held($held) $name, [(trait_word "required" $name $members)...], []); (abstract $members)...; Record($words, [(trait_word "words" $name $members)...], []); class @holds($name) $held { value: any; words: $words }; $held(value: T): $held := $held(value, $words{(trait_word "boxed" $name $members)...}); (trait_word "forwarded" $name $members)...
+# what a trait's word writes in each part: the protocol's field, a function type taking the protocol first; the words
+# class's, the same taking any and the parameters' types; the boxing's, its field of the words made as data, a lambda
+# over any and the word's parameters, each by its own name (a bare one an any), giving the word of the value as T; the
+# forwarder, calling the field as a value, so the call is the field's and no forwarder's. A typed default body is no
+# required word, and in every other part its word
+# GUESS (unbuilt): the parameters' names and types read in one sequence, `((named_part $parameters): (typed_or_any $parameters))...`
+rule trait_word "required" $name ($word($parameters...): $type) => $word: (($name, $parameters...) -> $type)
+rule trait_word "words" $name ($word($parameters...): $type) => $word: ((any, (typed_or_any $parameters)...) -> $type)
+rule trait_word "boxed" $name ($word($parameters...): $type) => $word: ((v: any, ((named_part $parameters): (typed_or_any $parameters))...) => $word(v as T, (named_part $parameters)...))
+rule trait_word "forwarded" $name ($word($parameters...): $type) => ($word(h: Symbol("held_$name"), $parameters...): $type := { word = h.words.$word; word(h.value, (named_part $parameters)...) })
+rule trait_word "required" $name ($word($parameters...): $type := $body) => ()
+rule trait_word $part $name ($word($parameters...): $type := $body) => trait_word $part $name ($word($parameters...): $type)
+rule trait_word $part $name $member => ()
+# a parameter's name and its type, an unwritten type being any
+rule named_part ($n: $t) => $n
+rule named_part $n => $n
+rule typed_or_any ($n: $t) => $t
+rule typed_or_any $n => any
 # a protocol's member is a required word or a word's default body
 rule abstract ($word($parameters...): $type) => ()
 rule abstract ($head := $body) => ()
