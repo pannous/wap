@@ -1110,7 +1110,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | kernel-length | kernel-length.md | | −55, and about −37 dead | | |
 | T6a1 proofs | coc-t6a12.md | +10 | | | verify +35, extension +3 |
 | T6a2 hypotheses (what is left) | coc-plan.md (below) | 0 | 0 | 0 | extension +2, prove +4, verify −35 |
-| T6a3 indexed families | coc-t6a.md | +100 | | | |
+| T6a3 indexed families | coc-plan.md (below) | +70 | 0 | 0 | |
 | generic records with T6a3's parameters | coc-generic-records.md | its plan's | | | |
 | T6a4 cases and induction | coc-t6a4.md | +92 | 0 (apart's builder moved, net 0) | | |
 | T6a1b `by` as a term | coc-plan.md (below) | +12 | | | verify −30 |
@@ -1383,9 +1383,10 @@ The plan, one mechanism twice: a hypothesis is a parameter of statement type, an
    Given, Split.given, LAW_GIVEN, is_hypothesis, premises, TypedLaw.given and lemma_proved's given all go;
    proof_apart stays. verify about −35.
 2. **`implies` in a law's statement is a hypothesis.** One rule in verify's front (extensions/law_statements.wap):
-   `law $name($parameters...): $a implies $b` is `law $name($parameters..., ·implied: $a): $b`, its binder a name no
-   program writes (like `_holds`). It fires after the short form has made the free names parameters, and before
-   lazy-implies' rule for `implies` reads the statement as a bool. The run keeps `implies` as the bool it is. Then
+   `law $name($parameters...): If($a, $b, True())` is `law $name($parameters..., ·implied: $a): $b`, its binder a name
+   no program writes (like `_holds`). `a implies b` reaches it as `If(a, b, yes)` (sugar/conditions.wap's implies
+   rule), so every spelling of that meaning, `if a then b else yes` among them, is a hypothesis too. It fires after the
+   short form has made the free names parameters. The run keeps the If as the bool it is. Then
    `law used(a, h: a < 3): a < 4` and `law smaller(a): a < 3 implies a < 4` state one Π, and the provers meet either
    as a fact. extension +2, kernel 0: no implies_decided over ·bool_cases, no library word in the kernel.
    `spec: wiki/law.md` on its commit.
@@ -1410,7 +1411,48 @@ hypothesis):
 Red lines it turns green: test_theory_connectives:18 (implies applied to a goal it implies); with T5c4's fact and the
 induction along fact's recursion, test_theory_connectives_wanted:9 (law.md's pair, V3's).
 
-Builds on origin/typed-by-result (the batch, T6a1b); step 2's order on lazy-implies, which is not on main yet.
+Builds on origin/typed-by-result (the batch, T6a1b).
+
+#### T6a3: indexed families on the batch
+
+The wiki: proposition.md:74-86 (`enum Even: nat -> Prop { zero: Even(0), step(e: Even(n)): Even(n + 2) }`, `n` a
+letter the compiler finds, `Even(4)` by `Even.step(Even.step(Even.zero))`, `Even(3)` without proof, Even with Odd),
+enum.md:87-98 (each case says its own result type; `Equal(a: T): T -> Prop { refl: Equal(a, a) }`).
+
+What the batch (typed-by-result) holds: an enum's header with parameters and a plain sort (`enum And(a: Prop, b: Prop):
+Prop`), mutual enums as one block (inductives.wap groups_of), and a kernel whose blocks take indices. An enum whose
+sort has indices stays an assumption (inductives.wap block_entered), counted open.
+
+The plan:
+1. **The index sort.** `enum Even: nat -> Prop` declares Even a family: its word a function of the index types into
+   the sort, its block's sort `Π indices, Prop`. origin/t6a3-indices 94954383 drafts this (+18); it is copied onto the
+   batch, not merged (it sits far behind).
+2. **A case's own result.** `zero: Even(0)`, `step(e: Even(n)): Even(n + 2)`: the case's type is `Π parameters,
+   Π found letters, Π fields, the result written`. A letter the case uses that nothing binds (`n`) is a field in front,
+   implicit, found as T6a7's letters_bound finds a letter; its type is read from where it stands (Even's index: nat).
+   A result that is not the family at the enum's parameters is refused, naming the case.
+3. **A constructor call typed from its fields.** The found letters are solved from the arguments' types, first order:
+   `Even.step(Even.zero)` takes n from `Even.zero: Even(0)` and gives `Even(0 + 2)`. The expected type is then checked
+   by the kernel's conversion, `Even(0 + 2 + 2)` against `Even(4)`. Unifying the result first would need `?n + 2 = 4`
+   solved, which no first-order unify does, `+` being int's function and not a constructor.
+4. **Equal.** enum.md:95's Equal is bound to the core's block after equality_checked confirms its shape, as bool's word
+   is filled (type_notation.wap truths_declared); the core keeps declaring Equal, which its own laws need first. Its
+   line enters wap/types only after a seed refresh carries indexed families (the seed rule); until then only test lines
+   write it.
+
+The kernel reads nat as its parent, so Even is over int: `Even(-2)` is a proposition without proof. An index `n + 2`
+of a nat place is an int, held there by the subtype's narrowing at the index or left as an obligation in the type.
+Matching on a proof of a family (`match e { zero => …; step(d) => … }`) needs the dependent motive: T6a4's.
+
+Estimates: core about +70 (the index sort +18, case results and found letters +30, typing from the fields with the
+conversion check +20, Equal's binding +4), kernel 0, sugar 0, types 0 until the seed refresh.
+
+Tests that pin it, all red now: test_proposition_wanted "an enum of proofs proves its cases" and four_is_even;
+wap/test_proposition_wanted "Even(3) has no proof" and "two propositions defined together"; wap/test_theory "enums
+that name each other are one block" (proposition.md's Even and Odd). No gap: enum.md:95 shows Equal's declaration
+only, which every `refl` line already exercises once the types module states it.
+
+Builds on typed-by-result once T6a1b is in it; one builder, careful path (inductives.wap and typing).
 
 #### Each step's wiki lines and the tests that pin them
 
