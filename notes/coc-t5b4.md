@@ -57,14 +57,14 @@ already covers. modules.wap's chain gains a third reading after `module_word` an
 This is wiki/enum.md:102's `nat.recursor` and the same mechanism for any type's function. It needs no names: the
 rule holds for every type word and every word.
 
-**An enum's recursor.** For each defined enum E, analyze adds the word `recursor`, owned by E:
-- Its signature is the non-dependent one: a minor per case (the case's fields, then a T for each recursive field, to
-  T), then the major, an E, to T. T is a letter, found as any generic's from the wanted type and the minors.
-- Its kernel value is the block's recursor constant at the constant motive, through `recursor_applied` (T5b4's
-  helper), so `instance_entered` takes it as it stands, never through a body.
-- It runs (the emitted code) by a definition analyze writes from the enum's cases: `recursor(m…, value) := match
-  value { case(fields) => m_case(fields, recursor(m…, field) for each recursive field) }`. This is wap code, and it
-  runs as any match does.
+**An enum's recursor.** A sugar rule beside the enum rule (sugar/records.wap `recursor_of`), plain wap, no analyze:
+each enum E gets the overload `recursor(on_case…, value: E): T`, a minor per case (a bare case's is a T, a case with
+fields takes them, then a T for each field whose type is E, to T), written as a match on the value whose arm for a case
+calls the minor on the fields and on `recursor(on_case…, field)` for each such field. The lookup above picks it by its
+parameter of type E, so no `OWNER` fact is needed for it, and a program's own `enum nat` has its own beside types'.
+The typed body is a structural recursion, which T5c3's course reading takes as the kernel definition: the course
+term, definitionally the recursor. About +2 core instead of the +47 of analyze; the plan's route needed plumbing for a
+function the program never wrote.
 
 **nat's recursor in plain wap** (types/integers.wap, types +3). Written as a guard, so it runs now and the kernel takes
 it with T5c4's guard reading (coc-t5c4.md (3)), without nat's case patterns:
