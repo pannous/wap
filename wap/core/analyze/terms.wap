@@ -83,31 +83,33 @@ kernel_signature(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 	if typed.jumps { return ø }
 	# a parameter keeps its subtype, the parent by definition, so a law reads its binders' conditions
 	# (the result names the parameters, so only the whole signature, closed over them, is open or not)
-	signature = pis(parameters_locals(typed, s), kernel_result(typed, by_key, s) ?? return ø)
+	signature = pis(parameters_locals(typed, s, by_key), kernel_result(typed, by_key, s) ?? return ø)
 	if has_letters(signature) or has_unknowns(signature) then ø else signature
 }
 # a function's parameters as Locals, entered once on one checker: every term made of the function names the same Free variables
 # (a hypothesis, a parameter written as a statement, is entered as its truth under the parameters before it, and
-# typed as it, so its name's value proves it)
-parameters_locals(typed: TypedFunction, s: TypingState) as list<Local> := {
-	if typed.checker == ø {
+# typed as it, so its name's value proves it). Entered while typing, before the program's functions are, a type reading
+# one of them is entered again once they are given (by_key), so `e: Even(double(n))` names double
+parameters_locals(typed: TypedFunction, s: TypingState, by_key: map<text, TypedFunction> = {}) as list<Local> := {
+	if typed.checker == ø or not typed.entered_with_functions and by_key is not empty {
 		if typed.entering_locals { refused(typed.define, "a hypothesis reads its own law's parameters: a statement in a parameter's place reads only the parameters before it") }
 		typed.entering_locals = yes
 		c = checker(TYPES.environment, [])
 		# GUESS: raise takes a text, so the error is raised again by its message
-		locals = try parameters_entered(typed, c, s) catch e { typed.entering_locals = no; raise e.message }
+		locals = try parameters_entered(typed, c, s, by_key) catch e { typed.entering_locals = no; raise e.message }
 		typed.entering_locals = no
 		typed.arguments = (1 to #typed.arguments).list().map(at => if is_statement_written(declared_type(parameters_of(typed)#at)) then locals#at.domain else typed.arguments#at)
 		typed.locals = locals
 		typed.checker = c
+		typed.entered_with_functions = by_key is not empty
 	}
 	typed.locals
 }
-parameters_entered(typed: TypedFunction, c: Checker, s: TypingState) as list<Local> := {
+parameters_entered(typed: TypedFunction, c: Checker, s: TypingState, by_key: map<text, TypedFunction>) as list<Local> := {
 	locals: list<Local> = []
 	names = parameter_nodes(typed)
 	for at in 1 to #typed.arguments {
-		before = fresh_reading(c, {}, s).under(locals, names.take(at - 1).map(place_key))
+		before = fresh_reading(c, by_key, s).under(locals, names.take(at - 1).map(place_key))
 		written = declared_type(parameters_of(typed)#at)
 		# a parameter of a family applied to the parameters before it, `e: Even(n)`, names them as a result does
 		locals += [entered(c, text(names#at), statement_held(written, typed, before, s) ?? family_read(written, typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c))]
@@ -115,14 +117,14 @@ parameters_entered(typed: TypedFunction, c: Checker, s: TypingState) as list<Loc
 	locals
 }
 # the checker a function's parameters are entered on
-parameters_checker(typed: TypedFunction, s: TypingState) as Checker := {
-	parameters_locals(typed, s)
+parameters_checker(typed: TypedFunction, s: TypingState, by_key: map<text, TypedFunction> = {}) as Checker := {
+	parameters_locals(typed, s, by_key)
 	typed.checker!
 }
 # the names its definition gives its parameters, as written
 parameter_nodes(typed: TypedFunction) as list := parameters_of(typed).map(parameter => declared_name(parameter))
 # the result as the kernel reads it: a family applied to values read under the parameters, any other result as settled
-kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := family_read(typed.written, typed, parameters_reading(typed, by_key, s), s) ?? kernel_settled(typed.result ?? return ø, s, parameters_checker(typed, s))
+kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := family_read(typed.written, typed, parameters_reading(typed, by_key, s), s) ?? kernel_settled(typed.result ?? return ø, s, parameters_checker(typed, s, by_key))
 # GUESS (T6a3's value reader): a written type of a function as the kernel reads it in a reading of its binders: a family
 # applied to values, the head applied to its arguments read as values (`Even(double(n))`, each through term_of under
 # the reading); ø for any other type, which typing settles
@@ -130,7 +132,10 @@ family_read(written: Node?, typed: TypedFunction, reading: Entering, s: TypingSt
 	if written == ø or not is_family_call(written!) { return ø }
 	match written! {
 		Call(head, items) => {
-			given = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), reading) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)
+			# while typing, before the program's functions are given, a value naming one is read again once they are
+			read = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), reading) ?? (if reading.by_key is empty then ø else refused(item, "a type may depend only on values the program computes without acting")) else kernel_type(type_term(item))!)
+			if read.any(term => term == ø) { return ø }
+			given = read.map(term => term!)
 			kernel_headed(apply_all(kernel_type(family_word(head))!, given), reading.c)
 		}
 		_ => ø
@@ -182,7 +187,7 @@ reading_frame(typed: TypedFunction) as TypeFrame := {
 # a body read under the function's own parameters
 # (its locals entered first, so the reading is on the checker they were entered with)
 parameters_reading(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Entering := {
-	locals = parameters_locals(typed, s)
+	locals = parameters_locals(typed, s, by_key)
 	fresh_reading(typed.checker!, by_key, s).under(locals, parameter_nodes(typed).map(place_key))
 }
 # a reading under no binders yet, on this checker
