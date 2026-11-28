@@ -1,18 +1,25 @@
-# How a native build keeps its values in the memory, as wasm2c takes no GC type (core/emit/memory.wap MemoryLayout): texts,
+# How a native build keeps its values in the memory, as wasm2c takes no GC type (core/emit/strategy.wap Strategy): texts,
 # lists, maps and enums are i32s, a text's address, a list's, a map's or a class's instance's, an enum case's tag; their literals are
-# built by the words of types/memory_lists.wap; an uncaught raise writes its text to stderr and ends the program.
-use "../../core/emit/memory.wap"
+# built by the words of types/memory_lists.wap; a record's instance is laid out as C lays out a struct; an optional is
+# an address, 0 its ø; an uncaught raise writes its text to stderr and ends the program.
+use "../../core/emit/strategy.wap"
 use "../../kernel/opcodes.wap"
+use "../../kernel/primitives.wap"
 use "../../core/emit/wasm.wap"
+use "../../core/emit/values.wap"
+use "../../core/emit/places.wap"
+use "../../core/emit/primitives.wap"
 use "../../core/emit/host.wap"
+use "../../core/type_notation.wap"
+use "../../core/errors.wap"
 
 # a text in the memory: its count in these bytes, then its bytes and the one byte past them a line end may take
 # (types/memory_texts.wap)
 MEMORY_TEXT_BYTES := 4
-NATIVE_MEMORY = MemoryLayout{built_by: {"list": ["reserved", "extended"], "map": ["map_reserved", "entered"]}, layouts: {"text": I32, "list": I32, "map": I32, "enum": I32}, text_bytes: memory_text_bytes, raised: raise_written, files: {"types/text_bytes.wap": "types/memory_texts.wap", "types/list_items.wap": "types/memory_lists.wap"}}
+NATIVE_MEMORY = Strategy{built_by: {"list": ["reserved", "extended"], "map": ["map_reserved", "entered"]}, layouts: {"text": I32, "list": I32, "map": I32, "enum": I32}, files: {"types/text_bytes.wap": "types/memory_texts.wap", "types/list_items.wap": "types/memory_lists.wap"}, missing: Code(I32, i32_const(0)), missing_tested: I32_EQZ, captures_layout: I32, compound_layout: memory_compound_layout, kept: memory_kept, fixed_text: memory_text, text_literal: memory_text, field: (reached, layouts, at, gc) => field_place(reached, layouts(), at), struct_made: (layouts, gc, p) => memory_struct_made(layouts(), p), tagged: untagged, captures_cast: captures_as_held, box_opened: (word, p) => item_loaded(WORD_LAYOUTS[word]).code, present: memory_present, raised: p => raise_written(host(p, "fd_write"), host(p, "proc_exit"))}
 
-# a text in the module's data: its byte count, then its bytes
-memory_text_bytes(t: text) as list<int> := little_endian(#t.bytes, MEMORY_TEXT_BYTES) + t.bytes
+# a text in the module's data, its address: its byte count, then its bytes
+memory_text(t: text, m: WasmModule) as Code := Code(I32, i32_const(data_placed(m, little_endian(#t.bytes, MEMORY_TEXT_BYTES) + t.bytes)))
 # an uncaught raise, its text the function's local 0: the text and a line end written to stderr, the program ended
 raise_written(fd_write: int, proc_exit: int) as list<int> := {
 	count = local_get(0) + instruction(I32_LOAD, [2, 0])
@@ -20,3 +27,36 @@ raise_written(fd_write: int, proc_exit: int) as list<int> := {
 	iovec = i32_const(IOVEC_ADDRESS) + local_get(0) + i32_const(MEMORY_TEXT_BYTES) + I32_ADD + instruction(I32_STORE, [2, 0]) + i32_const(IOVEC_ADDRESS + 4) + count + i32_const(1) + I32_ADD + instruction(I32_STORE, [2, 0])
 	line_end + iovec + i32_const(STDERR) + i32_const(IOVEC_ADDRESS) + i32_const(1) + i32_const(WRITTEN_ADDRESS) + instruction(CALL, [fd_write]) + DROP + i32_const(RAISED_STATUS) + instruction(CALL, [proc_exit])
 }
+# A record's instance in the memory is laid out as C lays out a struct, so C reads it as one: its fields in its
+# record's order, each at the next multiple of its own width, the whole a multiple of its widest field's
+memory_place(reached: list<int>, offset: int, type: list<int>) as Place := Place(reached + i32_const(offset) + I32_ADD, item_loaded(type).code, item_stored(type).code)
+# the place of a field, from 1, of a struct of these layouts at the address reached
+field_place(reached: list<int>, layouts: list<list<int>>, at: int) as Place := memory_place(reached, field_offset(layouts, at), layouts#at)
+aligned(bytes: int, width: int) as int := (bytes + width - 1) ÷ width * width
+fields_end(layouts: list<list<int>>) as int := layouts.fold(0, (end, layout) => aligned(end, layout_bytes(layout)) + layout_bytes(layout))
+field_offset(layouts: list<list<int>>, field: int) as int := aligned(fields_end(layouts.take(field - 1)), layout_bytes(layouts#field))
+struct_bytes(layouts: list<list<int>>) as int := aligned(fields_end(layouts), max(layouts.map(layout_bytes)))
+# a new struct, its fields' values on the stack, by the helper storing them, one for each layout of fields, an
+# instance of no fields taking no bytes but an address past 0, which is ø
+memory_struct_made(layouts: list<list<int>>, p: Emission) as list<int> := if layouts is empty then i32_const(0) + helper_call(p, MEMORY_TAKEN, memory_taking_function) else helper_call(p, "memory struct ${layouts}", q => memory_struct_function(layouts, q))
+memory_struct_function(layouts: list<list<int>>, p: Emission) as int := {
+	address = #layouts
+	stored = (1 to #layouts).flat_map(at => written_code(field_place(local_get(address), layouts, at), Code(layouts#at, local_get(at - 1))).instructions)
+	added_function(p.m, layouts, [I32], [I32], i32_const(struct_bytes(layouts)) + helper_call(p, MEMORY_TAKEN, memory_taking_function) + local_set(address) + stored + local_get(address))
+}
+# a compound type the memory lays out none of is refused whole, before its parts, which have no place of their own;
+# a function value is the address of what it captures, or of its function's table slot beside them; an optional the
+# address of its value or of the box holding it
+memory_compound_layout(type: Term, at: Node?, m: WasmModule, records: Records) as list<int>? := if function_value_parts(type) != ø or function_parts(type) != ø or base_of_optional(type) != ø then I32 else memory_refused(type, at)
+# a layout as the memory keeps it: a number's; any other is refused, as wasm2c takes no GC type
+memory_kept(type: Term, at: Node?, layout: list<int>?) as list<int>? := if layout == ø or layout in PLAIN_VALUES then layout else memory_refused(type, at)
+memory_refused(type: Term, at: Node?) as list<int> := {
+	why = "a build keeping values in the memory has no layout for ${type_text(type)}"
+	if at != ø { refused(at!, why) }
+	raise why
+}
+# an optional's address known to be there, which a helper tests, trapping at 0
+memory_present(p: Emission) as list<int> := helper_call(p, MISSING_TEST, q => added_function(q.m, [I32], [I32], [], local_get(0) + I32_EQZ + if_block(UNREACHABLE) + local_get(0)))
+# a record's instance in the memory has no tag before its fields, and a function value's captures are an address as held
+untagged(tag: int) as list<int> := []
+captures_as_held(own: Term, form: Node, p: Emission) as list<int> := []

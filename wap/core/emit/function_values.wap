@@ -22,7 +22,7 @@ captures_loaded(form: Define, parameters: list<Node>, p: Emission, f: Frame) as 
 	loads = []
 	for at in 1 to #captures {
 		slot = slotted(f, place_key(captures#at), layouts#at).index
-		read = if p.m.memory != ø then field_read(local_get(0), layouts, at) else local_get(0) + instruction(STRUCT_GET, [closure_of(value, p), at - 1])
+		read = field_read(local_get(0), layouts, at, () => [closure_of(value, p), at - 1], p)
 		loads += read + local_set(slot)
 	}
 	loads
@@ -36,15 +36,15 @@ function_value_code(form: Node, p: Emission, f: Frame) as Code := {
 	Code(layout(form, p), captures_made(form, type_of(form), p, f))
 }
 # what a function value captures, in a new struct of its own type's, in the memory at a new address
-captures_made(form: Node, own: Term, p: Emission, f: Frame) as list<int> := captures_code(form, p, f) + struct_made(captured_layouts(function_value_parts(own)!, p), () => closure_of_type(own, form, p), p)
+captures_made(form: Node, own: Term, p: Emission, f: Frame) as list<int> := captures_code(form, p, f) + struct_made(() => captured_layouts(function_value_parts(own)!, p), () => closure_of_type(own, form, p), p)
 # A function value of a signature: its function's adapter referred to, then its captures, the struct of them a λ
 # builds or a variable holds, ø for a function's name. FUNCTION_VALUE, from the typing stage, is the value's own type, naming its function
 # and its captures' types.
 signature_value_code(form: Node, p: Emission, f: Frame) as Code := {
 	own = fact_type(fact_of(form, FUNCTION_VALUE)) ?? refused(form, "this function value reached the emitter without the function it is")
-	captures = if form is Fn then captures_made(form, own, p, f) else if names_function(form) then (if p.m.memory != ø then i32_const(0) else null_of(ANY_HEAP)) else variable_code(form, p, f).instructions
+	captures = if form is Fn then captures_made(form, own, p, f) else if names_function(form) then p.m.strategy.missing.instructions else variable_code(form, p, f).instructions
 	adapter = helper(p, "adapter ${adapted_key(form)} ${type_text(type_of(form), yes)}", q => adapting_function(form, own, q))
-	made = struct_made(SIGNATURE_MEMORY, () => signature_struct(p.m), p)
+	made = struct_made(() => SIGNATURE_MEMORY, () => signature_struct(p.m), p)
 	Code(layout(form, p), function_reference(p.m, adapter) + captures + made)
 }
 # the key of the function typed for the signature, which the adapter calls
@@ -58,8 +58,8 @@ adapting_function(form: Node, own: Term, p: Emission) as int := {
 	function = placed_by_key(p.functions, adapted_key(form)) ?? in_place_function(adapted_key(form), p) ?? refused(form, "the typing stage typed no function for this value")
 	parts = value_signature(form)
 	parameters = signature_parameters(parts, p.m, p.records)
-	captures = if #function.parameters == #parameters then [] else local_get(0) + (if p.m.memory != ø then [] else heap_instruction(REF_CAST_NULL, closure_of_type(own, form, p)))
-	added_function(p.m, [captures_layout(p.m)] + parameters, signature_results(parts, p.m, p.records), [], captures + (1 to #parameters).flat_map(local_get) + instruction(CALL, [function.index]))
+	captures = if #function.parameters == #parameters then [] else local_get(0) + (p.m.strategy.captures_cast)(own, form, p)
+	added_function(p.m, [p.m.strategy.captures_layout] + parameters, signature_results(parts, p.m, p.records), [], captures + (1 to #parameters).flat_map(local_get) + instruction(CALL, [function.index]))
 }
 # A call of a function value of a signature: the value kept in a slot of its own, then its captures, the arguments and
 # its function's reference, called by call_ref
@@ -78,7 +78,7 @@ value_call_code(form: Node, called: Node, arguments: list<Node>, p: Emission, f:
 # A value of a signature in the memory: its function's slot in the module's table, then the address of its captures
 SIGNATURE_MEMORY = [I32, I32]
 # a part of a value of a signature, from 0: its function or its captures
-signature_part(value: list<int>, part: int, p: Emission) as list<int> := if p.m.memory != ø then field_read(value, SIGNATURE_MEMORY, part + 1) else value + instruction(STRUCT_GET, [signature_struct(p.m), part])
+signature_part(value: list<int>, part: int, p: Emission) as list<int> := field_read(value, SIGNATURE_MEMORY, part + 1, () => [signature_struct(p.m), part], p)
 # the values a function value captures, read from the variables they are where it is made, the program's globals too
 captures_code(form: Node, p: Emission, f: Frame) as list<int> := {
 	captures_of(form).flat_map(definer => fetched(captured_variable(definer, p, f)))
