@@ -36,8 +36,14 @@ class Callee { key: text; caught: bool }
 # What a typed function does itself, the typed functions it calls, its parameters' keys, and when it may fail: never
 # (none), only where one of these parameters is 0, a divisor (their places), or whatever it is given (ø); the
 # parameters it writes into (their places), its State only where a caller gives it what the caller holds; the locals
-# it made itself, a literal or its own allocation, whose writes stay inside it, and those given anything else
-class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = [] }
+# it made itself, a literal or its own allocation, whose writes stay inside it, and those given anything else; the
+# parameters it lets out of a reading place, aliased, given back, stored, captured or given to an unknown callee, which
+# anything may change; the parameters it gives on to callees, and the arguments it shares as their parent's lists
+class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = []; escaped: list<int> = []; passes: list<Pass> = []; shared: list<Shared> = [] }
+# an argument given to a callee at its place there: what the callee changes or lets out of it, the giver does to it too
+class Pass { key: text; at: int; argument: Node; caught: bool }
+# an argument shared as its parent's list or map (fits.wap shared_argument), at its callee's place
+class Shared { argument: Node; key: text; at: int }
 # The effects of the typed functions, joined over the groups of functions that call each other round (groups.wap):
 # each function's own part and the effects found, each group's alike
 class Joining {
@@ -71,6 +77,7 @@ effects_joined(s: TypingState) as Joining := {
 # a group of functions that call each other round, each with the group's own effects and its calls' outside it: every
 # group it calls is joined before it
 effects_of_group(group: list<text>, x: Joining) := {
+	shares_judged(group, x)
 	round = #group > 1 or own_of(group#1, x).calls.any(call => call.key == group#1)
 	effects: list<Effect> = if round then [Effect.Div] else []
 	for member in group {
@@ -91,6 +98,7 @@ own_of(key: text, x: Joining) as Own := {
 	own = Own([], [], parameter_nodes(x.by_key[key]).map(place_key))
 	body = body_of(x.by_key[key])
 	if fact_of(body, CLAIMED) != ø and is_foreign(body) { claimed_own(fact_of(body, CLAIMED)!, x.by_key[key], own) } else { effects_in(body, no, own, x) }
+	for value in given_back(body) { escaped(value, own) }
 	# a parameter the body assigns no longer holds what the caller gave
 	if own.divisors != ø and own.divisors!.any(at => own.assigned.contains(at)) { own.divisors = ø }
 	x.own[key] = own
@@ -131,7 +139,10 @@ fails_by(claim: Node) as list<text> := match claim { Call(called, arguments) => 
 # node brings itself: its operation's, a loop's, a global variable's, a block's sharing the program's variables,
 # `global y`
 effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
-	Fn(parameters, body) => { own.calls += instances_named(place_key(name_for(LAMBDA_NAME, n)), x).map(key => Callee(key, caught)) }
+	Fn(parameters, body) => {
+		own.calls += instances_named(place_key(name_for(LAMBDA_NAME, n)), x).map(key => Callee(key, caught))
+		for part in nodes_in(body) { escaped(part, own) }
+	}
 	Define(name, parameters, body) => ø
 	Try(body, handler) => {
 		effects_in(body, yes, own, x)
@@ -151,12 +162,12 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		effects_in_each(arguments, caught, own, x)
 		named = fact_of(called, DEFINED_AT)
 		key = if named == ø then "" else place_key(named!)
+		for at in 1 to #arguments { passed(arguments#at, at, if x.by_key.has(key) then key else "", text(called), caught, own) }
 		if not x.by_key.has(key) { return effects_in(called, caught, own, x) }
 		divisors = own_of(key, x).divisors
 		# each divisor met, so each one the caller is given is recorded
 		safe = divisors != ø and divisors!.map(at => divisor_met(arguments#at, caught, own)).all(met => met)
 		if divisors == ø { divisor_met(Empty, caught, own) }
-		for at in own_of(key, x).written { written_into(arguments#at, caught, own) }
 		own.calls += [Callee(key, caught or safe)]
 	}
 	Prim(operation, arguments) => {
@@ -166,7 +177,13 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 	_ => {
 		if n is While { effect_added(Effect.Div, caught, own) }
 		if n is Block and globals_named(n) is not empty { effect_added(Effect.State, caught, own) }
+		match unwrapped(n) {
+			List(items, bracket, separator) => { for item in items { escaped(item, own) } }
+			Return(value) => escaped(value, own)
+			_ => ø
+		}
 		match unwrapped(n) { Set(place, value) => {
+			escaped(value, own)
 			own.assigned += [parameter_at(place, own)]
 			if place is Get or is_kind_word(fact_of(place, BINDING), DefinitionKind.Capture) then written_into(place, caught, own) else local_set(place, value, own)
 		}; _ => ø }
@@ -210,6 +227,54 @@ parameter_at(n: Node, own: Own) as int := {
 	named = fact_of(n, DEFINED_AT)
 	if named == ø then 0 else own.parameters.index_of(place_key(named!))
 }
+# a parameter let out of a reading place, which anything may then change
+escaped(value: Node, own: Own) := {
+	at = parameter_at(unwrapped(value), own)
+	if at > 0 { own.escaped = (own.escaped + [at]).unique }
+}
+# an argument as a call takes it: to a callee of no key (a function value, a record) let out, which anything may then
+# change; else kept, with an argument shared as its parent's list, to be judged once what the callee changes is known
+# (shares_judged)
+passed(argument: Node, at: int, key: text, called: text, caught: bool, own: Own) := {
+	if key == "" {
+		escaped(argument, own)
+		if has_fact(argument, SHARED_ARGUMENT) { unshared(argument, called) }
+		return
+	}
+	own.passes += [Pass(key, at, argument, caught)]
+	if has_fact(argument, SHARED_ARGUMENT) { own.shared += [Shared(argument, key, at)] }
+}
+# the values a body gives back: its last statement's, each arm's of an if
+given_back(n: Node) as list<Node> := match unwrapped(n) {
+	Block(statements) => if statements is empty then [] else given_back(statements.last)
+	If(condition, then_part, else_part) => given_back(then_part) + given_back(else_part)
+	_ => [n]
+}
+# what a function changes or lets out of its parameters
+touched(own: Own) as list<int> := own.written + own.escaped
+# A group's members do to what they give their callees what the callees do to it: written into (State, or the giver's
+# own parameter written), let out; followed round until nothing more changes, so a call back to a member read before
+# its body is (own_of's placeholder) counts too. Then each argument shared as its parent's list is refused where its
+# callee may change it (wiki/subtype.md)
+shares_judged(group: list<text>, x: Joining) := {
+	changed = yes
+	while changed {
+		changed = no
+		for member in group {
+			own = own_of(member, x)
+			before = #touched(own)
+			for pass in own.passes { taken(pass, own_of(pass.key, x), own) }
+			if #touched(own) != before { changed = yes }
+		}
+	}
+	for member in group { for shared in own_of(member, x).shared { if touched(own_of(shared.key, x)).contains(shared.at) { unshared(shared.argument, text(defined_name(x.by_key[shared.key].define))) } } }
+}
+# what a callee does to its parameter at a place, done to the argument given there
+taken(pass: Pass, callee: Own, own: Own) := {
+	if callee.written.contains(pass.at) { written_into(pass.argument, pass.caught, own) }
+	if callee.escaped.contains(pass.at) { escaped(pass.argument, own) }
+}
+unshared(argument: Node, callee: text) := refused(argument, "this ${text_of(fact_of(argument, SHARED_ARGUMENT))} is shared where ${callee} takes a ${type_text(value_type(argument)!)}, which ${callee} may change: write `${argument} as ${type_text(value_type(argument)!)}` for a copy")
 # an effect a body does itself, none where it is ø, a Fail none where a `try` catches it
 effect_added(effect: Effect?, caught: bool, own: Own) := if effect != ø and not (caught and effect == Effect.Fail) {
 	own.effects += [effect!]
