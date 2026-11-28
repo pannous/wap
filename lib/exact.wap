@@ -10,8 +10,8 @@ use "../kernel/magnitude.wap"
 # the combining overline written after each digit of a repeating period
 OVERLINE := "̅"
 
-# sign, numerator and denominator; the denominator is never zero, the sign of zero never negative
-class Exact { negative: bool, numerator: Magnitude, denominator: Magnitude }
+# a signed whole numerator over a denominator, which is never zero (the types' Whole carries the sign)
+class Exact { numerator: Whole, denominator: Magnitude }
 
 # --- exact numbers
 
@@ -20,28 +20,27 @@ common_divisor(a: Magnitude, b: Magnitude): Magnitude := if is_zero(b) then a el
 exact_of(negative: bool, n: Magnitude, d: Magnitude): Exact := {
 	if is_zero(d) { raise "division by zero" }
 	common = common_divisor(n, d)
-	Exact(negative and not is_zero(n), divided(n, common).quotient, divided(d, common).quotient)
+	Exact(signed(negative, divided(n, common).quotient), divided(d, common).quotient)
 }
-exact(n: int): Exact := Exact(n < 0, magnitude(n), ONE)
+# a numerator's sign and size over a denominator, in lowest terms
+reduced(n: Whole, d: Magnitude): Exact := exact_of(n.negative, n.size, d)
+# a whole size, no fraction
+whole_size(m: Magnitude): Exact := Exact(Whole(no, m), ONE)
+exact(n: int): Exact := Exact(whole(n), ONE)
 exact(n: int, d: int): Exact := exact_of((n < 0) != (d < 0), magnitude(n), magnitude(d))
 is_whole(x: Exact): bool := compared(x.denominator, ONE) == 0
-numerator(x: Exact): Exact := Exact(x.negative, x.numerator, ONE)
-denominator(x: Exact): Exact := Exact(no, x.denominator, ONE)
-text(x: Exact): text := (if x.negative then "-" else "") + digits(x.numerator) + (if is_whole(x) then "" else "/" + digits(x.denominator))
+numerator(x: Exact): Exact := Exact(x.numerator, ONE)
+denominator(x: Exact): Exact := whole_size(x.denominator)
+text(x: Exact): text := text(x.numerator) + (if is_whole(x) then "" else "/" + digits(x.denominator))
 
--(x: Exact): Exact := Exact(not x.negative and not is_zero(x.numerator), x.numerator, x.denominator)
-abs(x: Exact): Exact := Exact(no, x.numerator, x.denominator)
-+(a: Exact, b: Exact): Exact := {
-	left = product(a.numerator, b.denominator)
-	right = product(b.numerator, a.denominator)
-	below = product(a.denominator, b.denominator)
-	if a.negative == b.negative then exact_of(a.negative, sum(left, right), below)
-	else if compared(left, right) >= 0 then exact_of(a.negative, difference(left, right), below)
-	else exact_of(b.negative, difference(right, left), below)
-}
+-(x: Exact): Exact := Exact(-x.numerator, x.denominator)
+abs(x: Exact): Exact := Exact(Whole(no, x.numerator.size), x.denominator)
+# a numerator times the other's denominator: two fractions over one denominator, compared and added so
+over(a: Exact, b: Exact): Whole := a.numerator * Whole(no, b.denominator)
++(a: Exact, b: Exact): Exact := reduced(over(a, b) + over(b, a), product(a.denominator, b.denominator))
 -(a: Exact, b: Exact): Exact := a + -b
-*(a: Exact, b: Exact): Exact := exact_of(a.negative != b.negative, product(a.numerator, b.numerator), product(a.denominator, b.denominator))
-/(a: Exact, b: Exact): Exact := exact_of(a.negative != b.negative, product(a.numerator, b.denominator), product(a.denominator, b.numerator))
+*(a: Exact, b: Exact): Exact := reduced(a.numerator * b.numerator, product(a.denominator, b.denominator))
+/(a: Exact, b: Exact): Exact := exact_of(a.numerator.negative != b.numerator.negative, product(a.numerator.size, b.denominator), product(a.denominator, b.numerator.size))
 # the floored quotient and the remainder of the same sign as b: a == b * (a ÷ b) + a % b
 ÷(a: Exact, b: Exact): Exact := floor(a / b)
 %(a: Exact, b: Exact): Exact := a - b * (a ÷ b)
@@ -60,11 +59,7 @@ abs(x: Exact): Exact := Exact(no, x.numerator, x.denominator)
 }
 
 # -1, 0 or 1
-order(a: Exact, b: Exact): int := {
-	if a.negative != b.negative { return if a.negative then -1 else 1 }
-	sizes = compared(product(a.numerator, b.denominator), product(b.numerator, a.denominator))
-	if a.negative then 0 - sizes else sizes
-}
+order(a: Exact, b: Exact): int := compared(over(a, b), over(b, a))
 ==(a: Exact, b: Exact): bool := order(a, b) == 0
 !=(a: Exact, b: Exact): bool := order(a, b) != 0
 <(a: Exact, b: Exact): bool := order(a, b) < 0
@@ -84,25 +79,24 @@ order(a: Exact, b: Exact): int := {
 # --- rounding and machine numbers
 
 # toward zero
-truncated(x: Exact): Exact := Exact(x.negative and not is_zero(divided(x.numerator, x.denominator).quotient), divided(x.numerator, x.denominator).quotient, ONE)
-floor(x: Exact): Exact := if x.negative and not is_whole(x) then truncated(x) - 1 else truncated(x)
+truncated(x: Exact): Exact := Exact(signed(x.numerator.negative, divided(x.numerator.size, x.denominator).quotient), ONE)
+floor(x: Exact): Exact := if x.numerator.negative and not is_whole(x) then truncated(x) - 1 else truncated(x)
 ceil(x: Exact): Exact := -floor(-x)
-round(x: Exact): Exact := if x.negative then -floor(-x + exact(1, 2)) else floor(x + exact(1, 2))
+round(x: Exact): Exact := if x.numerator.negative then -floor(-x + exact(1, 2)) else floor(x + exact(1, 2))
 float(m: Magnitude): float := m.limbs.reverse().fold(0.0, (value, part) => value * float(LIMB) + float(part))
-float(x: Exact): float := (if x.negative then -1.0 else 1.0) * float(x.numerator) / float(x.denominator)
+float(x: Exact): float := (if x.numerator.negative then -1.0 else 1.0) * float(x.numerator.size) / float(x.denominator)
 # the whole part toward zero, wrapping past 64 bits as ints do
 int(x: Exact): int := {
-	whole = divided(x.numerator, x.denominator).quotient
-	size = whole.limbs.reverse().fold(0, (value, part) => value * LIMB + part)
-	if x.negative then 0 - size else size
+	size = divided(x.numerator.size, x.denominator).quotient.limbs.reverse().fold(0, (value, part) => value * LIMB + part)
+	if x.numerator.negative then 0 - size else size
 }
 
 # --- decimals
 
 # the decimal digits of x, its repeating period overlined: 1/8 is 0.125, 2/3 is 0.6̅, 1/6 is 0.16̅
 decimal(x: Exact): text := {
-	division = divided(x.numerator, x.denominator)
-	sign = if x.negative then "-" else ""
+	division = divided(x.numerator.size, x.denominator)
+	sign = if x.numerator.negative then "-" else ""
 	if is_zero(division.rest) { return sign + digits(division.quotient) }
 	ten = magnitude(10)
 	fraction_digits: list<text> = []
@@ -144,14 +138,14 @@ exact(written: text): Exact := {
 decimal_value(body: text, written: text): Exact := {
 	halves = body.split(".")
 	if #halves > 2 or halves[0] == "" or not is_digits(halves[0]) { raise "exact: ${written} is no number" }
-	if #halves == 1 { return Exact(no, magnitude_of_digits(halves[0]), ONE) }
+	if #halves == 1 { return whole_size(magnitude_of_digits(halves[0])) }
 	marked = halves[1]
 	# the period starts at the digit the first overline follows
 	overlined = find(marked, OVERLINE)
 	plain = if overlined == 0 then marked else marked[0:overlined - 2]
 	period = marked[#plain:].replace(OVERLINE, "")
 	if plain + period != "" and not is_digits(plain + period) { raise "exact: ${written} is no number" }
-	whole = Exact(no, magnitude_of_digits(halves[0] + plain), ONE) / exact(10) ^ #plain
+	whole = whole_size(magnitude_of_digits(halves[0] + plain)) / exact(10) ^ #plain
 	if period == "" then whole
-	else whole + Exact(no, magnitude_of_digits(period), ONE) / ((exact(10) ^ #period - 1) * exact(10) ^ #plain)
+	else whole + whole_size(magnitude_of_digits(period)) / ((exact(10) ^ #period - 1) * exact(10) ^ #plain)
 }
