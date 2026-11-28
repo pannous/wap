@@ -104,7 +104,7 @@ parameters_locals(typed: TypedFunction, s: TypingState) as list<Local> := {
 }
 parameters_entered(typed: TypedFunction, c: Checker, s: TypingState) as list<Local> := {
 	locals: list<Local> = []
-	names = parameter_names(typed)
+	names = parameter_nodes(typed)
 	for at in 1 to #typed.arguments {
 		before = fresh_reading(c, {}, s).under(locals, names.take(at - 1).map(place_key))
 		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c, s))]
@@ -116,8 +116,7 @@ parameters_checker(typed: TypedFunction, s: TypingState) as Checker := {
 	parameters_locals(typed, s)
 	typed.checker!
 }
-parameters_of(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters); _ => [] }
-parameter_names(typed: TypedFunction) as list := parameters_of(typed).map(parameter => declared_name(parameter))
+parameter_nodes(typed: TypedFunction) as list<Node> := parameters_of(typed).map(parameter => declared_name(parameter))
 # GUESS (T6a3's value reader): the result as the kernel reads it: where a family is written applied to values, the head applied to its arguments
 # read as values under the parameters (`Even(double(n))`, each value through term_of and the checker's Locals); any other result as settled
 kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
@@ -159,33 +158,33 @@ binder_headed(c: Checker, s: TypingState, binder: text, domain: Term, body: Term
 	inside = entered(c, binder, headed)
 	made(binder, headed, abstracted(kernel_headed(instantiated(body, inside.variable), c, s), variable_id(inside.variable)))
 }
-# a kernel family applied to its arguments in order (`Equal(nat, a, b)`: u from nat's Type)
+# a kernel family applied to its arguments in order (`Equal(nat, a, b)`: u from nat's Type); applied to fewer than
+# it takes, a function of the rest (`Equal(nat, a)`)
 family_applied(family: Declaration, arguments: list<Term>, c: Checker) as Term := {
 	if #arguments > #binder_names(family.type) { refused_type(family.type, "${family.name} takes fewer arguments than ${#arguments}") }
-	declared_applied(family, (at, binder) => if at <= #arguments then Placed(arguments#at, ø) else ø, (place, laws, goal) => ø, c)!
+	declared_applied(family, (at, binder) => Placed(arguments#at, ø), (place, laws, goal) => ø, c, #arguments)!
 }
 # what a call gives a kernel declaration's binder: a term, or a proof's laws the provers prove its goal from; ø where
 # the binder is found from the others
-# (at: its place among the call's arguments)
-class Placed { term: Term?; laws: list?; at: int = 0 }
-class ProofPlace { hole: Term; domain: Term; laws: list; at: int }
+# (at: its place among the call's arguments; domain: a proof's goal)
+class Placed { term: Term?; laws: list?; at: int = 0; domain: Term? = ø }
 # A kernel declaration applied: a level hole for each level parameter and, at each binder, what `given` places there or
 # a hole the others fill, each term unified with its binder's type, the binders after it taking it, a bool relation
 # where a relation into Prop is wanted its truth (truth_adapted); a proof proved last, at its goal with the holes
-# filled, by `proved` (ø where it gives none). A binder or a level nothing gives, or a term of another type, is refused,
-# naming it
-declared_applied(d: Declaration, given: (int, text) -> Placed?, proved: (int, list, Term) -> Term?, c: Checker) as Term? := elaborated_over(c, el => {
+# filled, by `proved` (ø where it gives none); its first `walked` binders only, where given. A binder or a level nothing
+# gives, or a term of another type, a proof's among them, is refused, naming it
+declared_applied(d: Declaration, given: (int, text) -> Placed?, proved: (int, list, Term) -> Term?, c: Checker, walked: int? = ø) as Term? := elaborated_over(c, el => {
 	holes = d.levels.map(name => level_hole(el))
 	type = with_levels(d.type, d.levels, holes)
-	binders = binder_names(d.type)
+	binders = binder_names(d.type).take(walked ?? #binder_names(d.type))
 	placed: list<Term> = []
-	proofs: list<ProofPlace> = []
+	proofs: list<Placed> = []
 	for binder in binders {
 		type = match type.shape {
 			Pi(name, domain, body) => {
 				written = given(#placed + 1, binder)
 				argument = if written == ø or written!.term == ø then hole(el, binder, domain) else truth_adapted(el.c, written!.term!, domain)
-				if written != ø and written!.laws != ø { proofs += [ProofPlace(argument, domain, written!.laws!, written!.at)] }
+				if written != ø and written!.laws != ø { proofs += [Placed(argument, written!.laws!, written!.at, domain)] }
 				if written != ø and written!.term != ø and not unified(el, domain, type_of(el.c, argument)) { refused_type(d.type, "${d.name} takes ${shown(domain)} as ${binder}, and this is ${shown(type_of(el.c, argument))}") }
 				placed += [argument]
 				instantiated(body, argument)
@@ -194,10 +193,14 @@ declared_applied(d: Declaration, given: (int, text) -> Placed?, proved: (int, li
 		}
 	}
 	if not problems_retried(el) { refused_type(d.type, "the levels of ${d.name} are found from none of its arguments") }
-	for proof in proofs { if not unified(el, proof.hole, proved(proof.at, proof.laws, filled(el, proof.domain)) ?? return ø) { return ø } }
-	terms = placed.map(argument => filled(el, argument))
-	missing = (1 to #terms).find(at => holes_in(el, terms#at) is not empty)
+	missing = (1 to #placed).find(at => not proofs.any(proof => proof.term == placed#at) and holes_in(el, filled(el, placed#at)) is not empty)
 	if missing != ø { refused_type(d.type, "the ${binders#missing!} of ${d.name} is found from none of the arguments") }
+	for proof in proofs {
+		goal = filled(el, proof.domain!)
+		answer = proved(proof.at, proof.laws!, goal) ?? return ø
+		if not unified(el, proof.term!, answer) { refused_type(d.type, "the provers answer ${shown(goal)} for ${d.name} with a proof of ${shown(type_of(el.c, answer))}") }
+	}
+	terms = placed.map(argument => filled(el, argument))
 	levels = holes.map(hole => level_filled(el, hole))
 	if levels.any(level => level_holes_in(level) is not empty) { refused_type(d.type, "the levels of ${d.name} are found from none of its arguments") }
 	apply_all(constant(named_id(TYPES.environment, d.name)!, d.name, levels), terms)
@@ -214,14 +217,14 @@ truth_adapted(c: Checker, value: Term, wanted: Term) as Term := {
 # the frame its parameters are typed in, as a body's is
 reading_frame(typed: TypedFunction) as TypeFrame := {
 	frame = TypeFrame()
-	for at in 1 to #typed.arguments { frame.variables += [Binding(place_key(parameter_names(typed)#at), typed.arguments#at)] }
+	for at in 1 to #typed.arguments { frame.variables += [Binding(place_key(parameter_nodes(typed)#at), typed.arguments#at)] }
 	frame
 }
 # a body read under the function's own parameters
 # (its locals entered first, so the reading is on the checker they were entered with)
 parameters_reading(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Entering := {
 	locals = parameters_locals(typed, s)
-	fresh_reading(typed.checker!, by_key, s).under(locals, parameter_names(typed).map(place_key))
+	fresh_reading(typed.checker!, by_key, s).under(locals, parameter_nodes(typed).map(place_key))
 }
 # a reading under no binders yet, on this checker
 fresh_reading(c: Checker, by_key: map<text, TypedFunction>, s: TypingState) as Entering := Entering([], [], c, by_key, s)
@@ -327,7 +330,7 @@ kernel_declaration(typed: TypedFunction) as Declaration? := {
 # a call of a word that is a kernel constant: the constant at its arguments by binder name, the binders it gives none
 # found from them, a proof it leaves to the provers proved at its goal
 kernel_called(d: Declaration, typed: TypedFunction, arguments: list, x: Entering, proved: (int, list, Term) -> Term?) as Term? := {
-	names = parameter_names(typed).map(name => text(name))
+	names = parameter_names(typed)
 	binders = binder_names(d.type)
 	extra = names.find(name => not binders.contains(name))
 	if extra != ø { refused(typed.define, "${defined_name(typed.define)} is the kernel's ${d.name}, which takes no ${extra!}: its binders are ${binders.join(", ")}") }
@@ -363,7 +366,7 @@ arm_expected(pattern: Node, subject: Node, f: TypeFrame, expected: Term?, s: Typ
 	# only a family result names the parameters; the compiler's own source writes none, and a subtype result keeps its parent
 	if typed.written == ø or not is_family_call(typed.written!) { return expected }
 	if typed.result == ø or expected != typed.result or not is_variable(subject) { return expected }
-	place = parameter_names(typed).map(place_key).index_of(place_key(defined_at(subject)))
+	place = parameter_nodes(typed).map(place_key).index_of(place_key(defined_at(subject)))
 	id = pattern_constructor(pattern) ?? return expected
 	if place <= 0 { return expected }
 	locals = parameters_locals(typed, s)
@@ -597,11 +600,12 @@ hole_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: Typing
 		# each proof the provers give, or a hypothesis standing for it, so the goals after it are stated; a goal the run
 		# checks stays a warning where they find none, one only a proof decides is refused
 		goals: list<Term> = []
+		if called_typed(called, arguments, x) == ø { refused(obligation.call!, "this call leaves a proof to the provers, and the kernel holds no function of the program it calls") }
 		call_read(called, arguments, x, (at, laws, domain) => {
 			if at == obligation.place { goals.add(domain) }
 			(if obligation.check != ø then proof_tried(laws, domain, x) else hole_term(laws, domain, x)) ?? entered(x.c, NO_BINDER, domain).variable
 		}) ?? refused(obligation.call!, "a call's proof is stated by the arguments before it, which the kernel reads only as values computed without acting: name them first")
-		if goals is empty { return }
+		if goals is empty { refused(obligation.call!, "the kernel reads no proof at argument ${obligation.place} of this call") }
 		goal = goals#1
 		obligation.statement = pis(if typed == ø then [] else typed!.locals, goal)
 		if TYPES.prove == ø and obligation.check == ø { refused(obligation.call!, "this call leaves the proof of ${shown(goal)} to the provers (by), and this compile loads none: the verify extension proves it") }
