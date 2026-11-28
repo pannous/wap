@@ -265,7 +265,7 @@ definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 		stood_in = typed.result == STATEMENT_TERM
 		proof = if stood_in then with_type_of(body, wanted) else body
 		if not stood_in and not equal(inside.c, kernel_value(proof) ?? return ø, wanted) { return ø }
-		lambdas(typed.locals, term_of(proof, inside) ?? course_defined(typed, proof, inside) ?? return ø)
+		lambdas(typed.locals, term_of(proof, inside) ?? course_defined(typed, proof, inside) ?? measured_defined(typed, proof, inside) ?? return ø)
 	}
 	_ => ø
 }
@@ -461,6 +461,7 @@ choice_term(n: Node, condition: Node, at_yes: Node?, at_no: Node?, x: Entering) 
 	else_part = at_no ?? return ø
 	cases = if is_proposition_typed(n) then cases_term(type, condition, then_part, else_part, x) else ø
 	if cases != ø { return cases }
+	if x.recursion != ø and x.recursion!.measured != ø { return premised_choice(type, condition, then_part, else_part, x) }
 	guarded = if x.recursion == ø then ø else guard_read(n, condition, then_part, else_part, x)
 	if guarded != ø { return guarded }
 	if kernel_value(then_part) != type or kernel_value(else_part) != type { return ø }
@@ -566,11 +567,23 @@ literals_term(subject: Node, arms: list, type: Term, x: Entering) as Term? := {
 # A choice on a bool whose type is a proposition is a proof by the bool's cases:
 # ·bool_cases(c, y => type, (e: c == no) => the no arm, (e: c == yes) => the yes arm)
 cases_term(type: Term, condition: Node, at_yes: Node, at_no: Node, x: Entering) as Term? := {
+	arms = premised_arms(condition, at_yes, at_no, x) ?? return ø
+	apply_all(named_constant(BOOL_CASES), [arms.condition, lambda("_", BOOL_TERM, type), arms.at_no, arms.at_yes])
+}
+# a choice into a type whose arms know which case the condition is: bool's recursor into `(c == b) -> type` at the
+# condition, given that it equals itself; a measured recursion's calls prove their measure falls under the arm's premise
+premised_choice(type: Term, condition: Node, at_yes: Node, at_no: Node, x: Entering) as Term? := {
+	arms = premised_arms(condition, at_yes, at_no, x) ?? return ø
+	b = entered(x.c, "b", BOOL_TERM)
+	motive = lambdas([b], pis([entered(x.c, CASE_PREMISE, truths_equal(TYPES.environment, arms.condition, b.variable))], type))
+	apply(recursor_applied(BOOL_TERM, motive, [arms.at_no, arms.at_yes, arms.condition]), reflexive(TYPES.environment, TYPE_LEVEL, BOOL_TERM, arms.condition))
+}
+# a choice's condition read, and each arm a function of the premise that the condition is its case
+class PremisedArms { condition: Term; at_no: Term; at_yes: Term }
+premised_arms(condition: Node, at_yes: Node, at_no: Node, x: Entering) as PremisedArms? := {
 	c = term_of(condition, x) ?? return ø
 	truths = TYPES.environment.literals!
-	no_arm = premised_arm(at_no, c, truths.no_case, x) ?? return ø
-	yes_arm = premised_arm(at_yes, c, truths.yes_case, x) ?? return ø
-	apply_all(named_constant(BOOL_CASES), [c, lambda("_", BOOL_TERM, type), no_arm, yes_arm])
+	PremisedArms(c, premised_arm(at_no, c, truths.no_case, x) ?? return ø, premised_arm(at_yes, c, truths.yes_case, x) ?? return ø)
 }
 bool_choice_type(n: Node, condition: Node) as Term? := if kernel_value(condition) == BOOL_TERM then kernel_value(n) else ø
 # whether a typed node is a proof: its type a proposition, lying in Prop

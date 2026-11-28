@@ -15,14 +15,19 @@ use "../../kernel/typing.wap"
 use "../../kernel/compute.wap"
 use "../../kernel/equal.wap"
 use "../../kernel/recursors.wap"
+use "../../kernel/counting.wap"
+use "../../kernel/logic.wap"
+use "../../kernel/equality.wap"
 use "courses.wap"
+use "sizes.wap"
 use "terms.wap"
 
 # the function being read, the place of the parameter its recursion takes apart, and inside a course's step that
 # parameter's value `held` with the step's variable `of` standing for the value taken apart, and the parameter's
 # values at the fields of the case whose values below hold hypotheses, in the order of those values, and the checker
 # its reading computes by the count's equations with, one per recursion (kernel equating)
-class Recursion { key: text; place: int; held: Term? = ø; of: Term? = ø; fields: list<Term> = []; equating: Checker? = ø }
+# (a recursion that ends by a measure reads the calls by measured, its place 0)
+class Recursion { key: text; place: int; held: Term? = ø; of: Term? = ø; fields: list<Term> = []; equating: Checker? = ø; measured: Measured? = ø }
 # the binder of the values below the case's value, which the match rides
 BELOW_BINDER = "·below"
 # how many times a choice may take values apart before its condition decides
@@ -140,6 +145,7 @@ course_applied(typed: TypedFunction, place: int, variable: Term, domain: Term, m
 recursive_called(called: Node, arguments: list, x: Entering) as Term? := {
 	r = x.recursion ?? return ø
 	if place_key(fact_of(called, DEFINED_AT) ?? return ø) != r.key or #arguments < r.place { return ø }
+	if r.measured != ø { return measured_called(arguments, r.measured!, x) }
 	given = term_of(arguments#(r.place), x) ?? return ø
 	by_equations = equations_checker(x)
 	at = r.fields.index_where(field => equal(by_equations, given, field))
@@ -148,3 +154,53 @@ recursive_called(called: Node, arguments: list, x: Entering) as Term? := {
 	rest = (2 to at).list().fold(x.variables#(x.binders.index_of(BELOW_BINDER)), (path, step) => projection(pair, 2, path))
 	terms_applied(projection(pair, 1, projection(pair, 1, rest)), arguments.take(r.place - 1) + arguments.drop(r.place), x)
 }
+
+# A recursion that ends by a measure (notes/coc-t5c-measures.md): a function whose every call of itself has a smaller
+# measure than its own, the sum of its parameters' sizes, is the count's recursor on a bound above its measure. At
+# zero no measure is below the bound; at a successor the body is read with each call of itself the recursion one
+# below, given that the call's measure is below the bound, from the provers' proof that it is below the function's.
+# Inside it is the measure as a function of the parameters, the parameters, the recursion below, the bound and the
+# premise that the function's measure is below the bound's successor; ø where a call's proof is not found
+class Measured { measure: Term; parameters: list<Term>; below: Term; bound: Term; premise: Term }
+measured_defined(typed: TypedFunction, body: Node, x: Entering) as Term? := {
+	if x.recursion != ø or not calls_itself(body, instance_key(typed)) { return ø }
+	result = kernel_result(typed, x.by_key, x.s) ?? return ø
+	locals = typed.locals
+	sizes = sizes_known(TYPES.environment, locals)
+	if sizes is empty { return ø }
+	measure = lambdas(locals, summed(TYPES.environment, sizes))
+	start = successor_of(TYPES.environment, summed(TYPES.environment, sizes))
+	# the function at every value whose measure is below k, given that it is
+	bounded = (k: Term) => pis(locals + [entered(x.c, MEASURE_PREMISE, at_most_yes(start, k))], result)
+	count = named_constant(COUNT)
+	k = entered(x.c, "k", count)
+	zero_premise = entered(x.c, MEASURE_PREMISE, at_most_yes(start, named_constant(COUNT_ZERO)))
+	at_zero = lambdas(locals + [zero_premise], apply_all(named_constant(FALSE_ELIM, [TYPE_LEVEL]), [result, apply(named_constant(NO_IS_NOT_YES), zero_premise.variable)]))
+	bound = entered(x.c, "k", count)
+	below = entered(x.c, "below", bounded(bound.variable))
+	premise = entered(x.c, MEASURE_PREMISE, at_most_yes(start, successor_of(TYPES.environment, bound.variable)))
+	inside = reread(x, x.binders, x.variables, Recursion(instance_key(typed), 0, equating: equations_checker(x), measured: Measured(measure, variables(locals), below.variable, bound.variable, premise.variable)))
+	at_step = lambdas([bound, below] + locals + [premise], term_of(body, inside) ?? return ø)
+	recursion = apply_all(named_constant(recursor_name(COUNT), [TYPE_LEVEL]), [lambdas([k], bounded(k.variable)), at_zero, at_step, start])
+	apply_all(recursion, variables(locals) + [apply(named_constant(AT_MOST_SAME), start)])
+}
+# the binder of the premise that a measure is below a bound
+MEASURE_PREMISE = "·measured"
+# a call of the function inside its measured recursion: the recursion below the bound at the call's arguments, given
+# that the call's measure is below the bound, chained from the provers' proof that it is below the function's
+measured_called(arguments: list, m: Measured, x: Entering) as Term? := {
+	read = arguments.map(argument => term_of(argument, x))
+	if read.any(term => term == ø) { return ø }
+	given = read.map(term => term!)
+	smaller = successor_of(TYPES.environment, beta(m.measure, given))
+	whole = beta(m.measure, m.parameters)
+	falls = hole_term([], at_most_yes(smaller, whole), x, yes) ?? return ø
+	apply_all(m.below, given + [apply_all(named_constant(AT_MOST_TRANS), [smaller, whole, m.bound, falls, m.premise])])
+}
+# `at_most(m, n) == yes`
+at_most_yes(m: Term, n: Term) as Term := truths_equal(TYPES.environment, apply_all(named_constant(AT_MOST), [m, n]), TYPES.environment.literals!.yes_case)
+# whether a body calls the function of this key
+calls_itself(body: Node, key: text) as bool := nodes_in(body).any(n => match n {
+	Call(called, arguments) => fact_of(called, DEFINED_AT) != ø and place_key(fact_of(called, DEFINED_AT)!) == key
+	_ => no
+})
