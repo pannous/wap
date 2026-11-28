@@ -18,6 +18,8 @@ use "../../types/effects.wap"
 
 # the words of the effects in their order
 EFFECT_NAMES = EFFECT_ORDER.map(effect => text(effect))
+# the words a claim may name, none of the effects first
+CLAIM_WORDS = [PURE_WORD] + EFFECT_NAMES
 # each host operation's effect, by its name
 OPERATION_EFFECT = operation_effects()
 
@@ -105,6 +107,8 @@ failing_claim(own: Own, typed: TypedFunction) as text := {
 	"${text(Effect.Fail)}(${own.divisors!.unique.map(at => names#at).join(", ")})"
 }
 is_foreign(n: Node) as bool := match n { Prim(operation, arguments) => text(operation) == FOREIGN; _ => no }
+# the effects of each of these parts, one after another
+effects_in_each(parts: list, caught: bool, own: Own, x: Joining) := for part in parts { effects_in(part, caught, own, x) }
 claimed_effects(body: Node) as list<Effect> := effects_named(effect_words(fact_of(body, CLAIMED)!))
 # the effects words name, the others (Pure, a Fail(b)'s parameters) left out
 effects_named(words: list<text>) as list<Effect> := words.filter(word => EFFECT_NAMES.contains(word)).map(word => Effect(word))
@@ -135,7 +139,7 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		}
 	}
 	Call(called, arguments) => {
-		for argument in arguments { effects_in(argument, caught, own, x) }
+		effects_in_each(arguments, caught, own, x)
 		named = fact_of(called, DEFINED_AT)
 		key = if named == ø then "" else place_key(named!)
 		if not x.by_key.has(key) { return effects_in(called, caught, own, x) }
@@ -146,14 +150,14 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		own.calls += [Callee(key, caught or safe)]
 	}
 	Prim(operation, arguments) => {
-		for argument in arguments { effects_in(argument, caught, own, x) }
+		effects_in_each(arguments, caught, own, x)
 		if DIVIDING.contains(text(operation)) { if not divisor_met(arguments#2, caught, own) and not caught { own.effects += [Effect.Fail] } } else { effect_added(if text(operation) == FOREIGN then (if text(arguments#1) == WASI then Effect.IO else Effect.FFI) else OPERATION_EFFECT.get(text(operation)), caught, own) }
 	}
 	_ => {
 		if n is While { effect_added(Effect.Div, caught, own) }
 		if n is Block and globals_named(n) is not empty { effect_added(Effect.State, caught, own) }
 		match unwrapped(n) { Set(place, value) => own.assigned += [parameter_at(place, own)]; _ => ø }
-		for part in direct_parts(unwrapped(n)) { effects_in(part, caught, own, x) }
+		effects_in_each(direct_parts(unwrapped(n)), caught, own, x)
 	}
 }
 # a divisor met: whether it is a whole number other than 0 written in place, which no division fails by; else the
@@ -201,8 +205,8 @@ effects_text(found: list<Effect>, failing: text = text(Effect.Fail)) as text := 
 claim_typed(n: Node, arguments: list, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
 	written = if f.function == ø then ø else s.defines.get(place_key(f.function!))
 	if not (match written ?? Empty { Define(name, List(items, Bracket.Round, separator), body) => yes; _ => no }) { refused(n, "a misplaced effect constraint: `! ${arguments#2}` claims a function's effects, after its body, `f(x) := … ! ${arguments#2}`") }
-	strays = effect_words(arguments#2).filter(word => not (EFFECT_NAMES + [PURE_WORD]).contains(word))
-	if strays is not empty { refused(arguments#2, "! ${strays#1} names no effect: a claim names ${PURE_WORD} or ${EFFECT_NAMES.join(", ")}") }
+	strays = effect_words(arguments#2).filter(word => not CLAIM_WORDS.contains(word))
+	if strays is not empty { refused(arguments#2, "! ${strays#1} names no effect: a claim names ${CLAIM_WORDS.join(", ")}") }
 	with_fact(typed_form(arguments#1, s, f, expected), CLAIMED, arguments#2)
 }
 # each typed function whose body claims its effects, refused where it has one the claim leaves out, naming the calls
