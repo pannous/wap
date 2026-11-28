@@ -71,7 +71,7 @@ parts_as_they_are(given: Term, wanted: Term, s: TypingState) as bool := {
 # a list of a refinement where its parent's list is wanted: a copy of it, never the same list (lists change)
 copied_refinement(given: Term, wanted: Term, s: TypingState) as bool := {
 	if type_word(given) != LIST_TYPE or type_word(wanted) != LIST_TYPE or unrefined(given) == given { return no }
-	conversion(item_type(given), item_type(wanted), s) == Conversion.Same
+	conversion(item_type(given), item_type(wanted), s) == Conversion.Same or copied_refinement(item_type(given) ?? return no, item_type(wanted) ?? return no, s)
 }
 # a list of a parent where its refinement's list is wanted: a copy of it whose items are all checked
 checked_refinement(given: Term, wanted: Term, s: TypingState) as bool := {
@@ -193,8 +193,16 @@ converted(n: Node, wanted: Term, s: TypingState, at: Node, place: text) as Node 
 	if way == Conversion.Narrowed and word_by_row(n, wanted) { return with_type_of(n, wanted) }
 	if way == Conversion.Narrowed { return if narrowed_part(given, wanted, s) == ø then narrowed_call(n, wanted, at, s) else converted(narrowed_call(n, narrowed_part(given, wanted, s)!, at, s), wanted, s, at, place) }
 	if way == Conversion.Checked and error_part(given) != ø and error_part(wanted) == ø { return unfailed_call(n, given, wanted, s) }
-	if way == Conversion.Checked and unrefined(wanted) != wanted { return checked_refined(n, given, wanted, at, s) }
+	if way == Conversion.Checked and unrefined(wanted) != wanted { return checked_refined(n, given, wanted, at, s, place) }
 	if way == Conversion.Checked then with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [n]), n), wanted) else repacked(n, way, wanted, s)
+}
+# the function telling whether a value meets an item type's condition and those of the subtypes it is a subtype of
+item_holds(item: Term, n: Node, s: TypingState) as Node := {
+	name = name_once("holds(${type_text(item, yes)})", n, s)
+	parent = narrowed_type(item)!
+	rest = if subset_condition(parent) != ø then item_holds(parent, n, s) else ø
+	written_once(name, [unrefined(item)], reads => If(narrowing_test(reads#1, item, n, s), if rest == ø then True else Call(rest!, [reads#1]), False), BOOL_TERM, s)
+	name
 }
 # a list given where its refinement's parent list is wanted: a copy of a literal, any other list (a named place, a
 # call's result, which may be a list the program holds) is copied only where written, `xs as list<int>`, the type's
@@ -213,10 +221,10 @@ type_made(value: Node, wanted: Term, s: TypingState, at: Node) as Node := {
 }
 # an any's value, or a union's part, where a type with a refinement is wanted: checked as its parent, then by the
 # condition, a list's items each; a shape no condition is asked of is refused
-checked_refined(n: Node, given: Term, wanted: Term, at: Node, s: TypingState) as Node := {
+checked_refined(n: Node, given: Term, wanted: Term, at: Node, s: TypingState, place: text) as Node := {
 	cast = with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [n]), n), unrefined(wanted))
 	if checkable(wanted) { return copy_checked(cast, wanted, at, s) }
-	if subset_condition(wanted) != ø { return narrowed_call(with_type_of(cast, narrowed_type(wanted)!), wanted, at, s) }
+	if conversion(unrefined(wanted), wanted, s) in [Conversion.Narrowed, Conversion.Wrapped] { return converted(cast, wanted, s, at, place) }
 	refused(at, "a cast out of ${type_text(given)} cannot check ${type_text(wanted)} yet")
 }
 # whether a list's items have a condition, or are lists whose items do
@@ -226,7 +234,7 @@ checkable(wanted: Term) as bool := type_word(wanted) == LIST_TYPE and (subset_co
 items_hold(wanted: Term, n: Node, s: TypingState) as Node := {
 	name = name_once("holds(${type_text(wanted, yes)})", n, s)
 	item = item_type(wanted)!
-	check = if subset_condition(item) != ø then written_bound(subset_condition(item)!, s) else items_hold(item, n, s)
+	check = if subset_condition(item) != ø then item_holds(item, n, s) else items_hold(item, n, s)
 	written_once(name, [unrefined(wanted)], reads => Call(symbol("all"), [reads#1, check]), BOOL_TERM, s)
 	name
 }
