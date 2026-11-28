@@ -1215,6 +1215,83 @@ The change, in one compile:
 Lines: core about +3, pipeline 0 (moved), check.wap about +4, compiler.wap about −6. Careful path: the emission half
 moves, which the self-build uses.
 
+#### int-takes: int is natural(n) | negative(n) over the count
+
+Inside proofs `int = natural(n: ·count) | negative(n: ·count)`, with negative(n) = -(n + 1), Lean's `Int.ofNat |
+Int.negSucc`, over the hidden `·count = zero | successor(·count)`. It replaces `zero | positive | negative`. It lands as
+its own step from int-takes-on-batch aaa29124 (unbuilt, on 5285eb86), after typed-by-result, whose terms.wap stays three
+cases. The branch merges onto main with no conflict.
+
+**Step 1: the two cases (aaa29124 as it is).** kernel −2.
+- kernel/terms.wap:126 INT_CASES two names, with NATURAL_CASE and NEGATIVE_CASE (22c1211b's names, on q1).
+- kernel/counting.wap int_declared (:151-186): both cases take a count. UPS is the count of natural, DOWNS the
+  successor of negative's. MINUS and DIFFERENCE go by from_zero. int_bridge_declared's two-case split (:243-262).
+- kernel/numbers.wap:44 int_numeral: `natural(numeral(v))`, or `negative(numeral(-1 - v))` below zero.
+- kernel/show.wap:48-58: an int's case shown as its whole number.
+- kernel/integer_laws.wap zero_of; extensions/prove/linear.wap's int value read (:319) and zero_of.
+- Every int_split caller is generic over the arms (counting.wap :160-164, :258, :262; integer_laws.wap :221), so no
+  other line changes.
+
+**Step 2: int's declaration in core beside Equal.** Already so: core_environment (core/type_notation.wap:145-153)
+declares equality, the count, then int. The `·` mark hides the count from programs. 0.
+
+**Step 3: literals stay binary.** A count numeral is a kernel Numeral, and the shortcuts (counting.wap
+shortcut_fixed, fixed by theorems the kernel checks) compute ·add, ·subtract, ·multiply and the comparisons on two
+numerals at once. A recursor meets a numeral one successor at a time, never unfolded to unary. Step 1 keeps it: an int
+literal is a case over one numeral. 0.
+
+**Step 4: the words joined to the cases.** types/integers.wap gains `successor(n: int): int := n + 1` and
+`predecessor(n: int): int := n - 1`, with next and previous as their aliases (one word each, the others with a got-it
+note), beside nat's patterns by inverse (7b771f28, on q1). The kernel joins them to the case definitions with four
+theorems, each by refl on the two-case definitions (integer_laws.wap, kernel +8):
+- successor(natural(c)) == natural(·successor(c));
+- successor(negative(·zero)) == natural(·zero);
+- successor(negative(·successor(c))) == negative(c);
+- predecessor(natural(·zero)) == negative(·zero).
+The provers then rewrite at the case level without unfolding sum. types +4.
+
+**Step 5: Lean's Int theorems bind with no bridge. This is the step that conflicts with today's shape.**
+- Binding is by shape, as Nat binds today (extensions/theory/second/bindings.wap:65-75, `enum nat { zero;
+  successor(n: nat) }`). The two cases bind Int.ofNat and Int.negSucc to natural and negative, by position, not by
+  name: extensions +6, an `int_bound` beside the number binding.
+- A theorem about Lean's Int.add is about Lean's definition, though. It binds to wap's sum only if both are the same
+  term. Lean defines Int.add by its four case pairs and subNatNat. counting.wap:172-181 defines SUM, TIMES and NOT_ABOVE
+  by crossed counts (`difference(ups(a) + ups(b), downs(a) + downs(b))`). The two agree on natural+natural and
+  negative+negative by computing, but on a mixed pair only up to a proof (·add recurses on its second count, so
+  `add(zero, successor(n))` is stuck for a variable n).
+- (A) Lean's definitions in the kernel: SUM, TIMES and NOT_ABOVE by cases, with DIFFERENCE as subNatNat (37ffb139
+  already gives it Lean's argument order). Then Lean's constants bind to wap's by checked shape, with no bridge.
+  kernel about +10 there. int_bridge_declared and integer_laws.wap's proofs are re-read on the new definitions; the
+  product laws (cb5b24ae, on q1) are written over the crossed form, so their churn is the cost to measure, about +30.
+- (B) Keep the crossed definitions and add one theorem per operation stating Lean's equation. That is a bridge, which
+  the card rules out.
+- Recommendation: A, as a step of its own after steps 1-4. It goes to warp-interviewer with both costs before it is
+  built, because the card says "no bridge" and A rewrites what the kernel's int laws rest on.
+- The count's own functions bind already: ·add and ·multiply recurse on the second count as Lean's Nat.add and
+  Nat.mul do, and ·subtract is Lean's Nat.sub (the predecessor of `m - n` at `successor(n)`, counting.wap:87).
+
+**Test lines.**
+- Green after step 1: test_theory_induction "square(-x) == square(x) is proved along the cases of an integer" (two
+  arms, not three) and "twice(x) == 2 * x". Neither is a regression if it stays red: their other cause is T5c4.
+- Unchanged: test_theory_prelude_checked_wanted:8. The theory prelude's own Lean-spelled block (`int.of_nat`,
+  `int.negative_successor`, quotients_made.wap) is the second reader's, not the kernel's int.
+- Watch: test_theory_arithmetic's Proved lines and every linear-prover line (int_value's two cases); show's whole
+  numbers in every `type of` and failure message that prints an int case; test_law_runs.
+- Step 4: one test_theory_arithmetic line, `law next_after(n: int): successor(n) == n + 1` Proved by refl (wiki/
+  number.md's successor, if the page names it; if not, the words wait for a page line).
+
+**Order and cost.** Step 1 after typed-by-result lands (careful path: the kernel's int, which every compile declares).
+Steps 2-3 need nothing. Step 4 is normal path. Step 5 (A) is careful, after the interviewer. Totals: kernel −2 (1),
++8 (4), about +40 (5A); types +4; extensions +6.
+
+**What conflicts with unify-typers' current shape.**
+- main is three cases. q1 9e41e3d7 and typed-by-result b3daebfd mixed two-case names with three-case code; the
+  supervisor's ruling takes typed-by-result back to three. q1 needs the same fix before it merges with step 1.
+- The product laws on q1 (cb5b24ae) are written for the three cases (`case_of(b, 3)`, a fieldless zero). When step 1
+  lands they are re-read on two cases, so whichever of q1 and int-takes lands second carries that merge.
+- pattern-arms-t5c4 is consistently two-case (T5c4's nat recursor over int's cases), so it should land after step 1,
+  not before.
+
 #### Each step's wiki lines and the tests that pin them
 
 A builder starts from these lines red. "red" is the last recorded full run (test/reds.txt); `_wanted` files are
