@@ -1,13 +1,14 @@
-# Statements read as terms (notes/coc-plan.md 9.5): a local variable, a choice made as a statement and a loop are ways
-# to write a function, no action on the world. An assignment is a new binding of its name. A statement whose parts
-# assign names bound before it (a block, an if, a loop) gives the tuple of their values, its state, and binds them
-# again after it. A `for` is the count's recursor folding its rounds over the state; a `while` the count's recursor
-# on a bound above its measure, each round carrying the proof that the measure fell (measured_loop). A statement
-# assigning none of them, a write into a part of a value, a capture's or a global's write, and an exit from inside a
-# part give no term, and so does a function that changes a value in place or calls one that does (changes_in_place):
-# the function is then no definition the kernel holds.
-# TODO (card statement-terms) `return`, `break` and `continue` a mark in the state; a write into a part of a value the
-#   function made itself a new binding of its name
+# Statements read as terms (notes/coc-plan.md 9.5): a local variable, a choice made as a statement, a loop and an exit
+# are ways to write a function, no action on the world. A block is read in order, each statement binding what the
+# rest reads: an assignment is a let of its name, its name known equal to its value. A statement of several paths (an
+# if, a loop) before the rest of the block reads the rest once, as the join, a function of the names bound before
+# it that it assigns, and each path ends by calling it; a return gives the function's value instead. A `for` is the
+# count's recursor walking down the rounds left, each round ending by calling the walk of the rounds after it with
+# the names it gives, a continue there and then, a break the join. A `while` walks down a bound above its measure,
+# each round carrying the proof that the measure fell (measured_walk). A write into a part of a value, a capture's or
+# a global's write and a statement that gives nothing the rest reads give no term, and so does a function that
+# changes a value in place or calls one that may (changes_in_place): the function is then no definition the kernel
+# holds.
 
 use folder
 use "../stage.wap"
@@ -24,104 +25,196 @@ use "../../kernel/recursors.wap"
 use "../../kernel/equality.wap"
 use "../../kernel/logic.wap"
 use "../../kernel/compute.wap"
+use "../../kernel/equal.wap"
 use "../../types/effects.wap"
 
-# the binders of a state, of the rounds a fold has made and of the rounds below
-STATE_BINDER = "·state"
+# the binders of a join, of the rounds left and of the walk of the rounds after a round, ones no program writes
+JOIN_BINDER = "·join"
 ROUNDS_BINDER = "·rounds"
-BELOW_BINDER_ROUNDS = "·rounds_below"
+WALK_BINDER = "·walk"
 
-# the names a statement binds again, by their bindings' keys, and their types
-class State { keys: list<text>; names: list<text>; types: list<Term> }
+# where a block's paths go: the type of the value it gives, whether a return gives it (the function's own body), and
+# what a break and a continue call, ø outside a loop
+class Flow { result: Term; returns: bool; exit: ((Entering) -> Term?)? = ø; next: ((Entering) -> Term?)? = ø }
+# the names a statement assigns that are bound before it, each its binding's key, its name and its type now
+class Given { keys: list<text>; names: list<text>; types: list<Term> }
 
-# a block's statements read in order, each under the bindings the ones before it leave, then what ends it under the
-# bindings they all leave
-block_term(statements: list, x: Entering, ending: (Entering) -> Term?) as Term? := {
-	if statements is empty { return ending(x) }
-	after = (inside: Entering) => block_term(statements.drop(1), inside, ending)
+# a function's body: a block whose return gives the function's value, any other body its term
+body_term(body: Node, x: Entering, result: Term) as Term? := match unwrapped(body) {
+	Block(statements) => block_term(statements, x, Flow(result, yes), ø)
+	_ => term_of(body, x)
+}
+# A block's statements read in order, each under the bindings the ones before it leave. The block ends by calling
+# `ending` with the bindings it leaves; where there is none, its last statement gives the block's value
+block_term(statements: list, x: Entering, flow: Flow, ending: ((Entering) -> Term?)?) as Term? := {
+	if statements is empty { return if ending == ø then ø else ending!(x) }
+	rest = statements.drop(1)
 	statement = unwrapped(statements#1)
 	match statement {
-		Empty => after(x)
-		Set(place, value) => if assignable(place, x) then let_read(x, place, kernel_value(value) ?? return ø, term_of(value, x) ?? return ø, after) else ø
-		_ => {
-			state = state_of(statement, x) ?? return ø
-			state_bound(state, state_after(statement, state, x) ?? return ø, x, after)
-		}
+		Empty => block_term(rest, x, flow, ending)
+		Return(value) => if flow.returns then term_of(value, x) else ø
+		Break() => if flow.exit == ø then ø else flow.exit!(x)
+		Continue() => if flow.next == ø then ø else flow.next!(x)
+		Block(inner) => block_term(inner + rest, x, flow, ending)
+		Set(place, value) => if assignable(place, x) then let_read(x, place, kernel_value(value) ?? return ø, term_of(value, x) ?? return ø, inside => block_term(rest, inside, flow, ending)) else ø
+		If(condition, then_part, else_part) => joined(statement, rest, x, flow, ending, (inside, after) => chosen(condition, then_part, else_part, inside, flow, after))
+		For(place, count, body) => joined(statement, rest, x, flow, ending, (inside, after) => walked(statement, place, count, body, inside, flow, after))
+		While(condition, body) => joined(statement, rest, x, flow, ending, (inside, after) => measured_walk(statement, condition, body, inside, flow, after))
+		_ => if rest is empty and ending == ø then term_of(statement, x) else ø
 	}
 }
 # whether an assignment gives a name of this reading a new binding: a new local, or a parameter or local bound before;
 # a capture's or a global's is a write to a cell, State
 assignable(place: Node, x: Entering) as bool := place is Symbol and not is_bound(place, DefinitionKind.Capture) and not is_bound(place, DefinitionKind.Global) and (fact_of(place, DEFINER) != ø or binder_place(x, binding_key(place)) > 0)
 
-# the names a statement assigns that are bound before it, of their types now; ø where it assigns a part of a value, a
-# name a binding of another type (flow.wap REBOUND) or one that is no new binding, and where it assigns none of them:
-# what it does then binds nothing
-state_of(statement: Node, x: Entering) as State? := {
-	state = State([], [], [])
+# A statement of several paths and the rest of the block: the rest read once as the join, a function of the names
+# given, let-bound, and each path ending by calling it with the names as it leaves them; the last statement's paths
+# end as the block does
+joined(statement: Node, rest: list, x: Entering, flow: Flow, ending: ((Entering) -> Term?)?, split: (Entering, ((Entering) -> Term?)?) -> Term?) as Term? := {
+	if rest is empty { return split(x, ending) }
+	given = given_of(statement, x) ?? return ø
+	named = given_locals(given, x.c)
+	join = lambdas(named, block_term(rest, x.under(named, given.keys), flow, ending) ?? return ø)
+	let_keyed(x, JOIN_BINDER, JOIN_BINDER, pis(named, flow.result), join, inside => {
+		called = inside.variables#(binder_place(inside, JOIN_BINDER))
+		split(inside, at => given_to(called, given, at))
+	})
+}
+# the names a statement assigns that are bound before it, of their types now; ø where it assigns a part of a value or
+# a name a binding of another type (flow.wap REBOUND), or a name that is no new binding
+given_of(statement: Node, x: Entering) as Given? := {
+	given = Given([], [], [])
 	for part in nodes_in(statement) {
 		place = set_place(part)
 		if place != ø {
 			if not unwrapped(place!) is Symbol or fact_of(place!, REBOUND) != ø or not assignable(place!, x) { return ø }
 			key = binding_key(place!)
 			at = binder_place(x, key)
-			if at > 0 and not state.keys.contains(key) {
-				state.keys += [key]
-				state.names += [text(place!)]
-				state.types += [type_of(x.c, x.variables#at)]
+			if at > 0 and not given.keys.contains(key) {
+				given.keys += [key]
+				given.names += [text(place!)]
+				given.types += [type_of(x.c, x.variables#at)]
 			}
 		}
 	}
-	if state.keys is empty then ø else state
+	given
 }
-# the state's values after a statement, read with the state's names bound as they are before it
-state_after(statement: Node, state: State, x: Entering) as Term? := match statement {
-	Block(statements) => block_term(statements, x, inside => state_tuple(state, inside))
-	If(condition, then_part, else_part) => {
-		arms = [else_part, then_part].map(part => round_state(part, state, x))
-		held = term_of(condition, x) ?? return ø
-		if arms.any(arm => arm == ø) then ø else recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, state_type(state, x.c)), arms.map(arm => arm!) + [held])
-	}
-	For(place, count, body) => {
-		place_type = kernel_value(place) ?? return ø
-		counted = term_of(count, x) ?? return ø
-		rounds(state, x, apply(named_constant(UPS), counted), (inside, made, below, before) => counted_round(place, place_type, counted, body, state, inside, made, apply(below, before)))
-	}
-	While(condition, body) => measured_loop(statement, condition, body, state, x)
-	_ => ø
+given_locals(given: Given, c: Checker) as list<Local> := (1 to #given.keys).list().map(at => entered(c, given.names#at, given.types#at))
+# a function of the names given applied to them as a reading holds them now
+given_to(function: Term, given: Given, x: Entering) as Term := apply_all(function, given.keys.map(key => x.variables#(binder_place(x, key))))
+
+# a choice's two parts by bool's recursor, each ending as given
+chosen(condition: Node, then_part: Node, else_part: Node, x: Entering, flow: Flow, ending: ((Entering) -> Term?)?) as Term? := {
+	held = term_of(condition, x) ?? return ø
+	parts = [else_part, then_part].map(part => block_term(statements_of(unwrapped(part)), x, flow, ending))
+	if parts.any(part => part == ø) then ø else recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, flow.result), parts.map(part => part!) + [held])
 }
-# a part's statements read under the state's names, giving the state's values after them
-round_state(part: Node, state: State, x: Entering) as Term? := block_term(statements_of(unwrapped(part)), x, inside => state_tuple(state, inside))
-# a for's round after the ones made before it: the state they leave bound, the place the count of rounds made plus one,
-# known to lie between 1 and the count
-counted_round(place: Node, place_type: Term, count: Term, body: Node, state: State, x: Entering, made: Term, before: Term) as Term? := {
-	place_value = apply(TYPES.environment.integers!.natural, successor_of(TYPES.environment, made))
-	state_bound(state, before, x, inside => let_read(inside, place, place_type, place_value, at => round_state(body, state, ranged(at, place, count))))
+
+# A for, For(at, n, body): the count's recursor walking down the rounds left from ups(n), the walk a function of the
+# names the body gives. With none left it ends as the block goes on; with l + 1 left its round is at = ups(n) - l,
+# known to lie between 1 and n, and ends by calling the walk of the l after it; a break ends as the loop does
+walked(loop: Node, place: Node, count: Node, body: Node, x: Entering, flow: Flow, ending: ((Entering) -> Term?)?) as Term? := {
+	after = ending ?? return ø
+	given = given_of(loop, x) ?? return ø
+	place_type = kernel_value(place) ?? return ø
+	counted = term_of(count, x) ?? return ø
+	total = apply(named_constant(UPS), counted)
+	c = x.c
+	walk = pis(given_locals(given, c), flow.result)
+	at_none = given_locals(given, c)
+	left = entered(c, ROUNDS_BINDER, named_constant(COUNT))
+	below = entered(c, WALK_BINDER, walk)
+	round_named = given_locals(given, c)
+	round = x.under([left, below] + round_named, [ROUNDS_BINDER, WALK_BINDER] + given.keys)
+	next = (at: Entering) => given_to(below.variable, given, at)
+	place_value = apply(TYPES.environment.integers!.natural, apply_all(named_constant(SUBTRACT), [total, left.variable]))
+	ran = let_read(round, place, place_type, place_value, at => block_term(statements_of(unwrapped(body)), ranged(at, place, counted), Flow(flow.result, flow.returns, after, next), next)) ?? return ø
+	none = lambdas(at_none, after(x.under(at_none, given.keys)) ?? return ø)
+	recursor = named_constant(recursor_name(COUNT), [level_of(c, walk)])
+	given_to(apply_all(recursor, [lambda("_", named_constant(COUNT), walk), none, lambdas([left, below] + round_named, ran), total]), given, x)
 }
+# a round's reading knowing its place lies between 1 and the count, a fact no term proves (the trusted reading:
+# obliged_term)
 ranged(x: Entering, place: Node, count: Term) as Entering := {
 	e = TYPES.environment
 	at = x.variables#(binder_place(x, binding_key(place)))
 	knowing(x, [apply_all(named_constant(NOT_ABOVE), [int_numeral(e, 1), at]), apply_all(named_constant(NOT_ABOVE), [at, count])].map(fact => truth_stated(e, fact)))
 }
-# The count's recursor folding rounds over a state, at a count of rounds: at zero the state as it is, at one more than
-# k the round given k, the function of the k rounds below and the state before
-rounds(state: State, x: Entering, count: Term, round: (Entering, Term, Term, Term) -> Term?) as Term? := {
-	type = state_type(state, x.c)
-	step = pi("_", type, type)
-	made = entered(x.c, ROUNDS_BINDER, named_constant(COUNT))
-	below = entered(x.c, BELOW_BINDER_ROUNDS, step)
-	before = entered(x.c, STATE_BINDER, type)
-	inside = x.under([made, below, before], [ROUNDS_BINDER, BELOW_BINDER_ROUNDS, STATE_BINDER])
-	at_step = lambdas([made, below, before], round(inside, made.variable, below.variable, before.variable) ?? return ø)
-	unchanged = entered(x.c, STATE_BINDER, type)
-	recursor = named_constant(recursor_name(COUNT), [level_of(x.c, step)])
-	apply(apply_all(recursor, [lambda("_", named_constant(COUNT), step), lambdas([unchanged], unchanged.variable), at_step, count]), state_tuple(state, x))
+
+# A while as measured_defined reads a recursion (coc-plan 9.3): the count's recursor on a bound k, the walk a function
+# of the names the body gives and of the proof that their measure is below k. Where the condition fails it ends as
+# the block goes on. Where it holds: at zero there is no such round, the measure at least 0 and below 0; at k + 1 the
+# body runs, and its end, or a continue, calls the walk below k with the proof that the measure fell below k. The
+# provers show each, so a measure loops.wap reads wrongly gives no term, never a wrong one. The walk starts at one
+# more than the measure's whole part (ups)
+measured_walk(loop: Node, condition: Node, body: Node, x: Entering, flow: Flow, ending: ((Entering) -> Term?)?) as Term? := {
+	after = ending ?? return ø
+	if loop_measured(loop, x.by_key, x.s) == ø { return ø }
+	given = given_of(loop, x) ?? return ø
+	c = x.c
+	named = given_locals(given, c)
+	inner = x.under(named, given.keys)
+	held = term_of(condition, inner) ?? return ø
+	m = Walking(given, named, held, counted_measure(c, held) ?? return ø, body, flow, after, c)
+	k = entered(c, ROUNDS_BINDER, named_constant(COUNT))
+	below = entered(c, WALK_BINDER, bounded(m, k.variable))
+	at_zero = walk_round(m, named_constant(COUNT_ZERO), ø, x) ?? return ø
+	at_step = lambdas([k, below], walk_round(m, successor_of(TYPES.environment, k.variable), below.variable, x.under([k, below], [ROUNDS_BINDER, WALK_BINDER])) ?? return ø)
+	now = given.keys.map(key => x.variables#(binder_place(x, key)))
+	start = successor_of(TYPES.environment, apply(named_constant(UPS), measure_at(m, now)))
+	started = hole_term([], measure_below(m, now, start), x, yes) ?? return ø
+	recursor = named_constant(recursor_name(COUNT), [level_of(c, bounded(m, k.variable))])
+	apply_all(recursor, [lambdas([k], bounded(m, k.variable)), at_zero, at_step, start] + now + [started])
 }
+# a while read over the names it gives as variables: its condition and measure, and where it goes
+class Walking { given: Given; named: list<Local>; held: Term; measure: Term; body: Node; flow: Flow; after: (Entering) -> Term?; c: Checker }
+# a term of the given names taken at these values of them
+at_values(t: Term, m: Walking, values: list<Term>) as Term := (1 to #m.named).list().fold(t, (term, at) => replaced_by(term, variable_id(m.named#at.variable), values#at))
+measure_at(m: Walking, values: list<Term>) as Term := at_values(m.measure, m, values)
+# `measure < bound`, the bound a count read as an int
+measure_below(m: Walking, values: list<Term>, bound: Term) as Term := truth_stated(TYPES.environment, apply_all(named_constant(BELOW), [measure_at(m, values), apply(TYPES.environment.integers!.natural, bound)]))
+# the walk at a bound: a function of the names and of the proof that their measure is below the bound
+bounded(m: Walking, bound: Term) as Term := pis(m.named + [entered(m.c, MEASURE_PREMISE, measure_below(m, variables(m.named), bound))], m.flow.result)
+# a round at a bound, of the names and the premise: where the condition fails it ends as the loop does; where it
+# holds, at zero the provers' proof that no such round is, else the body, ending by the walk below
+walk_round(m: Walking, bound: Term, below: Term?, x: Entering) as Term? := {
+	e = TYPES.environment
+	c = m.c
+	named = given_locals(m.given, c)
+	values = variables(named)
+	premise = entered(c, MEASURE_PREMISE, measure_below(m, values, bound))
+	inside = x.under(named + [premise], m.given.keys + [MEASURE_PREMISE])
+	condition = at_values(m.held, m, values)
+	holds = entered(c, CASE_PREMISE, truths_equal(e, condition, e.literals!.yes_case))
+	fails = entered(c, CASE_PREMISE, truths_equal(e, condition, e.literals!.no_case))
+	running = inside.under([holds], [CASE_PREMISE])
+	at_yes = if below == ø then {
+		absurd = hole_term([], truths_equal(e, e.literals!.no_case, e.literals!.yes_case), running, yes) ?? return ø
+		apply_all(named_constant(FALSE_ELIM, [level_of(c, m.flow.result)]), [m.flow.result, apply(named_constant(NO_IS_NOT_YES), absurd)])
+	} else {
+		next = (at: Entering) => fallen(m, below!, predecessor_of(bound), at)
+		block_term(statements_of(unwrapped(m.body)), running, Flow(m.flow.result, m.flow.returns, m.after, next), next) ?? return ø
+	}
+	at_no = m.after(inside.under([fails], [CASE_PREMISE])) ?? return ø
+	b = entered(c, "b", BOOL_TERM)
+	motive = lambdas([b], pis([entered(c, CASE_PREMISE, truths_equal(e, condition, b.variable))], m.flow.result))
+	lambdas(named + [premise], apply(recursor_applied(BOOL_TERM, motive, [lambdas([fails], at_no), lambdas([holds], at_yes), condition]), reflexive(e, TYPE_LEVEL, BOOL_TERM, condition)))
+}
+# the walk below a bound called with the names as a round leaves them, and the provers' proof that their measure fell
+# below what is left
+fallen(m: Walking, below: Term, left: Term, x: Entering) as Term? := {
+	now = m.given.keys.map(key => x.variables#(binder_place(x, key)))
+	proof = hole_term([], measure_below(m, now, left), x, yes) ?? return ø
+	apply_all(below, now + [proof])
+}
+# the count a successor was made of, k of k + 1
+predecessor_of(bound: Term) as Term := arguments(bound)#1
 
 # A value checked against a condition when the program runs, `narrowed(i, message, …)` (dispatch.wap narrowed_call),
 # read as the value itself where the provers show the condition here from what is known here (wiki/type.md "Proved or
 # checked"): the lets' values, a round's range, a while's condition, the parameters' conditions. Its obligations are
-# then proved, and the run checks nothing; else the call is read as it is. The trusted reading is how the known facts
-# are made (let_keyed, ranged, measured_loop), each over the binders' variables where it holds, the way loops.wap's
+# then proved, and the run checks nothing; else the call is read as it is. The trusted reading is how the facts no
+# term proves are made (ranged), each over the binders' variables where it holds, the way loops.wap's
 # round is read: true only where nothing changes in place, so a function that may (changes_in_place) and the
 # program's own statements prove nothing here, `n = #xs; xs.pop(); at(xs, n)` keeps its check
 obliged_term(n: Node, arguments: list, x: Entering) as Term? := {
@@ -160,90 +253,3 @@ changes_in_place(key: text, x: Joining, seen: list<text>) as bool := {
 	own = own_of(key, x)
 	own.in_place or (x.found.get(key) ?? []).contains(Effect.State) or nodes_in(body_of(x.by_key[key])).any(value_called) or own.calls.any(call => changes_in_place(call.key, x, seen + [key]))
 }
-
-# A while as measured_defined reads a recursion (coc-plan 9.3): the count's recursor on a bound k, its motive the loop
-# from a state whose measure is below k, the proof of that its premise. At zero a state where the condition holds is
-# none: its measure is at least 0 and below 0. At k + 1 a state where it holds runs the body, and the rounds below
-# take the state after it, whose measure fell below k. The provers show each, so a measure loops.wap reads wrongly
-# gives no term, never a wrong one. The loop starts at one more than the measure's whole part (ups). The condition,
-# the body and the measure are read once over the state's names as variables, then taken at each state
-measured_loop(loop: Node, condition: Node, body: Node, state: State, x: Entering) as Term? := {
-	if loop_measured(loop, x.by_key, x.s) == ø { return ø }
-	c = x.c
-	named = (1 to #state.keys).list().map(at => entered(c, state.names#at, state.types#at))
-	inner = x.under(named, state.keys)
-	held = term_of(condition, inner) ?? return ø
-	measure = counted_measure(c, held) ?? return ø
-	# a round's body runs where the condition holds
-	ran = round_state(body, state, knowing(inner, [truth_stated(TYPES.environment, held)])) ?? return ø
-	m = Measuring(state, named, held, measure, ran)
-	k = entered(c, ROUNDS_BINDER, named_constant(COUNT))
-	start = successor_of(TYPES.environment, apply(named_constant(UPS), measure_at(m, state_tuple(state, x))))
-	below = entered(c, BELOW_BINDER_ROUNDS, bounded(m, k.variable, c))
-	at_zero = loop_round(m, named_constant(COUNT_ZERO), ø, x) ?? return ø
-	at_step = lambdas([k, below], loop_round(m, successor_of(TYPES.environment, k.variable), below.variable, x.under([k, below], [ROUNDS_BINDER, BELOW_BINDER_ROUNDS])) ?? return ø)
-	recursor = named_constant(recursor_name(COUNT), [level_of(c, bounded(m, k.variable, c))])
-	started = hole_term([], measure_below(m, state_tuple(state, x), start), x, yes) ?? return ø
-	apply_all(recursor, [lambdas([k], bounded(m, k.variable, c)), at_zero, at_step, start, state_tuple(state, x), started])
-}
-# a while read over its state's names as variables: the condition, the measure and the state after a round
-class Measuring { state: State; named: list<Local>; held: Term; measure: Term; ran: Term }
-# a term of the state's names taken at a value of the state
-at_state(t: Term, m: Measuring, value: Term) as Term := (1 to #m.named).list().fold(t, (term, at) => replaced_by(term, variable_id(m.named#at.variable), parts_of(#m.named, value)#at))
-measure_at(m: Measuring, value: Term) as Term := at_state(m.measure, m, value)
-# `measure(s) < bound`, the bound a count read as an int
-measure_below(m: Measuring, value: Term, bound: Term) as Term := truth_stated(TYPES.environment, apply_all(named_constant(BELOW), [measure_at(m, value), apply(TYPES.environment.integers!.natural, bound)]))
-# the motive at a bound: from every state whose measure is below it, the state the loop leaves
-bounded(m: Measuring, bound: Term, c: Checker) as Term := {
-	type = state_type(m.state, c)
-	before = entered(c, STATE_BINDER, type)
-	pis([before, entered(c, MEASURE_PREMISE, measure_below(m, before.variable, bound))], type)
-}
-# a round at a bound, of a state and its premise: where the condition holds, the rounds below after the body given
-# the proof that its measure fell below what is left, or at zero the proof that there is no such state; else the
-# state as it is
-loop_round(m: Measuring, bound: Term, below: Term?, x: Entering) as Term? := {
-	e = TYPES.environment
-	c = x.c
-	type = state_type(m.state, c)
-	before = entered(c, STATE_BINDER, type)
-	premise = entered(c, MEASURE_PREMISE, measure_below(m, before.variable, bound))
-	inside = x.under([before, premise], [STATE_BINDER, MEASURE_PREMISE])
-	condition = at_state(m.held, m, before.variable)
-	holds = entered(c, CASE_PREMISE, truths_equal(e, condition, e.literals!.yes_case))
-	fails = entered(c, CASE_PREMISE, truths_equal(e, condition, e.literals!.no_case))
-	proving = inside.under([holds], [CASE_PREMISE])
-	after = at_state(m.ran, m, before.variable)
-	at_yes = if below == ø then {
-		absurd = hole_term([], truths_equal(e, e.literals!.no_case, e.literals!.yes_case), proving, yes) ?? return ø
-		apply_all(named_constant(FALSE_ELIM, [level_of(c, type)]), [type, apply(named_constant(NO_IS_NOT_YES), absurd)])
-	} else {
-		left = predecessor_of(bound)
-		fell = hole_term([], measure_below(m, after, left), proving, yes) ?? return ø
-		apply_all(below!, [after, fell])
-	}
-	b = entered(c, "b", BOOL_TERM)
-	motive = lambdas([b], pis([entered(c, CASE_PREMISE, truths_equal(e, condition, b.variable))], type))
-	chosen = apply(recursor_applied(BOOL_TERM, motive, [lambdas([fails], before.variable), lambdas([holds], at_yes), condition]), reflexive(e, TYPE_LEVEL, BOOL_TERM, condition))
-	lambdas([before, premise], chosen)
-}
-# the count a successor was made of, k of k + 1
-predecessor_of(bound: Term) as Term := arguments(bound)#1
-
-# The state as one value: its names' values paired from the right, one name's its own
-state_type(state: State, c: Checker) as Term := types_paired(state.types, c)
-state_tuple(state: State, x: Entering) as Term := values_paired(state.types, state.keys.map(key => x.variables#(binder_place(x, key))), x.c)
-# a state's names bound again to their parts of a value of it: the value let once, each name its part
-state_bound(state: State, value: Term, x: Entering, after: (Entering) -> Term?) as Term? := let_keyed(x, STATE_BINDER, STATE_BINDER, state_type(state, x.c), value, inside => parts_bound(state, 1, parts_of(#state.keys, inside.variables.last), inside, after))
-parts_bound(state: State, at: int, parts: list<Term>, x: Entering, after: (Entering) -> Term?) as Term? := if at > #state.keys then after(x) else let_keyed(x, state.names#at, state.keys#at, state.types#at, parts#at, inside => parts_bound(state, at + 1, parts, inside, after))
-types_paired(types: list<Term>, c: Checker) as Term := if #types == 1 then types#1 else apply_all(pair_at(types#1, types_paired(types.drop(1), c), c, products_of().pair), [types#1, types_paired(types.drop(1), c)])
-values_paired(types: list<Term>, values: list<Term>, c: Checker) as Term := {
-	if #values == 1 { return values#1 }
-	rest = types_paired(types.drop(1), c)
-	apply_all(pair_at(types#1, rest, c, products_of().intro), [types#1, rest, values#1, values_paired(types.drop(1), values.drop(1), c)])
-}
-# the parts of a value of a state of this many names: the pair's first, then the parts of its second
-parts_of(count: int, value: Term) as list<Term> := if count == 1 then [value] else [projection(products_of().pair, 1, value)] + parts_of(count - 1, projection(products_of().pair, 2, value))
-# the pair's type or its case at the levels of two types
-pair_at(first: Term, second: Term, c: Checker, made: Term) as Term := at_levels(made, [level_of(c, first), level_of(c, second)])
-products_of() as Products := TYPES.environment.products ?? raise "a state is a pair, and this environment holds no products"

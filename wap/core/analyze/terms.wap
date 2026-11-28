@@ -324,13 +324,13 @@ definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 		stood_in = typed.result == STATEMENT_TERM
 		proof = if stood_in then with_type_of(body, wanted) else body
 		if not stood_in and not equal(inside.c, kernel_value(proof) ?? return ø, wanted) { return ø }
-		lambdas(typed.locals, term_of(proof, inside) ?? course_defined(typed, proof, inside) ?? measured_defined(typed, proof, inside) ?? return ø)
+		lambdas(typed.locals, body_term(proof, inside, wanted) ?? course_defined(typed, proof, inside) ?? measured_defined(typed, proof, inside) ?? return ø)
 	}
 	_ => ø
 }
 # what a body is read in, locally nameless (kernel/terms.wap): the binders around it by their keys, the innermost last,
 # each the free variable of the checker c it was entered with; a term read under them is closed over them with `lambdas`
-# (known: facts true where it reads that no term proves, a let's name equal to its value, a round's place between 1
+# (known: facts true where it reads that no term proves, a round's place between 1
 # and its count: an obligation met there is proved under them, statements.wap obliged_term)
 class Entering { binders: list<text>; variables: list<Term>; c: Checker; by_key: map<text, TypedFunction>; s: TypingState; recursion: Recursion? = ø; known: list<Local> = [] }
 # the same reading under more binders, entered as locals under these keys
@@ -350,9 +350,15 @@ knowing(x: Entering, facts: list<Term>) as Entering := {
 # binding the name holds, so an assignment to a name bound before binds it again (statements.wap)
 let_read(x: Entering, name: Node, type: Term, given: Term, body: (Entering) -> Term?) as Term? := let_keyed(x, text(name), binding_key(name), type, given, body)
 let_keyed(x: Entering, binder: text, key: text, type: Term, given: Term, body: (Entering) -> Term?) as Term? := {
+	# the name known equal to its value while the body is read, proved by refl once the let closes: inside the let the
+	# name is its value
+	e = TYPES.environment
+	level = level_of(x.c, type)
 	local = entered(x.c, binder, type)
-	read = body(knowing(x.under([local], [key]), [equated(TYPES.environment, level_of(x.c, type), type, local.variable, given)])) ?? return ø
-	let_in(binder, type, given, abstracted(read, variable_id(local.variable)))
+	fact = entered(x.c, NO_BINDER, equated(e, level, type, local.variable, given))
+	read = body(x.under([local, fact], [key, NO_BINDER])) ?? return ø
+	proved = replaced_by(read, variable_id(fact.variable), reflexive(e, level, type, local.variable))
+	let_in(binder, type, given, abstracted(proved, variable_id(local.variable)))
 }
 # the key of the binding a name holds where it stands: its definer's, itself where it is the definer
 binding_key(name: Node) as text := place_key(definer_of(name) ?? name)
@@ -376,7 +382,7 @@ term_of(n: Node, x: Entering) as Term? := match n {
 	Prim(operation, arguments) => row_term(n, text(operation), arguments, x)
 	If(condition, then_part, else_part) => choice_term(n, condition, then_part, else_part, x)
 	Case(subject, arms) => choice_term(n, subject, truth_arm(arms, yes), truth_arm(arms, no), x) ?? match_term(n, subject, arms, x)
-	Block(statements) => if has_fact(n, HELD_ARGUMENTS) then term_of(held_call(n), x) else lets_term(statements, x)
+	Block(statements) => if has_fact(n, HELD_ARGUMENTS) then term_of(held_call(n), x) else block_term(statements, x, Flow(kernel_value(n) ?? return ø, no), ø)
 	_ => ø
 }
 # a list literal, its items folded into list's cases as a text's code points are: [1, 2] is item(1, item(2, empty))
@@ -723,8 +729,6 @@ premised_arm(arm: Node, condition: Term, case: Term, x: Entering) as Term? := {
 	lambdas([premise], term_of(arm, x.under([premise], [CASE_PREMISE])) ?? return ø)
 }
 truth_arm(arms: list, held: bool) as Node? := arm_result(arms.find(arm => if held then arm_pattern(arm) is True else arm_pattern(arm) is False) ?? return ø)
-# a block's statements read in order (statements.wap), ending in the value its last one gives
-lets_term(statements: list, x: Entering) as Term? := if statements is empty then ø else block_term(statements.take(#statements - 1), x, inside => term_of(statements.last, inside))
 terms_applied(function: Term, arguments: list, x: Entering) as Term? := {
 	terms = arguments.map(argument => term_of(argument, x))
 	if terms.any(term => term == ø) then ø else apply_all(function, terms.map(term => term!))
