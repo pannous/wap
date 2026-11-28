@@ -32,9 +32,9 @@ TAG_RANGE = 2147483647
 text_type(m: WasmModule) as int := added_type(m, array_type(field_type(I8, MUTABLE)))
 # the wasm type of a text's value: a reference to its bytes, null where it is missing; or the address of its bytes in
 # the memory
-text_layout(m: WasmModule) as list<int> := memory_layout(m, TEXT_TYPE) ?? nullable(text_type(m))
-# the layout of a type word's values in the memory, ø where they are GC values
-memory_layout(m: WasmModule, word: text) as list<int>? := if m.memory == ø then ø else m.memory!.layouts.get(word)
+text_layout(m: WasmModule) as list<int> := given_layout(m, TEXT_TYPE) ?? nullable(text_type(m))
+# the layout the build gives a type word's values, ø where they are GC values
+given_layout(m: WasmModule, word: text) as list<int>? := m.strategy.layouts.get(word)
 
 # the code of a literal, or ø for a node that is none
 literal(n: Node, m: WasmModule) as Code? := match n {
@@ -47,7 +47,7 @@ constant(n: Node, m: WasmModule) as Code? := match n {
 	Char(value) => Code(I32, i32_const(ord(value)))
 	True => Code(I32, i32_const(1))
 	False => Code(I32, i32_const(0))
-	Empty => missing_value(m)
+	Empty => m.strategy.missing
 	_ => ø
 }
 
@@ -58,27 +58,18 @@ constant(n: Node, m: WasmModule) as Code? := match n {
 # (a type held as one of its arguments is laid out as that argument: core/type_notation.wap held_part)
 layout_of(written: Term, m: WasmModule, records: Records, at: Node? = ø) as list<int>? := {
 	type_name = unrefined(written)
-	if held_part(type_name) != ø then layout_of(held_part(type_name)!, m, records, at) else memory_layout(m, type_word(type_name)) ?? memory_kept(type_name, at, m, if (is_word(type_name) or WORD_LAYOUTS.has(type_word(type_name)) or universe_level(type_name) != ø) and function_value_key(type_name) == ø then word_layout(narrowed_type(type_name) ?? subtype_base(type_name, records) ?? type_name, m, records) else compound_layout(type_name, at, m, records))
+	if held_part(type_name) != ø then layout_of(held_part(type_name)!, m, records, at) else given_layout(m, type_word(type_name)) ?? (m.strategy.kept)(type_name, at, if (is_word(type_name) or WORD_LAYOUTS.has(type_word(type_name)) or universe_level(type_name) != ø) and function_value_key(type_name) == ø then word_layout(narrowed_type(type_name) ?? subtype_base(type_name, records) ?? type_name, m, records) else (m.strategy.compound_layout)(type_name, at, m, records))
 }
 word_layout(type: Term, m: WasmModule, records: Records) as list<int>? := {
 	name = type_text(type)
 	record = record_named(records, type)
 	if WORD_LAYOUTS.has(type_word(type)) then WORD_LAYOUTS[type_word(type)] else if name == TEXT_TYPE or universe_level(type) != ø then text_layout(m) else if name == LIST_TYPE then nullable(list_base(m)) else if name == MAP_TYPE then nullable(map_base(m)) else if name == ENUM_TYPE then enum_layout(m) else if record == ø then ø else if plain_enums(m) and cases_of(record!).all(case => case_fields(case) is empty) then I32 else nullable(struct_of(record, m, records))
 }
-# a compound type the memory lays out none of is refused whole, before its parts, which have no place of their own;
-# a function value in the memory is the address of what it captures, or of its function's table slot beside them;
-# an optional the address of its value or of the box holding it, 0 its ø
-compound_layout(type: Term, at: Node?, m: WasmModule, records: Records) as list<int>? := if m.memory != ø then (if function_value_parts(type) != ø or function_parts(type) != ø or base_of_optional(type) != ø then I32 else memory_refused(type, at)) else {
+# a compound type's GC layout: a reference to its struct or array, or its optional's
+gc_compound_layout(type: Term, at: Node?, m: WasmModule, records: Records) as list<int>? := {
 	index = list_index(type, m, records) ?? function_value_index(type, m, records) ?? signature_value_index(type, m, records) ?? map_index(type, m, records)
 	# a generic record's value, `Stack<int>`, is laid out as its record, its letters' fields any values
 	if index == ø then optional_layout(type, m, records) ?? (if declared_by(type) != ø then word_layout(head_of(type), m, records) else ø) else nullable(index)
-}
-# a layout as a build keeping its values in the memory takes it: a number's; any other is refused, as its wasm2c takes no GC type
-memory_kept(type: Term, at: Node?, m: WasmModule, layout: list<int>?) as list<int>? := if m.memory == ø or layout == ø or layout in PLAIN_VALUES then layout else memory_refused(type, at)
-memory_refused(type: Term, at: Node?) as list<int> := {
-	why = "a build keeping values in the memory has no layout for ${type_text(type)}"
-	if at != ø { refused(at!, why) }
-	raise why
 }
 
 # The GC type of a map, `map<text, int>`: a struct of three lists, its keys and its values of one count and its slots (lists.wap); ø
@@ -101,10 +92,6 @@ optional_layout(type: Term, m: WasmModule, records: Records) as list<int>? := {
 	held = known_layout(base, m, records)
 	if held in PLAIN_VALUES then nullable(box_index(m, type_text(base))) else held
 }
-# an optional's ø: GC's null, or the memory's address 0
-missing_value(m: WasmModule) as Code := if m.memory != ø then Code(I32, i32_const(0)) else Code(ANYREF, null_of(ANY_HEAP))
-# the test of an optional on the stack for its ø
-missing_tested(m: WasmModule) as list<int> := if m.memory != ø then I32_EQZ else REF_IS_NULL
 # The box of a plain value of a type, `int`: a struct of the value, one type for each type word, so a value in an `any`
 # is told apart by its box at run time
 box_index(m: WasmModule, word: text) as int := plain_typed(m, word, layout => struct_type([field_type(layout, IMMUTABLE)]))
@@ -143,9 +130,7 @@ signature_struct(m: WasmModule) as int := function_base(m) + 1
 # record's place key is, its group's types at #m.types in order (added_group), the signature value's next to it
 function_base(m: WasmModule) as int := type_kept(m, FUNCTION_WORD, () => added_group(m, [open_type([], struct_type([])), open_type([#m.types], struct_type([field_type(I32, IMMUTABLE), field_type(ANYREF, IMMUTABLE)]))]))
 # the function a value of a signature refers to: what it captures, then the signature's parameters
-signature_function_index(parts: FunctionType, m: WasmModule, records: Records) as int := added_type(m, function_type([captures_layout(m)] + signature_parameters(parts, m, records), signature_results(parts, m, records)))
-# what a value of a signature captures: any struct, or in the memory its address
-captures_layout(m: WasmModule) as list<int> := if m.memory != ø then I32 else ANYREF
+signature_function_index(parts: FunctionType, m: WasmModule, records: Records) as int := added_type(m, function_type([m.strategy.captures_layout] + signature_parameters(parts, m, records), signature_results(parts, m, records)))
 signature_parameters(parts: FunctionType, m: WasmModule, records: Records) as list<list<int>> := parts.parameters.map(parameter => known_layout(parameter, m, records))
 signature_results(parts: FunctionType, m: WasmModule, records: Records) as list<list<int>> := if parts.result == EMPTY_TERM then [] else [known_layout(parts.result, m, records)]
 # a type's layout, refused when the emitter has none for it yet
@@ -204,9 +189,9 @@ class_tag(record: Record) as int := text(record_declared(record)).bytes.fold(0, 
 # the GC type every enum's extends: its case's tag, which the instructions of `tagged` read. In the memory (a native
 # build) a case of no fields is its tag alone, an i32, as a class's instance is its address
 enum_base(m: WasmModule) as int := type_kept(m, ENUM_TYPE, () => added_type(m, open_type([], struct_type([TAG_FIELD]))))
-enum_layout(m: WasmModule) as list<int> := memory_layout(m, ENUM_TYPE) ?? nullable(enum_base(m))
+enum_layout(m: WasmModule) as list<int> := given_layout(m, ENUM_TYPE) ?? nullable(enum_base(m))
 # whether an enum's case of no fields is its tag alone
-plain_enums(m: WasmModule) as bool := memory_layout(m, ENUM_TYPE) != ø
+plain_enums(m: WasmModule) as bool := given_layout(m, ENUM_TYPE) != ø
 tagged(m: WasmModule) as list<int> := if plain_enums(m) then [] else instruction(STRUCT_GET, [enum_base(m), 0])
 # the field `at` of a case's own fields, after its record's, of the value on the stack cast to the case's struct
 case_field_read(cast: int, record: Record, at: int) as list<int> := heap_instruction(REF_CAST_NULL, cast) + instruction(STRUCT_GET, [cast, at + #fields_of(record)])
@@ -225,11 +210,10 @@ case_struct_of(record: Record, case: Node, m: WasmModule, records: Records) as i
 
 # a text's bytes kept in a passive segment, copied into a new array where the program meets it
 # a text literal as a constant expression, its bytes given one by one, ø for any other node
-fixed_text(n: Node, m: WasmModule) as Code? := match n { Text(t) => if m.memory != ø then memory_text(t, m) else Code(text_layout(m), t.bytes.flat_map(b => i32_const(b)) + instruction(ARRAY_NEW_FIXED, [text_type(m), byte_count(t)])); _ => ø }
-text_literal(t: text, m: WasmModule) as Code := {
-	if m.memory != ø { return memory_text(t, m) }
+fixed_text(n: Node, m: WasmModule) as Code? := match n { Text(t) => (m.strategy.fixed_text)(t, m); _ => ø }
+gc_fixed_text(t: text, m: WasmModule) as Code := Code(text_layout(m), t.bytes.flat_map(b => i32_const(b)) + instruction(ARRAY_NEW_FIXED, [text_type(m), byte_count(t)]))
+text_literal(t: text, m: WasmModule) as Code := (m.strategy.text_literal)(t, m)
+gc_text_literal(t: text, m: WasmModule) as Code := {
 	type = text_type(m)
 	Code(nullable(type), i32_const(0) + i32_const(byte_count(t)) + instruction(ARRAY_NEW_DATA, [type, added_text(m, t.bytes)]))
 }
-# a text in the module's data, its address: its bytes as the memory lays a text out
-memory_text(t: text, m: WasmModule) as Code := Code(I32, i32_const(data_placed(m, (m.memory!.text_bytes)(t))))

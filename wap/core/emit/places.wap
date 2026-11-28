@@ -9,9 +9,6 @@ use "../bindings.wap"
 use "../type_notation.wap"
 use "../../kernel/forms.wap"
 
-# the alignment of a struct with no fields
-SMALLEST_ALIGNMENT = 1
-
 # the layout of a form's value as typing gives it: none for a form typing left without a value, NEVER for one that
 # never finishes
 typed_layout(n: Node, p: Emission) as list<int> := if fact_of(n, TYPE) == ø then [] else result_layout(type_of(n), p, n)
@@ -25,31 +22,13 @@ class Place { reached: list<int>; read: list<int>; written: list<int>; held: lis
 place_of(subject: Node, key: Node, p: Emission, f: Frame) as Place := {
 	record = record_named(p.records, type_of(subject)) ?? refused(subject, "a part reaching the emitter is a record's field: typing writes an item as a call of #")
 	field = index_where(fields_of(record), field => same_name(field, key))
-	if p.m.memory != ø { return field_place(code(subject, p, f).instructions, record_layouts(record, p), field) }
-	at = [struct_of(record, p.m, p.records), field]
-	Place(code(subject, p, f).instructions, instruction(STRUCT_GET, at), instruction(STRUCT_SET, at), record_layouts(record, p)#field)
+	(p.m.strategy.field)(code(subject, p, f).instructions, () => record_layouts(record, p), field, () => [struct_of(record, p.m, p.records), field])
 }
-# A record's instance in the memory is laid out as C lays out a struct, so C reads it as one: its fields in its
-# record's order, each at the next multiple of its own width, the whole a multiple of its widest field's
-memory_place(reached: list<int>, offset: int, type: list<int>) as Place := Place(reached + i32_const(offset) + I32_ADD, item_loaded(type).code, item_stored(type).code, type)
-# the place of a field, from 1, of a struct of these layouts at the address reached, and its value read
-field_place(reached: list<int>, layouts: list<list<int>>, at: int) as Place := memory_place(reached, field_offset(layouts, at), layouts#at)
-field_read(reached: list<int>, layouts: list<list<int>>, at: int) as list<int> := read_code(layouts#at, field_place(reached, layouts, at)).instructions
 record_layouts(record: Record, p: Emission) as list<list<int>> := fields_of(record).map(field => known_layout(field_declared(field, record), p))
-aligned(bytes: int, width: int where it > 0) as int := (bytes + width - 1) ÷ width * width
-fields_end(layouts: list<list<int>>) as int := layouts.fold(0, (end, layout) => aligned(end, layout_bytes(layout)) + layout_bytes(layout))
-field_offset(layouts: list<list<int>>, field: int) as int := aligned(fields_end(layouts.take(field - 1)), layout_bytes(layouts#field))
-# a struct aligned as its widest field, one with no fields at 1
-struct_bytes(layouts: list<list<int>>) as int := aligned(fields_end(layouts), max([SMALLEST_ALIGNMENT] + layouts.map(layout_bytes)))
-# a new struct, its fields' values on the stack: in the memory, by the helper storing them, one for each layout of
-# fields, an instance of no fields taking no bytes but an address past 0, which is ø; else GC's struct of that type
-struct_made(layouts: list<list<int>>, gc_struct: () -> int, p: Emission) as list<int> := if p.m.memory != ø then memory_struct_made(layouts, p) else instruction(STRUCT_NEW, [gc_struct()])
-memory_struct_made(layouts: list<list<int>>, p: Emission) as list<int> := if layouts is empty then i32_const(0) + helper_call(p, MEMORY_TAKEN, memory_taking_function) else helper_call(p, "memory struct ${layouts}", q => memory_struct_function(layouts, q))
-memory_struct_function(layouts: list<list<int>>, p: Emission) as int := {
-	address = #layouts
-	stored = (1 to #layouts).flat_map(at => written_code(field_place(local_get(address), layouts, at), Code(layouts#at, local_get(at - 1))).instructions)
-	added_function(p.m, layouts, [I32], [I32], i32_const(struct_bytes(layouts)) + helper_call(p, MEMORY_TAKEN, memory_taking_function) + local_set(address) + stored + local_get(address))
-}
+# the value of a field, from 1, of a struct of these layouts at the address reached, GC's by its struct and index
+field_read(reached: list<int>, layouts: list<list<int>>, at: int, gc_at: () -> list<int>, p: Emission) as list<int> := read_code(layouts#at, (p.m.strategy.field)(reached, () => layouts, at, gc_at)).instructions
+# a new struct, its fields' values on the stack, as the build makes one: GC's struct of that type
+struct_made(layouts: () -> list<list<int>>, gc_struct: () -> int, p: Emission) as list<int> := (p.m.strategy.struct_made)(layouts, gc_struct, p)
 read_code(type: list<int>, place: Place) as Code := Code(type, place.reached + place.read)
 written_code(place: Place, value: Code) as Code := Code([], place.reached + value.instructions + place.written)
 
@@ -63,8 +42,7 @@ map_code(form: Node, entries: list<Node>, p: Emission, f: Frame) as Code := {
 # An instance, `Point{x: 1, y: 2}`: its fields' values in the order its record writes them, a new struct
 instance_code(form: Node, record: Record, items: list<Node>, p: Emission, f: Frame) as Code := {
 	filled = fields_of(record).flat_map(field => field_filled(field, record, given_value(items.filter(item => same_name(item, field))#1), p, f))
-	if p.m.memory != ø { return Code(layout(form, p), filled + memory_struct_made(record_layouts(record, p), p)) }
-	Code(layout(form, p), i32_const(class_tag(record)) + filled + instruction(STRUCT_NEW, [struct_of(record, p.m, p.records)]))
+	Code(layout(form, p), (p.m.strategy.tagged)(class_tag(record)) + filled + struct_made(() => record_layouts(record, p), () => struct_of(record, p.m, p.records), p))
 }
 # the instructions of a value given to a field, made to fit the field's type
 field_filled(field: Node, record: Record, value: Node, p: Emission, f: Frame) as list<int> := {
