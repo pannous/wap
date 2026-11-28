@@ -88,7 +88,7 @@ primitive_code(form: Node, operation: Node, arguments: list<Code>, p: Emission) 
 	if MAP_FIELDS.has(name) { return ending(instruction(STRUCT_GET, [map_struct(first_operand_type(form), p), MAP_FIELDS[name]])) }
 	if TYPED_HELPERS.has(name) { return finished(ending(typed_helper_called(name, first_operand_type(form), p))) }
 	# a 32-bit word given where its definition writes an int is extended, as wasm_called extends it
-	if is_carried(form, name) { return finished(ending(helper_call(p, "carried ${name}", q => carried_function(name, q)) + (if name == NARROWED_ROW and typed_layout(form, p) == I64 then I64_EXTEND_I32_U else []))) }
+	if is_carried(form, name) { return finished(ending(if name == NARROWED_ROW then plain_checked(p) + PRIMITIVES[name].code + (if typed_layout(form, p) == I64 then I64_EXTEND_I32_U else []) else helper_call(p, "carried ${name}", q => carried_function(name, q)))) }
 	if PRIMITIVES.has(name) { return wasm_called(form, arguments, host_performed(name, p), p) }
 	if name == ITEM_LOAD { return wasm_called(form, arguments, item_loaded(typed_layout(form, p)), p) }
 	if name == ITEM_STORE { return wasm_called(form, arguments, item_stored(arguments#2.type), p) }
@@ -102,11 +102,9 @@ primitive_code(form: Node, operation: Node, arguments: list<Code>, p: Emission) 
 # (core/analyze/types.wap row_placed): run by a helper of the module
 is_carried(form: Prim, name: text) as bool := (CARRIED_ROWS.has(name) or name in ORDER_ROWS or name == NARROWED_ROW) and type_text(first_operand_type(form)) == INT_TYPE and (fact_of(form, TYPE) == ø or type_text(type_of(form)) != SCALAR_WORD)
 # The helper running a row on ints: the row's instruction where its operands and its value are scalars, else the
-# types library's carried function, exact (types/whole.wap); an order compares the carried order with 0, and a row
-# taking 32 bits refuses an int past the scalars
+# types library's carried function, exact (types/whole.wap); an order compares the carried order with 0
 carried_function(name: text, p: Emission) as int := {
 	row = PRIMITIVES[name].code
-	if name == NARROWED_ROW { return added_function(p.m, [I64], [I32], [], beneath(local_get(0)) + if_block(local_get(0) + runtime_call(p, "${CARRIED_NARROWING}(int)") + DROP + UNREACHABLE) + local_get(0) + row) }
 	operands = local_get(0) + local_get(1)
 	away = beneath(local_get(0)) + beneath(local_get(1)) + I32_OR
 	if name in ORDER_ROWS { return added_function(p.m, [I64, I64], [I32], [], away + if_block(operands + runtime_call(p, "${CARRIED_ORDER}(int, int)") + i64_const(0) + row + RETURN) + operands + row) }
@@ -114,6 +112,8 @@ carried_function(name: text, p: Emission) as int := {
 	value = local_get(2)
 	added_function(p.m, [I64, I64], [I64], [I64], away + operands_unfit(name) + I32_OR + carried + operands + row + local_set(2) + beneath(value) + value_unfit(name) + I32_OR + carried + value)
 }
+# an int on the stack where the machine takes a plain word, refused past the scalars
+plain_checked(p: Emission) as list<int> := helper_call(p, "plain int", q => added_function(q.m, [I64], [I64], [], beneath(local_get(0)) + if_block(local_get(0) + runtime_call(q, "${CARRIED_NARROWING}(int)") + DROP + UNREACHABLE) + local_get(0)))
 # whether a word is a handle, below the scalars
 beneath(word: list<int>) as list<int> := word + i64_const(SMALLEST_SCALAR) + PRIMITIVES["i64.lt_s"].code
 # whether a row may leave 64 bits before it runs: a product of an operand past 31 bits, a shift by the word's bits or more

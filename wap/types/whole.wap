@@ -88,6 +88,52 @@ whole_word(w: Whole): i64 := {
 # 2^63, the size of the smallest word
 BEYOND_WORDS := sum(LARGEST_SIZE, ONE)
 
+# The bits of whole numbers, two's complement without end: a negative number's bits are its complement's, -w - 1,
+# flipped. Sizes are combined 32 bits at a time
+CHUNK := 4294967296
+CHUNK_MASK := CHUNK - 1
+CHUNK_SIZE := magnitude(CHUNK)
+complement(w: Whole): Whole := -w - whole(1)
+# a size's chunks, the lowest first, and the whole number chunks make
+chunks(m: Magnitude): list<int> := {
+	parts: list<int> = []
+	rest = m
+	while not is_zero(rest) {
+		parts.add(whole(divided(rest, CHUNK_SIZE).rest))
+		rest = divided(rest, CHUNK_SIZE).quotient
+	}
+	parts
+}
+chunked(parts: list<int>): Whole := parts.reverse().fold(whole(0), (value, part) => value * whole(CHUNK) + whole(part))
+# two sizes' bits combined chunk by chunk
+combined(a: Magnitude, b: Magnitude, bits: (int, int) -> int): Whole := {
+	x = chunks(a)
+	y = chunks(b)
+	chunked((0 upto max(#x, #y)).map(at => bits(if at < #x then x[at] else 0, if at < #y then y[at] else 0)))
+}
+# a chunk's bits and those another's leaves off
+unmasked(x: int, y: int): int := x & (y xor CHUNK_MASK)
+&(a: Whole, b: Whole): Whole := {
+	if a.negative and not b.negative { return b & a }
+	if not b.negative { return combined(a.size, b.size, (x, y) => x & y) }
+	if not a.negative { return combined(a.size, complement(b).size, unmasked) }
+	complement(combined(complement(a).size, complement(b).size, (x, y) => x | y))
+}
+|(a: Whole, b: Whole): Whole := {
+	if a.negative and not b.negative { return b | a }
+	if not b.negative { return combined(a.size, b.size, (x, y) => x | y) }
+	if not a.negative { return complement(combined(complement(b).size, a.size, unmasked)) }
+	complement(combined(complement(a).size, complement(b).size, (x, y) => x & y))
+}
+xor(a: Whole, b: Whole): Whole := {
+	if a.negative and not b.negative { return xor(b, a) }
+	if not b.negative { return combined(a.size, b.size, (x, y) => x xor y) }
+	if not a.negative { return complement(combined(a.size, complement(b).size, (x, y) => x xor y)) }
+	combined(complement(a).size, complement(b).size, (x, y) => x xor y)
+}
+# a word shifted right with zeros in, as the machine shifts
+unsigned_halved(w: i64, b: i64): i64 := prim i64.shr_u(w, b)
+
 # An int's rows where an operand or the value is past the scalars, each the row's value exact (kernel/scalars.wap
 # CARRIED_ROWS); a shift's count is a scalar
 carried_sum(a: int, b: int): int := int_of(whole_of(a) + whole_of(b))
@@ -97,6 +143,15 @@ carried_quotient(a: int, b: int): int := int_of(truncated_quotient(whole_of(a), 
 carried_remainder(a: int, b: int): int := int_of(truncated_remainder(whole_of(a), whole_of(b)))
 carried_shifted(a: int, b: int): int := int_of(whole_of(a) * power_of_two(b))
 carried_halved(a: int, b: int): int := int_of(whole_of(a) ÷ power_of_two(b))
+carried_and(a: int, b: int): int := int_of(whole_of(a) & whole_of(b))
+carried_or(a: int, b: int): int := int_of(whole_of(a) | whole_of(b))
+carried_xor(a: int, b: int): int := int_of(xor(whole_of(a), whole_of(b)))
+# an unsigned shift reads the int as its 64-bit word (`-1 >>> 60` is 15), so an int no word holds has none
+carried_unsigned_halved(a: int, b: int): int := {
+	w = whole_of(a)
+	if compared(w.size, if w.negative then BEYOND_WORDS else LARGEST_SIZE) > 0 { raise "${a} >>> ${b}: an unsigned shift reads a 64-bit word, and ${a} is past them" }
+	widened(unsigned_halved(whole_word(w), word_of(b)))
+}
 carried_order(a: int, b: int): int := compared(whole_of(a), whole_of(b))
 # an int past the scalars where the machine takes a 32-bit word: a list's place, a character's code
 beyond_scalars(n: int): int := raise "${n} is past the whole numbers the machine takes here"
