@@ -596,25 +596,28 @@ obligations_entered(by_key: map<text, TypedFunction>, s: TypingState) := for obl
 obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) := {
 	if obligation.call != ø { return hole_entered(obligation, by_key, s) }
 	shown = subset_condition(obligation.type) ?? return
-	typed = by_key.get(obligation.within ?? "")
+	within = within_of(obligation, by_key, s)
 	condition = named_id(TYPES.environment, condition_name(TYPES.environment, obligation.type)!) ?? return
 	held = match declared_at(TYPES.environment, condition)!.kind { Defined(value) => value; _ => return }
-	argument = term_of(obligation.argument!, within_reading(typed, by_key, s)) ?? return
-	obligation.function_type = pis(within_locals(typed), BOOL_TERM)
-	obligation.value = lambdas(within_locals(typed), beta(held, [argument]))
-	obligation.verdict = decided(TYPES.environment, beta(held, [argument]))
-	if obligation.verdict == no and obligation.choice == 0 { refused(obligation.argument!, "${REFUSED_BY_CONDITION} ${condition_shown(shown)}") }
+	holds = beta(held, [term_of(obligation.argument!, within.reading) ?? return])
+	obligation.function_type = pis(within.locals, BOOL_TERM)
+	obligation.value = lambdas(within.locals, holds)
+	obligation.verdict = decided(TYPES.environment, holds)
+	if obligation.verdict == no and obligation.choice == 0 { refused(obligation.argument!, condition_broken(condition_shown(shown))) }
 }
-# what an obligation's code is read under: the parameters of the function it sits in, none at the top level
-within_reading(typed: TypedFunction?, by_key: map<text, TypedFunction>, s: TypingState) as Entering := if typed == ø then fresh_reading(checker(TYPES.environment, []), by_key, s) else parameters_reading(typed!, by_key, s)
-within_locals(typed: TypedFunction?) as list<Local> := if typed == ø then [] else typed!.locals
+# where an obligation's code is read: under the parameters of the function it sits in, none at the top level
+class Within { reading: Entering; locals: list<Local> }
+within_of(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) as Within := {
+	typed = by_key.get(obligation.within ?? "") ?? return Within(fresh_reading(checker(TYPES.environment, []), by_key, s), [])
+	Within(parameters_reading(typed, by_key, s), typed.locals)
+}
 # A proof a call leaves to the provers, as a law of the function the call sits in (of none at the top level): the goal at
 # its place, the callee's domain after the arguments before it, for every value of that function's parameters. One the
 # run cannot check is refused where no prover is loaded (wiki/type.md "Proved or checked": the last step)
 hole_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) := match obligation.call! {
 	Call(called, arguments) => {
-		typed = by_key.get(obligation.within ?? "")
-		x = within_reading(typed, by_key, s)
+		within = within_of(obligation, by_key, s)
+		x = within.reading
 		# each proof the provers give, or a hypothesis standing for it, so the goals after it are stated; a goal the run
 		# checks stays a warning where they find none, one only a proof decides is refused
 		goals: list<Term> = []
@@ -625,7 +628,7 @@ hole_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: Typing
 		}) ?? refused(obligation.call!, "a call's proof is stated by the arguments before it, which the kernel reads only as values computed without acting: name them first")
 		if goals is empty { refused(obligation.call!, "the kernel reads no proof at argument ${obligation.place} of this call") }
 		goal = goals#1
-		obligation.statement = pis(within_locals(typed), goal)
+		obligation.statement = pis(within.locals, goal)
 		if TYPES.prove == ø and obligation.check == ø { refused(obligation.call!, "this call leaves the proof of ${shown(goal)} to the provers (by), and this compile loads none: the verify extension proves it") }
 	}
 	_ => ø
