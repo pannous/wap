@@ -703,22 +703,29 @@ body_typed(typed: TypedFunction, definition: Signature, name: Node, parameters: 
 	frame.typed_function = typed
 	typed_parameters = (1 to #typed.arguments).map(at => parameter_typed(items_of(parameters)#at, typed.arguments#at, frame))
 	frame.variables += captured_by(define_of(definition, s), typed.arguments)
+	typed_within(function_key(define_of(definition, s)), keyed_text([definition.key] + typed.arguments.map(type => type_text(type, yes))), s, () => {
+		typed_body = typed_form(body, s, frame, typed.result)
+		given = result_given(typed_body, frame, name, s)
+		# a written result stays the result, `show(x: any): text := raise(…)`; one that writes none and never returns jumps
+		typed.jumps = typed.jumps or written == ø and jumps(typed_body) and frame.returns is empty
+		# the body gives the result, the one written or the body's and the returns' types joined: an int beside `return` an int?
+		result = written ?? given
+		if result != ø and not typed.jumps { typed_body = converted(typed_body, result!, s, body, FUNCTION_GIVES) }
+		typed.result = typed.result ?? (if given != ø and given != EMPTY_TERM and base_of_optional(written) != ø then optional_type(given) else given)
+		typed.define = refitted(Define(signed_name(typed, s), with_items(parameters, typed_parameters), typed_body), define_of(definition, s))
+		typed.late = frame.late
+	})
+}
+# work typed within a function's instance: s.within names the function (its obligations') and TYPES.instance the
+# instance (its function values' words) while work runs, both put back after it, a raise too
+typed_within(within: text, instance: text, s: TypingState, work: () -> ø) := {
 	enclosing = s.within
-	s.within = function_key(define_of(definition, s))
 	enclosing_instance = TYPES.instance
-	TYPES.instance = keyed_text([definition.key] + typed.arguments.map(type => type_text(type, yes)))
-	typed_body = typed_form(body, s, frame, typed.result)
-	given = result_given(typed_body, frame, name, s)
-	# a written result stays the result, `show(x: any): text := raise(…)`; one that writes none and never returns jumps
-	typed.jumps = typed.jumps or written == ø and jumps(typed_body) and frame.returns is empty
-	# the body gives the result, the one written or the body's and the returns' types joined: an int beside `return` an int?
-	result = written ?? given
-	if result != ø and not typed.jumps { typed_body = converted(typed_body, result!, s, body, FUNCTION_GIVES) }
-	typed.result = typed.result ?? (if given != ø and given != EMPTY_TERM and base_of_optional(written) != ø then optional_type(given) else given)
-	typed.define = refitted(Define(signed_name(typed, s), with_items(parameters, typed_parameters), typed_body), define_of(definition, s))
-	typed.late = frame.late
-	s.within = enclosing
-	TYPES.instance = enclosing_instance
+	put_back = () => { s.within = enclosing; TYPES.instance = enclosing_instance }
+	s.within = within
+	TYPES.instance = instance
+	try work() catch e { put_back(); raise e.message }
+	put_back()
 }
 # a call typed by the function it calls: of its result, or jumping when that never returns
 result_of(n: Node, chosen: TypedFunction) as Node := if chosen.jumps then jumping(n) else if chosen.result == ø and not chosen.done then with_fact(n, RESULT_UNKNOWN, Text(chosen.unknown_result)) else with_type_of(n, value_bearing(chosen.result))
