@@ -30,10 +30,7 @@ in either order of the crossed counts.
 | where | what | lines |
 |---|---|---|
 | integer_laws.wap:23, :347 `·add_swapped` | No caller (the card's note). linear.wap's regrouper does without it | −2 |
-| logic.wap:18, :29, :54-61 `·yes_is_not_no` | No caller on int-takes, t6a3a or unify-linear. unify-provers.md:80-81 and :100 plan it only for the divide laws, which are not built. It goes and comes back with divide | −8 |
-
-`·bool_cases` (logic.wap:19, :30, :62-75) stays: a proof by cases over a comparison (Q1's sign laws, T6a4's proofs
-by cases) is its caller.
+| logic.wap:18, :29, :54-61 `·yes_is_not_no`; :19, :30, :62-75 `·bool_cases` | No caller on int-takes, t6a3a or unify-linear. unify-provers.md:80-81 and :100 plan them only for the divide laws, which are not built. Both go. `·bool_cases` comes back in the commit of its first caller, a proof by cases over a comparison (Q1's sign_product or T6a4's case proofs); `·yes_is_not_no` with divide | −16 |
 | integer_laws.wap:232 `parts_zero` | An induction inside paired's zero arm. paired's at_zero takes a step (the card's note) | −2 |
 
 ## Parameters always passed the same
@@ -66,10 +63,10 @@ These stay:
 
 ## Total
 
-About −47 code lines in the five files, against the card's measured −12, plus the dead code's about 37 elsewhere:
+About −55 code lines in the five files, against the card's measured −12, plus the dead code's about 37 elsewhere:
 - integer_laws.wap about −24;
 - counting.wap about −8;
-- logic.wap −8;
+- logic.wap −16;
 - equality.wap −3;
 - linear.wap about −5;
 - kernel +5 for `instance_of`.
