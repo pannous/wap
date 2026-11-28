@@ -99,17 +99,18 @@ case_indexed(case: CaseTyped, letters: list<Term>, s: TypingState) as CaseTyped 
 		Found(each.word, each.domain, if at > 0 then locals#at.variable else ø)
 	})
 	allowed = letters + found.map(each => each.word)
-	reading = fresh_reading(c, {}, s).under(locals, values.map(each => place_key(found_definer(each, node))))
-	read = (written: Node) => closed_type(case_read(written, node, values, reading, s), allowed)
+	definers = values.map(each => found_definer(each, node))
+	reading = fresh_reading(c, {}, s).under(locals, definers.map(definer => place_key(definer)))
+	read = (written: Node) => closed_type(case_read(written, values, definers, reading, s), allowed)
 	written = case_result(node)
 	result = if written == ø then ø else read(written!)
-	CaseTyped(case.name, case.definer, case.binders, case_fields(node).map(field => read(declared_type(field))), found, result, case.result_open, node)
+	CaseTyped(case.name, case.definer, case.binders, case_fields(node).map(field => read(declared_type(field))), found, result, written != ø and result == ø, node)
 }
 # a type a case writes as the kernel holds it: a family applied to values reads each value, any other type as written
-case_read(written: Node?, case: Node, values: list<Found>, reading: Entering, s: TypingState) as Term? := {
+case_read(written: Node?, values: list<Found>, definers: list<Node>, reading: Entering, s: TypingState) as Term? := {
 	if written == ø { return ø }
 	match written! {
-		Call(head, items) => if is_type_former(family_type(head)) then type_built(family_word(head), items.map(item => index_read(item, case, values, reading, s))) else written_type(written)
+		Call(head, items) => if is_type_former(family_type(head)) then type_built(family_word(head), items.map(item => index_read(item, values, definers, reading, s))) else written_type(written)
 		_ => written_type(written)
 	}
 }
@@ -117,8 +118,7 @@ case_read(written: Node?, case: Node, values: list<Found>, reading: Entering, s:
 # the case finds, each a parameter named by the case, then as a term over their locals. No function of the program is
 # entered yet (L3: they are entered after the enums), so an index may name a constructor of an earlier group, a numeral
 # or an operator on them
-index_read(item: Node, case: Node, values: list<Found>, reading: Entering, s: TypingState) as Term := {
-	definers = values.map(each => found_definer(each, case))
+index_read(item: Node, values: list<Found>, definers: list<Node>, reading: Entering, s: TypingState) as Term := {
 	written = (1 to #values).list().fold(item, (body, at) => substituted(body, type_text(values#at.word), definers#at))
 	if not is_value_written(written) { return type_term(item) }
 	frame = TypeFrame()
@@ -135,10 +135,13 @@ found_definer(each: Found, case: Node) as Node := {
 block_entered(enums: list<EnumRead>, s: TypingState) := {
 	ids = enums.map(enum => word_id(enum.word))
 	keys = enums.map(enum => enum.key)
-	if enums.any(enum => enum.sort == ø or enum.cases.any(case => case.result_open or case.fields.any(field => field == ø))) { return enums_counted(ids, ENUM_OPEN) }
+	if enums.any(enum => enum.sort == ø) { return enums_counted(ids, ENUM_OPEN) }
 	headers = enums.map(header_of)
 	try {
-		types = enums.map(enum => BlockType(enum.key, header_of(enum), enum.cases.map(case => WrittenCase(case_constructed(enum.key, case.name), case_type(case_indexed(case, parts_of(enum.whole), s), enum, ids, keys, headers)))))
+		indexed = enums.map(enum => enum.cases.map(case => case_indexed(case, parts_of(enum.whole), s)))
+		# an enum with a case whose result or field the kernel cannot read stays open
+		if indexed.any(cases => cases.any(case => case.result_open or case.fields.any(field => field == ø))) { return enums_counted(ids, ENUM_OPEN) }
+		types = (1 to #enums).list().map(at => BlockType(enums#at.key, headers#at, indexed#at.map(case => WrittenCase(case_constructed(enums#at.key, case.name), case_type(case, enums#at, ids, keys, headers)))))
 		inductive_declared(TYPES.environment, InductiveBlock([], #parts_of(enums#1.whole), types))
 	} catch refusal {
 		refusal_only(refusal)
@@ -185,7 +188,7 @@ case_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
 	terms_applied(apply_all(constant(id, constructor.name, []), parameters), arguments, x)
 }
 # a type closed over a letter a case finds: over its local where it is a value's, over its constant where it is a type's
-found_closed(body: Term, each: Found) as Term := if each.variable != ø then abstracted(body, variable_id(each.variable!)) else block_named(body, [word_id(each.word)], 0)
+found_closed(body: Term, each: Found) as Term := block_named(if each.variable == ø then body else abstracted(body, variable_id(each.variable!)), [word_id(each.word)], 0)
 # how many letters a case finds, the binders in front of its fields
 found_count(type: Term) as int := match type.shape {
 	Pi(binder, domain, body) => if binder.starts_with(FOUND_MARK) then 1 + found_count(body) else 0
