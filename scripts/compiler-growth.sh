@@ -22,6 +22,7 @@ CEILINGS=("census size nodes:test/wap/ratchet_census.sh:SIZE_NODES=" "self-compi
 PLANNED_DELETIONS=(wap/core/analyze/letters.wap wap/core/analyze/fits.wap wap/core/analyze/conditions.wap wap/core/analyze/matching.wap)
 DEFAULT_SINCE="2026-11-27"
 
+if [ "${1:-}" = "--help" ]; then sed -n '2,/^set /p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0; fi
 if [ "${1:-}" = "--measures" ]; then
 	since=${2:-$DEFAULT_SINCE}
 	cd "${3:-.}" || exit 2
@@ -29,8 +30,13 @@ if [ "${1:-}" = "--measures" ]; then
 	echo "compiler: $lines lines by the plan's count, ballpark $BALLPARK_LINES ($((lines - BALLPARK_LINES)) over)"
 	for ceiling in "${CEILINGS[@]}"; do
 		IFS=: read -r name file start <<<"$ceiling"
-		echo "$name: $(grep -m1 "^$start" "$file" | sed "s/^$start//") now; raised since $since:"
-		git log --since="$since" --reverse --format='%h %ad' --date=short -G"^$start" -- "$file" | sed 's/^/  /'
+		echo "$name: $(grep -m1 "^$start" "$file" | sed "s/^$start//") now; raises since $since (commit, old -> new):"
+		# each commit that changed the ceiling, oldest first, kept where the new value is higher than the old
+		git log --since="$since" --reverse --format=%h -G"^$start" -- "$file" | while read -r commit; do
+			now=$(git show "$commit:$file" | sed -n "s/^$start//p" | head -1)
+			before=$(git show "$commit^:$file" 2>/dev/null | sed -n "s/^$start//p" | head -1)
+			[ -n "$before" ] && [ "$now" -gt "$before" ] && echo "  $commit $before -> $now"
+		done
 	done
 	for file in "${PLANNED_DELETIONS[@]}"; do [ -f "$file" ] && echo "planned deletion without a step: $file stays ($(wc -l <"$file" | tr -d ' ') lines)"; done
 	exit 0
