@@ -25,6 +25,7 @@ use "../kernel/typing.wap"
 use "../kernel/recursors.wap"
 use "../kernel/show.wap"
 use "analyze/courses.wap"
+use "analyze/unify.wap"
 
 # a written `block`: code run by its call, a function of no parameters (wiki/block.md)
 BLOCK_WORD = "block"
@@ -420,11 +421,32 @@ type_term(n: Node) as Term := {
 # GUESS (T6a3's value reader): a declared type applied to values, `Even(double(n))`. While typing, an argument that is no type stands as its
 # code, as a subtype's condition does (the type is keyed by it); terms.wap family_read reads the values under the function's parameters
 is_family_call(n: Node) as bool := match n { Call(head, items) => is_type_former(family_type(head)) and items.any(item => is_value_written(item)); _ => no }
-# the type of a call's head, its word's: the program's type word as declared with its header, else the kernel's
-# declaration of the name (`Equal`), ø for a name neither holds; looked up, never declared here
+# the type of a call's head, its word's: the program's type word as declared with its header (word_named declares it
+# the first time, the same word each time), else the kernel's declaration of the name (`Equal`), which is looked up,
+# never declared; ø for a name neither holds yet
 family_type(head: Node) as Term? := {
-	if fact_of(head, DECLARED_BY) != ø { return declared_at(TYPES.environment, word_id(word_named(head)))!.type }
+	if fact_of(head, DECLARED_BY) != ø { return (declared_at(TYPES.environment, word_id(word_named(head))) ?? return ø).type }
 	(declaration(TYPES.environment, text(head)) ?? return ø).type
+}
+# The head of a type applied to these arguments: the program's word, or the kernel's family with a level hole for each
+# of its level parameters, each found as the elaborator unifies a binder's sort with the universe of the type an
+# argument gives it (`Equal(nat, a, b)`: u of Sort(u) with nat's Type), so no word of the name is declared again
+family_head(head: Node, arguments: list<Term>) as Term := {
+	if fact_of(head, DECLARED_BY) != ø { return word_named(head) }
+	family = declaration(TYPES.environment, text(head))!
+	el = elaboration(TYPES.environment, [])
+	holes = family.levels.map(name => level_hole(el))
+	domains = arrow_parts(with_levels(family.type, family.levels, holes))
+	for at in 1 to min(#domains - 1, #arguments) {
+		wanted = universe_level(domains#at)
+		if wanted != ø and not levels_unified(el, wanted!, universe_level(universe_of(arguments#at))!) { refused_type(family.type, "${family.name} takes no ${type_text(arguments#at)} at its argument ${at}") }
+	}
+	constant(named_id(TYPES.environment, family.name)!, family.name, holes.map(hole => level_filled(el, hole)))
+}
+# a function type's parameter types and its result
+arrow_parts(type: Term) as list<Term> := match type.shape {
+	Pi(binder, domain, body) => [domain] + arrow_parts(body)
+	_ => [type]
 }
 # whether a type is a type former's: a function of one argument or more ending in a sort
 is_type_former(type: Term?) as bool := match (type ?? return no).shape { Pi(binder, domain, body) => match body.shape { Sort(level) => yes; _ => is_type_former(body) }; _ => no }
@@ -434,7 +456,10 @@ is_type_former(type: Term?) as bool := match (type ?? return no).shape { Pi(bind
 is_statement_written(n: Node?) as bool := match n ?? Empty { Call(head, items) => fact_of(head, DEFINED_AT) != ø and text(head) != ARRAY_TIMES and not is_type_written(n!) and not is_family_call(n!); _ => no }
 # a value: an expression, or a name bound as a parameter or a value; any other name is no value, so a misspelt type is unknown as everywhere
 is_value_written(item: Node) as bool := not (is_type_written(item) or fact_of(item, DECLARED_BY) != ø or core_place(text(item)) != ø) and (not item is symbol or fact_of(item, DEFINED_AT) != ø)
-family_typed(head: Node, items: list<Node>) as Term := type_built(word_named(head), items.map(item => if is_value_written(item) then word_term("${item}") else type_term(item)))
+family_typed(head: Node, items: list<Node>) as Term := {
+	parts = items.map(item => if is_value_written(item) then word_term("${item}") else type_term(item))
+	type_built(family_head(head, parts), parts)
+}
 # the level a universe is written at, `Prop`, `Type`, `Type(n)`, `Sort(n)`; ø for other code
 universe_written(n: Node) as Level? := {
 	call = call_written(n)

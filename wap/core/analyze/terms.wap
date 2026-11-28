@@ -89,6 +89,8 @@ kernel_signature(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 # typed as it, so its name's value proves it)
 parameters_locals(typed: TypedFunction, s: TypingState) as list<Local> := {
 	if typed.checker == ø {
+		if typed.entering_locals { refused(typed.define, "a hypothesis reads its own law's parameters: a statement in a parameter's place reads only the parameters before it") }
+		typed.entering_locals = yes
 		c = checker(TYPES.environment, [])
 		locals: list<Local> = []
 		names = parameter_names(typed)
@@ -100,6 +102,7 @@ parameters_locals(typed: TypedFunction, s: TypingState) as list<Local> := {
 		typed.arguments = (1 to #typed.arguments).list().map(at => if is_statement_written(written#at) then locals#at.domain else typed.arguments#at)
 		typed.locals = locals
 		typed.checker = c
+		typed.entering_locals = no
 	}
 	typed.locals
 }
@@ -109,7 +112,13 @@ parameter_names(typed: TypedFunction) as list := parameters_of(typed).map(parame
 # read as values under the parameters (`Even(double(n))`, each value through term_of and the checker's Locals); any other result as settled
 kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
 	if typed.written == ø or not is_family_call(typed.written!) { return kernel_settled(typed.result ?? return ø, s) }
-	match typed.written! { Call(head, items) => apply_all(kernel_type(word_named(head))!, items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), parameters_reading(typed, by_key, s)) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)); _ => ø }
+	match typed.written! {
+		Call(head, items) => {
+			given = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), parameters_reading(typed, by_key, s)) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)
+			apply_all(kernel_type(family_head(head, given))!, given)
+		}
+		_ => ø
+	}
 }
 # the frame its parameters are typed in, as a body's is
 reading_frame(typed: TypedFunction) as TypeFrame := {
@@ -221,11 +230,6 @@ row_constant(operation: text, types: list<Term?>) as Term := {
 }
 # the name a row's constant takes: its operation and the types it takes and gives, `prim i64.add int -> int -> int`
 row_name(operation: text, type: Term) as text := "${ROW_MARK} ${operation} ${arrow_parts(type).map(part => shown(part)).join(" -> ")}"
-# a function type's parameter types and its result
-arrow_parts(type: Term) as list<Term> := match type.shape {
-	Pi(binder, domain, body) => [domain] + arrow_parts(body)
-	_ => [type]
-}
 # a choice on a bool, an `if` or a match of yes and no: a proof by its cases where its type is a proposition, else
 # bool's recursor into the type both arms give, the arm at no before the arm at yes
 choice_term(n: Node, condition: Node, at_yes: Node?, at_no: Node?, x: Entering) as Term? := {
