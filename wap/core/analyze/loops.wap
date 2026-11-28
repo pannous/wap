@@ -1,0 +1,104 @@
+# Whether a loop ends (wiki/effects.md "Div"): `while i < b { … i += d … }`. Its condition is the kernel's comparison of
+# a variable i below, or not above, a bound b; its body steps i once, in a statement of its own, by a d the provers
+# show is above 0 there, knowing that the condition holds and that each `if c { … }` before the step whose block never
+# finishes leaves c false; nothing in the body sets what b reads, and no `continue` skips the step. Then b - i falls at
+# every round, and the loop leaves before it goes below 0. Any other loop may run on: it is Div
+
+use folder
+use "../stage.wap"
+use "../bindings.wap"
+use "../rules/lowering.wap"
+use "../../kernel/forms.wap"
+use "../../kernel/terms.wap"
+use "../../kernel/environment.wap"
+use "../../kernel/compute.wap"
+use "../../kernel/counting.wap"
+use "../../kernel/numbers.wap"
+use "../../kernel/recursors.wap"
+use "../../kernel/equality.wap"
+
+# the comparisons a counting loop's condition is
+COUNTED_BY = [BELOW, NOT_ABOVE]
+# the binder of what a loop's round knows
+ROUND_FACT = "·round"
+# the bindings a loop's variables may be of
+LOOP_VARIABLES = [DefinitionKind.Local, DefinitionKind.Parameter, DefinitionKind.Capture]
+
+loop_ends(loop: Node, by_key: map<text, TypedFunction>, s: TypingState) as bool := match loop {
+	While(condition, body) => {
+		if nodes_in(body).any(n => unwrapped(n) is Continue) { return no }
+		x = loop_reading(loop, by_key, s)
+		compared = meaning(x.c, term_of(condition, x) ?? return no, COUNTED_BY) ?? return no
+		counter = arguments(compared)#1
+		bound = arguments(compared)#2
+		set = variables_set(body, x) ?? return no
+		if variable_id(counter) == 0 or #set.filter(variable => same(variable, counter)) != 1 or set.any(variable => holds_variable(bound, variable)) { return no }
+		statements = statements_of(unwrapped(body))
+		step = statements.index_where(statement => stepped_by(statement, counter, x) != ø)
+		if step <= 0 { return no }
+		e = TYPES.environment
+		known = [truth_stated(e, compared)] + guards_known(statements.take(step - 1), x)
+		facts = known.map(fact => entered(x.c, ROUND_FACT, fact))
+		above_zero = truth_stated(e, apply_all(named_constant(BELOW), [int_numeral(e, 0), stepped_by(statements#step, counter, x)!]))
+		hole_term([], above_zero, x.under(facts, facts.map(fact => ROUND_FACT)), yes) != ø
+	}
+	_ => no
+}
+# a loop read with each variable it names a free variable of its type, a subtype kept so the provers read its
+# condition (`moved: nat` is at least 0)
+loop_reading(loop: Node, by_key: map<text, TypedFunction>, s: TypingState) as Entering := {
+	c = checker(TYPES.environment, [])
+	named: map<text, Node> = {}
+	for n in nodes_in(loop) {
+		if unwrapped(n) is Symbol and LOOP_VARIABLES.any(kind => is_bound(n, kind)) and definer_of(n) != ø and not has_unknowns(value_type(n)) { named[place_key(definer_of(n)!)] = n }
+	}
+	locals = named.values().map(name => entered(c, text(name), kernel_headed(kernel_domain(settled_type(value_type(name), s)), c, s)))
+	fresh_reading(c, by_key, s).under(locals, named.keys())
+}
+# A term read through its head's definitions until its head is one of these constants, `i < b` the kernel's
+# `·below(i, b)`; ø where it never is
+meaning(c: Checker, t: Term, names: list<text>) as Term? := {
+	at = computed_folded(c, t)
+	while not names.contains(constant_name(head(at))) { at = computed_folded(c, unfolded(c, at) ?? return ø) }
+	at
+}
+# what a statement steps a variable by, `i += d` and `i = d + i` by d; ø for any other statement
+stepped_by(statement: Node, counter: Term, x: Entering) as Term? := {
+	value = match unwrapped(statement) {
+		Set(place, value) => if unwrapped(place) is Symbol and same(term_of(place, x) ?? return ø, counter) then value else return ø
+		_ => return ø
+	}
+	parts = arguments(meaning(x.c, term_of(value, x) ?? return ø, [SUM]) ?? return ø)
+	if same(parts#1, counter) then parts#2 else if same(parts#2, counter) then parts#1 else ø
+}
+# what these statements leave known, run in order: an `if c { … }` whose block never finishes that c is false, until
+# a later statement sets a variable c reads
+guards_known(statements: list<Node>, x: Entering) as list<Term> := {
+	known: list<Term> = []
+	for statement in statements {
+		set = variables_set(statement, x) ?? []
+		known = known.filter(fact => not set.any(variable => holds_variable(fact, variable)))
+		guard = guarded(statement, x)
+		if guard != ø { known += [guard!] }
+	}
+	known
+}
+# `c == no` after an `if c { … }` whose block never finishes; ø for any other statement
+guarded(statement: Node, x: Entering) as Term? := match unwrapped(statement) {
+	If(condition, then_part, else_part) => if jumps(then_part) then truths_equal(TYPES.environment, term_of(condition, x) ?? return ø, TYPES.environment.literals!.no_case) else ø
+	_ => ø
+}
+# the variables a node's assignments set, each place's root, `xs#1 = 2` setting xs; ø where one is no variable the
+# reading holds
+variables_set(n: Node, x: Entering) as list<Term>? := {
+	roots = nodes_in(n).map(part => set_place(part)).filter(place => place != ø).map(place => term_of(place_root(place!), x))
+	if roots.any(root => root == ø) then ø else roots.map(root => root!)
+}
+set_place(n: Node) as Node? := match unwrapped(n) {
+	Set(place, value) => place
+	_ => ø
+}
+place_root(place: Node) as Node := match unwrapped(place) {
+	Get(subject, key) => place_root(subject)
+	_ => place
+}
