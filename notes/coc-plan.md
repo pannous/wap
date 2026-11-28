@@ -1085,7 +1085,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T7 the theory extension retires | planned (notes/coc-t7.md) | | T6 |
 | T8a the reader | planned (notes/coc-t8.md); its first commit is whole()'s sign | | exact-big-literals |
 | T8b the machine words | planned (notes/coc-t8.md; below "T8b: what a word's row means"); origin/t8b-q1 a739da9b holds its types part; builder wap-q1-kernel | | Q1, T4d |
-| T8b-k the words' kernel part | planned (below "T8b-k: the kernel's division and the wrapping meanings"); origin/t8b-kernel 8dd2847b holds its code, unbuilt; builder wap-q1-kernel | | exact-big-literals, int-takes, kernel-length, T8b |
+| T8b-k the words' kernel part | all five steps on t8b-kernel-2 (below "T8b-k: the kernel's division and the wrapping meanings"): the kernel's definitions in kernel/counting.wap, the laws in extensions/prove/integer_laws.wap; unbuilt | | exact-big-literals, int-takes, kernel-length, T8b |
 | T8c exact int on the run | planned (notes/coc-t8.md) | | T8a, T5f |
 
 ### What each open step costs now
