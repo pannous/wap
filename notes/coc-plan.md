@@ -1220,7 +1220,7 @@ moves, which the self-build uses.
 #### int-takes: int is natural(n) | negative(n) over the count
 
 Inside proofs `int = natural(n: ·count) | negative(n: ·count)`, with negative(n) = -(n + 1), Lean's `Int.ofNat |
-Int.negSucc`, over the hidden `·count = zero | successor(·count)`. It replaces `zero | positive | negative`. It lands as
+Int.negSucc`, over the hidden `·count = zero | successor(·count)`. It lands as
 its own step from int-takes-on-batch aaa29124 (unbuilt, on 5285eb86), after typed-by-result, whose terms.wap stays three
 cases. The branch merges onto main with no conflict.
 

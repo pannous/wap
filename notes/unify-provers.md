@@ -5,7 +5,7 @@ A program's whole numbers reach the kernel as int, and int is the only number st
 
 int is Lean's shape, `enum int { natural(n: count); negative(n: count) }`, where `natural(n)` is n and
 `negative(n)` is −(n + 1), so each number has one form and Lean's Int theorems bind with no bridge (user, warp
-decisions aec483024d; card int-takes, after unify-typers, which carries the three cases `zero | positive | negative`).
+decisions aec483024d; card int-takes, after unify-typers).
 Its payload is the kernel's count (next section). A numeral is `natural(k)` or `negative(k)`, k a count literal. An operator is a row constant, `prim i64.add int -> int -> int`,
 whose Defined value is its meaning: sum, minus, times, equal_integers, not_above, and the other comparisons. The count
 is only the payload of int's two signed cases. The provers never state a program's law over it; only the reader of an
