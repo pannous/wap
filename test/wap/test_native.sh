@@ -294,6 +294,11 @@ no"
 # `wap verify <file>` runs the verify program beside its compiler on the file, from any folder
 printf '%s\n' 'axiom choice: Prop' >"$stage/axiom_only.wap"
 check "wap verify gives each axiom and law its verdict, from any folder" "$(cd "$stage" && "$native_wap" verify axiom_only.wap 2>&1)" "choice: Axiom"
+# `wap trust` lists what a verdict rests on (wiki/cli.md "Proofs"): the kernel's files, and a program's axioms its laws rest on
+check "wap trust lists the kernel's files" "$("$native_wap" trust | grep -c '^kernel/terms.wap$')" "1"
+printf '%s\n' 'axiom fact: Prop' 'axiom given: fact' 'law uses_given: fact := given' >"$stage/resting.wap"
+check "wap trust of a program lists the axioms its laws rest on" "$(cd "$stage" && "$native_wap" trust resting.wap | grep -v '^kernel/')" "fact
+given"
 # a native wap built standalone holds its seed (build.sh --standalone): it runs with no seed folder beside it, its seed
 # unpacked into the cache folder of the user's home once
 native_wap_built "$stage/standalone" --standalone >/dev/null && rm -rf "$stage/standalone/wap-seed"
