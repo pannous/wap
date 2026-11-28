@@ -82,9 +82,9 @@ literal would be checked at run time, or the place-typed `'a'` kept under anothe
 
 T4 as a whole: about +180 core (+90, +30, +30, −30, +60) and +30 types, against coc-plan's +409 (450 analyze and 100
 types added, 141 deleted). The difference: the plan counted a mechanism of its own for conditions and obligations,
-where narrowing and findings exist. The 141 deleted lines are the extension's elaborate/conditions.wap (with
-obligations.wap, 64, and convert.wap, 28): they go in T5, since the theory's doors read programs as written until
-then (as T3g's work moved to T5); core's analyze/conditions.wap stays and grows by T4b's 30.
+where narrowing and findings exist. The 141 deleted lines are the extension's conditions file (with
+obligations, 64, and convert, 28), gone with the extension's elaborator; core's analyze/conditions.wap stays and
+grows by T4b's 30.
 
 ## Gate
 
