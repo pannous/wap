@@ -124,6 +124,8 @@ type_bound(type: Node, scope: Scope) as Node := match type {
 		meant = named_in(scope, name).filter(definition => definition.kind == DefinitionKind.Record or names_type(definition))
 		named = named_type(meant, name, scope)
 		if named != ø { return named! }
+		# a type name with parameters stands only applied, `vector(int, 3)`
+		if meant is not empty and names_type(meant#1) { match fact_of(meant#1.definer, TYPE_NAMED)! { Fn(parameters, body) => arguments_refused(type, name, items_of(parameters)); _ => ø } }
 		# a case word narrows the enum its scope sees, whatever other enums hold a case so named
 		if meant is empty { return with_fact(type, NARROWS, type_bound(symbol((case_owner(scope, name) ?? return type).name), scope)) }
 		with_fact(type, DECLARED_BY, record_declared(meant#1.definer))
@@ -141,13 +143,26 @@ applied_type(type: Node, called: Node, arguments: list, scope: Scope) as Node? :
 	if meant is empty { return ø }
 	match fact_of(meant#1.definer, TYPE_NAMED)! {
 		Fn(parameters, body) => {
-			names = items_of(parameters).map(parameter => text(parameter_name(parameter)))
-			if #names != #arguments { refused(type, "${text(called)} takes ${#names} arguments, ${names.join(", ")}: this gives ${#arguments}") }
-			written = (1 to #names).fold(body, (part, at) => substituted(part, names#at, arguments#at))
+			taken = items_of(parameters)
+			if #taken != #arguments { arguments_refused(type, text(called), taken) }
+			written = (1 to #taken).fold(body, (part, at) => parameter_written(part, text(parameter_name(taken#at)), argument_given(taken#at, arguments#at, text(called))))
 			with_fact(type_bound(written, scope), WRITTEN, Text("${type}"))
 		}
 		_ => ø
 	}
+}
+# an argument as a type's parameter takes it: a type parameter (bare, or `T: Type`) only a written type, a value
+# parameter its value made into the parameter's type, `-1 as nat`, so its condition decides it like a call's argument
+argument_given(parameter: Node, argument: Node, name: text) as Node := {
+	written = declared_type(parameter)
+	if written != ø and universe_written(written!) == ø { return placed_like(Call(symbol(RESULT_WORD), [argument, written!]), argument) }
+	if is_type_written(argument) or argument is symbol then argument else refused(argument, "${name}'s ${text(parameter_name(parameter))} is a type, and this is a value")
+}
+arguments_refused(at: Node, name: text, parameters: list) := refused(at, "${name} takes ${#parameters} arguments, ${parameters.map(parameter => text(parameter_name(parameter))).join(", ")}")
+# a parameter written in where the body names it: never a field's name after a dot, `it.n`, which is no parameter
+parameter_written(n: Node, name: text, value: Node) as Node := match n {
+	Get(subject, key) => refitted(Get(parameter_written(subject, name, value), key), n)
+	_ => if n is symbol and text(n) == name then value else with_parts(n, part => parameter_written(part, name, value))
 }
 names_type(definition: Definition) as bool := fact_of(definition.definer, TYPE_NAMED) != ø
 # the type the innermost of these definitions names, as written by its name; ø where it names none
