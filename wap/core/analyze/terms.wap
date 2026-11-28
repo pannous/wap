@@ -23,8 +23,12 @@ use "../../kernel/show.wap"
 use "../../kernel/counting.wap"
 use "../../kernel/numbers.wap"
 use "../../kernel/recursors.wap"
+use "../../kernel/equality.wap"
+use "../../kernel/logic.wap"
 
 ROW_MARK = "prim"
+# the binder of an arm's premise in a proof by a bool's cases, that the bool is the arm's case
+CASE_PREMISE = "·case"
 
 # the typed functions entered, callees before their callers: each by its key, once
 instances_entered(functions: list<TypedFunction>, s: TypingState) as map<text, TypedFunction> := {
@@ -92,7 +96,8 @@ term_of(n: Node, x: Entering) as Term? := match n {
 	Symbol(name) => binder_term(n, x) ?? case_term(n, n, [], x)
 	Call(called, arguments) => called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
 	Prim(operation, arguments) => row_term(n, text(operation), arguments, x)
-	If(condition, then_part, else_part) => choice_term(n, condition, then_part, else_part, x)
+	If(condition, then_part, else_part) => cases_term(n, condition, then_part, else_part, x) ?? choice_term(n, condition, then_part, else_part, x)
+	Case(subject, arms) => cases_term(n, subject, truth_arm(arms, yes), truth_arm(arms, no), x)
 	Block(statements) => lets_term(statements, x)
 	_ => ø
 }
@@ -135,6 +140,25 @@ choice_term(n: Node, condition: Node, then_part: Node, else_part: Node, x: Enter
 	name = recursor_name(BOOL_TYPE)
 	terms_applied(apply(constant(named_id(TYPES.environment, name)!, name, [TYPE_LEVEL]), lambda("_", BOOL_TERM, type)), [else_part, then_part, condition], x)
 }
+# A choice on a bool whose type is a proposition, an `if` or a match of yes and no, is a proof by the bool's cases:
+# ·bool_cases(c, y => type, (e: c == no) => the no arm, (e: c == yes) => the yes arm)
+cases_term(n: Node, condition: Node, at_yes: Node?, at_no: Node?, x: Entering) as Term? := {
+	type = kernel_value(n) ?? return ø
+	if kernel_value(condition) != BOOL_TERM or not is_proposition(checker(TYPES.environment, []), type) { return ø }
+	c = term_of(condition, x) ?? return ø
+	truths = TYPES.environment.literals!
+	no_arm = premised_arm(at_no ?? return ø, c, truths.no_case, x) ?? return ø
+	yes_arm = premised_arm(at_yes ?? return ø, c, truths.yes_case, x) ?? return ø
+	apply_all(constant(named_id(TYPES.environment, BOOL_CASES)!, BOOL_CASES, []), [c, lambda("_", BOOL_TERM, type), no_arm, yes_arm])
+}
+# an arm of a proof by a bool's cases: a function of the premise that the bool is the arm's case, the arm read with
+# the premise in scope, where its `by` finds it
+premised_arm(arm: Node, condition: Term, case: Term, x: Entering) as Term? := {
+	proof = term_of(arm, Entering(x.binders + [CASE_PREMISE], x.by_key, x.s)) ?? return ø
+	lambda(CASE_PREMISE, truths_equal(TYPES.environment, condition, case), proof)
+}
+# the result of a match's arm whose pattern is that truth, ø where none is
+truth_arm(arms: list, held: bool) as Node? := arm_result(arms.find(arm => match arm { Arm(pattern, result) => if held then pattern is True else pattern is False }) ?? return ø)
 # a block of lets, each a name new to it given its value, ending in the value it gives
 lets_term(statements: list, x: Entering) as Term? := {
 	if statements is empty { return ø }
