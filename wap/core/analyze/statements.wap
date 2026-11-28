@@ -1,0 +1,134 @@
+# Statements read as terms (notes/coc-plan.md 9.5): a local variable, a choice made as a statement and a loop are ways
+# to write a function, no action on the world. An assignment is a new binding of its name. A statement whose parts
+# assign names bound before it (a block, an if, a loop) gives the tuple of their values, its state, and binds them
+# again after it. A `for` is the count's recursor folding its rounds over the state; a `while` is the same recursion
+# on one more than the measure the provers show falls in every round (loops.wap), so it runs out of no round the loop
+# runs. A statement assigning none of them, a write into a part of a value, a capture's or a global's write, and an
+# exit from inside a part give no term: the function is then no definition the kernel holds.
+# TODO (card statement-terms) `return`, `break` and `continue` a mark in the state; a write into a part of a value the
+#   function made itself a new binding of its name
+
+use folder
+use "../stage.wap"
+use "../bindings.wap"
+use "../type_notation.wap"
+use "../rules/lowering.wap"
+use "../../kernel/forms.wap"
+use "../../kernel/terms.wap"
+use "../../kernel/environment.wap"
+use "../../kernel/typing.wap"
+use "../../kernel/counting.wap"
+use "../../kernel/numbers.wap"
+use "../../kernel/recursors.wap"
+
+# the binders of a state, of the rounds a fold has made and of the rounds below
+STATE_BINDER = "·state"
+ROUNDS_BINDER = "·rounds"
+BELOW_BINDER_ROUNDS = "·rounds_below"
+
+# the names a statement binds again, by their bindings' keys, and their types
+class State { keys: list<text>; names: list<text>; types: list<Term> }
+
+# a block's statements read in order, each under the bindings the ones before it leave, then what ends it under the
+# bindings they all leave
+block_term(statements: list, x: Entering, ending: (Entering) -> Term?) as Term? := {
+	if statements is empty { return ending(x) }
+	after = (inside: Entering) => block_term(statements.drop(1), inside, ending)
+	statement = unwrapped(statements#1)
+	match statement {
+		Empty => after(x)
+		Set(place, value) => if assignable(place, x) then let_read(x, place, kernel_value(value) ?? return ø, term_of(value, x) ?? return ø, after) else ø
+		_ => {
+			state = state_of(statement, x) ?? return ø
+			state_bound(state, state_after(statement, state, x) ?? return ø, x, after)
+		}
+	}
+}
+# whether an assignment gives a name of this reading a new binding: a new local, or a parameter or local bound before;
+# a capture's or a global's is a write to a cell, State
+assignable(place: Node, x: Entering) as bool := place is Symbol and not is_bound(place, DefinitionKind.Capture) and not is_bound(place, DefinitionKind.Global) and (fact_of(place, DEFINER) != ø or binder_place(x, binding_key(place)) > 0)
+
+# the names a statement assigns that are bound before it, of their types now; ø where it assigns a part of a value, a
+# name a binding of another type (flow.wap REBOUND) or one that is no new binding, and where it assigns none of them:
+# what it does then binds nothing
+state_of(statement: Node, x: Entering) as State? := {
+	state = State([], [], [])
+	for part in nodes_in(statement) {
+		place = set_place(part)
+		if place != ø {
+			if not unwrapped(place!) is Symbol or fact_of(place!, REBOUND) != ø or not assignable(place!, x) { return ø }
+			key = binding_key(place!)
+			at = binder_place(x, key)
+			if at > 0 and not state.keys.contains(key) {
+				state.keys += [key]
+				state.names += [text(place!)]
+				state.types += [type_of(x.c, x.variables#at)]
+			}
+		}
+	}
+	if state.keys is empty then ø else state
+}
+# the state's values after a statement, read with the state's names bound as they are before it
+state_after(statement: Node, state: State, x: Entering) as Term? := match statement {
+	Block(statements) => block_term(statements, x, inside => state_tuple(state, inside))
+	If(condition, then_part, else_part) => {
+		arms = [else_part, then_part].map(part => round_state(part, state, x))
+		held = term_of(condition, x) ?? return ø
+		if arms.any(arm => arm == ø) then ø else recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, state_type(state, x.c)), arms.map(arm => arm!) + [held])
+	}
+	For(place, count, body) => {
+		place_type = kernel_value(place) ?? return ø
+		rounds(state, x, apply(named_constant(UPS), term_of(count, x) ?? return ø), (inside, made, below, before) => counted_round(place, place_type, body, state, inside, made, apply(below, before)))
+	}
+	While(condition, body) => {
+		if loop_measured(statement, x.by_key, x.s) == ø { return ø }
+		measure = counted_measure(x.c, term_of(condition, x) ?? return ø) ?? return ø
+		rounds(state, x, successor_of(TYPES.environment, apply(named_constant(UPS), measure)), (inside, made, below, before) => state_bound(state, before, inside, at => tested_round(condition, body, state, at, below, before)))
+	}
+	_ => ø
+}
+# a part's statements read under the state's names, giving the state's values after them
+round_state(part: Node, state: State, x: Entering) as Term? := block_term(statements_of(unwrapped(part)), x, inside => state_tuple(state, inside))
+# a for's round after the ones made before it: the state they leave bound, the place the count of rounds made plus one
+counted_round(place: Node, place_type: Term, body: Node, state: State, x: Entering, made: Term, before: Term) as Term? := {
+	place_value = apply(TYPES.environment.integers!.natural, successor_of(TYPES.environment, made))
+	state_bound(state, before, x, inside => let_read(inside, place, place_type, place_value, at => round_state(body, state, at)))
+}
+# a while's round: where its condition holds, the rounds below after its body, else the state as it is
+tested_round(condition: Node, body: Node, state: State, x: Entering, below: Term, before: Term) as Term? := {
+	held = term_of(condition, x) ?? return ø
+	ran = round_state(body, state, x) ?? return ø
+	recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, state_type(state, x.c)), [before, apply(below, ran), held])
+}
+# The count's recursor folding rounds over a state, at a count of rounds: at zero the state as it is, at one more than
+# k the round given k, the function of the k rounds below and the state before
+rounds(state: State, x: Entering, count: Term, round: (Entering, Term, Term, Term) -> Term?) as Term? := {
+	type = state_type(state, x.c)
+	step = pi("_", type, type)
+	made = entered(x.c, ROUNDS_BINDER, named_constant(COUNT))
+	below = entered(x.c, BELOW_BINDER_ROUNDS, step)
+	before = entered(x.c, STATE_BINDER, type)
+	inside = x.under([made, below, before], [ROUNDS_BINDER, BELOW_BINDER_ROUNDS, STATE_BINDER])
+	at_step = lambdas([made, below, before], round(inside, made.variable, below.variable, before.variable) ?? return ø)
+	unchanged = entered(x.c, STATE_BINDER, type)
+	recursor = named_constant(recursor_name(COUNT), [level_of(x.c, step)])
+	apply(apply_all(recursor, [lambda("_", named_constant(COUNT), step), lambdas([unchanged], unchanged.variable), at_step, count]), state_tuple(state, x))
+}
+
+# The state as one value: its names' values paired from the right, one name's its own
+state_type(state: State, c: Checker) as Term := types_paired(state.types, c)
+state_tuple(state: State, x: Entering) as Term := values_paired(state.types, state.keys.map(key => x.variables#(binder_place(x, key))), x.c)
+# a state's names bound again to their parts of a value of it: the value let once, each name its part
+state_bound(state: State, value: Term, x: Entering, after: (Entering) -> Term?) as Term? := let_keyed(x, STATE_BINDER, STATE_BINDER, state_type(state, x.c), value, inside => parts_bound(state, 1, parts_of(#state.keys, inside.variables.last), inside, after))
+parts_bound(state: State, at: int, parts: list<Term>, x: Entering, after: (Entering) -> Term?) as Term? := if at > #state.keys then after(x) else let_keyed(x, state.names#at, state.keys#at, state.types#at, parts#at, inside => parts_bound(state, at + 1, parts, inside, after))
+types_paired(types: list<Term>, c: Checker) as Term := if #types == 1 then types#1 else apply_all(pair_at(types#1, types_paired(types.drop(1), c), c, products_of().pair), [types#1, types_paired(types.drop(1), c)])
+values_paired(types: list<Term>, values: list<Term>, c: Checker) as Term := {
+	if #values == 1 { return values#1 }
+	rest = types_paired(types.drop(1), c)
+	apply_all(pair_at(types#1, rest, c, products_of().intro), [types#1, rest, values#1, values_paired(types.drop(1), values.drop(1), c)])
+}
+# the parts of a value of a state of this many names: the pair's first, then the parts of its second
+parts_of(count: int, value: Term) as list<Term> := if count == 1 then [value] else [projection(products_of().pair, 1, value)] + parts_of(count - 1, projection(products_of().pair, 2, value))
+# the pair's type or its case at the levels of two types
+pair_at(first: Term, second: Term, c: Checker, made: Term) as Term := at_levels(made, [level_of(c, first), level_of(c, second)])
+products_of() as Products := TYPES.environment.products ?? raise "a state is a pair, and this environment holds no products"

@@ -338,11 +338,20 @@ under(x: Entering, locals: list<Local>, keys: list<text>, fields: list<Term> = [
 valued(x: Entering, of: Term, value: Term) as Entering := reread(x, x.binders, x.variables.map(variable => replaced_by(variable, variable_id(of), value)), x.recursion)
 # the same reading over other binders, their variables and a recursion, every other part carried
 reread(x: Entering, binders: list<text>, variables: list<Term>, recursion: Recursion?) as Entering := Entering(binders, variables, x.c, x.by_key, x.s, recursion)
-# a let of a name: its body read with the name a free variable of the type, closed over it again
-let_read(x: Entering, name: Node, type: Term, given: Term, body: (Entering) -> Term?) as Term? := {
-	local = entered(x.c, text(name), type)
-	read = body(x.under([local], [place_key(name)])) ?? return ø
-	let_in(text(name), type, given, abstracted(read, variable_id(local.variable)))
+# a let of a name: its body read with the name a free variable of the type, closed over it again, under the key of the
+# binding the name holds, so an assignment to a name bound before binds it again (statements.wap)
+let_read(x: Entering, name: Node, type: Term, given: Term, body: (Entering) -> Term?) as Term? := let_keyed(x, text(name), binding_key(name), type, given, body)
+let_keyed(x: Entering, binder: text, key: text, type: Term, given: Term, body: (Entering) -> Term?) as Term? := {
+	local = entered(x.c, binder, type)
+	read = body(x.under([local], [key])) ?? return ø
+	let_in(binder, type, given, abstracted(read, variable_id(local.variable)))
+}
+# the key of the binding a name holds where it stands: its definer's, itself where it is the definer
+binding_key(name: Node) as text := place_key(definer_of(name) ?? name)
+# the place of the innermost binder of a key, 0 for none: a name bound again is read as its latest binding
+binder_place(x: Entering, key: text) as int := {
+	from_end = x.binders.reverse().index_of(key)
+	if from_end <= 0 then 0 else #x.binders + 1 - from_end
 }
 # a typed node's term, ø where it is not pure
 term_of(n: Node, x: Entering) as Term? := match n {
@@ -394,7 +403,7 @@ instance_term(n: Node, head: Node, items: list, x: Entering) as Term? := {
 # a name a binder around it holds, its free variable
 binder_term(n: Node, x: Entering) as Term? := {
 	definer = definer_of(n) ?? return ø
-	at = x.binders.index_of(place_key(definer))
+	at = binder_place(x, place_key(definer))
 	if at <= 0 then ø else x.variables#at
 }
 # a call of a typed function the kernel took in, each argument of its parameter's own type, giving its own result
@@ -706,19 +715,8 @@ premised_arm(arm: Node, condition: Term, case: Term, x: Entering) as Term? := {
 	lambdas([premise], term_of(arm, x.under([premise], [CASE_PREMISE])) ?? return ø)
 }
 truth_arm(arms: list, held: bool) as Node? := arm_result(arms.find(arm => if held then arm_pattern(arm) is True else arm_pattern(arm) is False) ?? return ø)
-# a block of lets, each a name new to it given its value, ending in the value it gives
-lets_term(statements: list, x: Entering) as Term? := {
-	if statements is empty { return ø }
-	match statements#1 {
-		Set(place, value) => {
-			if #statements == 1 or not place is Symbol or fact_of(place, DEFINER) == ø or x.binders.contains(place_key(place)) { return ø }
-			type = kernel_value(value) ?? return ø
-			given = term_of(value, x) ?? return ø
-			let_read(x, place, type, given, inside => lets_term(statements.drop(1), inside))
-		}
-		_ => if #statements == 1 then term_of(statements#1, x) else ø
-	}
-}
+# a block's statements read in order (statements.wap), ending in the value its last one gives
+lets_term(statements: list, x: Entering) as Term? := if statements is empty then ø else block_term(statements.take(#statements - 1), x, inside => term_of(statements.last, inside))
 terms_applied(function: Term, arguments: list, x: Entering) as Term? := {
 	terms = arguments.map(argument => term_of(argument, x))
 	if terms.any(term => term == ø) then ø else apply_all(function, terms.map(term => term!))
