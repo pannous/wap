@@ -108,7 +108,9 @@ parameters_entered(typed: TypedFunction, c: Checker, s: TypingState) as list<Loc
 	names = parameter_nodes(typed)
 	for at in 1 to #typed.arguments {
 		before = fresh_reading(c, {}, s).under(locals, names.take(at - 1).map(place_key))
-		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c))]
+		written = declared_type(parameters_of(typed)#at)
+		# a parameter of a family applied to the parameters before it, `e: Even(n)`, names them as a result does
+		locals += [entered(c, text(names#at), statement_held(written, typed, before, s) ?? family_read(written, typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c))]
 	}
 	locals
 }
@@ -119,14 +121,17 @@ parameters_checker(typed: TypedFunction, s: TypingState) as Checker := {
 }
 # the names its definition gives its parameters, as written
 parameter_nodes(typed: TypedFunction) as list := parameters_of(typed).map(parameter => declared_name(parameter))
-# GUESS (T6a3's value reader): the result as the kernel reads it: where a family is written applied to values, the head applied to its arguments
-# read as values under the parameters (`Even(double(n))`, each value through term_of and the checker's Locals); any other result as settled
-kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
-	if typed.written == ø or not is_family_call(typed.written!) { return kernel_settled(typed.result ?? return ø, s, parameters_checker(typed, s)) }
-	match typed.written! {
+# the result as the kernel reads it: a family applied to values read under the parameters, any other result as settled
+kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := family_read(typed.written, typed, parameters_reading(typed, by_key, s), s) ?? kernel_settled(typed.result ?? return ø, s, parameters_checker(typed, s))
+# GUESS (T6a3's value reader): a written type of a function as the kernel reads it in a reading of its binders: a family
+# applied to values, the head applied to its arguments read as values (`Even(double(n))`, each through term_of under
+# the reading); ø for any other type, which typing settles
+family_read(written: Node?, typed: TypedFunction, reading: Entering, s: TypingState) as Term? := {
+	if written == ø or not is_family_call(written!) { return ø }
+	match written! {
 		Call(head, items) => {
-			given = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), parameters_reading(typed, by_key, s)) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)
-			kernel_headed(apply_all(kernel_type(family_word(head))!, given), typed.checker!)
+			given = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), reading) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)
+			kernel_headed(apply_all(kernel_type(family_word(head))!, given), reading.c)
 		}
 		_ => ø
 	}
