@@ -193,7 +193,7 @@ checked) and a line here when its language changed. The lead reviews it against 
 2. **The new compiler builds itself.**
    Done when all of these hold, each measured by a script, never by eye (user 2026-11-18):
    1. the gauge, `warp scripts/wap-census.warp`, says every function of every wap file typed and emitted
-      ("typed n of n functions" on each line, the total likewise); test/wap/test_census.sh holds that count and
+      ("typed n of n functions" on each line, the total likewise); test/wap/ratchet_census.sh holds that count and
       only lets it rise;
    2. **met:** test/wap/test_self.sh has one line per wap file outside types/, "wap compiles <file> and the result loads",
       all green; the types module is no program of its own but part of every program, so every test compiles it, and
