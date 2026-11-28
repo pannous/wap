@@ -1084,7 +1084,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | Q1 quotients | planned (notes/coc-q1.md; also after T4e and V3) | | C1, T6a3, T6a4 |
 | T7 the theory extension retires | planned (notes/coc-t7.md) | | T6 |
 | T8a the reader | planned (notes/coc-t8.md); its first commit is whole()'s sign | | exact-big-literals |
-| T8b the machine words | planned (notes/coc-t8.md; below "T8b: what a word's row means"); origin/t8b-q1 a739da9b holds its types part; builder wap-q1-kernel | | Q1, T4d, int's division identity |
+| T8b the machine words | planned (notes/coc-t8.md; below "T8b: what a word's row means"); origin/t8b-q1 a739da9b holds its types part; builder wap-q1-kernel | | Q1, T4d; its kernel part exact-big-literals |
 | T8c exact int on the run | planned (notes/coc-t8.md) | | T8a, T5f |
 
 ### What each open step costs now
@@ -1126,7 +1126,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | Q1 quotients | coc-q1.md | +37 | | +27 | prove +5 |
 | T7 the extension retires | coc-t7.md | 0 (moves) | | | native +12 |
 | T8a the reader | coc-t8.md | +12 | +2 | | |
-| T8b machine words | coc-t8.md, coc-plan.md (below) | +1 | +8, and the division identity | +15 | |
+| T8b machine words | coc-t8.md, coc-plan.md (below) | +1 | after exact-big-literals: +8 and the division identity | +15 | |
 | T8c exact int on the run | coc-t8.md | +50 | −10 | +60 | emit +150, native +10 |
 | T5d statements | coc-t5d.md | parked | | | |
 
@@ -1310,21 +1310,26 @@ Steps 2-3 need nothing. Step 4 is normal path. Step 5 is careful. Totals: kernel
 #### T8b: what a word's row means
 
 - i64 is `int where WORD_SMALLEST <= it <= WORD_LARGEST` with the wasm rows as one-prim definitions, and
-  `type wrapped = quotient(int, same_wrapped)`, `same_wrapped(a, b) := (a - b) % 2^64 == 0` (types/words.wap).
+  `type wrapped = quotient(int, same_wrapped)`, `same_wrapped(a, b) := (a - b) % 2^64 == 0` (types/words.wap). One
+  i64 and one i32: words.wap is included from types.wap, and numbers.wap's `type i64 < int` goes in the same commit.
 - The kernel reads a subtype as its parent (core/analyze/terms.wap "a subtype by condition is its parent's"), so a
   row's meaning is chosen by the definition's written parameter types, not the operands' kernel types: an int row
-  means int's SUM, TIMES and the comparisons; an i64 row means its wrapping: WRAPPED_SUM(a, b) := wrap(SUM(a, b)) with
-  wrap(x) := (x - WORD_SMALLEST) % 2^64 + WORD_SMALLEST, the same for subtract and multiply; ==, <, <= keep int's;
-  ÷ and % keep int's but at MIN ÷ -1, which raises. core +1 (row_term), kernel about +8.
-- Then the word laws are laws: `(quotient.of((a + b) as int) as wrapped) == quotient.of((a as int) + (b as int))` is
-  same_wrapped(wrap(s), s) through quotient_sound, and a prim's result needs no range check because wrap lands in the
-  range.
-- Int's division identity, `a == (a ÷ m) * m + a % m`, is one kernel theorem before T8b: with Q1's distribute and
-  times_negated it gives same_wrapped's symmetric and transitive, the congruences lift asks for and the wrap law.
-  reflexive comes from ADD_MINUS.
-- words.wap is included from types.wap with quotients.wap; numbers.wap's `type i64 < int` goes in the same commit.
-- Gap lines: `x: i64 = WORD_LARGEST` then `x + 1 == WORD_SMALLEST`; `wap verify` of word_sum_wraps Proved by its
-  proof, not by refl; `law up(a: i64): a + 1 > a` not Proved.
+  means int's SUM, TIMES and the comparisons; an i64 row means no int function, so `a + 1 > a` over i64 is no law the
+  kernel proves. core +1 (row_term).
+- The wrapping meanings and the division identity need the kernel's numbers past LARGEST: the kernel has no int ÷ or %,
+  and its numeral shortcuts stop at LARGEST, where a Defined wrap would fall back to unary counting. Both come after
+  exact-big-literals:
+  - Int's division identity, `a == (a ÷ m) * m + a % m`, one kernel theorem: with Q1's distribute and times_negated it
+    gives same_wrapped's symmetric and transitive, the congruences lift asks for and the wrap law; reflexive comes
+    from ADD_MINUS.
+  - The wrapping meanings: WRAPPED_SUM(a, b) := wrap(SUM(a, b)) with wrap(x) := (x - WORD_SMALLEST) % 2^64 +
+    WORD_SMALLEST, the same for subtract and multiply; ==, <, <= keep int's; ÷ and % keep int's but at MIN ÷ -1, which
+    raises. kernel about +8. Then `(quotient.of((a + b) as int) as wrapped) == quotient.of((a as int) + (b as int))` is
+    same_wrapped(wrap(s), s) through quotient_sound, and a prim's result needs no range check because wrap lands in
+    the range.
+- Gap lines: `x: i64 = WORD_LARGEST` then `x + 1 == WORD_SMALLEST` (green with the row meaning); `law up(a: i64): a +
+  1 > a` not Proved (green with the row meaning); `wap verify` of word_sum_wraps Proved by its proof, not by refl
+  (red until the wrapping meanings).
 
 #### V1: every law gets its line
 
@@ -1457,7 +1462,7 @@ Each step is one builder; T8a and T8c take the careful path (the reader; a value
 | step | what works after it | core / kernel / types (estimate) | extension, emit, native | wiki pages it serves | outcome tests |
 |---|---|---|---|---|---|
 | T8a the reader keeps whole literals whole | A whole literal is an int at every size. One in the signed i64 range, `-9223372036854775808` included, reads as today. One past it reads as the digits it is (an atom holding its digit text), which analyze types as an `int` and the kernel holds as a `Large` (magnitude_of_digits). The reader's comparison goes: core/parse/atoms.wap's `LARGEST_INT` text copy and `whole`'s length test (and its DEBT) are replaced by one test against WHOLE_LARGEST. Until T8c a literal past i64 in code that runs is refused while compiling, with "an int past 2^63 runs once ints are exact"; laws and proofs take it at once | core +12 (the atom +5, its int typing +4, the range test against WHOLE_LARGEST +3, LARGEST_INT and the DEBT −3), kernel +2 (a numeral from digits) | 0 | int.md:4, number.md:107-112 | test_theory_prelude_numbers `big` (`law big: 4294967296 * 4294967296 == 18446744073709551616`, red); test_number_wanted:35 and test_quotient_wanted:14 `(9223372036854775807 as i64) + 1 == -9223372036854775808 as i64` (red today because `-9223372036854775808` reads as a float: "nothing defines i64 … as a field of float"). Gap: `type of 18446744073709551616` → `int` (int.md:4) |
-| T8b the machine words | `i64` and `i32` are wap/types' wrapping words, refinements of int by their range whose operations are T1's rows and wrap (number.md:109-111), and `i64` is the quotient of int by differences that are multiples of 2^64 (quotient.md:43-44), so laws that hold modulo 2^64 prove on it and `a + 1 > a` is refused there (coc-plan 13). A literal that does not fit its declared word is refused while compiling, by the range condition T4 computes. A row's kernel meaning is chosen by the definition's written parameter types, so i64's `+` means the wrapping sum (below "T8b: what a word's row means") | core +1 (row_term), kernel +8 (the wrapping meanings) and int's division identity, types +15 (the two words, `same_wrapped`, the quotient) | 0 | number.md:109-112, quotient.md:43-44 | test_number_page "i64 wraps as the machine does" (green); the two T8a lines. Gap: `x: i64 = 2^70` → refused, naming the range (number.md:112) |
+| T8b the machine words | `i64` and `i32` are wap/types' wrapping words, refinements of int by their range whose operations are T1's rows and wrap (number.md:109-111), and `i64` is the quotient of int by differences that are multiples of 2^64 (quotient.md:43-44), so laws that hold modulo 2^64 prove on it and `a + 1 > a` is refused there (coc-plan 13). A literal that does not fit its declared word is refused while compiling, by the range condition T4 computes. A row's kernel meaning is chosen by the definition's written parameter types, so i64's `+` means the wrapping sum (below "T8b: what a word's row means") | core +1 (row_term), types +15 (the two words, `same_wrapped`, the quotient); after exact-big-literals kernel +8 (the wrapping meanings) and int's division identity | 0 | number.md:109-112, quotient.md:43-44 | test_number_page "i64 wraps as the machine does" (green); the two T8a lines. Gap: `x: i64 = 2^70` → refused, naming the range (number.md:112) |
 | T8c exact int on the run, stored by context | An `int` runs exact: its operations check for overflow and carry a value past i64 into a big int, which comes from a library only the programs that need one load (lib/magnitude.wap with a sign). Where computing or a fact in scope (a parameter's condition, a range's bounds, an `if`) shows that a value fits, it is stored as an i64 with no check. `wap fast` builds with every int as a wrapping i64 and no checks (fast.md, int.md:4-5). The kernel's ROW_OVERFLOW and FOLDED_ARITHMETIC guard go, since the rows are exact on the run as in the kernel | core +40 (analyze: the storage chosen from facts), kernel −10 (ROW_OVERFLOW, the fold's guard), types +60 (the signed big int over magnitude) | emit +150 (checked operations, the carry into a big int, the int value's layout as a row of T1's table), native +10 (`wap fast`) | int.md:4-5, number.md:107-108, fast.md, bignum.md | test_number_wanted "text(xs#1 * 4)" (`xs = [2^62]`, red: got "0") and "an int is unbounded: big: int = 2^70" (red); test_exact "a whole number past 64 bits" (green, through `use exact`), which must stay green. Gaps: `wap fast` of `xs = [2^62]\nprint xs#1 * 4` → `0`; `for i in 1 to 10 { s += i }` with `s = 0` compiles its loop counter to an i64 with no check, measured by the benchmarks' guardrails (coc-plan's T8 row) |
 
 Net: core about +52, kernel −8, types +75, emit +150, native +10, about +280 in all.
@@ -1471,8 +1476,8 @@ conditions. T8c after T8a and T5's erasure stage (the int layout is one of its b
 **Beside the other work.**
 - T8a touches core/parse/atoms.wap and analyze's numerals. No T6 step and no dedup file does, so it runs beside
   them, but alone in its careful run.
-- T8b is wap/types but for one row_term line and the kernel's wrapping meanings; it runs beside anything after its
-  prerequisites, careful path for the kernel meanings.
+- T8b is wap/types but for one row_term line; it runs beside anything after its prerequisites. Its kernel part (the
+  wrapping meanings, the division identity) follows exact-big-literals, careful path.
 - T8c touches the emitter's value layouts. It is the one T8 step no other careful landing may share (C2 included),
   and it reports the self-compile time and the benchmarks against main.
 
