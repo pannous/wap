@@ -145,7 +145,7 @@ kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 # binders and in its arguments too, is headed at the levels its arguments give (family_applied); a term holding no level
 # parameter, typing's bare levels, is as it is. A function named as a family's argument, `same_value` of
 # `quotient(fraction, same_value)`, is that function
-kernel_headed(t: Term, c: Checker, s: TypingState) as Term := if not t.holds_parameter then t else match t.shape {
+kernel_headed(t: Term, c: Checker, s: TypingState) as Term := kernel_function(t, c, s) ?? if not t.holds_parameter then t else match t.shape {
 	Apply(function, argument) => {
 		family = declared_at(TYPES.environment, constant_id(head_of(t)))
 		given: list<Term> = []
@@ -156,6 +156,54 @@ kernel_headed(t: Term, c: Checker, s: TypingState) as Term := if not t.holds_par
 	Lambda(binder, domain, body) => binder_headed(c, s, binder, domain, body, lambda)
 	Projection(structure, field, of) => projection(structure, field, kernel_headed(of, c, s))
 	_ => t
+}
+# A function type as typing writes it, `(T, S) -> U` a Π over its parameter list, and a function value's own type,
+# its function's signature (its closure left out): the kernel's Π, curried left to right, `T -> S -> U`; ø for any
+# other type, a kernel Π too
+kernel_function(t: Term, c: Checker, s: TypingState) as Term? := {
+	key = function_value_key(t)
+	signature = (if key != ø then value_signature(key!, s) else if kernel_pi(t) then ø else function_parts(t)) ?? return ø
+	signature.parameters.reverse().fold(kernel_headed(signature.result, c, s), (rest, parameter) => pi("_", kernel_headed(parameter, c, s), rest))
+}
+# a function value's signature: its function's one instance's parameters, a lambda's closure left out, and result
+value_signature(key: text, s: TypingState) as FunctionType? := {
+	instances = instances_of(key, s)
+	if #instances != 1 { return ø }
+	typed = instances#1
+	FunctionType(typed.arguments.drop(if is_lambda_key(key, s) then 1 else 0), typed.result ?? return ø)
+}
+# A function value `x => e` as the kernel's λ x. e: its function's one instance's body read under its parameters, the
+# closure left out. A lambda reading a capture has no term (its value lives in the closure), so no term ever drops
+# what it reads
+lambda_term(n: Node, x: Entering) as Term? := {
+	if captures_of(n) is not empty { return ø }
+	key = function_value_key(fact_type(fact_of(n, FUNCTION_VALUE)) ?? value_type(n)) ?? return ø
+	instances = instances_of(key, x.s)
+	if #instances != 1 { return ø }
+	typed = instances#1
+	names = parameter_nodes(typed).drop(1)
+	locals = (1 to #names).list().map(at => entered(x.c, text(names#at), kernel_settled(typed.arguments#(at + 1), x.s, x.c)))
+	lambdas(locals, term_of(body_of(typed), x.under(locals, names.map(place_key))) ?? return ø)
+}
+# a function's name as a value: its one instance as the kernel holds it, or inside a measured recursion the recursion
+# itself (measured_value); ø for any other name
+named_function_term(n: Node, x: Entering) as Term? := {
+	key = function_value_key(value_type(n)) ?? return ø
+	if is_lambda_key(key, x.s) { return ø }
+	r = x.recursion
+	if r != ø and r!.measured != ø and key == r!.key { return measured_value(r!.measured!, x) }
+	instances = instances_of(key, x.s)
+	if #instances != 1 then ø else instance_entered(instances#1, x.by_key, x.s)
+}
+# a call of a function value: a variable of a function type applied to the arguments, or a lambda's function given
+# its closure first, the closure's term applied to the rest
+value_applied(called: Node, arguments: list, x: Entering) as Term? := {
+	through = binder_term(called, x)
+	typed = if through != ø then ø else called_typed(called, arguments, x)
+	if through == ø and (typed == ø or not is_lambda_key(instance_key(typed!), x.s) or arguments is empty) { return ø }
+	function = through ?? term_of(arguments#1, x) ?? return ø
+	given = (if through != ø then arguments else arguments.drop(1)).map(argument => term_of(argument, x))
+	if given.any(term => term == ø) then ø else apply_all(function, given.map(term => term!))
 }
 # the function a type's argument word names, by its definer, as the kernel holds it (type_notation.wap value_word): the
 # instance whose parameters are the family's at that place, its binder's domain with the arguments before it put in,
@@ -292,10 +340,11 @@ term_of(n: Node, x: Entering) as Term? := match n {
 	List(items, Bracket.Square, separator) => list_term(n, items, x)
 	True => TYPES.environment.literals!.yes_case
 	False => TYPES.environment.literals!.no_case
-	Symbol(name) => binder_term(n, x) ?? refl_term(n) ?? by_term(n, x) ?? case_term(n, n, [], x)
+	Symbol(name) => binder_term(n, x) ?? refl_term(n) ?? by_term(n, x) ?? named_function_term(n, x) ?? case_term(n, n, [], x)
 	Get(receiver, field) => field_term(receiver, field, x)
 	Key(head, Op.None, List(items, Bracket.Curly, separator)) => instance_term(n, head, items, x)
-	Call(called, arguments) => by_term(n, x) ?? recursive_called(called, arguments, x) ?? called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
+	Call(called, arguments) => by_term(n, x) ?? recursive_called(called, arguments, x) ?? value_applied(called, arguments, x) ?? called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
+	Fn(parameters, body) => lambda_term(n, x)
 	Prim(operation, arguments) => row_term(n, text(operation), arguments, x)
 	If(condition, then_part, else_part) => choice_term(n, condition, then_part, else_part, x)
 	Case(subject, arms) => choice_term(n, subject, truth_arm(arms, yes), truth_arm(arms, no), x) ?? match_term(n, subject, arms, x)

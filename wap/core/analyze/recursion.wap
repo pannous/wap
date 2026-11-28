@@ -157,7 +157,7 @@ recursive_called(called: Node, arguments: list, x: Entering) as Term? := {
 # Inside it is the measure as a function of the parameters, the parameters, the recursion below, the bound and the
 # premise that the function's measure is below the bound's successor, and the result as a function of the parameters;
 # ø where a call's proof is not found
-class Measured { measure: Term; parameters: list<Term>; below: Term; bound: Term; premise: Term; result: Term }
+class Measured { measure: Term; parameters: list<Term>; below: Term; bound: Term; premise: Term; result: Term; locals: list<Local> }
 measured_defined(typed: TypedFunction, body: Node, x: Entering) as Term? := {
 	if x.recursion != ø or not calls_itself(body, instance_key(typed)) { return ø }
 	result = kernel_result(typed, x.by_key, x.s) ?? return ø
@@ -175,7 +175,7 @@ measured_defined(typed: TypedFunction, body: Node, x: Entering) as Term? := {
 	bound = entered(x.c, "k", count)
 	below = entered(x.c, "below", bounded(bound.variable))
 	premise = entered(x.c, MEASURE_PREMISE, at_most_yes(start, successor_of(TYPES.environment, bound.variable)))
-	inside = reread(x, x.binders, x.variables, Recursion(instance_key(typed), 0, equating: equations_checker(x), measured: Measured(measure, variables(locals), below.variable, bound.variable, premise.variable, lambdas(locals, result))))
+	inside = reread(x, x.binders, x.variables, Recursion(instance_key(typed), 0, equating: equations_checker(x), measured: Measured(measure, variables(locals), below.variable, bound.variable, premise.variable, lambdas(locals, result), locals)))
 	at_step = lambdas([bound, below] + locals + [premise], term_of(body, inside) ?? return ø)
 	# the levels the result and the recursion's motive live at, so a proof or a function of types is read too
 	recursion = apply_all(named_constant(recursor_name(COUNT), [level_of(x.c, bounded(k.variable))]), [lambdas([k], bounded(k.variable)), at_zero, at_step, start])
@@ -195,7 +195,7 @@ measured_match(subject: Node, arms: list, domain: Term, m: Measured, x: Entering
 	within = (inside: Entering, value: Term, read: (Entering) -> Term?) => {
 		h = entered(inside.c, MEASURE_PREMISE, premised(value))
 		taken = valued(inside, variable, value)
-		measured = Recursion(inside.recursion!.key, 0, equating: inside.recursion!.equating, measured: Measured(m.measure, at(value), m.below, m.bound, h.variable, m.result))
+		measured = Recursion(inside.recursion!.key, 0, equating: inside.recursion!.equating, measured: Measured(m.measure, at(value), m.below, m.bound, h.variable, m.result, m.locals))
 		body = read(reread(taken, taken.binders, taken.variables, measured))
 		if body == ø then ø else lambdas([h], body!)
 	}
@@ -207,12 +207,20 @@ MEASURE_PREMISE = "·measured"
 # that the call's measure is below the bound, chained from the provers' proof that it is below the function's
 measured_called(arguments: list, m: Measured, x: Entering) as Term? := {
 	read = arguments.map(argument => term_of(argument, x))
-	if read.any(term => term == ø) { return ø }
-	given = read.map(term => term!)
+	if read.any(term => term == ø) then ø else measured_applied(read.map(term => term!), m, x)
+}
+measured_applied(given: list<Term>, m: Measured, x: Entering) as Term? := {
 	smaller = successor_of(TYPES.environment, beta(m.measure, given))
 	whole = beta(m.measure, m.parameters)
 	falls = hole_term([], at_most_yes(smaller, whole), x, yes) ?? return ø
 	apply_all(m.below, given + [apply_all(named_constant(AT_MOST_TRANS), [smaller, whole, m.bound, falls, m.premise])])
+}
+# the function being read as a value inside its measured recursion: a function of fresh parameters, each call of it
+# the recursion below (its premise found where it is applied, so only an argument the provers see smaller passes)
+# GUESS: a parameter's type naming one before it keeps the original's variable
+measured_value(m: Measured, x: Entering) as Term? := {
+	fresh = m.locals.map(local => entered(x.c, local.binder, local.domain))
+	lambdas(fresh, measured_applied(variables(fresh), m, x.under(fresh, fresh.map(local => NO_BINDER))) ?? return ø)
 }
 # `at_most(m, n) == yes`
 at_most_yes(m: Term, n: Term) as Term := truths_equal(TYPES.environment, apply_all(named_constant(AT_MOST), [m, n]), TYPES.environment.literals!.yes_case)
