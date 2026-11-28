@@ -1,7 +1,7 @@
-# A function type over named binders, as a value and as a statement
+# A function type over its binders, as a value and as a statement
 
-`(n: nat) -> n + n == 2 * n`, `(A: Prop) -> A`, `(n: int) -> text`: an arrow whose parameters are named binders, with
-its result reading them. It is a type, so it is a value (wiki/universe.md:24-31). Where its result is a comparison, it
+`(n: nat) -> n + n == 2 * n`, `(A: Prop) -> A`, `(n: int) -> text`, `(int) -> text`: an arrow over its parameters as
+binders, named or anonymous, its result reading the named ones. It is a type, so it is a value (wiki/universe.md:24-31). Where its result is a comparison, it
 is the proposition "for every n" (wiki/proposition.md:20, :34). Card dependent-types.
 
 ## Where it is written
@@ -24,24 +24,26 @@ is the proposition "for every n" (wiki/proposition.md:20, :34). Card dependent-t
 ## The plan (core about +25)
 
 1. **Scope (about +6).**
-   - An arrow whose parameters are all named binders, `(x: T, …) -> R`, is a type, both where a value stands and in a
-     type's place.
+   - An arrow is a type wherever it stands, as a value or in a type's place. A named parameter, `(x: T, …) -> R`, is a
+     binder of that name. An unnamed one, `(int) -> text`, gets an anonymous binder (kernel terms.wap's NO_BINDER, as
+     minor_of names an unnamed field). There is one reading for both, with no split.
    - Its binders are a layer of their own: `within(scope, parameter_definitions(parameters, depth + 1))`, the same call
      applied_type makes for an alias's parameters (scope.wap).
    - The result is bound in that layer. A statement result is bound by is_code_call and the AS_CODE reading (proof-words),
      every other result by type_bound.
    - Names in the result take DEFINED_AT from their binder, through t4e-2's condition_bound, which binds Parameter,
      Local and Capture kinds by declaration. So `n` means the arrow's n, never a global of that spelling.
-   - The refusal stays for an arrow without named binders where a value stands, `(a, b) -> a + b`, with its fix-it.
-     An unnamed arrow in a type's place, `(int) -> text`, reads as today.
+   - scope.wap:72's refusal goes. `(a, b) -> a + b` written for a lambda is read as the type it spells: a and b as
+     parameter types, refused at typing where they name no type. That is the general rule's answer, with no special
+     message.
 2. **Typing (about +8).**
-   - type_value_written gets one arm: an arrow of named binders is a type value.
+   - type_value_written gets one arm: an arrow is a type value.
    - Its result is typed under a frame holding the binders as parameters, the way body_typed types a function's
      declared result: proof-words' statement_typed for a statement result, written_type for any other.
    - A statement result types as STATEMENT_TERM, proof-words' stand-in, so the arrow over it is a statement too. Every
      proof fits it, and the kernel checks the proof when it enters it.
 3. **Term (about +8).**
-   - term_of of such an arrow enters each binder in order on the reading's checker, `entered(x.c, name, kernel_type(T))`.
+   - term_of of an arrow enters each binder in order (an anonymous one under NO_BINDER, which nothing reads) on the reading's checker, `entered(x.c, name, kernel_type(T))`.
      Each binder's type is read under the binders before it, as parameters_entered does for a function's parameters.
    - The result is read under them: `x.under(locals, keys)`, with keys the binders' place keys. This is the entering
      T6a4's minor_of uses for a case's fields and hypotheses.
@@ -83,5 +85,5 @@ test_proposition_wanted.
   - after t4e-2's condition_bound and declared_scope;
   - after T6a4's riders, for minor_of's entering as written there.
 - None of them is changed, only called.
-- The one risk is in scope: the compiler's own `(T) -> U` types are unnamed arrows and keep today's path. Only an arrow
-  whose every parameter is `name: type` takes the new one, and that test is read from the form, not from a word list.
+- The one risk is in scope: the compiler's own `(T) -> U` types now take the same path, with anonymous binders. Their
+  terms must stay what function_type_of gives today, a non-dependent pi, so test_self and the census check it.
