@@ -1084,7 +1084,8 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | Q1 quotients | planned (notes/coc-q1.md; also after T4e and V3) | | C1, T6a3, T6a4 |
 | T7 the theory extension retires | planned (notes/coc-t7.md) | | T6 |
 | T8a the reader | planned (notes/coc-t8.md); its first commit is whole()'s sign | | exact-big-literals |
-| T8b the machine words | planned (notes/coc-t8.md; below "T8b: what a word's row means"); origin/t8b-q1 a739da9b holds its types part; builder wap-q1-kernel | | Q1, T4d; its kernel part exact-big-literals |
+| T8b the machine words | planned (notes/coc-t8.md; below "T8b: what a word's row means"); origin/t8b-q1 a739da9b holds its types part; builder wap-q1-kernel | | Q1, T4d |
+| T8b-k the words' kernel part | planned (below "T8b-k: the kernel's division and the wrapping meanings") | | exact-big-literals, int-takes, T8b |
 | T8c exact int on the run | planned (notes/coc-t8.md) | | T8a, T5f |
 
 ### What each open step costs now
@@ -1126,7 +1127,8 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | Q1 quotients | coc-q1.md | +37 | | +27 | prove +5 |
 | T7 the extension retires | coc-t7.md | 0 (moves) | | | native +12 |
 | T8a the reader | coc-t8.md | +12 | +2 | | |
-| T8b machine words | coc-t8.md, coc-plan.md (below) | +1 | after exact-big-literals: +8 and the division identity | +15 | |
+| T8b machine words | coc-t8.md, coc-plan.md (below) | +1 | | +15 | |
+| T8b-k the words' kernel part | coc-plan.md (below) | | +24 | | |
 | T8c exact int on the run | coc-t8.md | +50 | −10 | +60 | emit +150, native +10 |
 | T5d statements | coc-t5d.md | parked | | | |
 
@@ -1316,9 +1318,8 @@ Steps 2-3 need nothing. Step 4 is normal path. Step 5 is careful. Totals: kernel
   row's meaning is chosen by the definition's written parameter types, not the operands' kernel types: an int row
   means int's SUM, TIMES and the comparisons; an i64 row means no int function, so `a + 1 > a` over i64 is no law the
   kernel proves. core +1 (row_term).
-- The wrapping meanings and the division identity need the kernel's numbers past LARGEST: the kernel has no int ÷ or %,
-  and its numeral shortcuts stop at LARGEST, where a Defined wrap would fall back to unary counting. Both come after
-  exact-big-literals:
+- The wrapping meanings and the division identity need the kernel's numbers past LARGEST and an int ÷ and %: they are
+  T8b-k, below. What they are:
   - Int's division identity, `a == (a ÷ m) * m + a % m`, one kernel theorem: with Q1's distribute and times_negated it
     gives same_wrapped's symmetric and transitive, the congruences lift asks for and the wrap law; reflexive comes
     from ADD_MINUS.
@@ -1330,6 +1331,26 @@ Steps 2-3 need nothing. Step 4 is normal path. Step 5 is careful. Totals: kernel
 - Gap lines: `x: i64 = WORD_LARGEST` then `x + 1 == WORD_SMALLEST` (green with the row meaning); `law up(a: i64): a +
   1 > a` not Proved (green with the row meaning); `wap verify` of word_sum_wraps Proved by its proof, not by refl
   (red until the wrapping meanings).
+
+#### T8b-k: the kernel's division and the wrapping meanings
+
+After exact-big-literals (counts past LARGEST as Large, computed natively by the shortcuts) and int-takes (int's two
+cases), careful path, one builder. In order:
+1. The count's divide and remainder: two count functions by recursion, bound to Shortcut.Divide and Shortcut.Remainder
+   by `shortcut_fixed` beside Add … AtMost (kernel/counting.wap), fixed by the shortcut's statements
+   (kernel/numbers.wap shortcut_statements' Divide: f(m, k)·k + rest(m, k) == m, f(m, 0) == 0, rest(m, k + 1) <= k).
+   The count's division identity is then a theorem. kernel about +6.
+2. Int's ÷ and %, truncated as i64.div_s and i64.rem_s divide: by both ints' cases over the count's pair, the
+   quotient's sign by the cases and the remainder's the dividend's; INT_MEANINGS gains "i64.div_s" and "i64.rem_s".
+   The int division identity, `a == (a ÷ m) * m + a % m` for m != 0, by the cases from step 1 with Q1's
+   times_negated, one theorem. kernel about +8.
+3. M = 2^64 from a magnitude: an int numeral of a Magnitude beside int_numeral (natural(count_literal(m)), negative
+   of the one before), and M as magnitude.wap's product of 2^32 by itself or magnitude_of_digits. The compiler's own
+   ints wrap, so a whole number past i64 never passes through one. kernel about +2.
+4. The wrapping meanings: WRAPPED_SUM(a, b) := wrap(SUM(a, b)), wrap(x) := (x - WORD_SMALLEST) % M + WORD_SMALLEST,
+   the same for subtract and multiply, the i64 rows' meanings by row_term's written types. kernel about +8.
+5. Green: `wap verify` of word_sum_wraps and word_product_wraps Proved by their proofs (same_wrapped(wrap(s), s)
+   through quotient_sound, same_wrapped's symmetric and transitive from the division identity), not by refl.
 
 #### V1: every law gets its line
 
