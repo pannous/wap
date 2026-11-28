@@ -258,28 +258,35 @@ binder_term(n: Node, x: Entering) as Term? := {
 }
 # a call of a typed function the kernel took in, each argument of its parameter's own type, giving its own result
 called_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
+	function = called_function(called, arguments, x) ?? return ø
+	# a proof the call leaves to the provers, where they give none, leaves the call no term: the obligation decides it
+	given = arguments_read(function, arguments, x, (laws, goal) => hole_term(laws, goal, x)) ?? return ø
+	if not equal(x.c, kernel_value(n) ?? return ø, after_arguments(type_of(x.c, function), given)) { return ø }
+	apply_all(function, given)
+}
+# the function a call calls, as the kernel holds it; ø for a call of no function of the program
+called_function(called: Node, arguments: list, x: Entering) as Term? := {
 	definer = fact_of(called, DEFINED_AT) ?? return ø
 	typed = x.by_key.get(place_key(definer)) ?? return ø
 	if #arguments != #typed.arguments { return ø }
-	function = instance_entered(typed, x.by_key, x.s) ?? return ø
-	# GUESS: each argument against its domain and the call against the result, both under the arguments before them (kernel/recursors.wap with_parameters peels the same way)
+	instance_entered(typed, x.by_key, x.s)
+}
+# A call's arguments read against its function's domains in turn, each the function's type after the arguments before
+# it (kernel/recursors.wap with_parameters peels the same way); a proof the call leaves to the provers given by
+# `proved`, from its laws and the goal at its place; ø where one is no term
+arguments_read(function: Term, arguments: list, x: Entering, proved: (list, Term) -> Term?) as list<Term>? := {
 	callee = type_of(x.c, function)
 	given: list<Term> = []
 	for argument in arguments {
 		domain = next_domain(after_arguments(callee, given))
-		laws = by_laws(argument)
-		if laws != ø { given += [proof_given(argument, laws!, domain, x)] } else {
+		laws = by_laws(fact_of(argument, PROOF_HOLE) ?? argument)
+		if laws != ø { given += [proved(laws!, domain) ?? return ø] } else {
 			if not equal(x.c, kernel_value(argument) ?? return ø, domain) { return ø }
 			given += [term_of(argument, x) ?? return ø]
 		}
 	}
-	if not equal(x.c, kernel_value(n) ?? return ø, after_arguments(callee, given)) { return ø }
-	apply_all(function, given)
+	given
 }
-# A proof a call leaves to the provers, a hypothesis parameter's `by` (`lift`'s respect, `h: b != 0 = by`): the proof of
-# the parameter's statement at the arguments before it. A program cannot check it when it runs, so a compile with no
-# prover refuses it
-proof_given(n: Node, laws: list, goal: Term, x: Entering) as Term := hole_term(laws, goal, x) ?? refused(n, "this call leaves the proof of ${shown(goal)} to the provers (by), and this compile loads none: the verify extension proves it")
 # GUESS (item 1, notes/coc-t6a4.md): an arm of a match on a bare parameter, directly in the function's result, is expected the result
 # with the parameter taken for the arm's case applied to its fields (entered on the function's checker); any other arm keeps `expected`.
 # case_typed still joins the arms' types by parts_type, which must compare each arm with its own expected instead
@@ -501,6 +508,7 @@ condition_entered(condition: Condition, by_key: map<text, TypedFunction>, s: Typ
 # listed for the run (extensions/verify/check.wap proves the rest)
 obligations_entered(by_key: map<text, TypedFunction>, s: TypingState) := for obligation in obligations { obligation_entered(obligation, by_key, s) }
 obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) := {
+	if obligation.type == ø { return hole_entered(obligation, by_key, s) }
 	if subset_condition(obligation.type) == ø { return }
 	typed = by_key.get(obligation.within ?? return) ?? return
 	condition = named_id(TYPES.environment, condition_name(TYPES.environment, obligation.type)!) ?? return
@@ -508,6 +516,22 @@ obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: 
 	argument = term_of(obligation.argument, parameters_reading(typed, by_key, s)) ?? return
 	obligation.function_type = pis(typed.locals, BOOL_TERM)
 	obligation.value = lambdas(typed.locals, beta(held, [argument]))
+}
+# A proof a call leaves to the provers, as a law of the function the call sits in (of none at the top level): the goal at
+# its place, the callee's domain after the arguments before it, for every value of that function's parameters. One the
+# run cannot check is refused where no prover is loaded (wiki/type.md "Proved or checked": the last step)
+hole_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) := match obligation.argument {
+	Call(called, arguments) => {
+		typed = by_key.get(obligation.within ?? "")
+		x = if typed == ø then fresh_reading(checker(TYPES.environment, []), by_key, s) else parameters_reading(typed!, by_key, s)
+		function = called_function(called, arguments, x) ?? return
+		# each proof the provers give, or a hypothesis standing for it, so the goals after it are stated
+		given = arguments_read(function, arguments, x, (laws, goal) => hole_term(laws, goal, x) ?? entered(x.c, NO_BINDER, goal).variable) ?? refused(obligation.argument, "a call's proof is stated by the arguments before it, which the kernel reads only as values computed without acting: name them first")
+		goal = next_domain(after_arguments(type_of(x.c, function), given.take(obligation.place - 1)))
+		obligation.statement = pis(if typed == ø then [] else typed!.locals, goal)
+		if TYPES.prove == ø and not obligation.decided { refused(obligation.argument, "this call leaves the proof of ${shown(goal)} to the provers (by), and this compile loads none: the verify extension proves it") }
+	}
+	_ => ø
 }
 # the name of a subtype's condition: its word's name and "holds"
 condition_name(e: Environment, type: Term) as text? := (declared_at(e, word_id(type)) ?? return ø).name + CONDITION_HOLDS
