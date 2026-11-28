@@ -14,9 +14,9 @@ in either order of the crossed counts.
 
 | where | what | lines |
 |---|---|---|
-| integer_laws.wap:153, :157, :160, :176, :240; counting.wap:221, :222 | Seven single inductions of one shape, `theorem_declared(b.e, NAME, [], binders, motive(v), induced(b, motive, base, step, v))`, each with its motive on a line of its own. They become `inducted(b, name, binders, motive, base, step)` on the last binder, motive inline | −8 |
-| integer_laws.wap:181-192 (at_most_split), :195-202 (at_most_beyond); counting.wap:224-232 (count_equals_sound) | Three paired inductions under a hypothesis. Each writes `X_at = (i, j) => pis([h: premise(i, j)], conclusion(i, j))`, the hypothesis local, `every = paired(…)`, `apply(apply(every, n), h)`, and arms that each open with `assuming(b, premise(…), h => …)`. They become one `paired_law(b, name, m, n, premise, conclusion, at_zero, at_first, at_both)` whose arms take h | −5 |
-| integer_laws.wap `applied` at :136 (twice), :165, :169, :241, :253, :256, :292, :297, :300, :319, :423; linear.wap `law_equated` at :150, :248, :325, :333, :343, :366, :368, :370 (twice), :372 | Each law's two sides are written twice: once in its declaration, again at every use. Instead, `instance_of(e, name, given): Identity` instantiates the declared statement with the arguments and reads its type and sides. That is kernel +5. The one-line wrappers it replaces go: successor_added, at_most_shifted, parts, differences_equal, the `shift` lambda, added_zero, associated, minus_cancelled. A use can then never restate a law differently from its declaration | −8 |
+| integer_laws.wap:153, :157, :160, :176, :240; counting.wap:221, :222 | Seven single inductions of one shape, `theorem_declared(b.e, NAME, [], binders, motive(v), induced(b, motive, base, step, v))`, each with its motive on a line of its own. They become `inducted(b, name, binders, motive, base, step)` on the last binder, the motive inline as equation_inducted does; with the motive locals kept (bf603e06) it is +1, not a shrink | −4 |
+| integer_laws.wap:181-192 (at_most_split), :195-202 (at_most_beyond); counting.wap:224-232 (count_equals_sound) | Three paired inductions under a hypothesis. Each writes `X_at = (i, j) => pis([h: premise(i, j)], conclusion(i, j))`, the hypothesis local, `every = paired(…)`, `apply(apply(every, n), h)`, and arms that each open with `assuming(b, premise(…), h => …)`. They become one `paired_law(b, name, m, n, premise, conclusion, at_zero, at_first, at_both)` whose arms take h (−2 if count_equals_sound's uneven zero arm reads worse) | −3 |
+| integer_laws.wap `applied` at :136 (twice), :165, :169, :241, :253, :256, :292, :297, :300, :319, :423; linear.wap `law_equated` at :150, :248, :325, :333, :343, :366, :368, :370 (twice), :372 | Each law's two sides are written twice: once in its declaration, again at every use. Instead, `instance_of(e, name, given): Identity` instantiates the declared statement with the arguments and reads its type and sides. That is kernel +5. The one-line wrappers it replaces go: successor_added, at_most_shifted, parts, differences_equal, the `shift` lambda, added_zero, associated, minus_cancelled. A use can then never restate a law differently from its declaration. Two fewer wrappers are left after main's merge, and law_equated stays one line over it | −7 |
 | integer_laws.wap:304-305 `complete`, `sound`; linear.wap:380-381 | The same two functions, over a Building and over Sums. One pair reads `e.integers`' equals_sound and equals_complete (open) | −2 |
 | integer_laws.wap:134-137 `count_sums`; linear.wap:370 `int_sums` | Two Monoids built the same way from three law names. They become one `monoid_of(c, type, zero, addition, zero_law, grouping_law, order_law)` with `instance_of` (open) | −1 |
 | equality.wap:79-83, :91-95 | symmetric and transitive open with the same five lines. One `equal_binders(e)` (open; no hit on the last scan: check whether it still exists before counting it) | −3 |
@@ -65,8 +65,8 @@ These stay:
 
 ## Total
 
-About −55 code lines in the five files, against the card's measured −12, plus the dead code's about 37 elsewhere:
-- integer_laws.wap about −24;
+About −48 code lines in the five files, against the card's measured −12, plus the dead code's about 37 elsewhere:
+- integer_laws.wap about −17;
 - counting.wap about −8;
 - logic.wap −16;
 - equality.wap −3;
