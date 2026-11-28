@@ -21,8 +21,8 @@ in either order of the crossed counts.
 | integer_laws.wap:302 `zero_of(b)`; linear.wap:384 `zero_of(s)` | Both are `e.integers.zero`, which int_declared sets (counting.wap:179) | −2 |
 | integer_laws.wap:134-137 `count_sums`; linear.wap:370 `int_sums` | Two Monoids built the same way from three law names. They become one `monoid_of(c, type, zero, addition, zero_law, grouping_law, order_law)` with `instance_of` | −1 |
 | linear.wap:325 | Restates int_sums' zero law (:370); `int_sums(s).zero_law(atom)` instead | −1 |
-| counting.wap:116, :126-138 | `fixing_proof` picks a proof by comparing names, and its two recursor proofs have one shape: `counted(b, Zero, stated, refl, (k, h) => before_both(b, left(k), right(k), h), n)`. One `by_predecessors(b, sides, base)`, and a list of (statement, proof) per shortcut in place of the name test | −4 |
 | equality.wap:79-83, :91-95 | symmetric and transitive open with the same five lines: the level, the checker, T, a, b. One `equal_binders(e)` | −3 |
+| counting.wap `zero_subtract_proof`, `successors_subtract_proof` | The two recursor proofs have one shape, now `by_predecessors(b, left, right, base, n)`; `fixing_proof` keeps its name test, a list of (statement, proof) would not be shorter | -2 |
 
 ## A helper used once, or nothing using it
 
