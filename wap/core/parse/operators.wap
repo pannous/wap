@@ -78,10 +78,23 @@ operated_form(language: Language, n: Node) as Node := match n {
 # (wiki/multi-value.md): `a = 1, b = 2, 3` is a = 1 and b = (2, 3). A row not led by a definition stays as it is:
 # `x, y = 1, 2` takes values apart, `Error, Warning = "warn", Hint` names cases
 definition_row(language: Language, items: list<Node>) as Node := {
-	if not defines(language, items#1) { return comma_row(items) }
+	if not defines(language, items#1) { return gathered_row(language, items) ?? comma_row(items) }
 	groups: list<Node> = []
 	for item in items { groups = if groups is not empty and not defines(language, item) then groups[.. #groups - 1] + [joined(language, groups.last, item)] else groups + [item] }
 	if #groups == 1 then groups#1 else comma_row(groups)
+}
+# a row led by an item that ends in a gathering group, `f(x): int ! IO, FFI := x`: the bare items up to the first
+# definition and that definition's left side go into the group, and the definition defines the whole; ø for any other
+gathered_row(language: Language, items: list<Node>) as Node? := {
+	at = (2 to #items).find(at => defines(language, items#at)) ?? return ø
+	match items#at {
+		Call(called, parts) => {
+			head = items#1
+			for item in items[.. at - 1].drop(1) + [parts#1] { head = into_gathering(language, head, item) ?? return ø }
+			definition_row(language, [refitted(Call(called, [head, parts#2]), items#at)] + items.drop(at))
+		}
+		_ => ø
+	}
 }
 defines(language: Language, n: Node) as bool := match n {
 	Call(called, parts) => #parts == 2 and group_of(language, text(called), Fixity.Infix) == compound_assignment_group
@@ -96,8 +109,14 @@ last_joined(language: Language, n: Node, item: Node) as Node := match n {
 	List(items, Bracket.None, Separator.Space) => List(items[.. #items - 1] + [last_joined(language, items.last, item)], Bracket.None, Separator.Space)
 	List(items, Bracket.None, Separator.Comma) => comma_row(items + [item])
 	# a group that gathers takes the items after it into its right operand: `! IO, FFI` claims IO and FFI, as `! (IO FFI)` does
-	Call(called, parts) => if #parts == 2 and gathers(language, text(called)) then Call(called, [parts#1, gathered(parts#2, item)]) else comma_row([n, item])
+	Call(called, parts) => into_gathering(language, n, item) ?? comma_row([n, item])
 	_ => comma_row([n, item])
+}
+# an item put into the gathering group a node ends in, `nat ! IO` of `f(x): nat ! IO`; ø where it ends in none
+into_gathering(language: Language, n: Node, item: Node) as Node? := match n {
+	Call(called, parts) => if #parts == 2 and gathers(language, text(called)) then Call(called, [parts#1, gathered(parts#2, item)]) else ø
+	Key(left, op, right) => Key(left, op, into_gathering(language, right, item) ?? return ø)
+	_ => ø
 }
 # whether a spelling is an infix operator of a group that gathers; a plain word has no infix group
 gathers(language: Language, spelling: text) as bool := {
