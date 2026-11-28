@@ -17,7 +17,6 @@ REFUSED := "refused by "
 # the exit code of a program a door refused
 REFUSED_EXIT := 1
 UNKNOWN_NAME := "unknown name"
-REFUSED_DECLARATION := "refused declaration"
 LEVEL_COUNT := "level count"
 LEVEL_PARAMETER := "level parameter"
 NOT_A_FUNCTION := "not a function"
@@ -44,8 +43,8 @@ NOT_EXPLICIT := "not explicit"
 QUOTIENTS := "quotients"
 TEXTS := "texts"
 ROW_OVERFLOW := "row overflow"
-# a term no run term stands for yet: what a program runs is erased from it (run/erase.wap)
-RUNNING := "running"
+# a function that may do more than its claim says, a proof that may loop, raise or act (core/analyze/effects.wap)
+EFFECT := "effect"
 
 refused(rule: text, found: text) := raise REFUSED + rule + ": " + found
 # a door's run stopped by its first refusal, printed as its one line, with a failure
@@ -185,22 +184,19 @@ class Environment {
 	products: Products? = ø
 	# the types the literals are of and the truths, where no numbers or texts statement binds them (core's words)
 	literals: Literals? = ø
+	# the types whose `==` decides Equal, each with its bridge, once core declared them
+	bridges: list<Bridge> = []
 	# the quotient and the maker of its values, once the quotients statement declared them (quotients.wap)
 	quotients: Quotients? = ø
-	# the ids of the courses below.wap made, so a course of the same name the program declared is never taken for one
+	# the ids of the courses core/analyze/courses.wap made, so a course of the same name the program declared is never taken for one
 	courses: list<int> = []
-	# what it accepted, in order, as it was given: what an export writes (export.wap)
-	accepted: list<Accepted> = []
 	# the axioms filled, in order, each with the assumption it replaced, which a take-back puts back
 	fills: list<Fill> = []
 }
 class Fill { id: int; assumed: Declaration }
-# A statement the kernel accepted: a declaration, an inductive block as written, or a binding statement
-enum Accepted {
-	AcceptedDeclaration(d: Declaration)
-	AcceptedBlock(block: InductiveBlock)
-	AcceptedBinding(word: text, names: list<text>)
-}
+# a type whose `==` decides Equal: its equality function, and once the provers declared them the two theorems joining
+# them, `(a == b) == yes -> Equal(T, a, b)` and back
+class Bridge { type: Term; equality: Term; sound: Term? = ø; complete: Term? = ø }
 # the types a number, a text and a truth literal are of, and the two truths, each a constant
 class Literals { number: Term; text: Term; truth: Term; yes_case: Term; no_case: Term }
 # the pair type and its one case, the unit type and its one case, each a constant
@@ -210,13 +206,6 @@ class Quotients { former: Term; made: Term }
 declaration(e: Environment, name: text): Declaration? := e.log#(named_id(e, name) ?? return ø)
 # the id a name means in the scope being read
 named_id(e: Environment, name: text): int? := e.ids.get(name) ?? e.outer.get(name) ?? e.core.get(name)
-# the id each name the scope being read sees means, its own names over those from outside
-seen_ids(e: Environment): map<text, int> := {
-	seen = copy(e.outer)
-	seen.update(e.ids)
-	seen
-}
-# the declaration of a name that must be declared, else refused
 # the declaration of an id while it is live; ø for an id taken back or never given
 declared_at(e: Environment, id: int): Declaration? := if id >= 1 and id <= #e.log and not e.taken_back.has(id) then e.log#id else ø
 # a constant's declaration, refused where it is taken back
@@ -260,11 +249,6 @@ filled_id(e: Environment, d: Declaration): int? := {
 }
 # a declaration by its name as a constant at these levels
 constant_of(e: Environment, name: text, levels: list<Level>): Term := constant(place(e, name), name, levels)
-declared_named(e: Environment, name: text): Declaration := {
-	d = declaration(e, name)
-	if d is ø { refused(UNKNOWN_NAME, "nothing is named ${name}") }
-	d!
-}
 place(e: Environment, name: text): int := named_id(e, name) ?? 0
 # the ids given so far, the live ones and those taken back
 size(e: Environment): int := #e.log
@@ -273,8 +257,6 @@ declared_names(e: Environment): list<text> := e.core.keys().filter(name => not e
 # Every axiom a declaration rests on (`axioms of name`): an axiom rests on itself, any other declaration on what the
 # names in its type and its value rest on, an opaque value's names too
 axioms_of(e: Environment, constant: Term): list<text> := (e.axioms.get(constant_id(constant)) ?? []).map(id => e.log#id.name)
-# the axioms a declaration rests on as `axioms of` prints them, `[hard]`
-axioms_shown(e: Environment, constant: Term): text := "[${axioms_of(e, constant).join(", ")}]"
 # what the declaration of this id rests on, through the constants of these terms; `own` is yes for an axiom
 rests_on(e: Environment, id: int, terms: list<Term>, own: bool) := {
 	resting: list<int> = if own then [id] else []
@@ -283,20 +265,8 @@ rests_on(e: Environment, id: int, terms: list<Term>, own: bool) := {
 	}
 	e.axioms[id] = resting
 }
-# whether a declaration was stated as written, not made by a block or the quotients
-stated(d: Declaration): bool := match d.kind {
-	Axiom => yes
-	Defined(value) => yes
-	Theorem(value) => yes
-	Opaque(value) => yes
-	Inductive(facts) => no
-	Constructor(of, place, fields) => no
-	Recursor(facts) => no
-	Quotient(part) => no
-	Row(operation) => no
-}
 # a declaration becomes part of the environment, checked first by typing.wap's `declared` or inductive.wap, its name
-# new in the scope being read, or in core's, under every other; one stated as written is recorded for an export
+# new in the scope being read, or in core's, under every other
 added(e: Environment, d: Declaration, core: bool = no) := {
 	filled = if core then ø else filled_id(e, d)
 	if filled is not ø {
@@ -308,14 +278,12 @@ added(e: Environment, d: Declaration, core: bool = no) := {
 		e.log += [d]
 	}
 	if core { e.core[d.name] = #e.log } else { e.ids[d.name] = filled ?? #e.log }
-	if stated(d) { e.accepted += [AcceptedDeclaration(d)] }
 }
 
 # How far the environment reached, and what the binding statements had bound by then, so what was declared after
 # is taken back: a refused statement, a search that found nothing, a block's types held as axioms while it is checked
 class Reach {
 	size: int = 0
-	accepted: int = 0
 	courses: int = 0
 	numbers: Numbers? = ø
 	texts: Texts? = ø
@@ -323,7 +291,7 @@ class Reach {
 	quotients: Quotients? = ø
 	fills: int = 0
 }
-mark(e: Environment): Reach := Reach(#e.log, #e.accepted, #e.courses, e.numbers, e.texts, e.products, e.quotients, #e.fills)
+mark(e: Environment): Reach := Reach(#e.log, #e.courses, e.numbers, e.texts, e.products, e.quotients, #e.fills)
 # the environment taken back to a reach: each declaration made since is taken back and loses its name, its id stays
 # given, so a term or a kept answer naming it finds nothing; the bindings and the courses are what they were then
 back_to(e: Environment, reach: Reach) := {
@@ -334,7 +302,6 @@ back_to(e: Environment, reach: Reach) := {
 		if e.ids.get(name) == id { e.ids.remove(name) }
 		if e.core.get(name) == id { e.core.remove(name) }
 	}
-	e.accepted = e.accepted.take(reach.accepted)
 	e.courses = e.courses.take(reach.courses)
 	e.numbers = reach.numbers
 	e.texts = reach.texts
@@ -407,7 +374,7 @@ class Checker {
 }
 # A judgement (6.3): a term has a type. Only typing.wap's rule functions make one
 class Checked { term: Term; type: Term }
-# a checker's levels its own: a hole's level it adds (elaborate/state.wap) leaves the declaration's levels as they are
+# a checker's levels its own: a hole's level it adds (core/analyze/holes.wap) leaves the declaration's levels as they are
 checker(e: Environment, levels: list<text>): Checker := Checker(e, copy(levels))
 
 # The free variable of a binder the kernel goes into (terms.wap: locally nameless): `(x: A) => b` is checked as
