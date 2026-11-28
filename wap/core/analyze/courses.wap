@@ -55,7 +55,7 @@ course_of(e: Environment, type: text): Way := {
 		_ => return Without("${type} is no enum")
 	}
 	if not facts.any_motive { return Without("${type} is taken apart only into Prop") }
-	if #facts.plain.types != 1 { return Without("${type} is one of several enums that name each other") }
+	if #facts.block.types != 1 { return Without("${type} is one of several enums that name each other") }
 	m = making(e, facts)
 	if m.cases#1.any(case => case.inductions.any(induction => induction.binders is not empty)) { return Without("a field of ${type} is a function into it") }
 	b = Built(type, m, products, Parameter(MOTIVE_LEVEL), Max(Successor(Zero), Parameter(MOTIVE_LEVEL)))
@@ -71,6 +71,9 @@ course_of(e: Environment, type: text): Way := {
 # level of the pairs, which is never Prop; once it is declared, below at its own levels, which course names
 class Built { type: text; m: Making; products: Products; values: Level; pairs: Level; below: Term = PROP }
 pair_type(b: Built, first: Level, second: Level, a: Term, c: Term): Term := apply_all(at_levels(b.products.pair, [first, second]), [a, c])
+# the unit type at the pairs' level, and its one value
+unit_of(b: Built): Term := at_levels(b.products.unit, [b.pairs])
+one_of(b: Built): Term := at_levels(b.products.one, [b.pairs])
 # a pair of a value of `a` and one of `c`, two types at the pairs' level
 pair_made(b: Built, a: Term, c: Term, first: Term, second: Term): Term := apply_all(at_levels(b.products.intro, [b.pairs, b.pairs]), [a, c, first, second])
 the_motive(b: Built): Term := b.m.motives#1.variable
@@ -78,11 +81,24 @@ motive_at(b: Built, indices: list<Term>, value: Term): Term := motive_applied(b.
 # the type a recursion's step gets at a value: the motive there, and the values below it
 course_value_type(b: Built, indices: list<Term>, value: Term): Term := pair_type(b, b.values, b.pairs, motive_at(b, indices, value), below_at(b, indices, value))
 below_at(b: Built, indices: list<Term>, value: Term): Term := apply_all(b.below, variables(b.m.parameters) + [the_motive(b)] + indices + [value])
-# the type's recursor into the motive given, applied to the parameters, the minor premises, the indices and the value
-recursor_into(b: Built, level: Level, motive: Term, minors: list<Term>, major: Major): Term := {
+# the type's recursor into the motives given, the type's first and then each container's it nests in (Node's
+# list<Node>), applied to the parameters, the minor premises, the indices and the value
+recursor_into(b: Built, level: Level, motives: list<Term>, minors: list<Term>, major: Major): Term := {
 	levels = [level] + b.m.facts.block.levels.map(name => Parameter(name))
-	apply_all(constant_of(b.m.c.environment, recursor_name(b.type), levels), variables(b.m.parameters) + [motive] + minors + variables(major_binders(major)))
+	apply_all(constant_of(b.m.c.environment, recursor_name(b.type), levels), variables(b.m.parameters) + motives + minors + variables(major_binders(major)))
 }
+# The containers the type nests in carry no values below for it: each container's motive gives one constant type, and
+# each of its cases that type's one value, a hypothesis at a field of the type itself of the type the first motive gives
+# there; so a recursion reaches the values below only through fields of the type itself
+container_motives(b: Built, type: Term): list<Term> := (2 to #b.m.block.types).list().map(at => {
+	indices = indices_entered(b.m, at)
+	lambdas(indices + [major_local(b.m, at, indices)], type)
+})
+container_minors(b: Built, own: (Induction) -> Term, type: Term, value: Term): list<Term> := (2 to #b.m.block.types).list().flat_map(at => b.m.cases#at.map(case => lambdas(case.fields + hypotheses_of(b, case, own, type), value)))
+# a case's hypotheses, at a field of the type itself of the type own gives, at a container's of the constant one
+hypotheses_of(b: Built, case: CaseMade, own: (Induction) -> Term, type: Term): list<Local> := case.inductions.map(induction => entered(b.m.c, INDUCTION, if induction.of == 1 then own(induction) else type))
+# the places of a case's hypotheses at fields of the type itself, whose values below it holds
+own_places(case: CaseMade): list<int> := (1 to #case.inductions).list().filter(at => case.inductions#at.of == 1)
 # the binders a definition takes after the parameters and the motive: the indices and the value
 class Major { indices: list<Local>; value: Local }
 major_entered(b: Built): Major := {
@@ -94,22 +110,23 @@ major_binders(major: Major): list<Local> := major.indices + [major.value]
 # indices and the value
 made_of_binders(b: Built, suffix: text, taken: list<Local>, major: Major, type: Term, value: Term): Declaration := {
 	binders = b.m.parameters + [b.m.motives#1] + taken + major_binders(major)
-	Declaration(b.type + suffix, b.m.levels, pis(binders, type), Defined(lambdas(binders, value)))
+	Declaration(b.type + suffix, b.m.levels, contained(b.m, pis(binders, type)), Defined(contained(b.m, lambdas(binders, value))))
 }
 
 # `below(parameters, motive, indices, t)`: the recursor into types, each case's minor premise the pairs of its
 # recursive fields' motive and their below, its hypothesis
 below_made(b: Built, major: Major): Declaration := {
 	sort = universe(b.pairs)
+	unit = unit_of(b)
 	minors = b.m.cases#1.map(case => {
-		hypotheses = case.inductions.map(induction => entered(b.m.c, INDUCTION, sort))
-		chain = (1 to #hypotheses).list().reverse().fold(at_levels(b.products.unit, [b.pairs]), (rest, at) => {
+		hypotheses = hypotheses_of(b, case, induction => sort, sort)
+		chain = own_places(case).reverse().fold(unit, (rest, at) => {
 			induction = case.inductions#at
 			pair_type(b, b.pairs, b.pairs, pair_type(b, b.values, b.pairs, motive_at(b, induction.indices, induction.field), hypotheses#at.variable), rest)
 		})
 		lambdas(case.fields + hypotheses, chain)
 	})
-	value = recursor_into(b, Successor(b.pairs), lambdas(major_binders(major), sort), minors, major)
+	value = recursor_into(b, Successor(b.pairs), [lambdas(major_binders(major), sort)] + container_motives(b, sort), minors + container_minors(b, induction => sort, sort, unit), major)
 	made_of_binders(b, BELOW_SUFFIX, [], major, sort, value)
 }
 
@@ -120,9 +137,11 @@ course_made(b: Built, major: Major): Declaration := {
 	at = major.value.variable
 	values = entered(b.m.c, BELOW_VALUE, below_at(b, indices, at))
 	step = entered(b.m.c, STEP, pis(major_binders(major) + [values], motive_at(b, indices, at)))
+	unit = unit_of(b)
+	own = (induction: Induction) => course_value_type(b, induction.indices, induction.field)
 	minors = b.m.cases#1.map(case => {
-		hypotheses = case.inductions.map(induction => entered(b.m.c, INDUCTION, course_value_type(b, induction.indices, induction.field)))
-		below_value = (1 to #hypotheses).list().reverse().fold(Chain(at_levels(b.products.one, [b.pairs]), at_levels(b.products.unit, [b.pairs])), (rest, at) => {
+		hypotheses = hypotheses_of(b, case, own, unit)
+		below_value = own_places(case).reverse().fold(Chain(one_of(b), unit), (rest, at) => {
 			induction = case.inductions#at
 			first = course_value_type(b, induction.indices, induction.field)
 			Chain(pair_made(b, first, rest.type, hypotheses#at.variable, rest.value), pair_type(b, b.pairs, b.pairs, first, rest.type))
@@ -131,7 +150,8 @@ course_made(b: Built, major: Major): Declaration := {
 		pair = apply_all(at_levels(b.products.intro, [b.values, b.pairs]), [motive_at(b, case.indices, case.value), below_at(b, case.indices, case.value), made, below_value.value])
 		lambdas(case.fields + hypotheses, pair)
 	})
-	value = projection(b.products.pair, 1, recursor_into(b, b.pairs, lambdas(major_binders(major), course_value_type(b, indices, at)), minors, major))
+	motives = [lambdas(major_binders(major), course_value_type(b, indices, at))] + container_motives(b, unit)
+	value = projection(b.products.pair, 1, recursor_into(b, b.pairs, motives, minors + container_minors(b, own, unit, one_of(b)), major))
 	made_of_binders(b, COURSE, [step], major, motive_at(b, indices, at), value)
 }
 # the values below a case's value, and their type
