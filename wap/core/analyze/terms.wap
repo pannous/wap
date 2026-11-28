@@ -585,7 +585,7 @@ conditions_typed(s: TypingState) as list<Condition> := {
 		names = condition_names(condition_of(code))
 		plain = names.all(name => named_in(s.kind_rules!.scope, name) is not empty)
 		if plain { conditions += [condition_typed(type, written_bound(code, s), [], s) ?? raise A_CONDITION_FUNCTION] }
-		for obligation in s.obligations.filter(obligation => obligation.type == type) {
+		for obligation in s.obligations.filter(obligation => obligation.type == type and obligation.compared == ø) {
 			within = s.functions.find(function => instance_key(function) == obligation.within)
 			filled = parameters_read(names, within)
 			if filled is empty {
@@ -648,6 +648,7 @@ condition_entered(condition: Condition, by_key: map<text, TypedFunction>, s: Typ
 obligations_entered(by_key: map<text, TypedFunction>, s: TypingState) := for obligation in s.obligations { obligation_entered(obligation, by_key, s) }
 obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) := {
 	if obligation.call != ø { return hole_entered(obligation, by_key, s) }
+	if obligation.compared != ø { return comparison_decided(obligation, s) }
 	shown = subset_condition(obligation.type) ?? return
 	within = within_of(obligation, by_key, s)
 	condition = named_id(TYPES.environment, obligation.holds ?? condition_name(TYPES.environment, obligation.type ?? return)!) ?? return
@@ -659,6 +660,23 @@ obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: 
 	obligation.value = lambdas(within.locals, holds)
 	obligation.verdict = decided(TYPES.environment, holds)
 	if obligation.verdict == no and obligation.choice == 0 { refused(obligation.argument!, condition_broken(condition_shown(shown))) }
+}
+# Two type values compared (wiki/type.md: two types are the same type when they compute to the same): the same where
+# their parents compute alike and so do their conditions, or neither has one; different where their parents differ.
+# Any other pair, a condition computing unlike the other's or a subtype and its parent, wap cannot decide: refused
+comparison_decided(obligation: Obligation, s: TypingState) := {
+	c = checker(TYPES.environment, [])
+	types = [obligation.type!, obligation.compared!]
+	if not equal(c, kernel_settled(types#1, s), kernel_settled(types#2, s)) { obligation.verdict = no; return }
+	conditions = types.map(type => condition_value(type))
+	if conditions.all(condition => condition == ø) or conditions.all(condition => condition != ø) and equal(c, conditions#1!, conditions#2!) { obligation.verdict = yes; return }
+	refused(obligation.argument!, "wap cannot decide whether ${type_text(types#1)} and ${type_text(types#2)} are one type: their conditions compute unlike")
+}
+# a subtype's condition as the kernel holds it, the function of `it`; ø for any other type
+condition_value(type: Term) as Term? := {
+	if subset_condition(type) == ø { return ø }
+	condition = named_id(TYPES.environment, condition_name(TYPES.environment, type)!) ?? return ø
+	match declared_at(TYPES.environment, condition)!.kind { Defined(value) => value; _ => ø }
 }
 # where an obligation's code is read: under the parameters of the function it sits in, none at the top level
 class Within { reading: Entering; locals: list<Local> }

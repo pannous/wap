@@ -70,6 +70,13 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	# a proof's `by f, g` is of the statement wanted, which its laws make hold (wiki/proof.md)
 	if question_word(called, BY_WORD) { return proof_typed(n, BY_WORD, expected) }
 	if claims_effects(called, arguments) { return claim_typed(n, arguments, s, f, expected) }
+	# a type name applied where a value stands is the type it names, `vector(int, 3)`, and two types compare when compiling
+	applied = type_value_written(n, s)
+	if applied != ø { return applied! }
+	if text(called) == EQUALITY_WORD and #arguments == 2 {
+		compared = arguments.map(argument => type_value_written(argument, s))
+		if compared.all(value => value != ø) { return types_compared(n, compared.map(value => value!), s) }
+	}
 	if rest_named(n) != ø { refused(n, "a list's items spread, `...xs`, stand only in a list, `[...xs, 4]`") }
 	levelled = level_written_call(called)
 	if levelled != ø { return call_typed(n, levelled!, arguments, s, f, expected) }
@@ -177,7 +184,6 @@ call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s
 # decides it. Each is an obligation the kernel's reading settles (core/analyze/terms.wap hole_entered), its `by` kept on it
 proofs_held(n: Node, definition: Signature, taken: list, s: TypingState) as list := {
 	parameters = parameters_in(definition, s)
-	types = definition.parameters.map(type => substituted(type, letters))
 	(1 to #taken).map(at => if by_laws(taken#at) == ø or not is_statement_written(declared_type(parameters#at)) then taken#at else proof_held(n, definition, parameters, taken, at, s))
 }
 proof_held(n: Node, definition: Signature, parameters: list, taken: list, at: int, s: TypingState) as Node := {
@@ -268,7 +274,6 @@ named_value(argument: Node) as Node := match argument { Key(name, Op.Colon, valu
 # whether a definition takes this many arguments: one for each parameter, those with defaults at the end left out or not
 takes_count(definition: Signature, count: int, s: TypingState) as bool := {
 	parameters = parameters_in(definition, s)
-	types = definition.parameters.map(type => substituted(type, letters))
 	count <= #parameters and parameters.drop(count).all(defaulted)
 }
 defaulted(parameter: Node) as bool := has_fact(parameter, DEFAULT)
@@ -386,6 +391,19 @@ letters_defined(definition: Signature, s: TypingState) := for type in definition
 # check, and is refused
 argument_written(argument: Node) as Node := if written_in_place(argument) then argument else refused(argument, "a parameter after this one reads it in its type: give a value written in place or a parameter here")
 written_in_place(n: Node) as bool := is_bound(n, DefinitionKind.Parameter) or not n is symbol and (n is List or direct_parts(n) is empty) and direct_parts(n).all(written_in_place)
+# A written type where a value stands, typed as the type value it is: a type word, or a type name applied,
+# `vector(int, 2 + 1)` (wiki/type.md: a type is itself a value); ø for any other code
+type_value_written(n: Node, s: TypingState) as Node? := match n {
+	Call(called, arguments) => type_value(type_term(applied_type(n, called, arguments, s.kind_rules!.scope) ?? return ø), n)
+	_ => if n is symbol and names_type_value(n, ø, s) then type_value(type_term(n), n) else ø
+}
+# An `==` of two type values, decided when compiling (terms.wap comparison_decided) and placed as its yes or no
+# (types.wap decided_code): the run never compares types
+types_compared(n: Node, values: list<Node>, s: TypingState) as Node := {
+	denoted = values.map(value => fact_type(fact_of(value, DENOTES))!)
+	place = obligation_kept(Obligation(warning_of(n, "two types compared"), n, denoted#1, s.within, compared: denoted#2), "${place_of(n)}${n} compared", s)
+	obligations_noted(with_type(refitted(Call(symbol(EQUALITY_WORD), values), n), BOOL_TYPE), [place])
+}
 # the call of a word with these typed arguments, the definition chosen among all of the word's
 word_called(n: Node, word: text, given: list, expected: Term?, s: TypingState) as Node := call_chosen(n, symbol(word), word_scopes(word, s), given, expected, s, ø)
 # a word's definitions layer by layer, as a call written at the program's top finds them, the program's hiding the
@@ -482,7 +500,6 @@ denoted_types(given: list) as list<Term?> := given.map(argument => fact_type(fac
 # none of the other arguments (`items.map(item => named(item))` is no map over a Range)
 takes(definition: Signature, given: list, s: TypingState, fit: function) as bool := {
 	parameters = parameters_in(definition, s)
-	types = definition.parameters.map(type => substituted(type, letters))
 	if not takes_count(definition, #given, s) { return no }
 	plain = (1 to #given).filter(at => not has_letters(definition.parameters#at) and not has_unknowns(value_type(given#at)))
 	if not plain.all(at => argument_taken(given#at, parameters#at, NOTHING_CALLED, s, fit)) { return no }
