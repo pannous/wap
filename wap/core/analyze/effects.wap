@@ -33,7 +33,7 @@ operation_effects() as map<text, Effect> := {
 class Callee { key: text; caught: bool }
 # What a typed function does itself, the typed functions it calls, its parameters' keys, and when it may fail: never
 # (none), only where one of these parameters is 0, a divisor (their places), or whatever it is given (ø)
-class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; unknown: list<text> = [] }
+class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = [] }
 # The effects of the typed functions, joined over the groups of functions that call each other round (groups.wap):
 # each function's own part and the effects found, each group's alike
 class Joining {
@@ -93,7 +93,7 @@ own_of(key: text, x: Joining) as Own := {
 body_of(typed: TypedFunction) as Node := match typed.define { Define(name, parameters, body) => body; _ => Empty }
 parameters_of(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters); _ => [] }
 parameter_words(typed: TypedFunction) as list<Node> := parameters_of(typed).map(declared_name)
-parameter_names(typed: TypedFunction) as list<text> := parameter_words(typed).map(text)
+parameter_names(typed: TypedFunction) as list<text> := parameter_words(typed).map(word => text(word))
 # a foreign function's claim taken as its own effects, a `Fail(b)` failing only where its parameter b is 0
 claimed_own(claim: Node, typed: TypedFunction, own: Own) := {
 	own.effects = effects_named(effect_words(claim))
@@ -145,8 +145,6 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		effects_in_each(arguments, caught, own, x)
 		named = fact_of(called, DEFINED_AT)
 		key = if named == ø then "" else place_key(named!)
-		# a function held as a value, a parameter's, is called with effects nothing here knows: no Pure is claimed past it
-		if holds_value(called) and not x.by_key.has(key) { own.unknown += [text(called)] }
 		if not x.by_key.has(key) { return effects_in(called, caught, own, x) }
 		divisors = own_of(key, x).divisors
 		# each divisor met, so each one the caller is given is recorded
@@ -161,18 +159,24 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 	_ => {
 		if n is While { effect_added(Effect.Div, caught, own) }
 		if n is Block and globals_named(n) is not empty { effect_added(Effect.State, caught, own) }
-		match unwrapped(n) { Set(place, value) => own.assigned += [parameter_at(place, own)]; _ => ø }
+		match unwrapped(n) { Set(place, value) => {
+			own.assigned += [parameter_at(place, own)]
+			if writes_outside(place) { effect_added(Effect.State, caught, own) }
+		}; _ => ø }
 		effects_in_each(direct_parts(unwrapped(n)), caught, own, x)
 	}
 }
-# a divisor met: whether it is a whole number other than 0 written in place, which no division fails by; else the
+# a divisor met: whether it is a whole number other than 0 and -1 written in place, which no division fails by (the
+# smallest int ÷ -1 traps); else the
 # function may fail where its parameter is 0, if the divisor is one, or whatever it is given
 divisor_met(divisor: Node, caught: bool, own: Own) as bool := {
-	if match divisor { Number(value) => value != 0; _ => no } { return yes }
+	if match divisor { Number(value) => value != 0 and value != -1; _ => no } { return yes }
 	at = parameter_at(divisor, own)
 	if not caught and own.divisors != ø { own.divisors = if at > 0 then own.divisors! + [at] else ø }
 	no
 }
+# a place outside the function's own variables: a field, `c.n += 1`, or a variable of a function around it
+writes_outside(place: Node) as bool := place is Get or is_kind_word(fact_of(place, BINDING), DefinitionKind.Capture)
 # which of the function's parameters a name is, 0 for none
 parameter_at(n: Node, own: Own) as int := {
 	named = fact_of(n, DEFINED_AT)
@@ -221,18 +225,9 @@ claims_checked(s: TypingState, joining: Joining) := {
 	for typed in claimed {
 		body = body_of(typed)
 		key = instance_key(typed)
-		unknown = unknown_callee(key, [], joining)
-		if unknown != ø { refused(fact_of(body, CLAIMED)!, "${unknown!}'s effects are unknown: write them on its type") }
 		beyond = found_of(key, joining).filter(effect => not claimed_effects(body).contains(effect))
 		if beyond is not empty { refused(fact_of(body, CLAIMED)!, "${typed.function.name} is declared ! ${fact_of(body, CLAIMED)!} but has ${beyond#1} via ${chain_to(key, beyond#1, [], joining)}") }
 	}
-}
-# a function value called with effects unknown, in a function's body or in one it calls; ø for none
-unknown_callee(key: text, seen: list<text>, x: Joining) as text? := {
-	own = own_of(key, x)
-	if own.unknown is not empty { return own.unknown#1 }
-	for call in own.calls.filter(call => not seen.contains(call.key) and call.key != key) { found = unknown_callee(call.key, seen + [key], x); if found != ø { return found } }
-	ø
 }
 # the calls from a function down to one whose own body does an effect, or that calls round back
 chain_to(key: text, effect: Effect, seen: list<text>, x: Joining) as text := {
