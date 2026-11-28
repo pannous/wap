@@ -62,6 +62,7 @@ pattern_typed(pattern: Node, type: Term, s: TypingState, f: TypeFrame) as Node :
 		if pattern != symbol(WILDCARD) { remembered(pattern, type, s, f) }
 		return pattern
 	}
+	if fact_of(pattern, INVERSE) != ø { return inverse_pattern_typed(pattern, type, s, f) }
 	if narrowed_type(type) != ø { return shape_pattern_typed(pattern, type, s, f) }
 	# an arm naming a declared pattern on a value of the type it narrows, `Record(name, fields, variants)` on a Node: its
 	# holes hold their types too
@@ -73,9 +74,19 @@ pattern_typed(pattern: Node, type: Term, s: TypingState, f: TypeFrame) as Node :
 	base = base_of_optional(type)
 	if base != ø and (pattern is Call or is_case_name(pattern)) { return pattern_typed(pattern, base, s, f) }
 	tested = if pattern is Call then case_pattern_typed(pattern, type, s, f) else if is_case_name(pattern) or names_subject_case(pattern, type, s) then case_in_enum_typed(case_bound(pattern, type, s), s) else typed_form(pattern, s, f, type)
-	if (value_type(tested) ?? type) != type { refused(pattern, "this pattern can never fit a value of type ${type_text(type)}") }
-	tested
+	if (value_type(tested) ?? type) != type { refused(pattern, if fact_of(pattern, VALUED) == ø then "this pattern can never fit a value of type ${type_text(type)}" else "${pattern} reads two ways: the value ${pattern}, a ${type_text(value_type(tested)!)}, which no ${type_text(type)} equals, or a new name for the ${type_text(type)}; write another name for the new one") }
+	# a constant's value, typed as its call, stays a value pattern
+	if fact_of(pattern, VALUED) == ø then tested else with_fact(tested, VALUED, True)
 }
+# A pattern by inverse, `successor(k)`: its inverse called on a value of the type gives ø where it does not fit, and the
+# field's pattern, one at most, is of what it gives otherwise, the call unwrapped its INVERSE (wiki/enum.md "Patterns by
+# inverse")
+inverse_pattern_typed(pattern: Call, type: Term, s: TypingState, f: TypeFrame) as Node := match pattern { Call(called, parts) => {
+	if #parts > 1 { refused(pattern, "${called}${INVERSE_MARK} gives one value, so the pattern names one field of it") }
+	given = typed_form(placed_like(Call(fact_of(pattern, INVERSE)!, [with_fact(with_type_of(placed_like(symbol(WILDCARD), pattern), type), TYPED_HOLE, True)]), pattern), s, f, ø)
+	base = base_of_optional(value_type(given)) ?? refused(pattern, "${called}${INVERSE_MARK} gives no optional, so it cannot say where ${called} does not fit")
+	with_type_of(with_fact(refitted(Call(called, parts.map(part => pattern_typed(part, base, s, f))), pattern), INVERSE, unboxed(given, base, pattern)), type)
+} }
 # A pattern of a shape's value, `Record(name, fields, variants)` of a Record, as one of the type the shape narrows; a
 # declared pattern's holes named in it hold their holes' types, `fields` a List
 shape_pattern_typed(pattern: Node, type: Term, s: TypingState, f: TypeFrame) as Node := {
@@ -169,7 +180,7 @@ pattern_text(pattern: Node) as text := match pattern {
 	_ => text(pattern)
 }
 # a pattern that fits every value: a name that is no case, or _
-fits_any(pattern: Node) as bool := pattern is symbol and not is_bound(pattern, DefinitionKind.Case)
+fits_any(pattern: Node) as bool := pattern is symbol and not is_bound(pattern, DefinitionKind.Case) and fact_of(pattern, VALUED) == ø
 # a case's bare name: as a pattern it fits the case whatever its fields hold
 is_case_name(pattern: Node) as bool := pattern is symbol and is_bound(pattern, DefinitionKind.Case)
 # the declared pattern an arm names by its shape, `Record(name, fields, variants)`; ø for any other pattern
