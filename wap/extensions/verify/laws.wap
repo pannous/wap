@@ -40,6 +40,7 @@ REFL_WORD := "refl"
 BY_WORD := "by"
 ASSUME_WORD := "assume"
 AXIOM_WORD := "axiom"
+AXIOMS_OF_WORD := "axioms_of"
 # the refusal of a proof of no form verify reads
 PROOF_REFUSED := "proof"
 
@@ -48,9 +49,10 @@ PROOF_REFUSED := "proof"
 class TypedLaw { name: text; key: text; id: int?; assumed: text?; given: list<Premise> = []; proof: Node? = ø }
 # a law's hypothesis: its binder's name and the id of its function
 class Premise { binder: text; id: int }
-# the laws of a program, in the order they are stated, and the answer to each question it asks at its top, `axioms of
-# hard`; a law analyze refuses, or one a hypothesis of which it refuses, says why on standard error
-class LawsTyped { laws: list<TypedLaw>; answers: list<text> }
+# the laws of a program, in the order they are stated, the compiler's answers to the questions the program asks at
+# its top, and the names it asks the axioms of (wiki/proof.md "What a proof rests on"), answered once the laws are
+# proved; a law analyze refuses, or one a hypothesis of which it refuses, says why on standard error
+class LawsTyped { laws: list<TypedLaw>; answers: list<text>; asked: list<text> }
 laws_typed(wap_folder: text, program: text): LawsTyped := {
 	front = base_language()
 	modules_bringable(front)
@@ -77,22 +79,27 @@ laws_typed(wap_folder: text, program: text): LawsTyped := {
 		if held is not empty { eprint "law ${name}: its hypothesis ${held#1.binder} is no statement the kernel holds"; continue }
 		laws += [TypedLaw(name, key, named_id(TYPES.environment, key), assumed_callee(TYPES.environment, statement), given.map(each => Premise(each.binder, named_id(TYPES.environment, keys[each.function])!)), split.proofs.get(function))]
 	}
-	LawsTyped(laws, statements_in(typed).map(statement => match unwrapped(statement) { Text(answer) => answer; _ => ø }).compact())
+	LawsTyped(laws, statements_in(typed).filter(statement => has_fact(statement, ANSWERED)).map(answer => text(answer)), split.asked)
 }
 # A law's binder whose type is a statement, `h: a <= b`, is a hypothesis: the law's function takes the other binders,
 # and each hypothesis is a function of them of its own, its statement, named after the law and the binder. Split as the
 # shape rules wrote the law's function, before its names are declared: the code, the laws' functions in their order and
 # each one's hypotheses' functions
 LAW_GIVEN := " given "
-class Split { code: Node; language: Language; laws: list<text> = []; given: map<text, list<Given>> = {}; proofs: map<text, Node> = {} }
+class Split { code: Node; language: Language; laws: list<text> = []; given: map<text, list<Given>> = {}; proofs: map<text, Node> = {}; asked: list<text> = [] }
 # a hypothesis as written: its binder's name and the name of its function
 class Given { binder: text; function: text }
 hypotheses_split(code: Node, language: Language) as Split := {
 	split = Split(code, language)
-	statements = top_level_statements(code).map(statement => proof_apart(statement, split)).flat_map(statement => hypotheses_apart(statement, split))
+	statements = top_level_statements(code).filter(statement => not axioms_asked(statement, split)).map(statement => proof_apart(statement, split)).flat_map(statement => hypotheses_apart(statement, split))
 	# a lone law with hypotheses becomes several statements, so the code is a run of lines from then on
 	split.code = refitted(if #statements == 1 then statements#1 else List(statements, Bracket.None, Separator.Newline), code)
 	split
+}
+# whether a statement asks the axioms of a name, `axioms of hard`, the name kept to answer after the proofs
+axioms_asked(statement: Node, split: Split) as bool := match statement {
+	Call(called, parts) => if text(called) == AXIOMS_OF_WORD and #parts == 1 { split.asked += [text(parts#1)]; yes } else no
+	_ => no
 }
 # a law's function whose statement has its proof beside it, the function of the statement alone and the proof kept
 proof_apart(statement: Node, split: Split) as Node := {
@@ -174,6 +181,12 @@ law_proved(e: Environment, law: TypedLaw, d: Declaration): bool := {
 	declared(e, Declaration(law.name, [], statement, Theorem(proof)))
 	yes
 }
+# the kernel's constant of a declaration by its name, ø for a name it holds none of
+declared_constant(name: text): Term? := constant(named_id(TYPES.environment, name) ?? return ø, name, [])
+# the axioms a law declared by its name rests on, none for one declared by no name of its own
+resting_on(name: text): list<text> := axioms_of(TYPES.environment, declared_constant(name) ?? return [])
+# the answer to `axioms of name`, the axioms it rests on as the kernel shows them
+axioms_said(name: text): text := axioms_shown(TYPES.environment, declared_constant(name) ?? return "axioms of ${name}: ${name} names nothing the kernel holds")
 # whether a law's proof is `assume`
 is_assume(proof: Node?) as bool := proof_word(proof) == ASSUME_WORD
 # a statement taken as true without a proof, an assume's or an axiom's verdict; ø for a proof
