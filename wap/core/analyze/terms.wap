@@ -99,7 +99,7 @@ reading_frame(typed: TypedFunction) as TypeFrame := {
 	frame
 }
 # a body read under the function's own parameters
-parameters_reading(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Entering := Entering([], [], typed.checker ?? checker(TYPES.environment, []), by_key, s).under(parameters_locals(typed, s), parameter_names(typed).map(place_key))
+parameters_reading(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Entering := Entering([], [], typed.checker ?? checker(TYPES.environment, []), by_key, s, ø, instance_key(typed)).under(parameters_locals(typed, s), parameter_names(typed).map(place_key))
 # a pure function's value, the function of its parameters its body computes; ø for any other
 definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := match typed.define {
 	Define(name, parameters, body) => {
@@ -107,24 +107,19 @@ definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 		inside = parameters_reading(typed, by_key, s)
 		# GUESS: the body's type and the result name the same Free variables, so `Even(n + n)` meets `Even(double(n))` by unfolding double
 		if not equal(inside.c, kernel_value(body) ?? return ø, kernel_result(typed, by_key, s) ?? return ø) { return ø }
-		outer = s.reading
-		s.reading = instance_key(typed)
-		read = term_of(body, inside) ?? course_defined(typed, body, inside)
-		s.reading = outer
-		value = lambdas(typed.locals, read ?? return ø)
-		# a proof still holding a `by`'s hole is no definition until verify answers it
-		if has_unknowns(value) then ø else value
+		lambdas(typed.locals, term_of(body, inside) ?? course_defined(typed, body, inside) ?? return ø)
 	}
 	_ => ø
 }
 # what a body is read in, locally nameless (kernel/terms.wap): the binders around it by their keys, the innermost last,
 # each the free variable of the checker c it was entered with; a term read under them is closed over them with `lambdas`
-class Entering { binders: list<text>; variables: list<Term>; c: Checker; by_key: map<text, TypedFunction>; s: TypingState; recursion: Recursion? = ø }
+# and the key of the function being read, which a proof read in it is kept under
+class Entering { binders: list<text>; variables: list<Term>; c: Checker; by_key: map<text, TypedFunction>; s: TypingState; recursion: Recursion? = ø; reading: text = "" }
 # the same reading under more binders, entered as locals under these keys
 # (a course's case names the values of the parameter at the fields its values below hold hypotheses of)
-under(x: Entering, locals: list<Local>, keys: list<text>, fields: list<Term> = []) as Entering := if #keys != #locals then raise "a reading's binders and their variables go out of step" else Entering(x.binders + keys, x.variables + variables(locals), x.c, x.by_key, x.s, if fields is empty or x.recursion == ø then x.recursion else Recursion(x.recursion!.key, x.recursion!.place, x.recursion!.held, x.recursion!.of, fields))
+under(x: Entering, locals: list<Local>, keys: list<text>, fields: list<Term> = []) as Entering := if #keys != #locals then raise "a reading's binders and their variables go out of step" else Entering(x.binders + keys, x.variables + variables(locals), x.c, x.by_key, x.s, if fields is empty or x.recursion == ø then x.recursion else Recursion(x.recursion!.key, x.recursion!.place, x.recursion!.held, x.recursion!.of, fields), x.reading)
 # the same reading with a free variable taken for a value, in every binder's term
-valued(x: Entering, of: Term, value: Term) as Entering := Entering(x.binders, x.variables.map(variable => replaced_by(variable, variable_id(of), value)), x.c, x.by_key, x.s, x.recursion)
+valued(x: Entering, of: Term, value: Term) as Entering := Entering(x.binders, x.variables.map(variable => replaced_by(variable, variable_id(of), value)), x.c, x.by_key, x.s, x.recursion, x.reading)
 # a let of a name: its body read with the name a free variable of the type, closed over it again
 let_read(x: Entering, name: Node, type: Term, given: Term, body: (Entering) -> Term?) as Term? := {
 	local = entered(x.c, text(name), type)
@@ -212,21 +207,24 @@ choice_term(n: Node, condition: Node, then_part: Node, else_part: Node, x: Enter
 	terms = [else_part, then_part, condition].map(part => term_of(part, x))
 	if terms.any(term => term == ø) then ø else recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, type), terms.map(term => term!))
 }
-# `by f, g`: a hole of the statement typing wanted here, over every binder around it, kept for verify with the laws
+# `by f, g` in a law's proof: a hole of the statement typing wanted here, over every binder around it, kept with the
+# laws in the proof's record for verify; no term elsewhere
 by_term(n: Node, called: Node, laws: list, x: Entering) as Term? := {
 	if not question_word(called, BY_WORD) { return ø }
 	type = kernel_value(n) ?? return ø
 	hole = hole_over(elaboration_over(x.c), BY_WORD, type, x.variables)
-	TYPES.by_holes += [ByHole(hole, x.c, x.variables, type, laws, n)]
+	read = TYPES.proofs.get(x.reading) ?? return ø
+	read.holes += [ByHole(hole, x.variables, type, laws, n)]
 	hole
 }
-# a law's statement with its proof: the statement's value, the proof's term, closed over the binders, kept for verify
-# under the function being read
+# a law's statement with its proof: the statement's value; the proof's term, open over the law's parameters, kept for
+# verify under the law's function, each reading replacing the one before
 stated_term(called: Node, given: list, x: Entering) as Term? := {
 	if not question_word(called, PROOF_MARK) { return ø }
 	statement = term_of(given#1, x) ?? return ø
-	proof = term_of(given#2, x)
-	if proof != ø { TYPES.proofs[x.s.reading] = closed_filled(elaboration_over(x.c), proof!, x.variables, yes) }
+	read = ReadProof(x.c, x.variables)
+	TYPES.proofs[x.reading] = read
+	read.term = term_of(given#2, x)
 	statement
 }
 # `refl`: the proof that the wanted equation's left side equals itself

@@ -25,6 +25,7 @@ use "../../kernel/forms.wap"
 use "../prove/prove.wap"
 use "../../core/analyze/holes.wap"
 use "../../core/analyze/terms.wap"
+use "../../kernel/recursors.wap"
 
 # the rules the front reads laws by, and the name each law's function takes
 LAW_STATEMENT_RULES := "extensions/law_statements.wap"
@@ -155,8 +156,10 @@ typed_verdict(law: TypedLaw): TypedVerdict := {
 	value = computed(checker(e, []), constant(id, law.key, []))
 	if is_constant(value, e.literals!.yes_case) then Holds else if is_constant(value, e.literals!.no_case) then Breaks else Open
 }
+# a law's statement, over its function's binders and its hypotheses
+stated(e: Environment, law: TypedLaw, d: Declaration): Term := law_statement(e, d.type, unfolding(d)!, law.given)
 # whether the provers prove a law's statement yes for every value of its binders, the proof declared as its theorem, of the law's own name, so a later proof uses it
-law_proved(e: Environment, law: TypedLaw, d: Declaration): bool := statement_proved(e, law.name, law_statement(e, d.type, unfolding(d)!, law.given))
+law_proved(e: Environment, law: TypedLaw, d: Declaration): bool := statement_proved(e, law.name, stated(e, law, d))
 # whether the provers prove a statement, the proof declared as the theorem of this name
 statement_proved(e: Environment, name: text, statement: Term): bool := {
 	proof = proof_found(elaboration(e, []), statement, []) ?? return no
@@ -168,60 +171,72 @@ resting_on(name: text): list<text> := axioms_of(TYPES.environment, constant(name
 # whether a law's proof is `assume`
 is_assume(proof: Node?) as bool := proof_word(proof) == ASSUME_WORD
 # a statement taken as true without a proof, an assume's or an axiom's verdict; ø for a proof
-taken_as(proof: Node) as TypedVerdict? := if proof_word(proof) == ASSUME_WORD then Assumed else if proof_word(proof) == AXIOM_WORD then Axiom else ø
+taken_as(proof: Node) as TypedVerdict? := {
+	at = TAKEN_WORDS.index_of(proof_word(proof))
+	if at <= 0 then ø else [TypedVerdict.Assumed, TypedVerdict.Axiom]#at
+}
 proof_word(proof: Node?) as text := match unwrapped(proof ?? return "") { Symbol(word) => word; _ => "" }
 # a law's written proof made the term of its statement, declared as its theorem, which the kernel checks: a wrong one
 # is refused by value type, naming the statement it proves and the one it should; `assume` declares the statement an
 # axiom of the law's name, which every law resting on it names (wiki/proof.md "What a proof rests on")
 proof_checked(e: Environment, law: TypedLaw, d: Declaration, proof: Node): TypedVerdict := {
-	statement = law_statement(e, d.type, unfolding(d)!, law.given)
 	taken = taken_as(proof)
 	if taken != ø {
-		declared(e, Declaration(law.name, [], statement, DeclarationKind.Axiom))
+		declared(e, Declaration(law.name, [], stated(e, law, d), DeclarationKind.Axiom))
 		return taken!
 	}
-	term = TYPES.proofs.get(law.key) ?? refused(PROOF_REFUSED, "law ${law.name} := ${proof}: a law's proof is ${REFL_WORD}, its statement computed, or ${BY_WORD} the laws it follows from")
-	declared(e, Declaration(law.name, [], statement, Theorem(answered_proof(e, term))))
+	unread = "law ${law.name} := ${proof}: a law's proof is ${REFL_WORD}, its statement computed, or ${BY_WORD} the laws it follows from"
+	read = TYPES.proofs.get(law.key) ?? refused(PROOF_REFUSED, unread)
+	term = read.term ?? refused(PROOF_REFUSED, unread)
+	telescope = law_telescope(e, read.c, read.parameters.map(variable => local_of(read.c, variable)), unfolding(d)!, law.given)
+	premises = variables(telescope.locals)
+	answered = read.holes.fold(term, (t, by) => replaced_by(t, variable_id(head(by.hole)), by_answer(e, read.c, by, premises)))
+	declared(e, Declaration(law.name, [], pis(telescope.locals, telescope.statement), Theorem(lambdas(telescope.locals, answered))))
 	Holds
+}
+# a variable as the binder its checker holds it as
+local_of(c: Checker, variable: Term): Local := {
+	held = hypothesis_of(c, variable_id(variable))
+	Local(held.binder, held.type, variable)
 }
 # the proof written beside a law's statement, in its typed function's body (core/analyze/calls.wap stated_proof_typed)
 written_proof(definition: Node) as Node? := match definition {
 	Define(name, parameters, body) => match body { Call(called, given) => if question_word(called, PROOF_MARK) then given#2 else ø; _ => ø }
 	_ => ø
 }
-# a proof with each `by` in it answered (core/analyze/terms.wap by_term): its hole replaced by what the provers find
-answered_proof(e: Environment, proof: Term): Term := TYPES.by_holes.fold(proof, (t, by) => {
-	id = variable_id(head(by.hole))
-	if replaced_by(t, id, t) == t then t else replaced_by(t, id, by_answer(e, by))
-})
-# a `by`'s proof: the provers given its laws, the binders around it as premises, the proof closed over them
-by_answer(e: Environment, by: ByHole): Term := {
+# a `by`'s proof (core/analyze/terms.wap by_term): the provers given its laws, the binders around it and the law's
+# premises, the proof closed over the binders its hole is a function of
+by_answer(e: Environment, c: Checker, by: ByHole, premises: list<Term>): Term := {
 	names = by.laws.map(law => text(law))
 	laws = by.laws.map(law => declaration(e, text(law)) ?? refused(PROOF_REFUSED, unproved_named(e, law)))
-	el = elaboration_over(by.c)
-	proof = first_proof(Goal(el, by.context, by.type, laws), PROVERS) ?? refused(PROOF_REFUSED, "by ${names.join(", ")}: the provers find no proof of ${shown(by.type)} from ${names.join(", ")}")
+	el = elaboration_over(c)
+	proof = first_proof(Goal(el, (by.context + premises).unique(), by.type, laws), PROVERS) ?? refused(PROOF_REFUSED, "by ${names.join(", ")}: the provers find no proof of ${shown(by.type)} from ${names.join(", ")}")
 	closed_filled(el, proof, by.context, yes)
 }
 # why a law a `by` names is no lemma: a law stated but not proved proves nothing, any other name is no law
 unproved_named(e: Environment, law: Node): text := if named_id(e, LAW_FUNCTION + text(law)) is ø then "by ${law}: ${law} names no law proved before" else "refused by unproved law: ${law} is Tested, so it proves nothing"
-# `statement == yes` for every value of the binders of the law's function type, the statement its function's value
-# at a variable for each binder, under its hypotheses, each the same of its function; each variable then bound by its
-# binder, and a binder of a subtype followed by its condition's hypothesis, `Π n: nat, Π n_holds: (n >= 0) == yes`.
-# The variables' ids are 1 up, as a definition's value is closed
+# A law's binders as the kernel states it: each parameter, one of a subtype followed by its condition holding, then each
+# hypothesis at the parameters; and `statement == yes`, its function's value at them, under them
+class Telescope { locals: list<Local>; statement: Term }
+law_telescope(e: Environment, c: Checker, parameters: list<Local>, value: Term, given: list<Premise>): Telescope := {
+	values = variables(parameters)
+	hypotheses = given.map(each => entered(c, each.binder, truth_stated(e, apply_all(constant(each.id, declared_at(e, each.id)!.name, []), values))))
+	Telescope(parameters.flat_map(parameter => [parameter] + condition_held(e, c, parameter)) + hypotheses, proposition_of(e, beta(value, values)))
+}
+# a law's statement over its function's binders, `Π n: nat, Π n_holds: (n >= 0) == yes, …`
 law_statement(e: Environment, type: Term, value: Term, given: list<Premise>): Term := {
+	c = checker(e, [])
 	parts = arrow_parts(type)
 	names = binder_names(type)
-	count = #parts - 1
-	variables = (1 to count).map(at => free(at))
-	holds = given.reverse.fold(proposition_of(e, beta(value, variables)), (body, each) => pi(each.binder, truth_stated(e, apply_all(constant(each.id, declared_at(e, each.id)!.name, []), variables)), body))
-	(1 to count).reverse.fold(holds, (body, at) => pi(names#at, parts#at, abstracted(hypothesized(e, parts#at, free(at), names#at, body), at)))
+	telescope = law_telescope(e, c, (1 to #parts - 1).map(at => entered(c, names#at, parts#at)), value, given)
+	pis(telescope.locals, telescope.statement)
 }
-# a statement under the hypothesis that a binder of a subtype holds its condition; as it is for any other binder
-hypothesized(e: Environment, domain: Term, variable: Term, name: text, body: Term): Term := {
-	if subset_condition(domain) == ø { return body }
-	condition = condition_name(e, domain)!
-	id = named_id(e, condition) ?? refused(ASSUMED_NAMED, "the condition of ${name}'s type, ${shown(domain)}, is no definition the kernel holds: it calls what the kernel only assumes, so no law over it is stated")
-	pi(name + CONDITION_HOLDS_BINDER, truth_stated(e, apply(constant(id, condition, []), variable)), body)
+# that a parameter of a subtype holds its condition; nothing for any other parameter
+condition_held(e: Environment, c: Checker, parameter: Local): list<Local> := {
+	if subset_condition(parameter.domain) == ø { return [] }
+	condition = condition_name(e, parameter.domain)!
+	id = named_id(e, condition) ?? refused(ASSUMED_NAMED, "the condition of ${parameter.binder}'s type, ${shown(parameter.domain)}, is no definition the kernel holds: it calls what the kernel only assumes, so no law over it is stated")
+	[entered(c, parameter.binder + CONDITION_HOLDS_BINDER, truth_stated(e, apply(constant(id, condition, []), parameter.variable)))]
 }
 # the first function a typed body calls whose instance the kernel only assumes, by its written name
 assumed_callee(e: Environment, body: Node): text? := {
