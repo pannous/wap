@@ -35,10 +35,10 @@ LAW_FUNCTION := "law_"
 ASSUMED_NAMED := "assumed function"
 # the name of the hypothesis a subtype's binder brings, after the binder's
 CONDITION_HOLDS_BINDER := "_holds"
+# the question a program asks at its top of a name, `axioms of hard` (wiki/proof.md "What a proof rests on")
+AXIOMS_OF_WORD := "axioms_of"
 # the refusal of a proof of no form verify reads
 PROOF_REFUSED := "proof"
-# the question a program asks of a name at its top, `axioms of hard`, answered once the laws are proved
-AXIOMS_OF_WORD := "axioms_of"
 
 # a law analyze typed: its name, its function's key and id in the environment, the first function its body calls
 # that the kernel only assumes, all found while analyze's names are in scope, and the ids of its hypotheses' functions
@@ -49,6 +49,7 @@ class Premise { binder: text; id: int }
 class ProgramTyped { split: Split; typed: Node; refusals: map<text, text> }
 program_typed(wap_folder: text, program: text): ProgramTyped := {
 	front = base_language()
+	RULE_WORDS.said = yes
 	modules_bringable(front)
 	rules_files_loaded(front, wap_folder)
 	based(front, in_folder(wap_folder, LAW_STATEMENT_RULES))
@@ -63,10 +64,10 @@ program_typed(wap_folder: text, program: text): ProgramTyped := {
 	TYPES.prove = ø
 	ProgramTyped(split, typed, refusals)
 }
-# the laws of a program, in the order they are stated: each law's bool function, each proof's @proof function, a law
-# analyze refuses, or one a hypothesis of which it refuses, with why; the compiler's answers to the questions the
-# program asks at its top, and the names it asks the axioms of (wiki/proof.md "What a proof rests on"), answered once
-# the laws are proved
+# the laws of a program, in the order they are stated: each law's function, each proof's @proof function, each
+# axiom; the compiler's answers to the questions the program asks at its top, and the names it asks the axioms of
+# (wiki/proof.md "What a proof rests on"), answered once the laws are proved. A law, or a definition,
+# typing refuses is a failed verdict of its own, `bad: refused by value type: …`, after the others
 class LawsTyped { laws: list<TypedLaw>; answers: list<text>; asked: list<text> }
 laws_typed(wap_folder: text, program: text): LawsTyped := {
 	front = program_typed(wap_folder, program)
@@ -75,30 +76,47 @@ laws_typed(wap_folder: text, program: text): LawsTyped := {
 	defines = statements_in(front.typed).filter(statement => statement is Define)
 	keys: map<text, text> = {}
 	for statement in defines { keys[text(defined_name(statement))] = function_key(statement) }
-	laws: list<TypedLaw> = split.laws.filter(function => not keys.has(function)).map(function => TypedLaw(function[#LAW_FUNCTION ..], function, ø, ø, refused: "typing left ${function} out"))
-	# a proof typing refused is left out of the program: it says why, never silent
-	for key in refusals.keys { if not keys.has(keyed_name(key)) and not split.laws.contains(keyed_name(key)) { eprint refusals[key] } }
+	# what typing refused is left out of the program: a law's, a hypothesis's (its law's) or a definition's of the
+	# program is a failed verdict of its own, any other's is said on standard error
+	stated = top_level_statements(split.code).map(statement => match statement { Call(defines, parts) => text(head_word(parts#1)); _ => "" })
+	dropped = refusals.keys.filter(key => not keys.has(key_word(key)))
+	left = dropped.filter(key => stated.contains(key_word(key)))
+	for key in dropped.filter(key => not left.contains(key)) { eprint refusals[key] }
+	left_names = left.map(key_word)
+	laws: list<TypedLaw> = []
 	for statement in defines {
 		function = text(defined_name(statement))
 		proof = proof_of(statement)
 		if proof == ø and not split.laws.contains(function) { continue }
-		name = if proof != ø then function else function[#LAW_FUNCTION ..]
+		name = shown_law_name(function)
 		given = split.given.get(function) ?? []
-		why = ([function] + given.map(each => each.function)).map(part => if keys.has(part) then refusals.get(keys[part]) else "typing left ${part} out").find(reason => reason != ø)
-		if why != ø { laws += [TypedLaw(name, function, ø, ø, refused: why)]; continue }
+		parts = [function] + given.map(each => each.function)
+		if parts.any(part => left_names.any(name => part == name or part.starts_with(name + LAW_GIVEN))) { continue }
 		key = keys[function]
-		id = (each: text) => named_id(TYPES.environment, keys[each])
+		id = (each: text) => if keys.has(each) then named_id(TYPES.environment, keys[each]) else ø
 		premised = premises(given, id)
-		if premised == ø { laws += [TypedLaw(name, key, ø, ø, refused: "its hypothesis ${given.find(each => id(each.function) == ø)!.binder} is no statement the kernel holds")]; continue }
+		why = parts.map(part => if keys.has(part) then refusals.get(keys[part]) else "typing left ${part} out").find(reason => reason != ø) ?? (if premised == ø then "its hypothesis ${given.find(each => id(each.function) == ø)!.binder} is no statement the kernel holds" else ø)
+		if why != ø { laws += [TypedLaw(name, key, ø, ø, refused: why!)]; continue }
 		laws += [TypedLaw(name, key, named_id(TYPES.environment, key), assumed_callee(TYPES.environment, statement), premised!, proof, split.binders.get(function) ?? [])]
 	}
-	# each `@axiom` definition is a verdict of its own, Axiom, in the order stated beside the laws
-	laws += defines.filter(is_axiom).map(axiom => TypedLaw(text(defined_name(axiom)), function_key(axiom), named_id(TYPES.environment, function_key(axiom)), ø, [], Symbol(AXIOM_ANNOTATION)))
-	stated = defines.map(function_key)
-	LawsTyped(laws.sorted(by: law => stated.index_of(law.key)), statements_in(front.typed).map(answer_in).filter(answer => has_fact(answer, ANSWERED)).map(answer => text(answer)), split.asked)
+	# each `@axiom` definition is a verdict of its own, Axiom, or refused where the kernel holds none of it
+	laws += defines.filter(is_axiom).map(axiom => axiom_law(axiom, refusals))
+	laws += split.laws.filter(function => not keys.has(function) and not left_names.contains(function)).map(function => TypedLaw(shown_law_name(function), function, ø, ø, refused: "typing left ${function} out"))
+	laws += left.map(key => TypedLaw(shown_law_name(key_word(key)), key, ø, ø, refused: refusals[key]))
+	order = defines.map(function_key)
+	ordered = laws.sorted(by: law => if order.contains(law.key) then order.index_of(law.key) else #order + 1)
+	LawsTyped(ordered, statements_in(front.typed).map(answer_in).filter(answer => has_fact(answer, ANSWERED)).map(answer => text(answer)), split.asked)
 }
-# the name a function's key holds after its place, `30#1 zero_right`
-keyed_name(key: text) as text := key.split(" ")#2
+# an `@axiom` definition's verdict, Axiom, or the refusal that left the kernel without it
+axiom_law(axiom: Define, refusals: map<text, text>) as TypedLaw := {
+	key = function_key(axiom)
+	id = named_id(TYPES.environment, key)
+	if id == ø then TypedLaw(text(defined_name(axiom)), key, ø, ø, refused: refusals.get(key) ?? "typing left it out") else TypedLaw(text(defined_name(axiom)), key, id, ø, [], Symbol(AXIOM_ANNOTATION))
+}
+# the name a definition's head declares, `choice` of `choice(a: Prop): a` and of `num: Type`
+head_word(declared: Node) as Node := match unwrapped(declared) { Key(head, Op.Colon, result) => head_word(head); Key(called, applied, group) => called; _ => declared }
+# a law's name as verdicts show it, its function's without the prefix
+shown_law_name(function: text) as text := if function.starts_with(LAW_FUNCTION) then function[#LAW_FUNCTION ..] else function
 # a proof's body, the definition of its law's @proof function (sugar/laws.wap); ø for any other definition
 proof_of(definition: Node) as Node? := if annotation(definition, PROOF_ANNOTATION) == ø then ø else match definition { Define(name, parameters, body) => body; _ => ø }
 # the name a law's theorem has in the kernel: a proof's its function's key, a law's the law's own
@@ -125,27 +143,36 @@ axioms_asked(statement: Node, split: Split) as bool := match unwrapped(statement
 	Key(called, applied, arguments) => if text(called) == AXIOMS_OF_WORD { split.asked += [text(items_of(arguments)#1)]; yes } else no
 	_ => no
 }
-hypotheses_apart(statement: Node, split: Split) as list := match statement {
-	Call(defines, parts) => match parts#1 {
-		Key(head, colon, result) => match unwrapped(head) {
-			Key(name, applied, arguments) => {
-				if not text(name).starts_with(LAW_FUNCTION) { return [statement] }
-				split.laws += [text(name)]
-				binders = items_of(arguments)
-				names = binders.map(binder => text(declared_name(binder)))
-				split.binders[text(name)] = names
-				given = binders.filter(binder => is_hypothesis(binder, names, split.language))
-				if given is empty { return [statement] }
-				values = with_items(arguments, binders.filter(binder => not is_hypothesis(binder, names, split.language)))
-				function = (called: text, value: Node) => refitted(Call(defines, [Key(refitted(Key(symbol(called), applied, values), head), colon, result), value]), statement)
-				split.given[text(name)] = given.map(binder => Given(text(declared_name(binder)), "${name}${LAW_GIVEN}${declared_name(binder)}"))
-				[function(text(name), parts#2)] + given.map(binder => function("${name}${LAW_GIVEN}${declared_name(binder)}", declared_type(binder)!))
-			}
-			_ => [statement]
+# A law's function as a statement defines it, `law_x(a: int) := …`, its result written or not: its parts, ø for any
+# other statement
+class LawRead { defines: Node; head: Node; name: text; applied: Op; arguments: Node; result: Node?; body: Node }
+law_read(statement: Node) as LawRead? := match statement {
+	Call(defines, parts) => {
+		result = match parts#1 { Key(declared, Op.Colon, type) => type; _ => ø }
+		head = match parts#1 { Key(declared, Op.Colon, type) => declared; _ => parts#1 }
+		match unwrapped(head) {
+			Key(name, applied, arguments) => if text(name).starts_with(LAW_FUNCTION) then LawRead(defines, head, text(name), applied, arguments, result, parts#2) else ø
+			_ => ø
 		}
-		_ => [statement]
 	}
-	_ => [statement]
+	_ => ø
+}
+# a law's function written again under a name, with these binders and this body, its result as the law wrote it
+law_written(law: LawRead, name: text, arguments: Node, body: Node, at: Node) as Node := {
+	head = refitted(Key(symbol(name), law.applied, arguments), law.head)
+	refitted(Call(law.defines, [if law.result == ø then head else Key(head, Op.Colon, law.result!), body]), at)
+}
+hypotheses_apart(statement: Node, split: Split) as list := {
+	law = law_read(statement) ?? return [statement]
+	split.laws += [law.name]
+	binders = items_of(law.arguments)
+	names = binders.map(binder => text(declared_name(binder)))
+	split.binders[law.name] = names
+	given = binders.filter(binder => is_hypothesis(binder, names, split.language))
+	if given is empty { return [statement] }
+	values = with_items(law.arguments, binders.filter(binder => not is_hypothesis(binder, names, split.language)))
+	split.given[law.name] = given.map(binder => Given(text(declared_name(binder)), "${law.name}${LAW_GIVEN}${declared_name(binder)}"))
+	[law_written(law, law.name, values, law.body, statement)] + given.map(binder => law_written(law, "${law.name}${LAW_GIVEN}${declared_name(binder)}", values, declared_type(binder)!, statement))
 }
 # whether a binder's annotation is a statement about the law's binders, a truth of them written with an operator of
 # the language, `h: a <= b`, `h: not (a <= b)`, `h: a and b`; a type, `x: T` or `e: Even(n)`, is a word or a call of
@@ -171,8 +198,8 @@ typed_verdict(law: TypedLaw): TypedVerdict := {
 	if law.proof != ø { return proof_verdict(law, d) }
 	if d.kind is Axiom { refused(ASSUMED_NAMED, "law ${law.name} names ${law.assumed ?? law.key}, which the kernel only assumes: it may write, raise or act, so no law states it") }
 	if d.type.shape is Pi { return if law_proved(e, law, d) then Holds else Open }
-	value = computed(checker(e, []), constant(id, law.key, []))
-	if is_constant(value, e.literals!.yes_case) then Holds else if is_constant(value, e.literals!.no_case) then Breaks else Open
+	held = decided(e, constant(id, law.key, [])) ?? return Open
+	if held then Holds else Breaks
 }
 statement_of(e: Environment, law: TypedLaw, d: Declaration): Term := law_statement(e, d.type, unfolding(d)!, law.given)
 # whether the provers prove a law's statement yes for every value of its binders, the proof declared as its theorem, of
@@ -189,10 +216,10 @@ statement_proved(e: Environment, name: text, statement: Term): bool := {
 	declared(e, Declaration(name, [], statement, Theorem(proof)))
 	yes
 }
-# the axioms a law declared by its name rests on, none for one declared by no name of its own
-resting_on(name: text): list<text> := axioms_of(TYPES.environment, declared_constant(name) ?? return [])
 # the kernel's constant of a declaration by its name, ø for a name it holds none of
 declared_constant(name: text): Term? := constant(named_id(TYPES.environment, name) ?? return ø, name, [])
+# the axioms a law declared by its name rests on, none for one declared by no name of its own
+resting_on(name: text): list<text> := axioms_of(TYPES.environment, declared_constant(name) ?? return []).map(key_word)
 # whether a law's proof is `assume`
 is_assume(proof: Node?) as bool := proof_word(proof) == ASSUME_WORD
 # a statement taken as true without a proof, an assume's or an axiom's verdict; ø for a proof

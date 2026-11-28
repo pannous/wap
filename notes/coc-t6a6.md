@@ -24,7 +24,7 @@ What already landed:
      False than programs do.
    - `True.intro` comes from the same row (the case name follows its block).
 
-2. **wap/types/logic.wap, plain wap, about 25 lines.**
+2. **lib/logic.wap, plain wap, about 25 lines.**
    ```wap
    enum And(a: Prop, b: Prop): Prop { intro(left: a, right: b) }
    enum Or(a: Prop, b: Prop): Prop { left(h: a); right(h: b) }
@@ -42,7 +42,7 @@ What already landed:
      new rule is needed.
    - **Build check:** reads_as reads `s.records`. Prop is a sort term, not a record. If `read_type` finds no function
      named Prop, the fix is to look the conversion up by `type_word(held)`, at most core +2.
-   - `use classical` is a library file, wap/types/classical.wap:
+   - `use classical` is a library file, lib/classical.wap:
      ```wap
      axiom excluded_middle(a: Prop): a or not a
      ```
