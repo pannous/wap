@@ -1,6 +1,6 @@
 # The new backbone: first principles and plan
 
-The design of wap, from the user's decisions (2026-11-17). Read first: notes/first_principles.md. Inputs: wap/kernel/forms.wap (the kernel forms), notes/layers.md, wiki/Philosophy.md, wiki/guiding-principles.md, notes/taste.md.
+The design of wap, from the user's decisions (2026-11-17). Read first: warp's notes/first_principles.md. Inputs: wap/kernel/forms.wap (the kernel forms), warp's notes/layers.md, wiki/Philosophy.md, wiki/guiding-principles.md, warp's notes/taste.md.
 
 **Names (user 2026-11-17):** **warp** is the old compiler (core/, frozen), **wap** the new one built here.
 
@@ -27,13 +27,13 @@ The design of wap, from the user's decisions (2026-11-17). Read first: notes/fir
 
 ## First principles
 
-notes/first_principles.md: the core identities (functions = operators, `f(x)` = `x.f`, overloads, `@meta`,
+warp's notes/first_principles.md: the core identities (functions = operators, `f(x)` = `x.f`, overloads, `@meta`,
 aliases), the language and compiler principles, and how agents work by them. Every design choice here cites one.
 
 ## Layers
 
-kernel, core, types, library, as wap/ is laid out: notes/first_principles.md "Layers" (user 2026-11-17). Kernel
-forms are named patterns of Node with `$` holes: notes/first_principles.md, wiki/pattern.md.
+kernel, core, types, library, as wap/ is laid out: warp's notes/first_principles.md "Layers" (user 2026-11-17). Kernel
+forms are named patterns of Node with `$` holes: warp's notes/first_principles.md, wiki/pattern.md.
 
 ## Stage languages: the contract between the workers
 
@@ -173,7 +173,7 @@ checked) and a line here when its language changed. The lead reviews it against 
 - **Rewritten:** everything between the reader and the wasm bytes: spelling rules, prescan, binding, typing, the
   rule engine, kernel lowering and the emitter.
 - **Reused as they are:**
-  - the value layout (notes/self_hosting.md);
+  - the value layout (warp's notes/self_hosting.md);
   - the runtime words;
   - the host words and the native driver;
   - the test harness;

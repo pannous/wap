@@ -1,6 +1,6 @@
 # The compiler runtime
 
-The runtime is the Wap code that implements operations used by compiled programs. It is part of the compiler in `core/runtime.wap` and `core/runtime/`, distinct from the modules programs import from `lib/`. The value representation is described in the main repository's `notes/self_hosting.md`, under “Value layout”.
+The runtime is the Wap code that implements operations used by compiled programs. It is part of the compiler in `core/runtime.wap` and `core/runtime/`, distinct from the modules programs import from `lib/`. The value representation is described in the main repository's `warp's notes/self_hosting.md`, under “Value layout”.
 
 ## Roots and the split
 
