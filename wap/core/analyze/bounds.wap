@@ -1,8 +1,10 @@
 # The bounds of an int's value that compiling knows (kernel/scalars.wap), so a row on ints that stays within the scalars
 # runs as its instruction (dispatch.wap row_fitted, terms.wap obligation_entered). Known are: a literal's; a count a
 # row of the machine gives, below 2^32 (`#xs`, a text's bytes); a sum, difference or product of known ones; a For
-# counter's, from 1 up to its count's; a local's given one value only, that value's. Bounds are facts beside the type,
-# never the type: `type of` an int is int (wiki/type.md).
+# counter's never given a value in its body, from 1 up to its count's; a local's given a value at one place only, that
+# value's. Bounds are facts beside the type, never the type: `type of` an int is int (wiki/type.md). The ends are
+# combined only where the compiler's own ints hold them on a machine that wraps (the seed's): sums of ends within
+# ±2^62, products of ends within ±2^31.
 use folder
 use "../errors.wap"
 use "../stage.wap"
@@ -13,6 +15,8 @@ use "../../kernel/scalars.wap"
 
 BOUNDS = "bounds"
 class Bounds { lo: int; hi: int }
+SUMMED_END := 4611686018427387904
+FACTOR_END := 2147483648
 
 # the machine row a definition is, its body a single primitive; ø for any other
 row_of(definition: Signature, s: TypingState) as text? := {
@@ -25,16 +29,18 @@ counted_noted(typed: Node, meant: Signature, s: TypingState) as Node := {
 	known = ROW_BOUNDS.get(row_of(meant, s) ?? return typed) ?? return typed
 	with_fact(typed, BOUNDS, data_list(known.map(end => Number(end))))
 }
-# a local given a value, counted, so one given a value once has that value's bounds; a For counter's count
-assignment_counted(key: text, value: Node, s: TypingState) := {
-	s.assignments[key] = (s.assignments.get(key) ?? 0) + 1
+# a local given a value at a place, the place kept, so one given a value at one place only has that value's bounds; a
+# place typed again (an instance, a second pass) is the same place, and an assignment without a place counts as many
+assignment_counted(key: text, value: Node, site: text, s: TypingState) := {
+	if site == "" or (s.assigned_at.has(key) and s.assigned_at[key] != site) { s.assigned_at[key] = ø; return }
+	s.assigned_at[key] = site
 	s.assigned_values[key] = value
 }
 # the bounds of a typed int's value, ø where compiling knows none; read once typing is done, when every local's
-# assignments are counted
+# assignments are found
 bounds_of(n: Node, s: TypingState) as Bounds? := match n {
 	Number(value) => if value is int then Bounds(value, value) else ø
-	Symbol(name) => variable_bounds(place_key(fact_of(n, DEFINED_AT) ?? return ø), s)
+	Symbol(name) => if is_bound(n, DefinitionKind.Local) then variable_bounds(place_key(fact_of(n, DEFINED_AT) ?? return ø), s) else ø
 	Call(called, arguments) => noted_bounds(n) ?? row_bounds(n, arguments, s)
 	_ => ø
 }
@@ -42,12 +48,12 @@ noted_bounds(n: Node) as Bounds? := {
 	ends = fact_items(n, BOUNDS).map(end => match end { Number(value) => value; _ => 0 })
 	if #ends == 2 then Bounds(ends#1, ends#2) else ø
 }
-# a local's: its one value's, a For counter's from 1 up to its count's; each found once
+# a local's: its one value's, a For counter's from 1 up to its count's while its body gives it none; each found once
 variable_bounds(key: text, s: TypingState) as Bounds? := {
 	if s.bounds_found.has(key) { return s.bounds_found[key] }
 	s.bounds_found[key] = ø
 	count = s.counters.get(key)
-	found = if count != ø then counter_bounds(bounds_of(count!, s)) else if s.assignments.get(key) == 1 then bounds_of(s.assigned_values[key], s) else ø
+	found = if count != ø then (if s.assigned_at.has(key) then ø else counter_bounds(bounds_of(count!, s))) else if s.assigned_at.get(key) != ø then bounds_of(s.assigned_values[key], s) else ø
 	s.bounds_found[key] = found
 	found
 }
@@ -59,12 +65,14 @@ row_bounds(n: Node, arguments: list, s: TypingState) as Bounds? := {
 	a = bounds_of(arguments#1, s) ?? return ø
 	b = bounds_of(arguments#2, s) ?? return ø
 	match row.row! {
-		"i64.add" => Bounds(a.lo + b.lo, a.hi + b.hi)
-		"i64.sub" => Bounds(a.lo - b.hi, a.hi - b.lo)
+		"i64.add" => if within(a, SUMMED_END) and within(b, SUMMED_END) then Bounds(a.lo + b.lo, a.hi + b.hi) else ø
+		"i64.sub" => if within(a, SUMMED_END) and within(b, SUMMED_END) then Bounds(a.lo - b.hi, a.hi - b.lo) else ø
 		"i64.mul" => {
+			if not within(a, FACTOR_END) or not within(b, FACTOR_END) { return ø }
 			ends = [a.lo * b.lo, a.lo * b.hi, a.hi * b.lo, a.hi * b.hi]
 			Bounds(min(ends), max(ends))
 		}
 		_ => ø
 	}
 }
+within(b: Bounds, end: int): bool := b.lo >= 0 - end and b.hi <= end
