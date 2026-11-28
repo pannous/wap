@@ -48,10 +48,15 @@ check "a native wap run shows the program's value" "$(cd "$stage" && "$native_wa
 # a program named by an absolute path through a link, which WASI alone would not follow
 mkdir -p "$stage/real" && cp "$stage/hello.wap" "$stage/real/" && ln -s "$stage/real" "$stage/linked"
 check "a native wap run of a program through a link" "$("$native_wap" "$stage/linked/hello.wap" 2>&1)" "Hello"
-# `wap test <areas>` runs the folder's test/wap/run.sh on those areas, its exit status the run's (a stand-in
+# `wap test <areas>` runs the test/wap/run.sh of the tree the folder is in on those areas, its exit status the run's (a stand-in
 # run.sh here, so the suite's own results stay untouched)
 mkdir -p "$stage/tested/test/wap" && printf '%s\n' 'echo "$@"' 'exit 3' >"$stage/tested/test/wap/run.sh" && chmod +x "$stage/tested/test/wap/run.sh"
 check "wap test runs the areas' tests" "$(cd "$stage/tested" && "$native_wap" test hello raise; echo "exit $?")" "--wait hello raise
+exit 3"
+# from a folder below the tree, where the script is found above it (a folder with no tree above would find this run's own,
+# as the stage lies in it)
+mkdir -p "$stage/tested/below/deeper"
+check "wap test runs the tree's tests from a folder below it" "$(cd "$stage/tested/below/deeper" && "$native_wap" test hello; echo "exit $?")" "--wait hello
 exit 3"
 check "wap build makes a program a native executable named as it" "$(cd "$tree" && "$native_wap" build "$stage/hello.wap" >/dev/null 2>&1 && "$stage/hello" 2>&1)" "Hello"
 # an argument that names no program file is code, run as a program is (core/native/warp.warp is_warp_file)
