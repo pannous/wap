@@ -1187,6 +1187,34 @@ statement at the call's arguments):
 - Typing records every call's hole, at the top level and in acting functions too; reading a pure body into the kernel
   discharges the ones it meets. V3's Obligation takes the goal as a term beside its subtype condition (core about +2).
 
+#### A proved obligation loses its run check
+
+wiki/type.md "Proved or checked" puts proving (3) before the run check (4). V3 builds the check at typing
+(dispatch.wap narrowed_call, the narrowing word wrapped around the argument) and proves only in the check door
+(extensions/verify/check.wap), which emits nothing. So a module keeps the check of an obligation the door proved.
+
+The change, in one compile:
+1. **check.wap runs between typing and emission.** The door already runs the compile's front (program_typed), then the
+   laws' verdicts, then obligation_proved over the obligations. It then runs the back too: compiler.wap's `compiled`
+   splits at `typed`, and its emission half becomes a pipeline function both the compiler and the door call
+   (`module_of(typed, …)`, moved, not new). The verdicts come first, so a law the provers proved is a fact for the
+   obligations after it, as V3 says.
+2. **Emission learns from a fact.** An Obligation keeps the call narrowed_call made. A proved one writes a PROVED fact
+   on that call, and elaboration takes a narrowing call that has the fact as its first argument. A stage writes a fact
+   on a node and makes no new hole. The check then goes from the code and from the function's effects (no Fail from
+   it). core about +3: the kept call, the fact, the elaborate arm.
+3. **Plain builds stay as they are.** Without the provers no fact is written, every check stays (step 4), and nothing
+   is proved, so a build costs what it costs today. A module with fewer checks comes from the check door with an output
+   path (`wap check program.wap out.wasm`). That spelling is a CLI form, so it goes to warp-interviewer with
+   wiki/cli.md's line.
+4. **The cost** is not measured yet. It is one first_proof per obligation entered with a kernel term, after the
+   verdicts. The builder measures the check door against a plain compile over test/wap's samples and the compiler's own
+   source, times and obligation counts, before the doors change. Proving stays the door's, so the measure decides
+   nothing about plain builds; it decides whether `wap check` stays a listing or becomes the assured build.
+
+Lines: core about +3, pipeline 0 (moved), check.wap about +4, compiler.wap about −6. Careful path: the emission half
+moves, which the self-build uses.
+
 #### Each step's wiki lines and the tests that pin them
 
 A builder starts from these lines red. "red" is the last recorded full run (test/reds.txt); `_wanted` files are
