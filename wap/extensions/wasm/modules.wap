@@ -7,6 +7,9 @@ use "../../kernel/forms.wap"
 use "../../core/parse/cascade.wap"
 use "../../core/analyze/calls.wap"
 use "../../core/analyze/declarations.wap"
+use "../../core/analyze/effects.wap"
+use "../../core/analyze/types.wap"
+use "../../core/emit/functions.wap"
 use "../../kernel/opcodes.wap"
 use "../../core/emit/wasm.wap"
 use "../../core/emit/host.wap"
@@ -98,12 +101,13 @@ defined_by(statement: Node, ids: list<text>) as bool := declaration_of(statement
 # the wap section: the module's file as read, without the definitions compiled once, a definition of each export under
 # its header line in their place, its values' first, as the code reads them; then each file it carries. Each path in
 # them, a place's or a use's, is written inside the module, so a use reads no file beside it
-module_section(language: Language, file: text, module: Module, exported: list<Signature>, exports: list<ModuleExport>, carried: list<text>) as text := {
+module_section(language: Language, file: text, module: Module, exported: list<Signature>, exports: list<ModuleExport>, carried: list<text>, typed: list) as text := {
+	claims = claims_by_header(typed)
 	cut = exported.map(signature => line_place(defining_statement(module.code, signature)!))
 	code = language.operated[file].code
 	kept = top_level_statements(code).filter(statement => not cut.contains(line_place(statement_place(statement)))).map(statement => carried_used(language, file, statement, carried))
 	values = operated_lines(language, file, exports.filter(item => item.kind == GLOBAL_KIND).map(item => foreign_value(LINKED_MARK, item.header)))
-	functions = operated_lines(language, file, exports.filter(item => item.kind != GLOBAL_KIND).map(item => foreign_definition(LINKED_MARK, item.header)))
+	functions = operated_lines(language, file, exports.filter(item => item.kind != GLOBAL_KIND).map(item => foreign_definition(LINKED_MARK, item.header, claims.get(item.header) ?? "")))
 	own = Operated(with_facts_of(List(values + kept + functions, Bracket.None, Separator.Newline), code), language.operated[file].words)
 	inside = written_files(file)
 	pack(List([file_entry(file, own)] + carried.map(path => file_entry(path, language.operated[path])), Bracket.Square, Separator.Comma), written => module_written(written, inside, carried))
@@ -143,14 +147,21 @@ library_section(folder: text) as list<int> := custom_section(LIBRARY_SECTION, fo
 # where a top-level statement is written: its own place, a class's that of its name
 statement_place(statement: Node) as Node := if line_of(statement) == ø and declaration_of(statement) != ø then declaration_name(declaration_of(statement)!) else statement
 
-# `add(a: int, b: int = 1) as int := prim foreign("m.wasm", "add(a: int, b: int = 1) → int", a, b)`
-foreign_definition(path: text, header: text) as text := {
+# each typed function's effects by its header line, as `effects of` names them: the claim of its foreign definition
+claims_by_header(typed: list) as map<text, text> := {
+	claims: map<text, text> = {}
+	for statement in typed { if statement is Define and fact_of(statement, EFFECTS) != ø { claims[header_line(statement)] = text_of(fact_of(statement, EFFECTS))! } }
+	claims
+}
+# `add(a: int, b: int = 1) as int := prim foreign("m.wasm", "add(a: int, b: int = 1) → int", a, b) ! Pure`, the
+# claim its effects
+foreign_definition(path: text, header: text, claim: text) as text := {
 	parts = header.split(RESULT_ARROW)
 	head = parts#1
 	result = if #parts == 2 then " as " + parts#2 else ""
 	given = head.split("(").drop(1).join("(")
 	names = given.split(", ").filter(part => part.contains(": ")).map(part => part.split(": ")#1)
-	"${head}${result} := prim foreign(\"${path}\", \"${header}\", ${names.join(", ")})"
+	"${head}${result} := prim foreign(\"${path}\", \"${header}\", ${names.join(", ")})${if claim == "" then "" else " ! " + claim}"
 }
 
 # the text of a module's custom section of that name, "" when it has none
