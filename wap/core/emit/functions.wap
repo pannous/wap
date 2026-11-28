@@ -4,6 +4,7 @@
 use folder
 use "../../kernel/opcodes.wap"
 use "../../kernel/primitives.wap"
+use "../../kernel/scalars.wap"
 use "../errors.wap"
 use "../stage.wap"
 use "../bindings.wap"
@@ -149,9 +150,19 @@ functions_exported(statements: list<Node>, exports: list<text>, p: Emission) := 
 	for definition in statements.filter(s => is_exported(s, exports)) {
 		placed = placed_by_key(p.functions, function_key(definition)) ?? refused(definition, "this function was never placed")
 		# the header line last, the name a backtrace shows
-		for name in export_names(definition, own) { exported(p.m, name, FUNCTION_KIND, placed.index) }
+		for name in export_names(definition, own) { exported(p.m, name, FUNCTION_KIND, if name == header_line(definition) or has_fact(defined_name(definition), EXPORTED_AS) then placed.index else host_facing(definition, placed, p)) }
 	}
 }
+# The function a host calls by an export's plain word: an int the host gives is widened, and one past the scalars it
+# would be given back is refused, as a host reads words (kernel/scalars.wap); the header line's export, which the
+# program's other modules call, passes handles as they are, as a dispatcher's word does
+host_facing(definition: Define, placed: Placed, p: Emission) as int := match definition { Define(name, parameters, body) => {
+	ints = items_of(parameters).map(parameter => type_text(type_of(declared_name(parameter))) == INT_TYPE)
+	gives_int = type_text(signed_parts(declared_name(name)).result) == INT_TYPE
+	if not gives_int and not ints.any(each => each) { return placed.index }
+	given = (1 to #ints).flat_map(at => local_get(at - 1) + (if ints#at then runtime_call(p, WIDENING) else []))
+	added_function(p.m, placed.parameters, if valued(placed.type) then [placed.type] else [], [], given + instruction(CALL, [placed.index]) + (if gives_int then plain_checked(p) else []))
+} }
 is_exported(statement: Node, exports: list<text>) as bool := statement is Define and (exports.contains(export_key(defined_name(statement))) or has_fact(defined_name(statement), EXPORTED_AS))
 export_names(definition: Define, own: list<Node>) as list<text> := {
 	name = plain_word(definition)
