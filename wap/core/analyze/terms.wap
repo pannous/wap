@@ -106,43 +106,52 @@ parameters_entered(typed: TypedFunction, c: Checker, s: TypingState) as list<Loc
 	names = parameter_names(typed)
 	for at in 1 to #typed.arguments {
 		before = fresh_reading(c, {}, s).under(locals, names.take(at - 1).map(place_key))
-		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? settled_type(typed.arguments#at, s))]
+		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c))]
 	}
 	locals
+}
+# the checker a function's parameters are entered on
+parameters_checker(typed: TypedFunction, s: TypingState) as Checker := {
+	parameters_locals(typed, s)
+	typed.checker!
 }
 parameters_of(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters); _ => [] }
 parameter_names(typed: TypedFunction) as list := parameters_of(typed).map(parameter => declared_name(parameter))
 # GUESS (T6a3's value reader): the result as the kernel reads it: where a family is written applied to values, the head applied to its arguments
 # read as values under the parameters (`Even(double(n))`, each value through term_of and the checker's Locals); any other result as settled
 kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
-	if typed.written == ø or not is_family_call(typed.written!) { return kernel_settled(typed.result ?? return ø, s) }
+	if typed.written == ø or not is_family_call(typed.written!) { return kernel_settled(typed.result ?? return ø, s, parameters_checker(typed, s)) }
 	match typed.written! {
 		Call(head, items) => {
 			given = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), parameters_reading(typed, by_key, s)) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)
-			apply_all(kernel_type(family_head(head, given, typed.checker!))!, given)
+			kernel_headed(apply_all(kernel_type(family_word(head))!, given), typed.checker!)
 		}
 		_ => ø
 	}
 }
-# The head of a type applied to these terms, on the checker they are read on: the program's word, or the kernel's
-# family with a level hole for each level parameter, its arguments unified with its binders' types in turn, each
-# dependent binder taking the argument before it, so the levels found fill the holes (`Equal(nat, a, b)`: u from nat's
-# Type); an argument of another type is refused, naming what the binder takes
-family_head(head: Node, arguments: list<Term>, c: Checker) as Term := {
-	if fact_of(head, DECLARED_BY) != ø { return word_named(head) }
-	family = declaration(TYPES.environment, text(head)) ?? refused(head, "${head} names no type the kernel holds")
-	el = elaboration_over(c)
+# A type as the kernel reads it, on the checker its terms are read on: a kernel family applied to arguments is headed at
+# the levels they give (family_head); any other type as it is
+kernel_headed(t: Term, c: Checker) as Term := {
+	family = declared_at(TYPES.environment, constant_id(head_of(t)))
+	if family == ø or family!.levels is empty { return t }
+	apply_all(family_head(family!, arguments(t), c), arguments(t))
+}
+# a kernel family with a level hole for each level parameter, its arguments unified with its binders' types in turn,
+# each dependent binder taking the argument before it, so the levels found fill the holes (`Equal(nat, a, b)`: u from
+# nat's Type); an argument of another type, or a level no argument gives, is refused
+family_head(family: Declaration, arguments: list<Term>, c: Checker) as Term := elaborated_over(c, el => {
 	holes = family.levels.map(name => level_hole(el))
 	type = with_levels(family.type, family.levels, holes)
 	for argument in arguments {
 		type = match type.shape {
-			Pi(binder, domain, body) => if unified(el, domain, type_of(el.c, argument)) then instantiated(body, argument) else refused(head, "${family.name} takes ${shown(domain)} here, and this is ${shown(type_of(el.c, argument))}")
-			_ => refused(head, "${family.name} takes fewer arguments than ${#arguments}")
+			Pi(binder, domain, body) => if unified(el, domain, type_of(el.c, argument)) then instantiated(body, argument) else refused_type(family.type, "${family.name} takes ${shown(domain)} here, and this is ${shown(type_of(el.c, argument))}")
+			_ => refused_type(family.type, "${family.name} takes fewer arguments than ${#arguments}")
 		}
 	}
-	if not problems_retried(el) { refused(head, "the levels of ${family.name} are found from none of its arguments") }
-	constant(named_id(TYPES.environment, family.name)!, family.name, holes.map(hole => level_filled(el, hole)))
-}
+	levels = holes.map(hole => level_filled(el, hole))
+	if not problems_retried(el) or levels.any(level => level_holes_in(level) is not empty) { refused_type(family.type, "the levels of ${family.name} are found from none of its arguments") }
+	constant(named_id(TYPES.environment, family.name)!, family.name, levels)
+})!
 # the frame its parameters are typed in, as a body's is
 reading_frame(typed: TypedFunction) as TypeFrame := {
 	frame = TypeFrame()
@@ -384,7 +393,8 @@ terms_applied(function: Term, arguments: list, x: Entering) as Term? := {
 }
 # a type as the kernel reads a value's: a subtype by condition is its parent's
 kernel_type(type: Term?) as Term? := if type != ø and subset_condition(type) != ø then kernel_type(narrowed_type(type)) else type
-kernel_settled(type: Term, s: TypingState) as Term := kernel_type(settled_type(type, s))!
+# (every typing type becomes a kernel term here, its families headed at their levels on the checker its terms are of)
+kernel_settled(type: Term, s: TypingState, c: Checker = checker(TYPES.environment, [])) as Term := kernel_headed(kernel_type(settled_type(type, s))!, c)
 kernel_value(n: Node) as Term? := kernel_type(value_type(n))
 
 # Each subtype's condition, a definition of the parent's values named after the subtype, `int where it >= 0 holds`:
