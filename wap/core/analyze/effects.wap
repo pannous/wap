@@ -75,7 +75,7 @@ effects_joined(s: TypingState) as Joining := {
 # group it calls is joined before it
 effects_of_group(group: list<text>, x: Joining) := {
 	writes_passed(group, x)
-	round = #group > 1 or own_of(group#1, x).calls.any(call => call.key == group#1)
+	round = is_round(group, x)
 	effects: list<Effect> = if round then [Effect.Div] else []
 	for member in group {
 		effects += own_of(member, x).effects
@@ -83,6 +83,8 @@ effects_of_group(group: list<text>, x: Joining) := {
 	}
 	for member in group { x.found[member] = effects.unique }
 }
+# whether a group's functions call each other round: two or more, or one calling itself
+is_round(group: list<text>, x: Joining) as bool := #group > 1 or own_of(group#1, x).calls.any(call => call.key == group#1)
 # the effects of a typed function as `effects of` names them: State too where it writes into what it is given
 shown_of(key: text, x: Joining) as list<Effect> := found_of(key, x) + (if own_of(key, x).written is empty and own_of(key, x).captured is empty then [] else [Effect.State])
 # the effects found of a typed function, every one it calls joined before it
@@ -179,6 +181,8 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 # variables around them their callees write into; followed round until nothing more is written, so a callee read
 # before its body is (own_of's placeholder) counts too
 writes_passed(group: list<text>, x: Joining) := {
+	# a function calling no member of its group reads only callees joined before it: once is enough
+	round = is_round(group, x)
 	changed = yes
 	while changed {
 		changed = no
@@ -188,7 +192,7 @@ writes_passed(group: list<text>, x: Joining) := {
 			for pass in own.passes { if own_of(pass.key, x).written.contains(pass.at) { written_into(pass.argument, pass.caught, own) } }
 			for value in own.values { if own_of(value.key, x).written is not empty { effect_added(Effect.State, value.caught, own) } }
 			for call in own.calls { captures_given(own_of(call.key, x), own) }
-			if #own.written + #own.captured != before { changed = yes }
+			if round and #own.written + #own.captured != before { changed = yes }
 		}
 	}
 }
@@ -201,9 +205,9 @@ value_given(key: text, caught: bool, own: Own, x: Joining) := {
 }
 # the variables of the functions around it a callee writes into: a list the caller made itself keeps the write,
 # `seen = []; xs.map(x => { seen.add(x); x })`; any other is passed on outward, State where nothing around keeps it
-captures_given(callee: Own, own: Own) := {
-	kept = own.made.filter(key => not own.given.contains(key))
-	own.captured = (own.captured + callee.captured.filter(key => not kept.contains(key))).unique
+captures_given(callee: Own, own: Own) := for key in callee.captured {
+	kept = own.made.contains(key) and not own.given.contains(key)
+	if not kept { added_once(own.captured, key) }
 }
 # a divisor met: whether it is a whole number other than 0 and -1 written in place, which no division fails by (the
 # smallest int ÷ -1 traps); else the
@@ -237,16 +241,18 @@ written_root(n: Node, steps: int) as Root? := match n {
 # a local given a value: one it made itself where the value is a literal or a new record, else one given anything
 local_set(place: Node, value: Node, own: Own) := {
 	key = local_key(declared_name(place))
-	if is_made(unwrapped(value)) then own.made += [key] else own.given += [key]
+	if is_made(unwrapped(value)) { added_once(own.made, key) } else { added_once(own.given, key) }
 }
 is_made(value: Node) as bool := match value { List(items, bracket, separator) => yes; Text(t) => yes; Call(called, arguments) => is_bound(called, DefinitionKind.Record) or is_bound(called, DefinitionKind.Case); _ => no }
 # which of the function's parameters a name is, 0 for none
 parameter_at(n: Node, own: Own) as int := if fact_of(n, DEFINED_AT) == ø then 0 else own.parameters.index_of(local_key(n))
+# an item added to a list that does not hold it yet
+added_once(items: list<T>, item: T) := if not items.contains(item) { items.add(item) }
 # the key of the variable a name means, the place it is defined; a defining name's own
 local_key(n: Node) as text := place_key(fact_of(n, DEFINED_AT) ?? n)
 # an effect a body does itself, none where it is ø, a Fail none where a `try` catches it
 effect_added(effect: Effect?, caught: bool, own: Own) := if effect != ø and not (caught and effect == Effect.Fail) {
-	own.effects += [effect!]
+	added_once(own.effects, effect!)
 	if effect == Effect.Fail { own.divisors = ø }
 }
 # the typed functions a name means: the one a call chose, or every one of a function named as a value
