@@ -179,3 +179,93 @@ cases). Careful path: a new type's conversions.
 
 **Green.** The table above, unchanged. The `sign` lift lines (test_quotient_wanted:10-11) hold only once the three sign
 laws are Proved.
+
+## Lift read on q1 (3b58de53 library, c389ee1c M1, dacfb13a M2)
+
+**The shape.** `lift(q: quotient(T, S), f: (T) -> R, respected: respects(f, S) = by): R := f(prim as_is(q))` is
+Lean's `Quot.lift f h q` with the respect proof a hypothesis parameter the provers fill.
+- The kernel's `quotient.lift(T, r, B, f, respects, q)` (kernel/quotients.wap:65) takes `respects: Π a b (joined: r a
+  b), Equal(B, f a, f b)`. `respects(f, S)`'s for-lines read `same(a, b) implies f(a) == f(b)` as exactly that, once
+  `r` is the bool relation's adaptation `(a, b) => S(a, b) == yes`, the one `quotient(T, S)` itself is read with.
+  The quotient type, quotient_sound and lift share that one adaptation.
+- The body `f(prim as_is(q))` is the run's only. In the kernel, a call of lift is `quotient.lift` with the found
+  relation (part 5 above), never lift's body. `as_is` is not a folded row (terms.wap row_term), so the body has no
+  kernel value: lift alone would be an axiom, consistent because quotient.lift inhabits it, but `lift_of := refl`
+  computes only through part 5.
+- `as_is` never gets a kernel meaning. With `as_is(of(a)) ≡ a`, quotient_sound gives `a == b` for any joined a and b:
+  `fraction(1, 2) == fraction(2, 4)`, then False.
+
+**M1, a value letter.** S of `quotient(T, S)` is a letter as T is, bound from the argument's type at the former's
+value place. Sound: the letter is the relation the argument's type holds, so lift reads the quotient's own relation and
+no other.
+
+**M2, a hypothesis's `by` default.** Each argument is read against `next_domain(after_arguments(callee, given))`, the
+callee's Π instantiated with the arguments before it, which is the kernel's application rule (B[a/x]). The proof found
+for that domain is checked with the whole term, so a wrong one is refused by the kernel. Two places change under the
+obligation ruling (coc-plan.md "A call's proof hole"):
+- proof_given refuses every hole in a compile without provers. A decidable goal (`nonzero: b != 0 = by`) is an
+  obligation and is checked when the program runs, as the subtype `b: int where it != 0` is. Only an undecidable one
+  (respects, a for-line) is refused.
+- M2b, a call never read into the kernel (the top level, an acting function), is recorded at typing as an
+  obligation, so it is never left undecided.
+
+## Hashing a constant by its id (wap-annotation-attachment-fix 71dee881)
+
+kernel/terms.wap:110 hashes a constant by its id, what `same` compares (:308), so core's word and the kernel's key of
+one id are one term. Its readers:
+- hash_rank (integer_laws.wap:78, linear.wap:371) orders a sum's terms. Each reordering is proved by commutativity,
+  so the order is free; it follows declaration order now.
+- linear.wap:210 names a lemma by a type's hash, within one compile.
+- union_type sorts its parts by type_text (type_notation.wap:288), not by hash, so nothing depends on a name's hash.
+  The old comment at :109 ("orders by hash (a union's parts)") was stale.
+- A prover's failure message that shows a sum may show its terms in another order.
+
+## Parts 2 and 3: `==` through lift, `of` from the expected type (read on q1 a989a899)
+
+**`==` is lift twice.** In types/quotients.wap:
+```
+==(p: quotient(T, S), q: quotient(T, S), r: reflexive(S) = by, s: symmetric(S) = by, t: transitive(S) = by): bool :=
+	p.lift(a => q.lift(b => S(a, b), respected: joined_after(a, s, t)), respected: lifted_after(q, s, t))
+reflexive(S: (T, T) -> bool): Prop := for a: T, S(a, a)
+symmetric(S: (T, T) -> bool): Prop := for a: T, for b: T, S(a, b) implies S(b, a)
+transitive(S: (T, T) -> bool): Prop := for a: T, for b: T, for c: T, S(a, b) and S(b, c) implies S(a, c)
+```
+- **The inner lift** respects S: from S(b, b'), `S(a, b) == S(a, b')` as bools, each side implying the other by
+  symmetric and transitive, then bool equality from the two implications (·bool_cases, which comes back here).
+- **The outer lift** respects S: from S(a, a'), `q.lift(S(a, ·)) == q.lift(S(a', ·))` for every q, by quotient.induct
+  on q (the motive an Equal, a Prop). On a made value both lifts compute to S(a, b) and S(a', b), and the inner case
+  finishes it.
+- The two respect proofs are library theorems with their proofs written (joined_after, lifted_after), not left to
+  the provers: the outer one needs induct, which the provers do not search. types about +14.
+- **reflexive** is not needed for `==` to be a function of the quotient. It makes `==` decide Equal: Equal(p, q) gives
+  `p == q` by rewriting q to p, then S(a, a). That is the bridge kernel/environment.wap:205 keeps for a type whose
+  `==` decides Equal. Without it, `==` could be no on equal values.
+
+**What a program's relation must state: nothing, when the provers prove the three.** wiki/quotient.md's example
+states no laws (`same_value` and `half == fraction(2, 4)`), so the three are `by` defaults, M2's mechanism.
+- Each is a proof-only obligation (a for-line). A program with a quotient's `==` loads the provers, as one calling
+  lift does (part 4, the driver's).
+- The goal does not depend on the call's values, only on S. So it is proved once: the first proof is declared as the
+  obligation's theorem, and every later `==` of that relation finds it by matching (wiki/type.md ladder step 2, V3's
+  match of a goal against a proved law's conclusion, no search).
+- A relation the provers cannot do is accepted when the program states the missing law with a proof, by statement,
+  not name: `law cross_transitive: transitive(same_value) := by times_cancel, …`. Otherwise `==` is refused, naming
+  the missing law: "same_value needs transitive(same_value) proved for ==". lift and of stay usable; only `==` needs
+  the three.
+- For same_value: reflexive and symmetric are ring identities. Transitive needs cancelling a nonzero bottom: from
+  a1·b2 = b1·a2 and b1·c2 = c1·b2 follows a1·c2·b2 = c1·a2·b2, then b2 != 0 cancels. The field's condition `bottom: int
+  where it != 0` is the hypothesis. The library ships `law times_cancel(x: int, y: int, k: int): x * k == y * k and k
+  != 0 implies x == y` (its proof by sign's cases) as the lemma. The builder checks that the provers find transitive
+  from it with products as atoms; if they do not, the library states same_value's transitive itself. That is a
+  rewrite of the wiki's example (a law line beside it), so it goes to the user.
+- set's same_items: all three follow from `all` and `contains`; the library states them with set.
+
+**`of` from the expected type (part 3, unchanged).** `of(a: T): quotient(T, S)` takes S from the type wanted. `half:
+rational = fraction(1, 2)` converts on its own (reads_as, up only). core +5.
+
+**Needs.** M2's defaults (on q1), M2b's obligations, a bare `by` taking the proved laws as lemmas (dacfb13a's GUESS),
+step 2's matching for a proof hole (V3, core about +8), ·bool_cases back in the kernel (kernel-length.md), and
+quotient.induct reached from wap (`quotient.induct(q, h)`, part 5's lookup, core +1).
+
+**Cost.** core about +9 (matching +8, induct +1), types about +25 (the three statements +3, `==` +2, the two respect
+theorems +14, times_cancel +6), kernel +16 (·bool_cases, verbatim from 183716f2).
