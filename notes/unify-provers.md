@@ -111,13 +111,17 @@ theorems. All are checked as declared, and none is an axiom.
 | `·ups`, `·downs` | definitions, new: an int's two counts, `x == ups(x) − downs(x)`: natural(n) → n, 0; negative(n) → 0, successor(n) | int's recursor at level 1, two arms each |
 | `·difference` (N191, rewritten) | definition: m − n of two counts in its one form: `subtract(n, m)` is successor(k) → negative(k); else natural(`subtract(m, n)`) | count's recursor twice |
 | `·minus` (N193, Lean's) | definition: natural(n) → by count's cases: ·count.zero → natural(·count.zero), ·count.successor(k) → negative(k); negative(n) → natural(·count.successor(n)) | int's recursor, two arms, count's recursor in one |
-| `·sum`, `·times` (N197, N210, rewritten) | definitions by the two counts: `sum(a, b) := difference(ups(a) + ups(b), downs(a) + downs(b))`, `times(a, b) := difference(ups(a)·ups(b) + downs(a)·downs(b), ups(a)·downs(b) + downs(a)·ups(b))` | `·add`, `·multiply`; no case arms. `·size`, `·negative`, `·turned` (N206–209) are not needed and go |
-| `·equal_integers` (N213, rewritten), `·not_above` (new) | definitions: `count_equals(ups(a) + downs(b), ups(b) + downs(a))` and `count_at_most(` the same two `)` | no case arms (section "The comparisons") |
+| `·sum`, `·times` (N197, N210, Lean's) | definitions by both ints' cases, Lean's Int.add and Int.mul: naturals add, negatives `negative(successor(m + n))`, a natural and a negative `difference(m, successor(n))`; a product of the magnitudes (n, successor(n)), natural where the signs agree, minus's negOfNat where they differ | int's recursor twice, `·add`, `·multiply` |
+| `·equal_integers` (N213, rewritten) | definition: `count_equals(ups(a) + downs(b), ups(b) + downs(a))` | no case arms (section "The comparisons") |
+| `·is_natural`, `·not_above` (Lean's Int.le) | definitions: yes for natural, no for negative; `not_above(a, b) := is_natural(b + -a)` | int's recursor |
 | `·subtracted` (N218), `·unequal` (N220) | definitions, as in the prelude | `·sum`, `·minus`, `·negated` |
 | `·below`, `·above`, `·not_below` | definitions, new: `not_above(a + 1, b)`, `below(b, a)`, `not_above(b, a)` | `·not_above` |
 | the rows' meanings | each row constant `prim i64.<op> int -> … ` declared Defined as its function: add ·sum, sub ·subtracted, mul ·times, sub(0, x) ·minus, eq ·equal_integers, ne ·unequal, le_s ·not_above, lt_s ·below, gt_s ·above, ge_s ·not_below | core/analyze/terms.wap's `row_term` then finds them declared |
 | a numeral | `term_of` writes k ≥ 0 as `int.natural(k)` and k < 0 as `int.negative(−1 − k)`, the payload a count literal | replaces today's bare `numeral(value)` |
-| `·parts_back` (new) | theorem: `difference(ups(x), downs(x)) == x` | int's recursor at level 0, two arms, each by computation |
+| `·difference_zero`, `·difference_steps` | theorems: `difference(m, zero) == natural(m)`, `difference(successor(m), successor(n)) == difference(m, n)` | the laws fixing subtract |
+| `·natural_difference` | theorem: `is_natural(difference(m, n)) == at_most(n, m)` | both counts at once |
+| `·sum_crossed` | theorem: `sum(a, b) == difference(ups(a) + ups(b), downs(a) + downs(b))` | both ints' cases |
+| `·parts_back` (new) | theorem: `difference(ups(x), downs(x)) == x` | int's recursor at level 0, two arms, by `·difference_zero` and computing |
 | `·difference_equal` (new) | theorem: `m + q == p + n → difference(m, n) == difference(p, q)` | count's recursor, `·zero_subtract`, `·subtract_successors`, `·add_cancel` |
 | `·equal_integers_itself` (N230, rewritten) | theorem | `·equals_itself(ups(x) + downs(x))`, no case split |
 | `int.successor`, `int.predecessor`, `·successor_sum`, `·predecessor_sum` and the two step theorems | definitions and theorems by cases (section "int's step functions") | int's recursor, count's recursor in one arm |
@@ -260,12 +264,13 @@ below. On literals both compute through the count's shortcuts, the same as a cas
 The laws the proofs are glued with, `equal_symmetric`, `equal_transitive`, `equal_congruent`, `chosen_decided` and
 `chosen_at_yes`, are about any type and stay as they are.
 
-Recommended proof route: an int is a difference of its two counts, which is how the functions are defined.
+Recommended proof route: an int is a difference of its two counts, which `·sum_crossed` and `·natural_difference`
+state of the case definitions.
 - `parts_back`: `difference(ups(x), downs(x)) == x`, by int's cases, each by computation.
 - `difference_parts`: `ups(difference(m, n)) + n == downs(difference(m, n)) + m`, by count's recursor.
 - `difference_equal`: `m + q == p + n → difference(m, n) == difference(p, q)`.
 
-Then the sum laws become: unfold sum to `difference(ups … , downs …)` and rewrite the inner sums' counts by
+Then the sum laws become: rewrite sum to `difference(ups … , downs …)` by `·sum_crossed` and rewrite the inner sums' counts by
 `difference_parts`. A goal `difference(m, n) == difference(p, q)` then goes by `difference_equal` to a count
 equation, which the count's add laws finish. The comparison laws go the same way to the count's at_most laws, with no
 case split on a or b. These
