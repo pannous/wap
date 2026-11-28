@@ -11,8 +11,8 @@ proofs load. Read on unify-typers 2b0e87be.
   - export.wap (the export of a declaration for an outside checker);
   - second/, seven files, the second opinion (K7): bindings, blocks, check, expressions, judge, nested, read.
 - The proof code is spread over three folders:
-  - extensions/prove/ (9 files: goals, computing, apart, facts, rewriting, introduction, induction, linear, prove);
-  - extensions/verify/ (verify.wap, laws.wap, options.wap);
+  - extensions/proof/prove/ (9 files: goals, computing, apart, facts, rewriting, introduction, induction, linear, prove);
+  - extensions/proof/verify/ (verify.wap, laws.wap, options.wap);
   - extensions/theory/.
 - The kernel's arithmetic is in wap/kernel/. counting.wap (count and int with their definitions and shortcut
   licences) is declared at every compile by core_environment, so it stays in kernel/. integer_laws.wap is declared only

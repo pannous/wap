@@ -13,7 +13,7 @@ Analyze is the only reader of a law. What T6a builds on:
 
 - **The law as a function.** Analyze types each wap law as a bool function of its binders
   (extensions/law_statements.wap: `law positive(x: int): x > 0` is `law_positive(x: int): bool := x > 0`). Its
-  proposition is `Π binders, Equal(bool, body, yes)` (extensions/verify/laws.wap `law_statement`). Without binders the verdict
+  proposition is `Π binders, Equal(bool, body, yes)` (extensions/proof/verify/laws.wap `law_statement`). Without binders the verdict
   is the kernel's by computing. With binders it is the provers', the proof declared as a kernel theorem
   (`law_proved`). Where neither proves it, the run's verdict stands (native/driver.wap `verdict_beside`).
 - **One environment.** The verify door works in TYPES.environment, and core's own words sit in a scope of their
@@ -22,7 +22,7 @@ Analyze is the only reader of a law. What T6a builds on:
   count (int_declared). An operator is a host row whose Defined value is int's function there, and the provers work over int only
   (notes/unify-provers.md). On int, `n + 0` is no longer `n` by computing for an open n, as `add(n, 0)` was on nat.
   A step that leaned on that now needs a prover.
-- **Refusals said per law.** A law analyze refuses says why and keeps its run's verdict (extensions/verify/laws.wap).
+- **Refusals said per law.** A law analyze refuses says why and keeps its run's verdict (extensions/proof/verify/laws.wap).
 
 What no longer exists:
 
@@ -151,7 +151,7 @@ bridge's own spelling, needing no new word.
 - **No special case.** `==` is not singled out in core by name: its row's Defined value is the type's equality
   function, and the bridge is found as `e.integers.equals_sound` is, by the row's type. The `implies` row already
   exists (types/operators.wap). `and`, `or` and `not` of propositions stay T6a2's sort-chosen rows.
-- **law_statement uses it.** `law_statement` (extensions/verify/laws.wap) builds `Π binders, proposition_of(body)`
+- **law_statement uses it.** `law_statement` (extensions/proof/verify/laws.wap) builds `Π binders, proposition_of(body)`
   in place of `truth_stated(body)`. The law's bool function stays what the run computes, and the bridge joins the
   two. The subtype hypotheses (2af0a649) are bools in a proposition's place and stay `Equal(bool, c(x), yes)`.
 

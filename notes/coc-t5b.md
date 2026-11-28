@@ -153,8 +153,8 @@ kernel then holds no `if` of its own: an `if` is bool's recursor.
 | core/analyze/terms.wap:83, :119 `choice_term` | `if c then a else b` as `if(T, c, a, b)` | `bool.recursor[1]((_: bool) => T, b, a, c)`: the motive constant in T, the no arm first (case order), then the yes arm, the condition last; level 1, since a program's T is in Type |
 | kernel/compute.wap:60 `Choice => choice_step`, :80 `choice_step` | the Choice's computing rule | gone: iota computes the recursor on a constructor |
 | kernel/environment.wap:89 `DeclarationKind.Choice`, :298 `stated`'s arm | the kind | gone |
-| extensions/verify/laws.wap:73, :89 | compares a value with `literals.yes_case` and `no_case`; states `… == yes` | unchanged: constructors are constants |
-| extensions/prove/linear.wap `choice_of`, `chosen_proof`, `chosen_bounds`; apart.wap | read a choice by bool's recursor (`recursor_facts` of the truth type) | unchanged, and they now see analyze's `if`, `and`, `or` and `not` (below), which reach them as a Choice today and are not read |
+| extensions/proof/verify/laws.wap:73, :89 | compares a value with `literals.yes_case` and `no_case`; states `… == yes` | unchanged: constructors are constants |
+| extensions/proof/prove/linear.wap `choice_of`, `chosen_proof`, `chosen_bounds`; apart.wap | read a choice by bool's recursor (`recursor_facts` of the truth type) | unchanged, and they now see analyze's `if`, `and`, `or` and `not` (below), which reach them as a Choice today and are not read |
 
 dispatch.wap's `Choice` class is a dispatch's test list, unrelated; it keeps its name.
 

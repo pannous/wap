@@ -27,7 +27,7 @@ axiom is no new kind of statement: it is a definition with its written type and 
   the definers read a body), and definition_of gives ø for it, so terms.wap declares it Axiom. About +4.
 - emit: reading an axiom when the program runs traps, as `unreachable` does, but it brings no effect: an axiom's use is
   no Fail, so a proof that uses one is Pure (t6a5-pure's `! Pure` claim) and Proved (:25). About +2.
-- extensions/verify/verify.wap: each `@axiom` definition gets the verdict `name: Axiom`, in the order stated beside the
+- extensions/proof/verify/verify.wap: each `@axiom` definition gets the verdict `name: Axiom`, in the order stated beside the
   laws (verify +6, outside the core count).
 
 Not chosen: a declaration rule (stage 2). Declaration rules write facts on nodes; entering the kernel happens from

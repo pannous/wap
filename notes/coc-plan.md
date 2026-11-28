@@ -1121,7 +1121,7 @@ statement at the call's arguments):
 
 wiki/type.md "Proved or checked" puts proving (3) before the run check (4). V3 builds the check at typing
 (dispatch.wap narrowed_call, the narrowing word wrapped around the argument) and proves only in the check door
-(extensions/verify/check.wap), which emits nothing. So a module keeps the check of an obligation the door proved.
+(extensions/proof/verify/check.wap), which emits nothing. So a module keeps the check of an obligation the door proved.
 
 The change, in one compile:
 1. **check.wap runs between typing and emission.** The door already runs the compile's front (program_typed), then the
@@ -1158,7 +1158,7 @@ cases. The branch merges onto main with no conflict.
   successor of negative's. MINUS and DIFFERENCE go by from_zero. int_bridge_declared's two-case split (:243-262).
 - kernel/numbers.wap:44 int_numeral: `natural(numeral(v))`, or `negative(numeral(-1 - v))` below zero.
 - kernel/show.wap:48-58: an int's case shown as its whole number.
-- kernel/integer_laws.wap zero_of; extensions/prove/linear.wap's int value read (:319) and zero_of.
+- kernel/integer_laws.wap zero_of; extensions/proof/prove/linear.wap's int value read (:319) and zero_of.
 - Every int_split caller is generic over the arms (counting.wap :160-164, :258, :262; integer_laws.wap :221), so no
   other line changes.
 
@@ -1248,7 +1248,7 @@ Steps 2-3 need nothing. Step 4 is normal path. Step 5 is careful. Totals: kernel
   kernel proves. core +1 (row_term).
 - The wrapping meanings and the division identity need the kernel's numbers past LARGEST and an int ÷ and %: they are
   T8b-k, below. What they are:
-  - Int's division identity, `a == (a ÷ m) * m + a % m`, a law of the provers' (extensions/prove), with Q1's
+  - Int's division identity, `a == (a ÷ m) * m + a % m`, a law of the provers' (extensions/proof/prove), with Q1's
     distribute and times_negated.
   - The wrapping meanings: WRAPPED_SUM(a, b) := word.wrapped(SUM(a, b)), the wrap floored at the count (T8b-k step
     4), the same for subtract and multiply; ==, <, <= keep int's; ÷ and % keep int's, and i64's divisor excludes
@@ -1264,10 +1264,10 @@ Steps 2-3 need nothing. Step 4 is normal path. Step 5 is careful. Totals: kernel
 Read on int's two cases, `natural(n) | negative(n)` over the count, with negative(n) being -(n + 1), as Lean's Int
 is. origin/t8b-kernel 8dd2847b holds the code of all five steps, unbuilt, on that shape. It adds about kernel +147
 code lines, and the kernel's part below brings that to about +18. One builder, careful path, after int-takes and
-kernel-length (which moves integer_laws.wap to extensions/prove).
+kernel-length (which moves integer_laws.wap to extensions/proof/prove).
 
 The rule for the split: the kernel holds definitions and the statements a shortcut is fixed by. Every theorem about
-them is a law in extensions/prove/integer_laws.wap, declared when a prover loads.
+them is a law in extensions/proof/prove/integer_laws.wap, declared when a prover loads.
 
 1. **The count's divide and remainder, fixed by their recursion equations.**
    - `·remainder(m, k)` goes by the count's recursor on m: zero at zero, and at m's successor zero where the
@@ -1506,7 +1506,7 @@ example stays red. C2 needs T5's classes with type arguments (the trait's struct
 
 **Beside the dedup and the exact-big-literals landing.**
 - The dedup (unify-dedup: the equation toolkit and the regrouper shared by kernel/counting.wap,
-  extensions/prove/integer_laws.wap and extensions/prove/linear.wap) touches none of T6a7, V1, V2, C1, C2, C4 or Q1's
+  extensions/proof/prove/integer_laws.wap and extensions/proof/prove/linear.wap) touches none of T6a7, V1, V2, C1, C2, C4 or Q1's
   files, so these run in parallel with it. V3 touches extensions/prove (goals.wap, facts.wap), so it starts after the dedup lands. Of
   T6a, T6a4 starts after it (a nat subject goes through int's case split in counting.wap); T6a3, T6a5 and T6a6 run
   beside it.

@@ -113,7 +113,7 @@ parameters, the condition holds of the argument".
    - An argument with no term (a global, an impure call) gives no value, and the obligation stays listed.
    - The pair kept is `o.function_type = pis(parameter domains, BOOL)` and `o.value`.
    - core +8.
-3. **The check door** (extensions/verify/check.wap, beside verify.wap).
+3. **The check door** (extensions/proof/verify/check.wap, beside verify.wap).
    - laws_typed's front (:53-60, up to `typed_modules`) becomes `program_typed(wap_folder, program)`, shared by both
      doors: 0 net.
    - The door proves the laws first, `laws.map(law => verdict(law, assumed))`, with the verdicts not printed. Each proved
