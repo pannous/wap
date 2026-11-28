@@ -6,10 +6,35 @@
 #   uses: <a>, <b>, <c>      three different libraries (or programs) that use the mechanism, the asking one included
 #   spec: wiki/<page>.md     a form of the language that wiki page specifies (sugar for the language itself)
 # Exit 1 names each new rule or file and the missing line; rules and files already on <base> never block.
+# scripts/compiler-growth.sh --measures [<since>] [<tree>]: the plan's sizes (notes/coc-plan.md 5.3), never a gate: the
+# compiler's lines by the plan's count against its ballpark, the census's and the self-compile's ceilings with every raise
+# of them since <since> (default: 2026-11-27), and the files the plan deletes that are still there
 set -uo pipefail
 GUARDED_FILES=(wap/core wap/kernel wap/sugar wap/extensions)
 RULE_SOURCES=(wap lib)
 REQUIRED_USES=3
+
+BALLPARK_LINES=17000
+PLAN_PARTS=(wap/core wap/kernel wap/types wap/sugar wap/compiler.wap wap/nodes.wap)
+# ceiling name, the file holding it, its line's start
+CEILINGS=("census size nodes:test/wap/ratchet_census.sh:SIZE_NODES=" "self-compile instructions:test/wap/test_self.sh:SELF_COMPILE_INSTRUCTIONS=")
+# files the plan deletes (notes/coc-plan.md, audit R5): each needs a step that removes it
+PLANNED_DELETIONS=(wap/core/analyze/letters.wap wap/core/analyze/fits.wap wap/core/analyze/conditions.wap wap/core/analyze/matching.wap)
+DEFAULT_SINCE="2026-11-27"
+
+if [ "${1:-}" = "--measures" ]; then
+	since=${2:-$DEFAULT_SINCE}
+	cd "${3:-.}" || exit 2
+	lines=$(git ls-files "${PLAN_PARTS[@]}" | grep '\.wap$' | xargs cat | wc -l | tr -d ' ')
+	echo "compiler: $lines lines by the plan's count, ballpark $BALLPARK_LINES ($((lines - BALLPARK_LINES)) over)"
+	for ceiling in "${CEILINGS[@]}"; do
+		IFS=: read -r name file start <<<"$ceiling"
+		echo "$name: $(grep -m1 "^$start" "$file" | sed "s/^$start//") now; raised since $since:"
+		git log --since="$since" --reverse --format='%h %ad' --date=short -G"^$start" -- "$file" | sed 's/^/  /'
+	done
+	for file in "${PLANNED_DELETIONS[@]}"; do [ -f "$file" ] && echo "planned deletion without a step: $file stays ($(wc -l <"$file" | tr -d ' ') lines)"; done
+	exit 0
+fi
 
 tree=${1:-.}
 base=${2:-origin/main}
