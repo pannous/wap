@@ -172,8 +172,9 @@ class Placed { term: Term?; laws: list?; at: int = 0; domain: Term? = ø }
 # a hole the others fill, each term unified with its binder's type, the binders after it taking it, a bool relation
 # where a relation into Prop is wanted its truth (truth_adapted); a proof proved last, at its goal with the holes
 # filled, by `proved` (ø where it gives none); its first `walked` binders only, where given. A binder or a level nothing
-# gives, or a term of another type, a proof's among them, is refused, naming it
-declared_applied(d: Declaration, given: (int, text) -> Placed?, proved: (int, list, Term) -> Term?, c: Checker, walked: int? = ø) as Term? := elaborated_over(c, el => {
+# gives, or a term of another type, a proof's among them, is refused, naming it; its result unified with the type
+# `wanted`, where one is, finds the binders only the result writes (the S of quotient.of)
+declared_applied(d: Declaration, given: (int, text) -> Placed?, proved: (int, list, Term) -> Term?, c: Checker, walked: int? = ø, wanted: Term? = ø) as Term? := elaborated_over(c, el => {
 	holes = d.levels.map(name => level_hole(el))
 	type = with_levels(d.type, d.levels, holes)
 	binders = binder_names(d.type).take(walked ?? #binder_names(d.type))
@@ -192,6 +193,7 @@ declared_applied(d: Declaration, given: (int, text) -> Placed?, proved: (int, li
 			_ => type
 		}
 	}
+	if wanted != ø and not unified(el, type, wanted!) { refused_type(d.type, "${d.name} gives ${shown(filled(el, type))} here, where ${shown(wanted!)} is wanted") }
 	if not problems_retried(el) { refused_type(d.type, "the levels of ${d.name} are found from none of its arguments") }
 	missing = (1 to #placed).find(at => not proofs.any(proof => same(proof.term!, placed#at)) and holes_in(el, filled(el, placed#at)) is not empty)
 	if missing != ø { refused_type(d.type, "the ${binders#missing!} of ${d.name} is found from none of the arguments") }
@@ -298,16 +300,17 @@ binder_term(n: Node, x: Entering) as Term? := {
 # a call of a typed function the kernel took in, each argument of its parameter's own type, giving its own result
 called_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
 	# a proof the call leaves to the provers, where they give none, leaves the call no term: the obligation decides it
-	read = call_read(called, arguments, x, (at, laws, goal) => proof_tried(laws, goal, x)) ?? return ø
-	if equal(x.c, kernel_value(n) ?? return ø, type_of(x.c, read)) then read else ø
+	wanted = kernel_value(n) ?? return ø
+	read = call_read(called, arguments, x, wanted, (at, laws, goal) => proof_tried(laws, goal, x)) ?? return ø
+	if equal(x.c, wanted, type_of(x.c, read)) then read else ø
 }
 # A call's kernel term: a word that is a kernel constant as that constant (kernel_called), any other function of the
 # program applied to its arguments read in order; a proof the call leaves to the provers given by `proved`, from its
-# place among the arguments, its laws and its goal
-call_read(called: Node, arguments: list, x: Entering, proved: (int, list, Term) -> Term?) as Term? := {
+# place among the arguments, its laws and its goal; a kernel constant's binders found from the call's type too
+call_read(called: Node, arguments: list, x: Entering, wanted: Term?, proved: (int, list, Term) -> Term?) as Term? := {
 	typed = called_typed(called, arguments, x) ?? return ø
 	kernel = kernel_declaration(typed)
-	if kernel != ø { return kernel_called(kernel!, typed, arguments, x, proved) }
+	if kernel != ø { return kernel_called(kernel!, typed, arguments, x, wanted, proved) }
 	function = instance_entered(typed, x.by_key, x.s) ?? return ø
 	apply_all(function, arguments_read(function, arguments, x, proved) ?? return ø)
 }
@@ -329,7 +332,7 @@ kernel_declaration(typed: TypedFunction) as Declaration? := {
 }
 # a call of a word that is a kernel constant: the constant at its arguments by binder name, the binders it gives none
 # found from them, a proof it leaves to the provers proved at its goal
-kernel_called(d: Declaration, typed: TypedFunction, arguments: list, x: Entering, proved: (int, list, Term) -> Term?) as Term? := {
+kernel_called(d: Declaration, typed: TypedFunction, arguments: list, x: Entering, wanted: Term?, proved: (int, list, Term) -> Term?) as Term? := {
 	names = parameter_names(typed)
 	binders = binder_names(d.type)
 	extra = names.find(name => not binders.contains(name))
@@ -340,7 +343,7 @@ kernel_called(d: Declaration, typed: TypedFunction, arguments: list, x: Entering
 	declared_applied(d, (at, binder) => {
 		place = names.index_of(binder)
 		if place == 0 then ø else Placed(terms#place, laws#place, place)
-	}, proved, x.c)
+	}, proved, x.c, ø, wanted)
 }
 # A call's arguments read against its function's domains in turn, each the function's type after the arguments before
 # it (kernel/recursors.wap with_parameters peels the same way); a proof the call leaves to the provers given by
@@ -601,7 +604,7 @@ hole_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: Typing
 		# checks stays a warning where they find none, one only a proof decides is refused
 		goals: list<Term> = []
 		if called_typed(called, arguments, x) == ø { refused(obligation.call!, "this call leaves a proof to the provers, and the kernel holds no function of the program it calls") }
-		call_read(called, arguments, x, (at, laws, domain) => {
+		call_read(called, arguments, x, kernel_value(obligation.call!), (at, laws, domain) => {
 			if at == obligation.place { goals.add(domain) }
 			(if obligation.check != ø then proof_tried(laws, domain, x) else hole_term(laws, domain, x)) ?? entered(x.c, NO_BINDER, domain).variable
 		}) ?? refused(obligation.call!, "a call's proof is stated by the arguments before it, which the kernel reads only as values computed without acting: name them first")
