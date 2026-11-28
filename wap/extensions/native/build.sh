@@ -5,14 +5,16 @@
 # (memory.wap beside this script), as the compiler writes them for `native`, which reads types/memory_texts.wap and
 # types/memory_lists.wap in the place of types/text_bytes.wap and types/list_items.wap; an uncaught raise is written to
 # stderr. Maps, `any`, enums whose cases have fields and try/catch stay GC values it cannot use.
-#   wap/extensions/native/build.sh [--standalone] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]
+#   wap/extensions/native/build.sh [--standalone] [--wap <executable>] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]
 # --standalone: the parts of the compiler's seed folder (scripts/lib/wap-beside.sh WAP_PARTS) built into the executable,
 # which the native wap unpacks once into its cache folder (main.c wap_seed, linking.wap seed_folder_found) in place of
 # a wap-seed/ folder beside it; and each library -l<name> whose static library lib<name>.a is in a -L folder linked
 # whole into it (its functions are found by name, so no reference pulls them in): one file, needing only the system's
 # the arguments after the executable are the C compiler's, the libraries the program's C functions are in:
 # scripts/lib/wap-beside.sh wap_linked's for the native wap (driver.wap)
-# The compiler runs on the native wap on PATH, else on wasmtime (scripts/lib/wap-host.sh). The build's files go in
+# The compiler runs on the native wap given by --wap (`wap build` passes itself, so it works from any folder, from
+# the seed folder beside an installed wap), else on the native wap on PATH, else on wasmtime (scripts/lib/wap-host.sh).
+# The C headers are lib/ beside this script (the seed folder's or the tree's). The build's files go in
 # <executable>.build/
 set -euo pipefail
 C_COMPILER=cc
@@ -26,9 +28,17 @@ STANDALONE_OPTION=--standalone
 # the seed's name: the first digits of its parts' contents hashed, so a seed built again unchanged finds its unpacked folder
 SEED_NAME_DIGITS=12
 
-standalone=""
-[ "${1-}" = "$STANDALONE_OPTION" ] && standalone=1 && shift
-[ $# -ge 3 ] || { echo "usage: $0 [$STANDALONE_OPTION] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]" >&2; exit 2; }
+# spelled the same in wap/extensions/native/driver.wap WAP_OPTION, which passes it
+WAP_OPTION=--wap
+standalone="" wap_executable=""
+while true; do
+	case ${1-} in
+		"$STANDALONE_OPTION") standalone=1; shift ;;
+		"$WAP_OPTION") wap_executable=${2-}; shift $(($# > 1 ? 2 : 1)) ;;
+		*) break ;;
+	esac
+done
+[ $# -ge 3 ] || { echo "usage: $0 [$STANDALONE_OPTION] [$WAP_OPTION <executable>] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]" >&2; exit 2; }
 compiler=$1 program=$2 executable=$3
 shift 3
 # whole_archive <static library>: the linker's arguments that link all of it
@@ -63,8 +73,12 @@ if [ -n "$standalone" ] && [ $# -gt 0 ]; then
 	set -- "${linked[@]}"
 fi
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-source "$here/../../../scripts/lib/wap-host.sh"
-library="$(cd -P "$here/../../../lib" && pwd -P)"
+# the C headers travel with this script, never with the compiler: the seed folder's lib/ (two folders up) or the tree's (three)
+library=$(for up in ../.. ../../..; do [ -d "$here/$up/lib/native" ] && { cd -P "$here/$up/lib" && pwd -P; break; }; done)
+[ -n "$library" ] || { echo "build.sh: no lib/native beside this script ($here)" >&2; exit 1; }
+# wap_compiled <arguments>: the compiler run by the wap given, else by the host
+if [ -n "$wap_executable" ]; then wap_compiled() { "$wap_executable" "$@"; }
+else source "$here/../../../scripts/lib/wap-host.sh"; wap_compiled() { wap_ran "$@"; }; fi
 # a call in last place is wasm's return_call, which wasm2c writes correctly only after 1.0.42: the Homebrew keg
 # wabt-head (a local tap) stands in for wabt until then
 # TODO (card tail-call-slowdown) at wabt 1.0.43: brew unpin wabt-head && brew uninstall wabt-head && brew upgrade wabt && brew link wabt
@@ -72,10 +86,10 @@ wasm2c=$(command -v wasm2c) || { echo "no wasm2c on the PATH (brew install wabt)
 wabt="$(cd -P "$(dirname "$(readlink -f "$wasm2c")")/.." && pwd -P)"
 building="$executable.build"
 mkdir -p "$building" && building="$(cd -P "$building" && pwd -P)"
-source "$here/../../../scripts/lib/wap-beside.sh"
+[ -z "$standalone" ] || source "$here/../../../scripts/lib/wap-beside.sh" || { echo "--standalone needs wap's tree" >&2; exit 1; }
 # (the library the compiler compiled once, types.wasm, is the GC one: a native build compiles the types module's files
 # anew, from their code in the warm state, its own files for texts and lists among them)
-wap_ran "$compiler" native "$program" "$building/$MODULE_NAME.wasm"
+wap_compiled "$compiler" native "$program" "$building/$MODULE_NAME.wasm"
 "$wasm2c" "$building/$MODULE_NAME.wasm" -n "$MODULE_NAME" -o "$building/$MODULE_NAME.c"
 seed=()
 if [ -n "$standalone" ]; then

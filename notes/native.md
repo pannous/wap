@@ -8,7 +8,7 @@ warp-host-fixer; this file is the inventory.
 - .wasm modules a program uses (run.wap imports_linked).
 - C functions (host_words.wap, branch native-c-functions): each C import is the C function of its name, from the
   process or the library its module names (lib/native/libraries.h); an i32 is a pointer into the module's memory, an
-  i64 as it is, an f64 a double. test/wap/test_c.sh.
+  i64 as it is, an f64 a double. test/wap/test_c.wap.
 - C calling back a function of the program (lib/native/callbacks.h trampolines, host_words.wap callback_answered):
   the export c_callback_fired(slot, a, b, c, d, e, f) of the module whose C call is in progress, during that call;
   its int result C's. test/wap/test_native.sh (qsort).

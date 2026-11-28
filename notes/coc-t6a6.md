@@ -89,13 +89,13 @@ What already landed:
 
 ## Tests it turns green
 
-- wap/test_theory_logic.wap, once its `logic = ""` reads the types module:
+- test/wap/test_theory_logic.wap, once its `logic = ""` reads the types module:
   - "And.intro takes both proofs", "Not is a function to False", "a law's statement is its type", "Decidable is
     data", "Equal at a level", "Or eliminates into Prop only", "the axiom is the only door".
   - "Exists eliminates into Prop only" with T6a5.
   - "a recursor's computing is refl's to prove" writes `negated(bool.no)`, the prelude's internal word. Rewritten to
     `not bool.no` in its own commit, why given; the word is no program's.
-- wap/test_theory_connectives.wap:
+- test/wap/test_theory_connectives.wap:
   - "both of two propositions hold", "one of two propositions holds", "and joins …", "or joins … nothing decides"
     (parts 2 and 3).
   - "not of a bool is a bool", "not of a proposition is a proposition", "a goal stated with not is proved by a law
@@ -106,9 +106,9 @@ What already landed:
   - "True has its proof" (part 1).
   - "an equation is a proposition" and "a false equation is a proposition too" turn green only with part 5 (B) or
     (C). With (A) they are rewritten after the wiki's new text.
-- wap/test_proposition_wanted.wap: "a proof decides no data" (part 4), "excluded middle comes with use classical"
+- test/test_proposition_wanted.wap: "a proof decides no data" (part 4), "excluded middle comes with use classical"
   (with V1).
-- wap/test_theory.wap: "a statement about all propositions is a proposition". The kernel has Imax; T6a6 checks that
+- test/wap/test_theory.wap: "a statement about all propositions is a proposition". The kernel has Imax; T6a6 checks that
   core's `type of` of a pi into Prop reports Prop (core 0 to 3).
 
 ## Cost
