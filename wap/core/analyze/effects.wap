@@ -40,8 +40,8 @@ class Callee { key: text; caught: bool }
 # parameters it lets out of a reading place, aliased, given back, stored, captured or given to an unknown callee, which
 # anything may change; the parameters it gives on to callees, and the arguments it shares as their parent's lists
 class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = []; escaped: list<int> = []; passes: list<Pass> = []; shared: list<Shared> = [] }
-# a parameter given on to a callee at its place there: what the callee changes, the giver changes too
-class Pass { key: text; at: int; parameter: int }
+# an argument given to a callee at its place there: what the callee changes or lets out of it, the giver does to it too
+class Pass { key: text; at: int; argument: Node; caught: bool }
 # an argument shared as its parent's list or map (fits.wap shared_argument), at its callee's place
 class Shared { argument: Node; key: text; at: int }
 # The effects of the typed functions, joined over the groups of functions that call each other round (groups.wap):
@@ -162,13 +162,12 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		effects_in_each(arguments, caught, own, x)
 		named = fact_of(called, DEFINED_AT)
 		key = if named == ø then "" else place_key(named!)
-		for at in 1 to #arguments { passed(arguments#at, at, if x.by_key.has(key) then key else "", own) }
+		for at in 1 to #arguments { passed(arguments#at, at, if x.by_key.has(key) then key else "", text(called), caught, own) }
 		if not x.by_key.has(key) { return effects_in(called, caught, own, x) }
 		divisors = own_of(key, x).divisors
 		# each divisor met, so each one the caller is given is recorded
 		safe = divisors != ø and divisors!.map(at => divisor_met(arguments#at, caught, own)).all(met => met)
 		if divisors == ø { divisor_met(Empty, caught, own) }
-		for at in own_of(key, x).written { written_into(arguments#at, caught, own) }
 		own.calls += [Callee(key, caught or safe)]
 	}
 	Prim(operation, arguments) => {
@@ -233,16 +232,16 @@ escaped(value: Node, own: Own) := {
 	at = parameter_at(unwrapped(value), own)
 	if at > 0 { own.escaped = (own.escaped + [at]).unique }
 }
-# an argument as a call takes it: a parameter given on, to a callee of no key (a function value, a record) let out; an
-# argument shared as its parent's list kept to be judged once what the callee changes is known (shares_judged)
-passed(argument: Node, at: int, key: text, own: Own) := {
+# an argument as a call takes it: to a callee of no key (a function value, a record) let out, which anything may then
+# change; else kept, with an argument shared as its parent's list, to be judged once what the callee changes is known
+# (shares_judged)
+passed(argument: Node, at: int, key: text, called: text, caught: bool, own: Own) := {
 	if key == "" {
 		escaped(argument, own)
-		if has_fact(argument, SHARED_ARGUMENT) { unshared(argument, "a function value") }
+		if has_fact(argument, SHARED_ARGUMENT) { unshared(argument, called) }
 		return
 	}
-	parameter = parameter_at(unwrapped(argument), own)
-	if parameter > 0 { own.passes += [Pass(key, at, parameter)] }
+	own.passes += [Pass(key, at, argument, caught)]
 	if has_fact(argument, SHARED_ARGUMENT) { own.shared += [Shared(argument, key, at)] }
 }
 # the values a body gives back: its last statement's, each arm's of an if
@@ -253,23 +252,27 @@ given_back(n: Node) as list<Node> := match unwrapped(n) {
 }
 # what a function changes or lets out of its parameters
 touched(own: Own) as list<int> := own.written + own.escaped
-# A group's members change what they give on to each other round: each one's passes followed until nothing more is
-# changed, a call back to a member read before its body is (own_of) included; then each argument shared as its
-# parent's list is refused where its callee may change it (wiki/subtype.md)
+# A group's members do to what they give their callees what the callees do to it: written into (State, or the giver's
+# own parameter written), let out; followed round until nothing more changes, so a call back to a member read before
+# its body is (own_of's placeholder) counts too. Then each argument shared as its parent's list is refused where its
+# callee may change it (wiki/subtype.md)
 shares_judged(group: list<text>, x: Joining) := {
 	changed = yes
 	while changed {
 		changed = no
 		for member in group {
 			own = own_of(member, x)
-			for pass in own.passes {
-				callee = own_of(pass.key, x)
-				if callee.written.contains(pass.at) and not own.written.contains(pass.parameter) { own.written += [pass.parameter]; changed = yes }
-				if callee.escaped.contains(pass.at) and not own.escaped.contains(pass.parameter) { own.escaped += [pass.parameter]; changed = yes }
-			}
+			before = #touched(own)
+			for pass in own.passes { taken(pass, own_of(pass.key, x), own) }
+			if #touched(own) != before { changed = yes }
 		}
 	}
 	for member in group { for shared in own_of(member, x).shared { if touched(own_of(shared.key, x)).contains(shared.at) { unshared(shared.argument, text(defined_name(x.by_key[shared.key].define))) } } }
+}
+# what a callee does to its parameter at a place, done to the argument given there
+taken(pass: Pass, callee: Own, own: Own) := {
+	if callee.written.contains(pass.at) { written_into(pass.argument, pass.caught, own) }
+	if callee.escaped.contains(pass.at) { escaped(pass.argument, own) }
 }
 unshared(argument: Node, callee: text) := refused(argument, "this ${text_of(fact_of(argument, SHARED_ARGUMENT))} is shared where ${callee} takes a ${type_text(value_type(argument)!)}, which ${callee} may change: write `${argument} as ${type_text(value_type(argument)!)}` for a copy")
 # an effect a body does itself, none where it is ø, a Fail none where a `try` catches it
