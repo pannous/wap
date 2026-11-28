@@ -13,13 +13,13 @@ FILES_TYPED_WHOLE=62
 FUNCTIONS_UNTYPED=0
 # wap's size, the nodes its reader makes of its source (scripts/wap-size.warp), may not rise above the ceiling: only a
 # real simplification lowers it
-SIZE_NODES=193623
+SIZE_NODES=215727
 # the function instances of wap's source the kernel holds as definitions, their bodies terms it checked (notes/coc-t5.md
 # T5a): only more may come, as T5 turns the assumed ones into definitions
 DEFINED_INSTANCES=1010
 # the enums of wap's source the kernel holds as inductive blocks, their cases its constructors (notes/coc-t5b.md T5b2);
 # the others stay assumed, each counted by why: only more may come
-DEFINED_ENUMS=0
+DEFINED_ENUMS=20
 
 source "$(dirname "$0")/compile.sh"
 root="$(cd -P "$(dirname "$0")/../.." && pwd -P)"

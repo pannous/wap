@@ -23,7 +23,8 @@ PLACE_WORD = "#"
 SET_WORD = "set"
 # the word a class reads its value through where no definition takes the value itself, `get(of: Signal): any`
 GETTER_WORD = "get"
-# the word of an optional value known present, `x!` (named required): its value, raising when it is missing
+# the word of an optional value known present, `x!` (named required): its value, raising when it is missing; with two
+# operands, after a function's body, the effects it claims, `f(x) := x * 2 ! Pure` (core/analyze/effects.wap)
 REQUIRED_WORD = "!"
 # the fact of a call of a function whose result is not known yet, its body calling itself: what to write instead
 RESULT_UNKNOWN = "result_unknown"
@@ -35,12 +36,20 @@ TYPE_OF_TYPE = "Type"
 # the annotation the class rule writes on a protocol's record (sugar/records.wap)
 PROTOCOL_ANNOTATION = "protocol"
 
+# whether a call asks the compiler by a word of its own, which no definition of the program took: `type of x`
+asks(called: Node, word: text) as bool := called is symbol and text(called) == word and fact_of(called, BINDING) == ø
+# the compiler's answer to a question by one of its own words (stage.wap QUESTION_WORDS): `type of x` the static type
+# of x, `effects of f` what f may do (core/analyze/effects.wap)
+answered(n: Node, word: text, of: Node, s: TypingState, f: TypeFrame) as Node := if word == TYPE_OF_WORD then type_of_typed(n, of, s, f) else effects_of_typed(n, of, s, f)
+# whether a call claims the effects of the body it follows, `x * 2 ! Pure`
+claims_effects(called: Node, arguments: list) as bool := text(called) == REQUIRED_WORD and #arguments == 2
 # A call: its arguments typed, each expecting its parameter's written type when only one definition takes that many
 # arguments; then the function it means, typed for these argument types
 call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
 	if is_bound(called, DefinitionKind.Case) { return case_call_typed(n, called, arguments, s, f) }
-	if called is symbol and text(called) == TYPE_TEST_WORD and fact_of(called, BINDING) == ø { return type_test_typed(n, arguments, s, f) }
-	if called is symbol and text(called) == TYPE_OF_WORD and fact_of(called, BINDING) == ø { return type_of_typed(n, arguments#1, s, f) }
+	if asks(called, TYPE_TEST_WORD) { return type_test_typed(n, arguments, s, f) }
+	if QUESTION_WORDS.any(word => asks(called, word)) { return answered(n, text(called), arguments#1, s, f) }
+	if claims_effects(called, arguments) { return claim_typed(n, arguments, s, f, expected) }
 	if rest_named(n) != ø { refused(n, "a list's items spread, `...xs`, stand only in a list, `[...xs, 4]`") }
 	if holds_value(called) { return value_call_typed(n, called, arguments, s, f, expected) }
 	scopes = scoped_definitions(called, s)
@@ -292,6 +301,9 @@ definition_keyed(key: text, s: TypingState) as Signature? := {
 # refused. A literal that reads both ways fits either: `"!"` a char or a text parameter.
 chosen_definition(n: Node, called: Node, scopes: list, given: list, expected: Term?, s: TypingState) as Signature := {
 	candidates = scopes.flat_map(scope => scope).map(definition => reached(definition, s))
+	# a word called through a type takes only the definitions with a parameter of exactly that type
+	owner = text_of(fact_of(called, OWNER))
+	if owner != ø { candidates = candidates.filter(definition => definition.parameters.any(parameter => type_text(parameter) == owner!)) }
 	types = given.map(argument => value_of(argument, "to pass"))
 	dispatcher = dispatching(called, candidates, types, s)
 	if dispatcher != ø { return dispatcher }

@@ -26,6 +26,7 @@ use "../wap/core/analyze/modules.wap"
 use "../wap/core/analyze/names.wap"
 use "../wap/core/analyze/scope.wap"
 use "../wap/core/analyze/types.wap"
+use "../wap/core/analyze/effects.wap"
 use "../wap/core/analyze/inductives.wap"
 use "../wap/core/analyze/variables.wap"
 use "../wap/core/emit/emitter.wap"
@@ -214,16 +215,21 @@ statements_of_line(line: Node) as list := {
 	operated = operated_program(language, line)
 	if sequence_rule(operated) != operated then [line] else top_level_statements(line)
 }
-# a `use` or an `include` line: it brings in another file, no code of its own
-brings_a_file(statement: Node) as bool := [USE_WORD, INCLUDE_WORD].any(word => phrase_text(statement, word) != ø)
-probe(file: text) as Tally := {
-	statements = []
-	try statements = lines_of(read_notation(language, file)).flat_map(statements_of_line).filter(statement => not brings_a_file(operated_program(language, statement))) catch e { report("read", e.message) }
-	used = used_scope(file)
-	lowered_ok = []
+each_lowered(statements: list<Node>) as list<Node> := {
+	lowered_ok: list<Node> = []
 	for statement in statements {
 		try { lowered_ok = lowered_ok + statements_in(lowered_program(language, declared_code(language, statement))) } catch e { report("lower", e.message) }
 	}
+	lowered_ok
+}
+# a `use` or an `include` line: it brings in another file, no code of its own
+brings_a_file(statement: Node) as bool := [USE_WORD, INCLUDE_WORD].any(word => phrase_text(statement, word) != ø)
+probe(file: text) as Tally := {
+	statements: list<Node> = []
+	try statements = lines_of(read_notation(language, file)).flat_map(statements_of_line).filter(statement => not brings_a_file(operated_program(language, statement))) catch e { report("read", e.message) }
+	used = used_scope(file)
+	# each statement read in the file's own grammar, as the compiler reads it, so the rules it declares stay the file's
+	lowered_ok = read_in(language, file, () => each_lowered(statements))
 	bound_ok = bound_each(lowered_ok, within(within(library_scope, used), defined_in(lowered_ok, library_scope, PROGRAM_DEPTH)), yes)
 	# typing: each function alone in the run's state (functions_probe), then the whole file as the compiler types it
 	# and emits it when no module of its closure refuses a form (whole_once); a types file is no program of its own
@@ -408,6 +414,7 @@ for whole in closures.values.filter(each => each.file != "").sorted(by: each => 
 for family in families { print "family\t${family.size} blocked by ${family.name}\t${owner_of(root_file(family))}\t" + family.root.message.replace("\n", " ") }
 print "total\t${total.whole} of ${total.files} files typed whole, ${total.typed} of ${total.functions} functions typed, ${total.anys} places typed any"
 print "assumed\t${TYPES.defined} function instances defined in the kernel, ${TYPES.assumed} assumed"
+print "effects\t" + CLAIM_WORDS.filter(word => TYPES.effects.has(word)).map(word => "${word} ${TYPES.effects[word]}").join(", ") + " function instances"
 print "enums\t${enums_shown()}"
 if front_refused > 0 {
 	print "front\t${front_refused} refusals of reading, lowering or binding wap's own source"
