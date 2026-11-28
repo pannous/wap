@@ -571,30 +571,38 @@ kernel_value(n: Node) as Term? := if has_unknowns(value_type(n)) then ø else ke
 # Each subtype's condition, a definition of the parent's values named after the subtype, `int where it >= 0 holds`:
 # typed as the function value it is with the program's functions, then its body read with `it` its one binder
 CONDITION_HOLDS = " holds"
-# A condition naming other values than `it`, `#it == n` or `it <= #xs`, takes them as its first parameters, `(n, it) =>
-# #it == n`: untyped, so it is typed at each obligation on its subtype by the types its names have where the obligation
-# sits (a parameter of the function around it), each such instance declared under its own name (the obligation's holds)
+# A condition naming other values than `it`, `#it == n` or `it <= #xs`, reads the parameters of that name of the
+# function its obligation sits in, lexically: a call's own arguments are written in where it fits them (core/analyze/
+# calls.wap earlier_filled), so what is left is the writing function's own, its result's or a local's type in its body.
+# Such a condition takes them as its first parameters, `(n, it) => #it == n`, typed at each obligation by those
+# parameters' types, each instance declared under its own name (the obligation's holds); one reading only names its
+# scope defines is the subtype's plain condition
 class Condition { type: Term; typed: TypedFunction; name: text? = ø }
 conditions_typed(s: TypingState) as list<Condition> := {
 	conditions: list<Condition> = []
 	for type in TYPES.subsets {
 		code = subset_condition(type)!
-		free = free_names(condition_of(code), s)
-		if free is empty {
-			conditions += [condition_typed(type, written_bound(code, s), [], s) ?? raise "a subtype's condition is a function value"]
-		} else {
-			written = written_bound(placed_like(Fn(data_list(free.map(name => symbol(name)) + [symbol(IT_WORD)]), condition_of(code)), code), s)
-			for obligation in s.obligations.filter(obligation => obligation.type == type) {
-				types = free_types(free, obligation, s) ?? continue
-				condition = condition_typed(type, written, types, s) ?? continue
-				condition.name = "${condition_name(TYPES.environment, type)!} ${instance_key(condition.typed)}"
-				obligation.holds = condition.name
-				if not conditions.any(other => other.name == condition.name) { conditions += [condition] }
+		names = condition_names(condition_of(code))
+		plain = names.all(name => named_in(s.kind_rules!.scope, name) is not empty)
+		if plain { conditions += [condition_typed(type, written_bound(code, s), [], s) ?? raise A_CONDITION_FUNCTION] }
+		for obligation in s.obligations.filter(obligation => obligation.type == type) {
+			within = s.functions.find(function => instance_key(function) == obligation.within)
+			filled = parameters_read(names, within)
+			if filled is empty {
+				if not plain { refused(obligation.argument!, "${condition_shown(code)} reads ${names.join(", ")}, which nothing where it is checked defines") }
+				continue
 			}
+			written = written_bound(placed_like(Fn(data_list(filled.map(name => symbol(name)) + [symbol(IT_WORD)]), condition_of(code)), code), s)
+			given = parameter_names(within!)
+			condition = condition_typed(type, written, filled.map(name => within!.arguments#(given.index_of(name))), s) ?? raise A_CONDITION_FUNCTION
+			condition.name = "${condition_name(TYPES.environment, type)!} ${instance_key(condition.typed)}"
+			obligation.holds = condition.name
+			if not conditions.any(other => other.name == condition.name) { conditions += [condition] }
 		}
 	}
 	conditions
 }
+A_CONDITION_FUNCTION = "a subtype's condition is a function value"
 # a condition's function typed for the types of its other names, then `it` its subtype's parent
 condition_typed(type: Term, written: Node, types: list<Term>, s: TypingState) as Condition? := match written {
 	Fn(parameters, body) => {
@@ -603,24 +611,15 @@ condition_typed(type: Term, written: Node, types: list<Term>, s: TypingState) as
 	}
 	_ => ø
 }
-# the names a condition reads that the program's scope defines none of, `it` and a field's name after a dot apart
-free_names(n: Node, s: TypingState) as list<text> := match n {
-	Symbol(name) => if name == IT_WORD or named_in(s.kind_rules!.scope, name) is not empty then [] else [name]
-	Get(subject, key) => free_names(subject, s)
-	_ => direct_parts(n).flat_map(part => free_names(part, s)).unique
+# the names a condition reads as values, `n` of `#it == n`: `it`, a field's name after a dot and what a call calls apart
+condition_names(n: Node) as list<text> := match n {
+	Symbol(name) => if name == IT_WORD then [] else [name]
+	Get(subject, key) => condition_names(subject)
+	Call(called, arguments) => ((if called is symbol then [] else condition_names(called)) + arguments.flat_map(condition_names)).unique
+	_ => direct_parts(n).flat_map(condition_names).unique
 }
-# the types the names have where an obligation sits, each a parameter of the function around it; ø where one is none
-free_types(names: list<text>, obligation: Obligation, s: TypingState) as list<Term>? := {
-	typed = s.functions.find(function => instance_key(function) == (obligation.within ?? return ø)) ?? return ø
-	given = parameter_nodes(typed).map(name => text(name))
-	types: list<Term> = []
-	for name in names {
-		at = given.index_of(name)
-		if at <= 0 { return ø }
-		types += [typed.arguments#at]
-	}
-	types
-}
+# those of the names that are parameters of the function an obligation sits in, in the condition's order; none at the top
+parameters_read(names: list<text>, within: TypedFunction?) as list<text> := if within == ø then [] else names.filter(name => parameter_names(within!).contains(name))
 # a condition the kernel cannot hold, one calling what it only assumes, is left out: a law over its subtype is refused
 # for it (extensions/verify/laws.wap)
 conditions_entered(conditions: list<Condition>, by_key: map<text, TypedFunction>, s: TypingState) := for condition in conditions { condition_entered(condition, by_key, s) }
@@ -650,9 +649,8 @@ obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: 
 	within = within_of(obligation, by_key, s)
 	condition = named_id(TYPES.environment, obligation.holds ?? condition_name(TYPES.environment, obligation.type ?? return)!) ?? return
 	held = match declared_at(TYPES.environment, condition)!.kind { Defined(value) => value; _ => return }
-	# a condition's other names are read where the obligation sits, each its function's parameter (conditions_typed)
-	given: list<Term> = []
-	for name in free_names(condition_of(shown), s) { given += [(within.locals.find(local => local.binder == name) ?? return).variable] }
+	# a condition's other names are the parameters of the function it sits in (conditions_typed), none for a plain one
+	given = if obligation.holds == ø then [] else condition_names(condition_of(shown)).flat_map(name => within.locals.filter(local => local.binder == name).map(local => local.variable))
 	holds = beta(held, given + [term_of(obligation.argument!, within.reading) ?? return])
 	obligation.function_type = pis(within.locals, BOOL_TERM)
 	obligation.value = lambdas(within.locals, holds)

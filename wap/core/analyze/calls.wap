@@ -326,9 +326,29 @@ char_text(character: Node) as Node := with_type(refitted(Text(text(character)), 
 # a plain value boxed for an any or an optional
 arguments_fitted(definition: Signature, given: list, s: TypingState) as list := {
 	letters = (letters_bound(definition, given.map(value_type), s, denoted_types(given)) ?? NOTHING_CALLED).letters
-	wanted = definition.parameters.map(type => substituted(type, letters))
+	parameters = parameters_in(definition, s)
+	wanted = (1 to #given).map(at => earlier_filled(substituted(definition.parameters#at, letters), parameters, given, at, s))
 	(1 to #given).map(at => if counted(value_type(given#at), wanted#at) then with_type_of(placed_like(Prim(symbol(COUNTING), [given#at]), given#at), wanted#at) else as_wanted(given#at, wanted#at, s))
 }
+# A parameter's type that reads the parameters before it, `xs: list<int> where #it == n` or `i: index(xs)`, as this call
+# wants it: their arguments written in (wiki/type.md "Dependent Types"), so its condition reads the call's own values,
+# never a name where the call sits. A name it reads of a parameter after it, or of one of the function around the
+# call that the callee does not bind, has no reading and is refused
+earlier_filled(type: Term, parameters: list<Node>, given: list, at: int, s: TypingState) as Term := {
+	condition = subset_condition(type) ?? return type
+	names = condition_names(condition_of(condition))
+	places = (1 to #parameters).filter(place => names.contains(text(parameter_name(parameters#place))))
+	later = places.find(place => place >= at)
+	if later != ø { refused(given#at, "this parameter's type reads ${parameter_name(parameters#later!)}, which comes after it: put ${parameter_name(parameters#later!)} first") }
+	bound = places.map(place => text(parameter_name(parameters#place)))
+	around = parameters_read(names.filter(name => not bound.contains(name)), s.functions.find(function => instance_key(function) == s.within))
+	if around is not empty { refused(given#at, "this parameter's type reads ${around.join(", ")}, which the function it is called from has as parameters too: rename one") }
+	if places is empty { return type }
+	subset_term(narrowed_type(type)!, places.fold(condition, (code, place) => parameter_written(code, text(parameter_name(parameters#place)), argument_written(given#place))))
+}
+# an argument a later parameter's type reads, written into it: a value written in place or a parameter of the function
+# around, which the kernel reads as they are; any other would be computed again by the check, and is refused
+argument_written(argument: Node) as Node := if is_bound(argument, DefinitionKind.Parameter) or not argument is symbol and direct_parts(argument) is empty then argument else refused(argument, "a parameter after this one reads it in its type: give a value written in place or a parameter here")
 # the call of a word with these typed arguments, the definition chosen among all of the word's
 word_called(n: Node, word: text, given: list, expected: Term?, s: TypingState) as Node := call_chosen(n, symbol(word), word_scopes(word, s), given, expected, s, ø)
 # a word's definitions layer by layer, as a call written at the program's top finds them, the program's hiding the
