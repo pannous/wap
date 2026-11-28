@@ -66,7 +66,8 @@ word_layout(type: Term, m: WasmModule, records: Records) as list<int>? := {
 # an optional the address of its value or of the box holding it, 0 its ø
 compound_layout(type: Term, at: Node?, m: WasmModule, records: Records) as list<int>? := if m.memory != ø then (if function_value_parts(type) != ø or function_parts(type) != ø or base_of_optional(type) != ø then I32 else memory_refused(type, at)) else {
 	index = list_index(type, m, records) ?? function_value_index(type, m, records) ?? signature_value_index(type, m, records) ?? map_index(type, m, records)
-	if index == ø then optional_layout(type, m, records) else nullable(index)
+	# a generic record's value, `Stack<int>`, is laid out as its record, its letters' fields any values
+	if index == ø then optional_layout(type, m, records) ?? (if declared_by(type) != ø then word_layout(head_of(type), m, records) else ø) else nullable(index)
 }
 # a layout as a build keeping its values in the memory takes it: a number's; any other is refused, as its wasm2c takes no GC type
 memory_kept(type: Term, at: Node?, m: WasmModule, layout: list<int>?) as list<int>? := if m.memory == ø or layout == ø or layout in PLAIN_VALUES then layout else memory_refused(type, at)
@@ -186,8 +187,8 @@ struct_of(record: Record, m: WasmModule, records: Records) as int := {
 	key = place_key(record_declared(record))
 	built = named_index(m, key)
 	if built != ø { return built }
-	for field in fields_of(record).filter(field => not names_record(field_declared(field), records)) { known_layout(field_declared(field), m, records) }
-	at = named_added(m, key, open_type([base], struct_type([TAG_FIELD] + field_layouts(fields_of(record), m, records))))
+	for field in fields_of(record).filter(field => not names_record(field_declared(field, record), records)) { known_layout(field_declared(field, record), m, records) }
+	at = named_added(m, key, open_type([base], struct_type([TAG_FIELD] + field_layouts(record, fields_of(record), m, records))))
 	if extended != ø { m.supertypes[at] = base }
 	at
 }
@@ -204,11 +205,16 @@ plain_enums(m: WasmModule) as bool := memory_layout(m, ENUM_TYPE) != ø
 tagged(m: WasmModule) as list<int> := if plain_enums(m) then [] else instruction(STRUCT_GET, [enum_base(m), 0])
 # the field `at` of a case's own fields, after its record's, of the value on the stack cast to the case's struct
 case_field_read(cast: int, record: Record, at: int) as list<int> := heap_instruction(REF_CAST_NULL, cast) + instruction(STRUCT_GET, [cast, at + #fields_of(record)])
-field_declared(field: Node) as Term := written_type(declared_type(field)) ?? refused(field, "a field is written name: type")
-field_layouts(fields: list<Node>, m: WasmModule, records: Records) as list<list<int>> := fields.map(field => field_type(known_layout(field_declared(field), m, records), MUTABLE))
+# a field's type as its record lays it out: a field of one of the record's parameters, `item: T`, `left: a`, holds any
+# value, whatever its uses fill the parameter with
+field_declared(field: Node, record: Record) as Term := {
+	type = written_type(declared_type(field)) ?? refused(field, "a field is written name: type")
+	if is_parameter_of(type, record) then ANY_TERM else type
+}
+field_layouts(record: Record, fields: list<Node>, m: WasmModule, records: Records) as list<list<int>> := fields.map(field => field_type(known_layout(field_declared(field, record), m, records), MUTABLE))
 case_struct_of(record: Record, case: Node, m: WasmModule, records: Records) as int := {
 	base = struct_of(record, m, records)
-	fields = field_layouts(fields_of(record) + case_fields(case), m, records)
+	fields = field_layouts(record, fields_of(record) + case_fields(case), m, records)
 	added_type(m, open_type([base], struct_type([TAG_FIELD] + fields)))
 }
 
