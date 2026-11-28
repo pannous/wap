@@ -53,11 +53,11 @@ reads them and adds nothing there.
    - verify keeps checking the proof's type (T6a1); the plain compile checks only what it can, that the proof
      computes and ends. A wrong proof's type is refused by verify, as coc-t6a12.md plans.
    - Extension +2 lines (the two rules, with binders and without), placed before `rule law($statement) => ()`.
-2. **False** (types). `False` is a types word naming the kernel's ·False, declared in types/logic.wap beside the
+2. **False** (types). `False` is a types word naming the kernel's ·False, declared in lib/logic.wap beside the
    kernel names T6a6 brings (coc-t6a.md "T6a5 re-read": +2 here, not +8). With it, `loop(): False := loop()` is
    typed at the kernel's False, and `law oops: False := loop()` meets part 1's claim.
 3. **Exists** (types + sugar), after T6a3's enum header. Exists is a one-case structure over two parameters,
-   `enum Exists(T: Type, P: T -> Prop): Prop { intro(witness: T, holds: P(witness)) }` in types/logic.wap
+   `enum Exists(T: Type, P: T -> Prop): Prop { intro(witness: T, holds: P(witness)) }` in lib/logic.wap
    (types +1), and `exists n: nat where body` a sugar rule, `Exists(nat, (n: nat) => body)` (spec:
    wiki/proposition.md). Checked on unify 5495afde with T6a7's compiler: no enum with a header compiles yet, even
    without the dependent field. `enum Boxed(T: Type): Type { box(item: T) }` is refused "wap does not lower this
@@ -82,7 +82,7 @@ reads them and adds nothing there.
 - Stages: part 1 in the build's stage 1 rules (extensions/laws.wap) and analyze's effect check (after typing);
   part 2 and 3 in types (the preload) and sugar; part 4 in analyze's typing of conditions.
 - Core files: core/analyze/effects.wap (+2), core/analyze/conditions.wap (+6), kernel/environment.wap (+2, two rule
-  words). Extension: extensions/laws.wap (+2). Types: types/logic.wap (+3, new unless T6a6 is first). Sugar: one
+  words). Extension: extensions/laws.wap (+2). Types: lib/logic.wap (+3, new unless T6a6 is first). Sugar: one
   rule for exists.
 - Parts 1, 2 and 4 wait for t5b-effects on main (the facts and the claim check) and T6a7 (universe_of for part 4).
   Part 3 waits for T6a3's enum header.

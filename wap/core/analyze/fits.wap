@@ -5,6 +5,10 @@ use folder
 use "../stage.wap"
 use "../bindings.wap"
 use "../type_notation.wap"
+use "../../kernel/environment.wap"
+use "../../kernel/levels.wap"
+use "../../kernel/equal.wap"
+use "../../kernel/typing.wap"
 use "../../kernel/forms.wap"
 use "../errors.wap"
 use "../../kernel/terms.wap"
@@ -132,11 +136,15 @@ WIDENING = "f64.convert_i64_s"
 # (wiki/Footguns.md "Booleans count as 1/0"), and the primitive that counts it
 COUNTING = "i64.extend_i32_u"
 counted(given: Term?, wanted: Term?) as bool := given == BOOL_TERM and wanted == INT_TERM
+# whether the kernel holds two types equal by its own rules, eta and proofs alike; one it cannot judge is not
+kernel_equal(a: Term, b: Term) as bool := try equal(checker(TYPES.environment, term_levels(a) + term_levels(b)), a, b) catch e { no }
 conversion(given: Term?, wanted: Term?, s: TypingState) as Conversion? := {
 	if given == ø or wanted == ø { return ø }
 	# every proof fits a statement not read yet; the kernel checks it as it enters its function
 	if wanted == STATEMENT_TERM { return Conversion.Same }
 	if given == wanted or bare_fit(given, wanted, s.records) or extends_class(given, wanted, s.records) or subtype_base(given, s.records) == wanted { return Conversion.Same }
+	# two universes fit at one level; one whose level holds a parameter or a hole, `Sort(u)`, is left to the kernel's
+	if universe_level(given) != ø and universe_level(wanted) != ø and [given, wanted].any(universe => level_number(universe_level(universe)!) == ø) { return Conversion.Same }
 	# a function value of its own type where a function type is wanted, or an unknown holding function values
 	if function_value_parts(given) != ø and (s.members.has(variable_id(wanted)) or adapted_name(given, wanted, s) != ø) { return Conversion.Adapted }
 	# a shape's value is a value of the type it narrows: a Record where a Node is
@@ -164,6 +172,8 @@ conversion(given: Term?, wanted: Term?, s: TypingState) as Conversion? := {
 	if optional != ø and base_of_optional(given) != ø and conversion(base_of_optional(given), optional, s) == Conversion.Same { return Conversion.Same }
 	if optional != ø and (given == EMPTY_TERM or conversion(given, optional, s) == Conversion.Same) { return Conversion.Wrapped }
 	if (has_unknowns(given) or has_unknowns(wanted)) and unified(wanted, given, [], s) != ø { return Conversion.Settled }
+	# two settled types the kernel holds equal are one, `P(f)` and `P((x: Prop) => f(x))` (wiki/universe.md)
+	if not has_unknowns(given) and not has_unknowns(wanted) and kernel_equal(given, wanted) { return Conversion.Same }
 	# out of an any, or of a union to a part of it, the way is a check when the program runs
 	if given == ANY_TERM or is_union(given) and union_parts(given).any(part => part in passing_types(wanted)) then Conversion.Checked else ø
 }
@@ -178,7 +188,7 @@ converted(n: Node, wanted: Term, s: TypingState, at: Node, place: text) as Node 
 	if value_type(n) == ø and not has_fact(n, RESULT_UNKNOWN) { return converted(empty_given(n), wanted, s, at, place) }
 	given = value_type(n) ?? refused(at, "this gives no value, ${place} ${type_text(wanted)}")
 	# a function value converts by its function, typed for the wanted function type
-	way = conversion(given, wanted, s) ?? refused(at, "this gives ${type_text(given)}, ${place} ${type_text(wanted)}" + (if counted(given, wanted) then ": a bool counts as 1 or 0 only in a call, write it `as int`" else ""))
+	way = conversion(given, wanted, s) ?? rule_refused(at, VALUE_TYPE, "this gives ${type_text(given)}, ${place} ${type_text(wanted)}" + (if counted(given, wanted) then ": a bool counts as 1 or 0 only in a call, write it `as int`" else ""))
 	if way == Conversion.Settled { settles(given, wanted, s) }
 	if way == Conversion.Narrowed { return if narrowed_part(given, wanted, s) == ø then narrowed_call(n, wanted, at, s) else converted(narrowed_call(n, narrowed_part(given, wanted, s)!, at, s), wanted, s, at, place) }
 	if way == Conversion.Checked and error_part(given) != ø and error_part(wanted) == ø { return unfailed_call(n, given, wanted, s) }

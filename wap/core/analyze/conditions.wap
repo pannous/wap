@@ -7,9 +7,14 @@ use "../stage.wap"
 use "../bindings.wap"
 use "../type_notation.wap"
 use "../../kernel/forms.wap"
+use "../../kernel/levels.wap"
+use "../../kernel/terms.wap"
 use "flow.wap"
 use "../rules/typed.wap"
 use "../rules/lowering.wap"
+
+# a proposition decides nothing when the program runs: an if, a while or an until on one is refused
+UNDECIDABLE = "refused by undecidable condition: whether this holds is a proposition, which wap cannot compute; prove it, or test a bool"
 
 # A choice: its condition a bool, each part expected the If's type; with both parts of one type (a part that never
 # finishes fits any) the If has it
@@ -18,7 +23,12 @@ use "../rules/lowering.wap"
 # what the other finds holds after the If too, `if x == ø { return }` leaving x present for the statements after it;
 # a loop's body, a match's arm and a try's parts keep such findings to themselves, as an If's arm does.
 if_typed(n: Node, condition: Node, then_part: Node, else_part: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
-	tested = condition_typed(condition, s, f)
+	tested = condition_typed(condition, s, f, yes)
+	# an If's kind rules fire once its condition is typed, before its arms: over a proposition `a and b` is And and `a or
+	# b` Or (sugar/conditions.wap); any other If on a proposition is refused
+	early = rule_rewritten(refitted(If(tested, then_part, else_part), n), s, f, expected)
+	if early != ø { return early! }
+	if is_proposition(tested) { refused(condition, UNDECIDABLE) }
 	# a test known while typing, `x is T` of an x of a type, chooses its arm here: the other is never typed
 	known = known_arm(tested)
 	if known != ø { live = typed_form([then_part, else_part]#known, s, f, expected); return with_type_of(refitted(Block([tested, live]), n), value_type(live)) }
@@ -111,8 +121,13 @@ NOT_WORD = "not"
 # what a condition finds in one arm, found in the other by its negation
 flipped(finding: Finding?) as Finding? := if finding == ø then ø else Finding(finding.key, 3 - finding.arm, finding.type)
 first_argument(tested: Node) as Node := match tested { Call(called, arguments) => arguments#1; _ => tested }
-condition_typed(condition: Node, s: TypingState, f: TypeFrame) as Node := {
-	tested = truth_of(typed_form(condition, s, f, BOOL_TERM), s)
+# whether typed code is a proposition, a value of a type in Prop
+is_proposition(typed: Node) as bool := levels_equal(universe_level(value_type(typed)) ?? Successor(Zero), Zero)
+# a condition as a bool; an If's may be a proposition, which its kind rules read; any other is refused
+condition_typed(condition: Node, s: TypingState, f: TypeFrame, propositions: bool = no) as Node := {
+	typed = typed_form(condition, s, f, BOOL_TERM)
+	if is_proposition(typed) { if propositions { return typed }; refused(condition, UNDECIDABLE) }
+	tested = truth_of(typed, s)
 	if not typed_bool(tested) { refused(condition, "a condition is yes or no") }
 	tested
 }

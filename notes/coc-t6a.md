@@ -279,7 +279,7 @@ last column says what the unification already gives.
 | T6a3 indexed families | enums over indices with a result per case, letters found as fields, mutual families one block; constructor calls typed by unifying their result; Equal as a family, replacing T6a1's core declaration (`==`'s place is T6a3a's) | core +100 (header and cases with indices +50, found fields +20, constructor typing +30), kernel −20 (T6a1's Equal declaration) | 9: proposition_wanted 15 four_is_even, wap proposition_wanted 10 and 12 (two, mutual), proof_wanted wrong, verify 13 hard, 17 uses_hard, 20 wrong, 26 any_even (Untested), connectives 18, 19 (And, Or as families) | int as an enum over nat in wap/types is the first two-case block analyze declares for the kernel; the found fields are written in analyze |
 | T6a4 proofs by cases and induction (plan: notes/coc-t6a4.md, core about +92 with the types module's nat) | a dependent motive; the theorem's own call on a field its hypothesis; a proof match missing a case refused by covering | core +60 (`motive_made` +35, the course with a dependent motive +25, after T5c3) | 7: double_even (test_proof_wanted 8, wap proof_wanted 7, elaborate 50 and 87, verify 12), wap proof_wanted 13 partial, verify 34 multiply_one_left | a nat subject is int's case split with the carrier's induction under it (the provers' step 5), so no nat induction theorem waits |
 | T6a5 False, Exists, undecidable | `False`; a proof's effects checked pure and total; `exists … where`; `if` on an undecided proposition refused | core +35 (False +8, the effect check +12, Exists +15), types +2 | 5: wap proof_wanted 14 and 15 (loop, raise), effects 15 and 16 (spin, loop), proposition_wanted 8 some_sum; plus the two undecidable-condition checks | the effects are facts on each typed function (T5b1, t5b-effects): the check reads EFFECTS and refuses Fail and Div in a proof |
-| T6a6 propositions as values, the logic in wap/types | a type in a value's place compared at Type; Prop binders; False, True, And, Or, Not, Exists, Decidable and the axiom proposition_extensionality in types/logic.wap | core +30 (types as values +20, Prop binders +10), types +35 (the rest of the logic in wap spelling) | 4: elaborate 107, 108, 153 (unions at Type); logic 18 anything; and logic's own checks (10 to 17) read on wap/types | the prelude is gone already (the deletion commit); the glue laws moved in T6a1, Equal in T6a3 |
+| T6a6 propositions as values, the logic in wap/types | a type in a value's place compared at Type; Prop binders; False, True, And, Or, Not, Exists, Decidable and the axiom proposition_extensionality in lib/logic.wap | core +30 (types as values +20, Prop binders +10), types +35 (the rest of the logic in wap spelling) | 4: elaborate 107, 108, 153 (unions at Type); logic 18 anything; and logic's own checks (10 to 17) read on wap/types | the prelude is gone already (the deletion commit); the glue laws moved in T6a1, Equal in T6a3 |
 
 Order: T6a1 first (it holds most of the laws, and every later step reads a law's declaration through it), then T6a2,
 T6a3, then T6a4 after T5c3, T6a5 after T5b1, T6a6 last. T6a1 needs the int enum; T6a1's
@@ -297,7 +297,7 @@ share; instances and protocols (traits) stay T6's.
 T6a is done when:
 - the statements in the table's "turns green" column are green, except those it names as waiting for T5c2, T5c4 or
   T5d;
-- the logic's words are declared once, in types/logic.wap, Equal as a family;
+- the logic's words are declared once, in lib/logic.wap, Equal as a family;
 - the whole suite has no new red, `--stage 2` is a fixed point; the self-compile and memory are measured and reported.
 
 ## Open for the supervisor
@@ -324,12 +324,12 @@ T6a is done when:
   - Estimate: core +100, kernel 0.
 - **T6a5 False, Exists, undecidable.**
   - kernel/logic.wap has `·False`, `·True`, `·True.intro` and `·false_elim`, marked as the kernel's. `False` for
-    programs is the types word naming it (T6a6's types/logic.wap), so it costs +2 here, not +8.
+    programs is the types word naming it (T6a6's lib/logic.wap), so it costs +2 here, not +8.
   - The effect check reads T5b1's EFFECTS fact (+12).
   - Exists is a family with one case (+15, on T6a3's indices).
   - Estimate: core about +29, types +2. Lands after T5b1 and T6a3.
 - **T6a6 the logic in wap/types.** The prelude is gone, and the kernel's logic is internal (`·`).
-  - types/logic.wap declares False and True (the kernel's), And, Or, Not, Exists (T6a5), Decidable, and the axiom
+  - lib/logic.wap declares False and True (the kernel's), And, Or, Not, Exists (T6a5), Decidable, and the axiom
     proposition_extensionality.
   - A comparison is a proposition where a type is wanted, and is decided to a bool where a bool is wanted
     (proposition.md:55): T6a3a's `proposition_of`, read the other way at `type of`.
