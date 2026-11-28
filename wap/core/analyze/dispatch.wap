@@ -28,9 +28,9 @@ UNFAILED_WORD = "unfailed"
 # and `value` (the function of the parameters giving the condition at the argument), is entered with the functions
 # (core/analyze/terms.wap obligations_entered); ø where the argument or the type has no kernel term. A proof a call
 # leaves to the provers, its `by` at the place of a parameter's statement, is one too: the call and the place, no
-# argument or type, its statement the kernel's goal there, `decided` where the run can check it (core/analyze/calls.wap
+# argument or type, its statement the kernel's goal there (core/analyze/calls.wap
 # proofs_held). `check` is the code that checks it when the program runs, ø for one only a proof decides
-class Obligation { line: text; argument: Node?; type: Term?; within: text?; function_type: Term? = ø; value: Term? = ø; call: Node? = ø; place: int = 0; decided: bool = yes; statement: Term? = ø; check: Node? = ø }
+class Obligation { line: text; argument: Node?; type: Term?; within: text?; function_type: Term? = ø; value: Term? = ø; call: Node? = ø; place: int = 0; statement: Term? = ø; check: Node? = ø }
 obligations: list<Obligation> = []
 OBLIGATION_LEFT = "is checked when the program runs"
 PROOF_LEFT = "needs a proof, which the run cannot check"
@@ -223,6 +223,13 @@ dispatcher_made(name: Node, reads: list, body: Node, results: list<Term?>, s: Ty
 	s.dispatchers += [dispatcher]
 	function_added(dispatcher, s)
 }
+# a function typing writes once by its name, of parameters of these types, its body made of their reads: a narrowing,
+# an unfailing, a statement's check (core/analyze/calls.wap statement_checker)
+written_once(name: Node, types: list, body: (list) -> Node, result: Term, s: TypingState) := {
+	if definitions_named(text(name), s) is not empty { return }
+	reads = parameters_of(name, types)
+	dispatcher_made(name, reads, placed_like(body(reads), name), [result], s)
+}
 # a dispatcher's name with its result written where every choice writes one: joined_type is ø where either is. A
 # choice among an any's types gives an any where the choices give unlike types, or where no type it takes is boxed
 # yet: its result stays as written while later boxed types add choices
@@ -272,11 +279,7 @@ raising(raised: Node, at: Node, s: TypingState) as Node := named_call(RAISE_WORD
 narrowed_call(n: Node, wanted: Term, at: Node, s: TypingState) as Node := {
 	name = name_once("${NARROWING_WORD}(${type_text(wanted, yes)})", n, s)
 	# one for each shape, wherever it is wanted
-	if definitions_named(text(name), s) is empty {
-		reads = parameters_of(name, [narrowed_type(wanted) ?? NODE_TERM, TEXT_TERM])
-		body = placed_like(If(narrowing_test(reads#1, wanted, name, s), reads#1, raising(reads#2, name, s)), name)
-		dispatcher_made(name, reads, body, [wanted], s)
-	}
+	written_once(name, [narrowed_type(wanted) ?? NODE_TERM, TEXT_TERM], reads => If(narrowing_test(reads#1, wanted, name, s), reads#1, raising(reads#2, name, s)), wanted, s)
 	check = word_called(n, text(name), [n, message_given(other_shape(wanted, at, s), at)], wanted, s)
 	obliged(at, n, wanted, s, check)
 	check
@@ -285,12 +288,11 @@ narrowed_call(n: Node, wanted: Term, at: Node, s: TypingState) as Node := {
 # as an any's is (wiki/Error.md: no other variable holds an Error), one function for each pair of types
 unfailed_call(n: Node, given: Term, wanted: Term, s: TypingState) as Node := {
 	name = name_once("${UNFAILED_WORD}(${type_text(given, yes)}, ${type_text(wanted, yes)})", n, s)
-	if definitions_named(text(name), s) is empty {
-		read = parameters_of(name, [given])#1
+	written_once(name, [given], reads => {
 		error = error_part(given)!
-		cast = type => with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [read]), name), type)
-		dispatcher_made(name, [read], placed_like(If(narrowing_test(read, error, name, s), raising(cast(error), name, s), cast(wanted)), name), [wanted], s)
-	}
+		cast = type => with_type_of(placed_like(Prim(symbol(CHECKED_CAST), reads), name), type)
+		If(narrowing_test(reads#1, error, name, s), raising(cast(error), name, s), cast(wanted))
+	}, wanted, s)
 	word_called(n, text(name), [n], wanted, s)
 }
 error_part(type: Term) as Term? := union_parts(type).find(is_error)
