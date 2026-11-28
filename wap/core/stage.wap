@@ -67,6 +67,8 @@ with_parts(n: Node, f: (Node) -> Node) as Node := match n {
 	List(items, bracket, separator) => List(items.map(f), bracket, separator)
 	_ => n
 }
+# code with each `name` in it read as another
+substituted(n: Node, name: text, value: Node) as Node := if n is symbol and text(n) == name then value else with_parts(n, part => substituted(part, name, value))
 # a node's direct parts: a key's two sides, a list's items; none of an atom
 direct_parts(n: Node) as list<Node> := match n {
 	Key(left, op, right) => [left, right]
@@ -80,6 +82,10 @@ nodes_in(n: Node) as list<Node> := [n] + direct_parts(n).flat_map(nodes_in)
 ANNOTATIONS = "meta"
 # the annotation naming the class a class extends
 EXTENDS_ANNOTATION = "extends"
+# the annotation naming the sort of an enum's values
+INDUCTIVE_ANNOTATION = "inductive"
+# the annotation naming the letters of a generic record
+PARAMETERS_ANNOTATION = "parameters"
 # the annotations written before a node, each one: `@final @protocol` two
 annotations_of(n: Node) as list<Node> := match fact_of(n, ANNOTATIONS) ?? Empty { Empty => []; List(items, Bracket.None, Separator.Space) => items; said => [said] }
 # the annotation of one word written before a node, `@protocol` or `@extends(A)`, ø without it
@@ -244,6 +250,8 @@ BOXED_TEST = "boxed_test"
 ERROR_CASE = "Error"
 # `prim cast(x)`, x an any: its value as the Prim's type, checked, raising with the place when it holds another type
 CHECKED_CAST = "cast"
+# `prim as_is(x)`: x as another type of its layout, a type value as the text it holds (types/prelude.wap): x itself
+READ_AS_IS = "as_is"
 # `prim box(x)`, x a plain value (int, float, bool, char) going into an any or an optional: x in its box, the Prim's
 # type the one wanted; only typing writes it (notes/decisions.md wap-boxed-any-debt)
 BOXED_VALUE = "box"
@@ -278,6 +286,10 @@ rest_named(item: Node) as Node? := match item {
 # The facts of the typing stage, core/analyze/types.wap: a value's TYPE, `int`, as a program writes types; a function's
 # SIGNATURE on its name, `(int, text) -> int`; a call's DEFINED_AT then names the one function it means
 TYPE = "type"
+# on a type as a value, `int` in `identity(int, 3)`: the type it is (core/analyze/types.wap type_value)
+DENOTES = "denotes"
+# on a function's name called at a level, `identity[1](…)`: the level written (core/analyze/calls.wap level_written_call)
+LEVEL_WRITTEN = "level"
 SIGNATURE = "signature"
 # A list's places by name, for a list that only grows or is changed in place, as the typing state's definitions and a
 # program's records are: indexed up to `count`, extended for the items added since
@@ -304,7 +316,7 @@ added_records(records: Records, added: list<Node>) as Records := {
 # A record's TYPE is its name, `Point`; these find a record among the Records a program declares, and its fields,
 # each a typed name `x: int` (declared_name, declared_type)
 record_named(records: Records, type: Term?) as Node? := {
-	if not is_word(type) { return ø }
+	if word_of(type) == ø { return ø }
 	named = items_named(records.names, records.items, word_of(type)!, record => record_name(record))
 	# the one its code sees, else the one declared last: a program's own class, or a used module's, shadows the types
 	# module's
@@ -315,7 +327,14 @@ record_named(records: Records, type: Term?) as Node? := {
 record_name(record: Record) as text := text(record_declared(record))
 record_declared(record: Record) as Node := match record { Record(name, fields, variants) => name }
 # the class a class extends, `@extends(A)` on its name (wap/sugar/records.wap), ø for one extending none
-class_extended(record: Node) as Node? := match annotation(record_declared(record), EXTENDS_ANNOTATION) { Key(name, op, List(items, bracket, separator)) => items#1; _ => ø }
+class_extended(record: Node) as Node? := annotated(record_declared(record), EXTENDS_ANNOTATION)
+# the sort an enum's header names, `@inductive(Prop)` on its name (wap/sugar/records.wap), ø for an enum naming none
+enum_sort(name: Node) as Node? := annotated(name, INDUCTIVE_ANNOTATION)
+# the letters a record's header names, `T` of `enum list<T>`, `@parameters(T)` on its name; none for a record naming none
+record_letters(name: Node) as list<Node> := annotated_all(name, PARAMETERS_ANNOTATION)
+# what an annotation of one word says, `A` of `@extends(A)`; ø without it
+annotated(n: Node, word: text) as Node? := { said = annotated_all(n, word); if said is empty then ø else said#1 }
+annotated_all(n: Node, word: text) as list<Node> := match annotation(n, word) { Key(name, op, List(items, bracket, separator)) => items; _ => [] }
 # the type a subtype is (wiki/alias.md), `int` of `type Color < int` (core/rules/stages.wap): the type its record
 # extends, which is no record; ø for any other type
 subtype_base(type: Term, records: Records) as Term? := {
@@ -324,7 +343,11 @@ subtype_base(type: Term, records: Records) as Term? := {
 	if record_named(records, base) == ø then base else ø
 }
 # a record as a type, its name bound to it, so it means this record wherever another of its name is declared too
-record_type(record: Record) as Node := with_fact(symbol(record_name(record)), DECLARED_BY, record_declared(record))
+record_type(record: Record) as Node := {
+	word = with_fact(symbol(record_name(record)), DECLARED_BY, record_declared(record))
+	letters = record_letters(record_declared(record))
+	if letters is empty then word else Key(word, Op.None, List(letters, Bracket.Less, Separator.Comma))
+}
 # its term (core/type_notation.wap)
 record_term(record: Record) as Term := type_term(record_type(record))
 fields_of(record: Record) as list := match record { Record(name, fields, variants) => items_of(fields) }
