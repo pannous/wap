@@ -53,3 +53,8 @@ T5 is done when:
   reader, about 150 in extensions/wasm, core 0.
   - It is also where C2's A (instances) and C4 come back (coc-c2.md, decided B).
   - It is where a plain build could use proofs from a module's stamps (coc-v3.md (3)).
+  - A class's closure is an assumption of a stamped verdict. A compile enters a class as a one-case block only
+    when nothing in it extends the class (core/analyze/inductives.wap enums_entered). A module verified on its own
+    cannot see an importer that extends its class later. So a verdict whose proof uses a class's recursor lists that
+    class's closure among the things it rests on, beside its axioms. The importer refuses the stamp where it extends
+    such a class, and verifies the law again with the class open.
