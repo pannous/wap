@@ -10,11 +10,10 @@ computes it, instead of an opaque constant. Read on unify-typers b4cda95e and fi
   function inside its own body finds no constant, so a recursive function stays an axiom (`TYPES.assumed`).
 - `term_of` (terms.wap:87-98) has no `Case`: a `match` gives no term. That is T5b4 (coc-t5b.md, the recursor's case
   split), which no branch holds yet.
-- courses.wap moved into core with T5c2 (e86988d2). `products_declared` has a caller (type_notation.wap:135). From
-  `Way` on, the file has none: the theory reader that asked for courses (elaborate/recursion.wap, match.wap's
-  `course_elaborated`) is deleted on unify-typers. The reading of a recursion therefore no longer moves from the
-  theory, as coc-t5c.md's row says. It is ported from main's copy (25046c0f:wap/extensions/theory/elaborate/
-  recursion.wap, 117 lines, and match.wap:157-170, 240-246) into core, onto analyze's typed nodes.
+- courses.wap is in core (T5c2, e86988d2). `products_declared` has a caller (type_notation.wap:135). From `Way` on,
+  the file has none: nothing reads a recursion's courses yet. The reading of a recursion (coc-t5c.md "How a recursion
+  is read": `riding`, the calls read from below, the match through the course) is written in core onto analyze's typed
+  nodes.
 - 3bca53e2 marks core's products `·Pair` and `·Unit`, so a program's own Pair is its own word. T5c3 builds on it.
 
 ## The 76 lines of courses.wap that wait (courses.wap:45-139 on unify-typers)
@@ -22,7 +21,7 @@ computes it, instead of an opaque constant. Read on unify-typers b4cda95e and fi
 | lines | what | T5c3 |
 |---|---|---|
 | :45-49 `Way` | a course, or why there is none | uses as is |
-| :50-69 `course_of` | below and course declared the first time a recursion asks | uses as is, except :51: every compile's environment is core's and holds the products (explicit.wap is gone on unify-typers), so `?? return Without(…)` becomes `!`, −1. The three other `Without` reasons (Prop only, mutual enums, a function field) stay, and T5c3 prints them as the reason the function stays opaque |
+| :50-69 `course_of` | below and course declared the first time a recursion asks | uses as is, except :51: every compile's environment is core's and holds the products, so `?? return Without(…)` becomes `!`, −1. The three other `Without` reasons (Prop only, mutual enums, a function field) stay, and T5c3 prints them as the reason the function stays opaque |
 | :23-24 `BELOW_SUFFIX`, `COURSE` | the two definitions' names, `Tree.below`, `Tree.course` | reshaped: marked `·` (`Tree·below`), as 3bca53e2 marks the products, so a program's own `below` meets none. 0 lines |
 | :71-99 `Built`, `pair_type`, `pair_made`, `the_motive`, `motive_at`, `course_value_type`, `below_at`, `recursor_into`, `Major`, `major_entered`, `major_binders`, `made_of_binders` | what below and course are built of | uses as is |
 | :101-115 `below_made`, :117-137 `course_made`, :139 `Chain` | the two definitions | uses as is |
@@ -35,7 +34,7 @@ None is dropped beyond :51. The file stays 138 lines, and all of them get caller
 | part | what | files | lines |
 |---|---|---|---|
 | a recursion's entry | `instance_entered` hands the function's own key to `definition_of` while entering. A call of it inside the body is read as a hypothesis, not left ø | analyze/terms.wap | core +15 |
-| the course term | A Define whose body is a `match` on parameter p of an enum that `course_of` takes becomes `λ params. T·course(parameters, motive, step, p)`. The motive is `λ p. Π other parameters. result`: the other parameters ride, so a call may change them. The step is `λ indices, value, below. (T5b4's case split of the arms)`, and an arm's fields are bound as T5b4 binds them | analyze/terms.wap `course_term` (ported from recursion.wap `riding`, match.wap `course_elaborated`) | core +35 |
+| the course term | A Define whose body is a `match` on parameter p of an enum that `course_of` takes becomes `λ params. T·course(parameters, motive, step, p)`. The motive is `λ p. Π other parameters. result`: the other parameters ride, so a call may change them. The step is `λ indices, value, below. (T5b4's case split of the arms)`, and an arm's fields are bound as T5b4 binds them | analyze/terms.wap `course_term` (`riding`, the match through the course) | core +35 |
 | calls read from below | A call `f(a, others)` with `a` a field, or a field's field, of the value matched is the first of the pair found in `below` for that field, applied to the other arguments (`pairs_below`, `course_below`, `place_of`, `recursive_call_elaborated`). A call on anything else leaves the function opaque, and `effects of` says Div (T5c1's fact) | analyze/terms.wap or a new analyze/recursion.wap | core +30 |
 | :51 | products always held | analyze/courses.wap | core −1 |
 
