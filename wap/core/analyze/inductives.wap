@@ -27,17 +27,18 @@ class EnumRead { word: Term; whole: Term; key: text; sort: Term?; cases: list<Ca
 enums_entered(records: list<Node>, s: TypingState) := {
 	enums: map<text, EnumRead> = {}
 	for record in records.filter(record => cases_of(record) is not empty) {
-		enum = enum_read(record, s)
+		enum = enum_read(record)
 		if not TYPES.enums.has(word_id(enum.word)) and assumed_word(enum.word) { enums[enum.key] = enum }
 	}
 	keys = enums.keys
-	named = (key: text) => enums[key].cases.flat_map(case => case.fields).flat_map(field => constants_in(field ?? DATA_TERM).map(word => word_key(constant_id(word)))).filter(other => keys.contains(other))
-	for group in groups_of(keys, named) { block_entered(group.map(key => enums[key])) }
+	# an enum names the enums its fields name, and the types its index domains name, whose constructors its indices may use
+	named = (key: text) => (enums[key].cases.flat_map(case => case.fields).map(field => field ?? DATA_TERM) + domains_of(header_of(enums[key]))).flat_map(type => constants_in(type).map(word => word_key(constant_id(word)))).filter(other => keys.contains(other))
+	for group in groups_of(keys, named) { block_entered(group.map(key => enums[key]), s) }
 }
-enum_read(record: Node, s: TypingState) as EnumRead := {
+enum_read(record: Node) as EnumRead := {
 	whole = record_term(record)
 	word = head_of(whole)
-	EnumRead(word, whole, word_key(word_id(word)), record_sort(record_declared(record)), enum_cases(record, parts_of(whole), s))
+	EnumRead(word, whole, word_key(word_id(word)), record_sort(record_declared(record)), enum_cases(record, parts_of(whole)))
 }
 # a word's key, the name the environment declares it by
 word_key(id: int) as text := declared_at(TYPES.environment, id)!.name
@@ -49,17 +50,17 @@ assumed_word(word: Term) as bool := match declared_at(TYPES.environment, word_id
 # an enum's case as the kernel reads it: its name, its definer's place, its fields' names and types, ø for a field
 # whose type is open, the letters it finds (T6a3: a one-letter name its types write that is none of the enum's, an
 # implicit binder in front of its fields) and the family member it gives, ø where it gives the enum itself
-class CaseTyped { name: text; definer: text; binders: list<text>; fields: list<Term?>; found: list<Found> = []; result: Term? = ø; result_open: bool = no }
+class CaseTyped { name: text; definer: text; binders: list<text>; fields: list<Term?>; found: list<Found> = []; result: Term? = ø; result_open: bool = no; node: Node? = ø }
 # marks a binder of a letter a case finds, so a call of the constructor can tell them from its fields
 FOUND_MARK = "·"
 # a letter a case finds: its word, standing for it in the types until the binders name it, and the type it has
-class Found { word: Term; domain: Term }
-enum_cases(enum: Node, letters: list<Term>, s: TypingState) as list<CaseTyped> := cases_of(enum).map(case => {
+class Found { word: Term; domain: Term; variable: Term? = ø }
+enum_cases(enum: Node, letters: list<Term>) as list<CaseTyped> := cases_of(enum).map(case => {
 	found = found_distinct(found_written(case, letters), text(case_name(case)))
 	allowed = letters + found.map(each => each.word)
 	written = case_result(case)
-	result = if written == ø then ø else closed_type(case_read(written, case, found, s), allowed)
-	CaseTyped(text(case_name(case)), place_key(case_name(case)), case_fields(case).map(field => text(declared_name(field))), case_fields(case).map(field => closed_type(case_read(declared_type(field), case, found, s), allowed)), found, result, written != ø and result == ø)
+	result = if written == ø then ø else closed_type(written_type(written), allowed)
+	CaseTyped(text(case_name(case)), place_key(case_name(case)), case_fields(case).map(field => text(declared_name(field))), case_fields(case).map(field => closed_type(written_type(declared_type(field)), allowed)), found, result, written != ø and result == ø, case)
 })
 # the letters a case's field types and result write, in the order written
 # (a case's own field names are no letters it finds: `m` of `pair(m: nat, e: Even(m))` is a field)
@@ -78,33 +79,51 @@ found_in(n: Node, own: list<Term>) as list<Found> := match n {
 	}
 	_ => if is_found_name(n, own) then [Found(word_term(text(n)), DATA_TERM)] else []
 }
+# (a letter under a call that is no family has no domain of its own, DATA_TERM: only two domains it is given that differ are refused)
 found_distinct(all: list<Found>, case: text) as list<Found> := all.fold([], (kept, each) => {
 	same = kept.find(other => other.word == each.word)
-	if same != ø and same!.domain != each.domain { raise("${case} writes ${type_text(each.word)} as a ${shown(same!.domain)} and as a ${shown(each.domain)}") }
-	if same != ø then kept else kept + [each]
+	if same == ø { return kept + [each] }
+	if same!.domain != DATA_TERM and each.domain != DATA_TERM and same!.domain != each.domain { raise("${case} writes ${type_text(each.word)} as a ${shown(same!.domain)} and as a ${shown(each.domain)}") }
+	kept.map(other => if other.word == each.word and other.domain == DATA_TERM then each else other)
 })
+# a case's types as the kernel holds them, read once the groups before its own are entered (their constructors are what an
+# index may name): its letters of a value type entered as locals of one checker, each field's type and its result read
+# under them, the letters' variables kept in `found` for case_type to abstract over (T6a3; GUESS: unbuilt)
+case_indexed(case: CaseTyped, letters: list<Term>, s: TypingState) as CaseTyped := {
+	node = case.node!
+	c = checker(TYPES.environment, [])
+	values = case.found.filter(each => each.domain != DATA_TERM)
+	locals = values.map(each => entered(c, type_text(each.word), each.domain))
+	found = case.found.map(each => {
+		at = values.map(value => value.word).index_of(each.word)
+		Found(each.word, each.domain, if at > 0 then locals#at.variable else ø)
+	})
+	allowed = letters + found.map(each => each.word)
+	reading = fresh_reading(c, {}, s).under(locals, values.map(each => place_key(found_definer(each, node))))
+	read = (written: Node) => closed_type(case_read(written, node, values, reading, s), allowed)
+	written = case_result(node)
+	result = if written == ø then ø else read(written!)
+	CaseTyped(case.name, case.definer, case.binders, case_fields(node).map(field => read(declared_type(field))), found, result, case.result_open, node)
+}
 # a type a case writes as the kernel holds it: a family applied to values reads each value, any other type as written
-case_read(written: Node?, case: Node, found: list<Found>, s: TypingState) as Term? := {
+case_read(written: Node?, case: Node, values: list<Found>, reading: Entering, s: TypingState) as Term? := {
 	if written == ø { return ø }
 	match written! {
-		Call(head, items) => if is_type_former(family_type(head)) then type_built(family_word(head), items.map(item => index_read(item, case, found, s))) else written_type(written)
+		Call(head, items) => if is_type_former(family_type(head)) then type_built(family_word(head), items.map(item => index_read(item, case, values, reading, s))) else written_type(written)
 		_ => written_type(written)
 	}
 }
 # a value in a family's argument place read as a function's result is (terms.wap family_read): typed under the letters
-# the case finds, each a parameter named by the case, then as a term, the letters its constants again (T6a3; GUESS: unbuilt)
-index_read(item: Node, case: Node, found: list<Found>, s: TypingState) as Term := {
-	letters = found.filter(each => each.domain != DATA_TERM)
-	definers = letters.map(each => found_definer(each, case))
-	written = (1 to #letters).list().fold(item, (body, at) => substituted(body, type_text(letters#at.word), definers#at))
+# the case finds, each a parameter named by the case, then as a term over their locals. No function of the program is
+# entered yet (L3: they are entered after the enums), so an index may name a constructor of an earlier group, a numeral
+# or an operator on them
+index_read(item: Node, case: Node, values: list<Found>, reading: Entering, s: TypingState) as Term := {
+	definers = values.map(each => found_definer(each, case))
+	written = (1 to #values).list().fold(item, (body, at) => substituted(body, type_text(values#at.word), definers#at))
 	if not is_value_written(written) { return type_term(item) }
 	frame = TypeFrame()
-	for at in 1 to #letters { frame.variables += [Binding(place_key(definers#at), letters#at.domain)] }
-	c = checker(TYPES.environment, [])
-	locals = letters.map(each => entered(c, type_text(each.word), each.domain))
-	reading = fresh_reading(c, instances_keyed(s.functions), s).under(locals, definers.map(definer => place_key(definer)))
-	read = term_of(typed_form(written, s, frame, ø), reading) ?? refused(item, "an index may depend only on values the program computes without acting")
-	(1 to #letters).list().fold(read, (body, at) => replaced_by(body, variable_id(locals#at.variable), letters#at.word))
+	for at in 1 to #values { frame.variables += [Binding(place_key(definers#at), values#at.domain)] }
+	term_of(typed_form(written, s, frame, ø), reading) ?? refused(item, "an index may use only a constructor of an earlier enum, a number and their operators: a function of the program is entered after the enums, and an enum's own constructors after its cases")
 }
 # the parameter a letter a case finds is for the typing of its indices, named as the case's name is
 found_definer(each: Found, case: Node) as Node := {
@@ -113,13 +132,13 @@ found_definer(each: Found, case: Node) as Node := {
 }
 # One block of enums declared, filling their words, each case's definer then naming its constructor, or each left the
 # axiom it is, counted by why
-block_entered(enums: list<EnumRead>) := {
+block_entered(enums: list<EnumRead>, s: TypingState) := {
 	ids = enums.map(enum => word_id(enum.word))
 	keys = enums.map(enum => enum.key)
 	if enums.any(enum => enum.sort == ø or enum.cases.any(case => case.result_open or case.fields.any(field => field == ø))) { return enums_counted(ids, ENUM_OPEN) }
 	headers = enums.map(header_of)
 	try {
-		types = enums.map(enum => BlockType(enum.key, header_of(enum), enum.cases.map(case => WrittenCase(case_constructed(enum.key, case.name), case_type(case, enum, ids, keys, headers)))))
+		types = enums.map(enum => BlockType(enum.key, header_of(enum), enum.cases.map(case => WrittenCase(case_constructed(enum.key, case.name), case_type(case_indexed(case, parts_of(enum.whole), s), enum, ids, keys, headers)))))
 		inductive_declared(TYPES.environment, InductiveBlock([], #parts_of(enums#1.whole), types))
 	} catch refusal {
 		refusal_only(refusal)
@@ -147,9 +166,8 @@ case_type(case: CaseTyped, enum: EnumRead, ids: list<int>, keys: list<text>, hea
 	letters = parts_of(enum.whole)
 	domains = domains_of(header_of(enum))
 	outer = ids + letters.map(letter => word_id(letter))
-	named = outer + case.found.map(each => word_id(each.word))
-	found = (1 to #case.found).list().reverse.fold(block_named(fields, named, 0), (body, at) => pi(FOUND_MARK + type_text(case.found#at.word), block_named(case.found#at.domain, outer + case.found.take(at - 1).map(each => word_id(each.word)), 0), body))
-	parameters = (1 to #letters).list().reverse.fold(found, (body, at) => pi(type_text(letters#at), domains#at, body))
+	found = (1 to #case.found).list().reverse.fold(fields, (body, at) => pi(FOUND_MARK + type_text(case.found#at.word), case.found#at.domain, found_closed(body, case.found#at)))
+	parameters = (1 to #letters).list().reverse.fold(block_named(found, outer, 0), (body, at) => pi(type_text(letters#at), domains#at, body))
 	(1 to #keys).list().reverse.fold(parameters, (body, at) => pi(keys#at, headers#at, body))
 }
 
@@ -166,6 +184,8 @@ case_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
 	if fields_given(opened, arguments) != value_type(n) { return ø }
 	terms_applied(apply_all(constant(id, constructor.name, []), parameters), arguments, x)
 }
+# a type closed over a letter a case finds: over its local where it is a value's, over its constant where it is a type's
+found_closed(body: Term, each: Found) as Term := if each.variable != ø then abstracted(body, variable_id(each.variable!)) else block_named(body, [word_id(each.word)], 0)
 # how many letters a case finds, the binders in front of its fields
 found_count(type: Term) as int := match type.shape {
 	Pi(binder, domain, body) => if binder.starts_with(FOUND_MARK) then 1 + found_count(body) else 0

@@ -104,3 +104,12 @@ a parameter named by the case's name, DEFINED_AT itself), typed by `typed_form` 
 `term_of` under an Entering over locals at the letters' domains (functions from `instances_keyed(s.functions)`), the
 locals then replaced by the letters' constants for `block_named`. `index_read`'s number/`+` reading and `constructed` are
 gone. GUESS: typed_form on a constructor of a not yet declared block (`Even(nat.zero)` inside its own block) may refuse.
+
+## Review fixes (wap-theory-plan on c1c83f55)
+- B1: a letter under a call that is no family has no domain of its own (DATA_TERM); only two domains it is given that differ are refused.
+- B2: `enum_cases` keeps the found letters and the types typing reads; `case_indexed` reads each case's types inside `block_entered`, after the
+  earlier groups registered their constructors, and `enums_entered` orders the groups by the constants of their headers' index domains too.
+  An index naming a constructor of its own block is induction-induction and stays refused ("an enum's own constructors after its cases"); no test.
+- L1+L2: a value letter is a local of one checker per case; the case type is abstracted over it (`found_closed`), type letters keep `block_named`.
+- L3 (chosen: refuse, fewer lines than entering functions first): no function of the program is entered yet, an index names constructors, numbers and operators.
+- S1 `arm_minor` reads `declared_constructor(id).type`; S2 `letter_holes` gives a found letter its own domain; S3 `holder_made` refuses where a letter stays unbound.
