@@ -33,9 +33,10 @@ is the proposition "for every n" (wiki/proposition.md:20, :34). Card dependent-t
      every other result by type_bound.
    - Names in the result take DEFINED_AT from their binder, through t4e-2's condition_bound, which binds Parameter,
      Local and Capture kinds by declaration. So `n` means the arrow's n, never a global of that spelling.
-   - scope.wap:72's refusal goes. `(a, b) -> a + b` written for a lambda is read as the type it spells: a and b as
-     parameter types, refused at typing where they name no type. That is the general rule's answer, with no special
-     message.
+   - scope.wap:72's refusal moves to where it belongs. In `(a, b) -> a + b`, a and b stand as unnamed binders' types.
+     A binder's type that names no type is refused at that parameter, with the message wiki/closure.md gives: "->
+     writes a function type; a function value is written with =>". It is the same message at a more exact place, and
+     it is no special case: it is the refusal of any arrow parameter that names no type.
 2. **Typing (about +8).**
    - type_value_written gets one arm: an arrow is a type value.
    - Its result is typed under a frame holding the binders as parameters, the way body_typed types a function's
@@ -88,12 +89,7 @@ test_proposition_wanted.
 - The one risk is in scope: the compiler's own `(T) -> U` types now take the same path, with anonymous binders. Their
   terms must stay what function_type_of gives today, a non-dependent pi, so test_self and the census check it.
 
-## A test this changes
+## The test that pins the refusal
 
-test/wap/test_functions.wap:34 pins the refusal that goes: "a function value written with -> is refused saying =>
-writes it", on `add = (a, b) -> a + b; add(1, 2)`.
-- Under the amended rule, add is a type, and `add(1, 2)` is refused as a type's call of two values ("a type makes its
-  value of one other"). A and b are no types either.
-- So the line goes red. Changing it is an edit of an existing test, so it goes to warp-interviewer first.
-- Options: drop the line, since the form is no longer refused for that reason, or pin what the general rule gives.
-  Recommendation: drop it. A test pins only behavior we want, and a hint about `=>` is a special case the ruling removes.
+test/wap/test_functions.wap:34 ("a function value written with -> is refused saying => writes it", `add = (a, b) ->
+a + b`) stays green as it is. The refusal now comes from the parameter a, which names no type, with the same words.
