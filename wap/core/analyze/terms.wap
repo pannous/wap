@@ -51,7 +51,7 @@ instance_entered(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 	type = kernel_settled(instance_type(typed), s)
 	value = definition_of(typed, by_key, s)
 	kind = if value == ø then DeclarationKind.Axiom else Defined(value!)
-	signature = kernel_signature(typed, s)
+	signature = kernel_signature(typed, by_key, s)
 	if value != ø and signature != ø {
 		try declared(TYPES.environment, Declaration(name, [], signature!, kind)) catch e { refused(written_name(typed.define), "the kernel refuses what typing made of this function: ${e.message}") }
 		TYPES.defined += 1
@@ -63,11 +63,11 @@ instance_entered(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 }
 # a function's type as the kernel reads it, a function of its parameters' types: ø where one is open or it never
 # returns
-kernel_signature(typed: TypedFunction, s: TypingState) as Term? := {
+kernel_signature(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
 	if typed.jumps { return ø }
 	# a parameter keeps its subtype, the parent by definition, so a law reads its binders' conditions
 	parameters = typed.arguments.map(type => settled_type(type, s))
-	result = kernel_settled(typed.result ?? return ø, s)
+	result = kernel_result(typed, by_key, s) ?? return ø
 	if (parameters + [result]).any(type => has_letters(type) or has_unknowns(type)) { return ø }
 	pis(parameters_locals(typed, s), result)
 }
@@ -80,6 +80,18 @@ parameters_locals(typed: TypedFunction, s: TypingState) as list<Local> := {
 	typed.locals
 }
 parameter_names(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters).map(parameter => declared_name(parameter)); _ => [] }
+# GUESS (T6a3's value reader): the result as the kernel reads it: where a family is written applied to values, the head applied to its arguments
+# read as values under the parameters (`Even(double(n))`, each value through term_of and the checker's Locals); any other result as settled
+kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
+	if typed.written == ø or not is_family_call(typed.written!) { return kernel_settled(typed.result ?? return ø, s) }
+	match typed.written! { Call(head, items) => apply_all(kernel_type(word_named(head))!, items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), parameters_reading(typed, by_key, s)) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)); _ => ø }
+}
+# the frame its parameters are typed in, as a body's is
+reading_frame(typed: TypedFunction) as TypeFrame := {
+	frame = TypeFrame()
+	for at in 1 to #typed.arguments { frame.variables += [Binding(place_key(parameter_names(typed)#at), typed.arguments#at)] }
+	frame
+}
 # a body read under the function's own parameters
 parameters_reading(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Entering := Entering([], [], typed.checker ?? checker(TYPES.environment, []), by_key, s).under(parameters_locals(typed, s), parameter_names(typed).map(place_key))
 # a pure function's value, the function of its parameters its body computes; ø for any other
@@ -88,7 +100,7 @@ definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 		# a body converted to the result, an int given where an int? is, is no term yet
 		inside = parameters_reading(typed, by_key, s)
 		# GUESS: the body's type and the result name the same Free variables, so `Even(n + n)` meets `Even(double(n))` by unfolding double
-		if not equal(inside.c, kernel_value(body) ?? return ø, kernel_settled(typed.result ?? return ø, s)) { return ø }
+		if not equal(inside.c, kernel_value(body) ?? return ø, kernel_result(typed, by_key, s) ?? return ø) { return ø }
 		lambdas(typed.locals, term_of(body, inside) ?? course_defined(typed, body, inside) ?? return ø)
 	}
 	_ => ø
@@ -152,7 +164,7 @@ arm_expected(pattern: Node, subject: Node, f: TypeFrame, expected: Term?, s: Typ
 	if place <= 0 { return expected }
 	constructor = declared_at(TYPES.environment, id)!
 	fields = field_types(constructor.type).map(domain => entered(typed.checker!, NO_BINDER, domain))
-	replaced_by(kernel_settled(typed.result!, s), variable_id(parameters_locals(typed, s)#place.variable), apply_all(constant(id, constructor.name, []), variables(fields)))
+	replaced_by(kernel_result(typed, x.by_key, s)!, variable_id(parameters_locals(typed, s)#place.variable), apply_all(constant(id, constructor.name, []), variables(fields)))
 }
 # a function type after the arguments given to its first places, and what it takes at the next
 after_arguments(callee: Term, given: list<Term>) as Term := instantiated_all(peeled(callee, #given), given)
