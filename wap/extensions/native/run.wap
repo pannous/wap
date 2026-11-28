@@ -305,19 +305,27 @@ module_ran(module: int, arguments: list<text>, importer: text, input: text = "")
 }
 # the laws of a module wap verify compiled (extensions/law_runs.wap) run, its verdicts written to the file at `output`:
 # its top level started, never its main, then each export whose name starts so, in the module's order, each printing
-# its law's verdict; whether every one ran to its end. A function is exported by its name and by its signature, a
+# its law's verdict and each alone: its own trap and its own time cap, so a law that raises or never ends is the only
+# one without a verdict. Returns the laws that trapped. A function is exported by its name and by its signature, a
 # law's `law_positive()`, which names it once
 LAW_PREFIX := "law_"
 LAW_SIGNATURE_END := "()"
-laws_ran(module: int, path: text, output: text): bool := {
+laws_ran(module: int, path: text, output: text): list<text> := {
 	context = wasmtime_store_context(store_made([path], output: output))
 	instance = if module == 0 then 0 else instance_ran(linker_made(), context, module, path, no)
-	if instance == 0 { return no }
+	if instance == 0 { return [] }
 	exports = module_vector(module, wasmtime_module_exports)
 	item = host_block(EXTERN_BYTES)
 	trap_at = host_block(8)
 	names = (0 upto long_at(exports)).map(i => vector_text(wasm_exporttype_name(vector_item(exports, i)))).filter(name => name.starts_with(LAW_PREFIX) and name.ends_with(LAW_SIGNATURE_END))
-	names.all(name => wasmtime_instance_export_get(context, instance, name, byte_count(name), item) % BOOL_BYTE != 0 and not failed(wasmtime_func_call(context, item + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, trap_at), trap_at))
+	names.filter(name => wasmtime_instance_export_get(context, instance, name, byte_count(name), item) % BOOL_BYTE != 0 and law_trapped(context, item, trap_at)).map(law_named)
+}
+# the law a `law_positive()` export is, `positive`
+law_named(export: text): text := export.split(LAW_PREFIX).drop(1).join(LAW_PREFIX).split(LAW_SIGNATURE_END)#1
+# whether the law function at `item` trapped or ran past the time cap, the cap counted from its own start
+law_trapped(context: int, item: int, trap_at: int): bool := {
+	wasmtime_context_set_epoch_deadline(context, time_cap_seconds)
+	failed(wasmtime_func_call(context, item + EXTERN_VALUE_OFFSET, 0, 0, 0, 0, trap_at), trap_at)
 }
 # a new path in the temporary folder by the template
 temporary_path(template: text): text := temporary_folder() + template
