@@ -8,28 +8,16 @@ Numbers are typed through the kernel: a numeral has the type its place wants, el
 
 ## One unifier, in core
 
-The elaborator's unifier is analyze's job from T3 on: letters, `_`, holes and an empty list's α are one thing, a hole
+The unifier is analyze's job: letters, `_`, holes and an empty list's α are one thing, a hole
 of the unifier. It is untrusted (the kernel checks what it fills in), so it lives in core, beside the typer, not in
 wap/kernel.
 
-What moves is what the provers call and what that calls in turn, measured over the two files' code lines (no
-comments, no blank lines; data/t3-plan/closure.py): 268 of their 275. analyze calls the same functions, since its holes
-are the provers' holes.
-
-| file today | code lines | moves to wap/core/analyze | stays in the extension |
-|---|---|---|---|
-| theory/elaborate/unify.wap | 133 | all 133, as unify.wap | none |
-| theory/elaborate/state.wap | 142 | 135, as holes.wap: `Elaboration` (the checker, the binders in scope, the holes and their answers), Hole, Problem, Found, `filled`, `holes_in`, `back_to`, `taken_back`, the level holes | 7: `holes_left`, `level_problems_hold`, `unscoped` and CANNOT_FIND, which only the elaborator calls; they go when T5 deletes it |
-
-The provers read the elaboration through `el.c` (39 places) and the moved functions, so the record moves whole.
-The plan's 180 for unification was an estimate of a unifier written fresh. The one the provers already run is 268
-lines, and moving it saves writing a second one.
-
-This settles the audit's finding 6 for two of the three files the provers import (data/extensions-audit/report.md):
-goals, linear, induction, apart, computing, introduction and rewriting import core/analyze/unify.wap and holes.wap
-in place of the extension's: a path edit ports them. Their third import, elaborate/match.wap (`Matched`,
-`eliminating`, the recursor's motive), stays until T5. T5 deletes match.wap when analyze elaborates `match`, and in
-that step the four provers that use it call analyze's eliminating, its lines counted there.
+What the provers call, and what that calls in turn, is in two files of wap/core/analyze: unify.wap (133 code lines)
+and holes.wap (135): `Elaboration` (the checker, the binders in scope, the holes and their answers), Hole, Problem,
+Found, `filled`, `holes_in`, `back_to`, `taken_back`, the level holes. analyze calls the same functions, since its
+holes are the provers' holes. The provers read the elaboration through `el.c` (39 places) and these functions, so
+the record lives whole in holes.wap. Goals, linear, induction, apart, computing, introduction and rewriting import
+core/analyze/unify.wap and holes.wap.
 
 ## Types as terms
 
@@ -56,11 +44,11 @@ in analyze, 26 in emit) become the kernel constants of the type words.
 A fact is a Node, and a kernel Term cannot be one. So a compile keeps one table of the type terms it met, and a
 TYPE fact holds `Number(place)` in that table.
 
-- **The table** (core/type_terms.wap) is `class TypeTerms { terms: list<Term>; places: map<int, list<int>>;
+- **The table** (core/type_notation.wap) is `class TypeTerms { terms: list<Term>; places: map<int, list<int>>;
   words: map<text, int> }`. A term is entered once, found again by its hash, so two equal types have one place, and
   a TYPE fact compared with `==` compares the types. A type word gets its constant's id from `words` the first time
   the door reads it, an opaque constant without levels. T3e and T3f move these ids to the program's kernel
-  environment, once the prelude declares the words there.
+  environment, once the kernel declares the words there.
 - **The table is the compile's own, as a symbol table is:** one value for the whole run in core/type_notation.wap
   (`TYPES`), so `value_type(n)` and emit's `type_of(n)` read a fact through it without a parameter. Handing it down
   would add a parameter to about 300 functions of analyze, emit and rules, and give nothing: a run compiles one
@@ -103,8 +91,8 @@ A name's bindings live in core/analyze/flow.wap. These forms are refused with a 
 ## Numbers through the kernel
 
 - **A numeral has the type its place wants, else `int`:** `x: float = 3` is a float, with no int-to-float
-  conversion written. `i32` and `i64` are the wrapping words, and `#xs` is an `int`. The numbers prelude
-  (theory/prelude/numbers.wap 197, checked.wap 43) moves into wap/types in the explicit spelling. Compiler source does
+  conversion written. `i32` and `i64` are the wrapping words, and `#xs` is an `int`. The numbers
+  declarations live in wap/types/numbers.wap. Compiler source does
   not use its words, so no seed refresh is needed. `int` keeps today's storage until T8.
 - **Overloads: the most specific by conversion order** (coc-plan 4). Of the definitions that fit, one is more
   specific than another by the first of three steps that decides:
@@ -141,12 +129,12 @@ The whole suite runs at T3b, T3d and T3e, compared line by line with main's last
 
 | step | what | core lines (estimate) | checks |
 |---|---|---|---|
-| T3a unifier | unify.wap and state.wap `git mv` into wap/core/analyze (unify.wap, holes.wap); the elaborator and the provers import them from there; nothing else changes | +268 moved, extension −268 | normal path: theory areas, prove's tests, test_hello |
+| T3a unifier | unify.wap and state.wap `git mv` into wap/core/analyze (unify.wap, holes.wap); the provers import them from there; nothing else changes | +268 moved, extension −268 | normal path: theory areas, prove's tests, test_hello |
 | T3b terms | the table; TYPE facts hold its places; signatures hold terms; type_notation.wap's readers read terms; one notation door; `type_shown` for messages and format; emit through the readers | about +300 (the table +30, the door +40, `type_shown` +30, the readers on terms, about 200 call sites edited and about 120 comparisons by `==` or `text()` rewritten; the user decides the size) | careful; the whole suite as before; `--stage 2` time and warm hello measured against the baseline |
 | T3c holes | letters.wap goes: letters, `_` and α are holes of the unifier, `settles`/`deferred` are answers; fits.wap's remaining comparisons go to kernel equality (`bare_fit`, `joined_settling`'s settling) | −169 letters, −45 fits, +60 | careful; `identity(3)` and `identity(int)`; the census |
 | T3c3 holes by id | a definition's letters are holes made once in a table by its key (letters.wap letter_holes), the signature's holes in all but where they are kept, so declare stays apart from the typing state; a call's answers, `s.unknowns` and `s.members` keyed by the hole's id (`variable_id`), a letter's name only in the types the definition writes; `hole_text` and its cache in TypeTerms go | about −10 type_notation, +20 letters (the call's letters and answers apart) | careful; two calls of one generic, a generic calling itself (test_letters) |
 | T3d one pass | headers first, assignment as a new binding, the retyping round goes; kind rules typed in place, the refiring goes | −40 analyze, −20 rules, +40 | careful; a recursive function's result is written, or found once its other arm gives the type, else refused with the fix-it naming it; a kind rule's error names the line of its phrase |
-| T3e numbers | numerals at the wanted type, else `int`, and an empty `{}` or `[]` at the type its place wants, the right of `??` wanting the left's (`m.get(k) ?? {}`; core/pipeline.wap line_told's `has` test goes); i32 and i64; `#xs` int; the numbers prelude in wap/types; overloads by conversion order| −40 analyze (the ranking's 5 words), +170 analyze, +200 types | careful; `0 - 3` is -3; `m.get(k) ?? {}` of a map<text, map<text, text>> is a map<text, text>; `#xs - 1` is -1 on an empty list; `type of 3` is `int` |
+| T3e numbers | numerals at the wanted type, else `int`, and an empty `{}` or `[]` at the type its place wants, the right of `??` wanting the left's (`m.get(k) ?? {}`; core/pipeline.wap line_told's `has` test goes); i32 and i64; `#xs` int; the numbers declarations in wap/types; overloads by conversion order| −40 analyze (the ranking's 5 words), +170 analyze, +200 types | careful; `0 - 3` is -3; `m.get(k) ?? {}` of a map<text, map<text, text>> is a map<text, text>; `#xs - 1` is -1 on an empty list; `type of 3` is `int` |
 | T3f functions | each typed function an opaque constant of its signature in the kernel environment; the census counts them as assumed | +20 | normal plus the census |
 
 T3a changes no core behaviour. T3b is the largest diff: about 200 places edited, mechanically, plus
@@ -161,15 +149,14 @@ type_notation.wap.
 | types as terms, the notation's readers | +100 | +100 |
 | one pass | +40, −40 | +40, −40 |
 | kind rules in place | +20, −20 | −20 |
-| the numbers prelude (types) | +200 | +240 (numbers 197, checked 43), moved from the extension |
+| the numbers declarations (types) | +200 | +240 (numbers 197, checked 43) |
 | functions as opaque constants | | +20 |
 | the holes wired into analyze | | +60 |
 | deleted | letters 235, fits 189, typed_readings and numerals 40 | letters 169, fits 45, ranking 40 |
-| **net** | **+186** | **about +584 in the compiler, −548 in the extension** |
+| **net** | **+186** | **about +584 in the compiler** |
 
 Two budget differences:
-- **The unifier moves in, it is not written again:** the extension shrinks by what core gains, and with the prelude moved too the tree as a whole
-  grows by about +36.
+- **The unifier is not written again:** analyze uses the one the provers run.
 - **fits.wap goes only in part:** its conversions (`conversion`, `converted`, `repacked`, the Conversion enum, about
   80 lines) are T4's job, where conversions are declared in the types module (coc-plan 3.2), and they leave with
   T4. The plan's T3 row counted all of fits.wap.
@@ -208,11 +195,11 @@ carries over to the next one, and one that needs more goes to the supervisor bef
 
 | step | share of the 25% | why |
 |---|---|---|
-| T3a | 0 | moved code only, the elaborator's own |
+| T3a | 0 | moved code only |
 | T3b | 10 | each type comparison becomes kernel equality on terms |
 | T3c | 5 | holes and answers in place of letter bindings |
 | T3d | 0 | one pass in place of the retyping rounds and the refiring: expected to be faster, and a gain is credited |
-| T3e | 7 | numerals typed through the kernel, the prelude's declarations read |
+| T3e | 7 | numerals typed through the kernel, the numbers declarations read |
 | T3f | 3 | one opaque constant per typed function |
 
 ## Open for the user (through the supervisor)
