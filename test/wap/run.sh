@@ -183,7 +183,7 @@ all_run() {
 # a test program prints one line for each check statement it holds; fewer is one ✗ saying how many, so a check that
 # vanished (never reached, its statement dropped silently) can never leave passed and failed short of the file; a test
 # that did not compile or run says so already
-CHECK_STATEMENT='^check\('
+CHECK_STATEMENT='^check('
 checks_missing() {
 	local written printed
 	! grep -q " compiled and ran$" "$2" || return 0

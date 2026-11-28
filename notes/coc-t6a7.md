@@ -60,12 +60,12 @@ proposition.md:1-10 gives a comparison's type as Prop. lambda.md:18 has `fs[1](3
 | test_universe_wanted:13-15 | `identity(int)`, `identity(Type)` | 4 |
 | test_universe_wanted:16-18 | `pair_type(int, text)`, `type of pair_type(int, Type)` | 4 |
 | test_universe_wanted:19 | `identity[1](int, 3)`, `identity[2](Type, int)` | 5 |
-| wap/test_theory.wap:9-18 | the same forms through verify's door | 1-6 |
+| test/wap/test_theory.wap:9-18 | the same forms through verify's door | 1-6 |
 
 The table lists the lines whose forms the plan reads. The builder counts the file's 18 red lines against
 test/reds.txt.
 
-**One line disagrees with the wiki.** wap/test_theory.wap:19 wants `type of identity(int, three)` refused "by level
+**One line disagrees with the wiki.** test/wap/test_theory.wap:19 wants `type of identity(int, three)` refused "by level
 count" for an `identity(T: Sort(u), a: T)`. universe.md:54-58 and :76 find a level that nothing writes, so the call is
 `int`'s identity and its type is int. Decided: the line follows the wiki and becomes `type of identity(int, three)` is `int`, in its own commit naming
 universe.md:54-58 and :76.

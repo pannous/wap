@@ -162,6 +162,7 @@ this file and your role file beat the handover.
 - A wrong value that another reading could make right, or a bug that may not matter, goes to warp-interviewer with
   code, value and expectation before anyone fixes code or test.
 - Communicate less: message only for landed, blocked or a decision needed. Git (branch, commits, card) is the status.
+- Never tell the user what the user did or decided; report only what follows from it.
   warp-integrator gets only requests it must act on.
 - Ideas for a better process or architecture go to warp-supervisor, which decides or brings them to warp-interviewer.
 
