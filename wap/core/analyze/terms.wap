@@ -24,8 +24,11 @@ use "../../kernel/counting.wap"
 use "../../kernel/numbers.wap"
 use "../../kernel/recursors.wap"
 use "../../kernel/inductive.wap"
+use "../../kernel/levels.wap"
 
 ROW_MARK = "prim"
+# the rule a match refuses by that takes a proposition apart into data (wiki/proposition.md "a proof decides no data")
+ELIMINATION = "elimination"
 
 # the typed functions entered, callees before their callers: each by its key, once
 instances_entered(functions: list<TypedFunction>, s: TypingState) as map<text, TypedFunction> := {
@@ -69,7 +72,7 @@ kernel_signature(typed: TypedFunction, s: TypingState) as Term? := {
 	parameters = typed.arguments.map(type => settled_type(type, s))
 	result = kernel_settled(typed.result ?? return ø, s)
 	if (parameters + [result]).any(type => has_letters(type) or has_unknowns(type)) { return ø }
-	parameters.reverse.fold(result, (body, parameter) => pi("_", parameter, body))
+	parameters.reverse.fold(result, (body, parameter) => pi(WILDCARD, parameter, body))
 }
 # a pure function's value, the function of its parameters its body computes; ø for any other
 definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := match typed.define {
@@ -121,7 +124,7 @@ row_term(n: Node, operation: text, arguments: list, x: Entering) as Term? := {
 }
 # a host operation's constant of the types it takes and gives, declared once
 row_constant(operation: text, types: list<Term?>) as Term := {
-	type = types.take(#types - 1).reverse.fold(types.last!, (body, parameter) => pi("_", parameter!, body))
+	type = types.take(#types - 1).reverse.fold(types.last!, (body, parameter) => pi(WILDCARD, parameter!, body))
 	name = row_name(operation, type)
 	meaning = if types.take(2).all(part => part == INT_TERM) then int_meaning(TYPES.environment, operation) else ø
 	if named_id(TYPES.environment, name) == ø { added(TYPES.environment, Declaration(name, [], type, if meaning == ø then Row(operation) else Defined(meaning!))) }
@@ -141,17 +144,23 @@ choice_term(n: Node, condition: Node, then_part: Node, else_part: Node, x: Enter
 	terms = [else_part, then_part, condition].map(part => term_of(part, x))
 	if terms.any(term => term == ø) then ø else recursor_applied(BOOL_TERM, type, terms.map(term => term!))
 }
-# a type's recursor into a constant motive, the result type, applied to its minor premises and then the major premise
+# a type's recursor into a constant motive, the result type, at the result's level, applied to its minor premises and
+# then the major premise; a proposition's enum, which its recursor takes apart only into propositions (And, Or,
+# Exists), refused where the result is data
 recursor_applied(type: Term, result: Term, arguments: list<Term>) as Term := {
 	name = recursor_name(constant_name(type))
-	apply_all(apply(constant(named_id(TYPES.environment, name)!, name, [TYPE_LEVEL]), lambda("_", type, result)), arguments)
+	recursor = named_id(TYPES.environment, name) ?? refused(ELIMINATION, "${constant_name(type)} has no recursor")
+	level = simplified(level_of(checker(TYPES.environment, []), result))
+	any_motive = block_of(TYPES.environment, type, ELIMINATION).any_motive
+	if not any_motive and not is_zero(level) { refused(ELIMINATION, "${constant_name(type)} is a proposition, taken apart only into a proposition, never into ${shown(result)}") }
+	apply_all(apply(constant(recursor, name, if any_motive then [level] else []), lambda(WILDCARD, type, result)), arguments)
 }
 # a `match` with every arm's result of its type: on a defined enum, a minor premise for each case of its recursor, on
 # whole numbers a chain of choices (guards and nested patterns give no term)
 match_term(n: Node, subject: Node, arms: list, x: Entering) as Term? := {
 	type = kernel_value(n) ?? return ø
 	domain = kernel_value(subject) ?? return ø
-	if arms.any(arm => kernel_value(arm_result(arm)) != type) { return ø }
+	if arms is empty or arms.any(arm => kernel_value(arm_result(arm)) != type) { return ø }
 	if domain == INT_TERM { return literals_term(subject, arms, type, x) }
 	if TYPES.enums.get(word_id(domain)) != ENUM_DEFINED { return ø }
 	block = block_of(TYPES.environment, domain, "match").block
@@ -160,33 +169,34 @@ match_term(n: Node, subject: Node, arms: list, x: Entering) as Term? := {
 	major = term_of(subject, x) ?? return ø
 	if minors.any(minor => minor == ø) then ø else recursor_applied(domain, type, minors.map(minor => minor!) + [major])
 }
-arm_result(arm: Node) as Node := match arm { Arm(pattern, result) => result }
-arm_pattern(arm: Node) as Node := match arm { Arm(pattern, result) => pattern }
 # the constructor a pattern names, ø for a name or `_`
 pattern_constructor(pattern: Node) as int? := TYPES.constructors.get(place_key(fact_of(case_name(pattern), DEFINED_AT) ?? return ø))
 # a case's minor premise: the fields, then a hypothesis for each field of the enum itself, under the first arm that names
 # the case or fits any value, a name there holding the case's value
-NO_BINDER = "·unnamed"
 case_minor(id: int, arms: list, domain: Term, type: Term, x: Entering) as Term? := {
 	constructor = declared_at(TYPES.environment, id)!
 	fields = arrow_parts(constructor.type).take(#arrow_parts(constructor.type) - 1)
-	arm = arms.find(arm => [id, ø].contains(pattern_constructor(arm_pattern(arm)))) ?? return ø
-	pattern = arm_pattern(arm)
+	arm = arms.find(arm => [id, ø].contains(pattern_constructor(pattern_of(arm)))) ?? return ø
+	pattern = pattern_of(arm)
 	named = pattern_constructor(pattern) == id
-	names = if named then case_fields(pattern) else fields.map(field => symbol(NO_BINDER))
+	names = if named then case_fields(pattern) else fields.map(field => symbol(WILDCARD))
 	if #names != #fields or names.any(name => not name is symbol) { return ø }
 	hypotheses = fields.filter(field => field == domain).map(field => type)
-	keys = names.map(name => place_key(name)) + hypotheses.map(hypothesis => NO_BINDER)
+	keys = names.map(name => place_key(name)) + hypotheses.map(hypothesis => WILDCARD)
 	inner = Entering(x.binders + keys, x.by_key, x.s)
 	body = if named or pattern == symbol(WILDCARD) then term_of(arm_result(arm), inner) else let_in(text(pattern), domain, apply_all(constant(id, constructor.name, []), (1 to #fields).list().map(at => bound(#keys - at))), term_of(arm_result(arm), Entering(inner.binders + [place_key(pattern)], x.by_key, x.s)))
 	binders = fields + hypotheses
-	if body == ø then ø else (1 to #binders).reverse.fold(body!, (inner_term, at) => lambda(if at <= #names then text(names#at) else NO_BINDER, binders#at, inner_term))
+	if body == ø then ø else (1 to #binders).reverse.fold(body!, (inner_term, at) => lambda(if at <= #names then text(names#at) else WILDCARD, binders#at, inner_term))
 }
-# whole-number arms, `0 => a; 1 => b; _ => c`, as chained choices on their equality, the last arm fitting any value
+# whole-number arms, `0 => a; 1 => b; _ => c`, as chained choices on their equality, the last arm fitting any value;
+# an arm of any other pattern, a name binding the value or a nested pattern, gives no term, and the match is left to
+# the run
 literals_term(subject: Node, arms: list, type: Term, x: Entering) as Term? := {
-	pattern = arm_pattern(arms#1)
+	if arms is empty { return ø }
+	pattern = pattern_of(arms#1)
 	result = term_of(arm_result(arms#1), x) ?? return ø
 	if #arms == 1 { return if pattern == symbol(WILDCARD) then result else ø }
+	if not pattern is Number { return ø }
 	literal = term_of(pattern, x) ?? return ø
 	rest = literals_term(subject, arms.drop(1), type, x) ?? return ø
 	given = term_of(subject, x) ?? return ø
