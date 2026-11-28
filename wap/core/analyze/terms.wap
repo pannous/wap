@@ -106,7 +106,7 @@ parameters_entered(typed: TypedFunction, c: Checker, s: TypingState) as list<Loc
 	names = parameter_names(typed)
 	for at in 1 to #typed.arguments {
 		before = fresh_reading(c, {}, s).under(locals, names.take(at - 1).map(place_key))
-		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c))]
+		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c, s))]
 	}
 	locals
 }
@@ -124,31 +124,40 @@ kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 	match typed.written! {
 		Call(head, items) => {
 			given = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), parameters_reading(typed, by_key, s)) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)
-			kernel_headed(apply_all(kernel_type(family_word(head))!, given), typed.checker!)
+			kernel_headed(apply_all(kernel_type(family_word(head))!, given), typed.checker!, s)
 		}
 		_ => ø
 	}
 }
 # A type as the kernel reads it, on the checker its terms are read on: every kernel family applied in it, under its
 # binders and in its arguments too, is headed at the levels its arguments give (family_head); a term holding no level
-# parameter, typing's bare levels, is as it is
-kernel_headed(t: Term, c: Checker) as Term := if not t.holds_parameter then t else match t.shape {
+# parameter, typing's bare levels, is as it is. A function named as a family's argument, `same_value` of
+# `quotient(fraction, same_value)`, is that function
+kernel_headed(t: Term, c: Checker, s: TypingState) as Term := if not t.holds_parameter then t else match t.shape {
 	Apply(function, argument) => {
-		given = arguments(t).map(part => kernel_headed(part, c))
+		given = arguments(t).map(part => function_valued(part, s) ?? kernel_headed(part, c, s))
 		family = declared_at(TYPES.environment, constant_id(head_of(t)))
-		if family == ø or family!.levels is empty then apply_all(kernel_headed(head_of(t), c), given) else apply_all(family_head(family!, given, c), given)
+		if family == ø or family!.levels is empty then apply_all(kernel_headed(head_of(t), c, s), given) else apply_all(family_head(family!, given, c), given)
 	}
-	Pi(binder, domain, body) => binder_headed(c, binder, domain, body, pi)
-	Lambda(binder, domain, body) => binder_headed(c, binder, domain, body, lambda)
-	Projection(structure, field, of) => projection(structure, field, kernel_headed(of, c))
+	Pi(binder, domain, body) => binder_headed(c, s, binder, domain, body, pi)
+	Lambda(binder, domain, body) => binder_headed(c, s, binder, domain, body, lambda)
+	Projection(structure, field, of) => projection(structure, field, kernel_headed(of, c, s))
 	_ => t
+}
+# the function a type's argument word names, as the kernel holds it, typing's word of its code read as the value
+# (type_notation.wap value_word); ø for any other part
+function_valued(part: Term, s: TypingState) as Term? := {
+	item = TYPES.values.get(word_id(part)) ?? return ø
+	if not item is symbol { return ø }
+	typed = s.functions.find(each => each.define is Define and text(defined_name(each.define)) == text(item)) ?? return ø
+	instance_entered(typed, instances_keyed(s.functions), s)
 }
 # a binder made again of its domain headed and its body headed with the binder entered as a variable of that domain
 # GUESS: a named kernel maker (pi, lambda) passes as a function value
-binder_headed(c: Checker, binder: text, domain: Term, body: Term, made: (text, Term, Term) -> Term) as Term := {
-	headed = kernel_headed(domain, c)
+binder_headed(c: Checker, s: TypingState, binder: text, domain: Term, body: Term, made: (text, Term, Term) -> Term) as Term := {
+	headed = kernel_headed(domain, c, s)
 	inside = entered(c, binder, headed)
-	made(binder, headed, abstracted(kernel_headed(instantiated(body, inside.variable), c), variable_id(inside.variable)))
+	made(binder, headed, abstracted(kernel_headed(instantiated(body, inside.variable), c, s), variable_id(inside.variable)))
 }
 # a kernel family with a level hole for each level parameter, its arguments unified with its binders' types in turn,
 # each dependent binder taking the argument before it, so the levels found fill the holes (`Equal(nat, a, b)`: u from
@@ -447,7 +456,7 @@ terms_applied(function: Term, arguments: list, x: Entering) as Term? := {
 # a type as the kernel reads a value's: a subtype by condition is its parent's
 kernel_type(type: Term?) as Term? := if type != ø and subset_condition(type) != ø then kernel_type(narrowed_type(type)) else type
 # (every typing type becomes a kernel term here, its families headed at their levels on the checker its terms are of)
-kernel_settled(type: Term, s: TypingState, c: Checker = checker(TYPES.environment, [])) as Term := kernel_headed(kernel_type(settled_type(type, s))!, c)
+kernel_settled(type: Term, s: TypingState, c: Checker = checker(TYPES.environment, [])) as Term := kernel_headed(kernel_type(settled_type(type, s))!, c, s)
 kernel_value(n: Node) as Term? := kernel_type(value_type(n))
 
 # Each subtype's condition, a definition of the parent's values named after the subtype, `int where it >= 0 holds`:
