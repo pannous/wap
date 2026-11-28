@@ -28,7 +28,6 @@ operation_effects() as map<text, Effect> := {
 	effects: map<text, Effect> = {}
 	for operation in IO_OPERATIONS { effects[operation] = Effect.IO }
 	for operation in FAILING_OPERATIONS { effects[operation] = Effect.Fail }
-	for operation in STATE_OPERATIONS { effects[operation] = Effect.State }
 	effects
 }
 # a typed function called, and whether its Fail is caught, by a `try` or by a divisor that is no 0
@@ -37,7 +36,9 @@ class Callee { key: text; caught: bool }
 # (none), only where one of these parameters is 0, a divisor (their places), or whatever it is given (ø); the
 # parameters it writes into (their places), its State only where a caller gives it what the caller holds; the locals
 # it made itself, a literal or its own allocation, whose writes stay inside it, and those given anything else
-class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = [] }
+class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = []; captured: list<Captured> = []; tentative: bool = no }
+# a variable of a function around a function value that the value writes: given a new value, or written into
+class Captured { key: text; rebinding: bool }
 # The effects of the typed functions, joined over the groups of functions that call each other round (groups.wap):
 # each function's own part and the effects found, each group's alike
 class Joining {
@@ -71,6 +72,7 @@ effects_joined(s: TypingState) as Joining := {
 # a group of functions that call each other round, each with the group's own effects and its calls' outside it: every
 # group it calls is joined before it
 effects_of_group(group: list<text>, x: Joining) := {
+	owns_settled(group, x)
 	round = #group > 1 or own_of(group#1, x).calls.any(call => call.key == group#1)
 	effects: list<Effect> = if round then [Effect.Div] else []
 	for member in group {
@@ -80,21 +82,46 @@ effects_of_group(group: list<text>, x: Joining) := {
 	for member in group { x.found[member] = effects.unique }
 }
 # the effects of a typed function as `effects of` names them: State too where it writes into what it is given
-shown_of(key: text, x: Joining) as list<Effect> := found_of(key, x) + (if own_of(key, x).written is empty then [] else [Effect.State])
+shown_of(key: text, x: Joining) as list<Effect> := found_of(key, x) + (if own_of(key, x).written is empty and own_of(key, x).captured is empty then [] else [Effect.State])
 # the effects found of a typed function, every one it calls joined before it
 found_of(key: text, x: Joining) as list<Effect> := x.found.get(key) ?? raise "effects: ${key} is read before its group is joined"
 # what a typed function's body does itself and calls, read once
 own_of(key: text, x: Joining) as Own := {
 	if x.own.has(key) { return x.own[key] }
-	# while its body is read, a call back to it may fail whatever it is given
-	x.own[key] = Own([], [], [], ø)
+	# while its body is read, a call back to it may fail whatever it is given, and what it writes is not known yet: what
+	# reads it so far is tentative, read again once its group is settled (owns_settled)
+	x.own[key] = Own([], [], [], ø, tentative: yes)
+	x.own[key] = own_read(key, x)
+	x.own[key]
+}
+own_read(key: text, x: Joining) as Own := {
 	own = Own([], [], parameter_words(x.by_key[key]).map(place_key))
 	body = body_of(x.by_key[key])
 	if fact_of(body, CLAIMED) != ø and is_foreign(body) { claimed_own(fact_of(body, CLAIMED)!, x.by_key[key], own) } else { effects_in(body, no, own, x) }
 	# a parameter the body assigns no longer holds what the caller gave
 	if own.divisors != ø and own.divisors!.any(at => own.assigned.contains(at)) { own.divisors = ø }
-	x.own[key] = own
 	own
+}
+# a callee's own part, the reader's tentative where the callee's is
+callee_own(key: text, own: Own, x: Joining) as Own := {
+	callee = own_of(key, x)
+	if callee.tentative { own.tentative = yes }
+	callee
+}
+# a group whose members read one another while being read, read again while what they write grows, each read seeing
+# the others' last: then final, as every group it calls is
+owns_settled(group: list<text>, x: Joining) := {
+	if not group.any(member => own_of(member, x).tentative) { return }
+	grown = yes
+	while grown {
+		grown = no
+		for member in group {
+			read = own_read(member, x)
+			grown = grown or #read.written > #own_of(member, x).written
+			x.own[member] = read
+		}
+	}
+	for member in group { x.own[member].tentative = no }
 }
 body_of(typed: TypedFunction) as Node := match typed.define { Define(name, parameters, body) => body; _ => Empty }
 parameters_of(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters); _ => [] }
@@ -132,7 +159,7 @@ fails_by(claim: Node) as list<text> := match claim { Call(called, arguments) => 
 # node brings itself: its operation's, a loop's, a global variable's, a block's sharing the program's variables,
 # `global y`
 effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
-	Fn(parameters, body) => { own.calls += instances_named(place_key(name_for(LAMBDA_NAME, n)), x).map(key => Callee(key, caught)) }
+	Fn(parameters, body) => for key in instances_named(place_key(name_for(LAMBDA_NAME, n)), x) { value_given(key, caught, own, x) }
 	Define(name, parameters, body) => ø
 	Try(body, handler) => {
 		effects_in(body, yes, own, x)
@@ -141,23 +168,20 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 	Symbol(name) => {
 		named = fact_of(n, DEFINED_AT) ?? return
 		if is_kind_word(fact_of(named, ASSIGNS), DefinitionKind.Global) { effect_added(Effect.State, caught, own) }
-		# a function given as a value may be given anything
-		for key in instances_named(place_key(named), x) {
-			if own_of(key, x).divisors != [] { divisor_met(Empty, caught, own) }
-			if own_of(key, x).written is not empty { effect_added(Effect.State, caught, own) }
-			own.calls += [Callee(key, caught)]
-		}
+		for key in instances_named(place_key(named), x) { value_given(key, caught, own, x) }
 	}
 	Call(called, arguments) => {
 		effects_in_each(arguments, caught, own, x)
 		named = fact_of(called, DEFINED_AT)
 		key = if named == ø then "" else place_key(named!)
 		if not x.by_key.has(key) { return effects_in(called, caught, own, x) }
-		divisors = own_of(key, x).divisors
+		callee = callee_own(key, own, x)
+		divisors = callee.divisors
 		# each divisor met, so each one the caller is given is recorded
 		safe = divisors != ø and divisors!.map(at => divisor_met(arguments#at, caught, own)).all(met => met)
 		if divisors == ø { divisor_met(Empty, caught, own) }
-		for at in own_of(key, x).written { written_into(arguments#at, caught, own) }
+		for at in callee.written { written_into(arguments#at, caught, own) }
+		captures_given(callee, own)
 		own.calls += [Callee(key, caught or safe)]
 	}
 	Prim(operation, arguments) => {
@@ -169,10 +193,26 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		if n is Block and globals_named(n) is not empty { effect_added(Effect.State, caught, own) }
 		match unwrapped(n) { Set(place, value) => {
 			own.assigned += [parameter_at(place, own)]
-			if place is Get or is_kind_word(fact_of(place, BINDING), DefinitionKind.Capture) then written_into(place, caught, own) else local_set(place, value, own)
+			match place { Get(subject, key) => written_into(subject, caught, own); _ => if is_bound(place, DefinitionKind.Capture) then own.captured += [Captured(local_key(place), yes)] else local_set(place, value, own) }
 		}; _ => ø }
 		effects_in_each(direct_parts(unwrapped(n)), caught, own, x)
 	}
+}
+# a function given as a value, named or written in place: it may be given anything, so it may fail by any divisor and
+# what it writes into is State
+value_given(key: text, caught: bool, own: Own, x: Joining) := {
+	callee = callee_own(key, own, x)
+	if callee.divisors != [] { divisor_met(Empty, caught, own) }
+	if callee.written is not empty { effect_added(Effect.State, caught, own) }
+	captures_given(callee, own)
+	own.calls += [Callee(key, caught)]
+}
+# the variables a callee writes of the functions around it: one of the caller's own keeps it, a rebinding of any of
+# its locals or a write into one it made itself (`count(xs) := { n = 0; xs.map(x => { n += 1; x }); n }`); any other
+# is passed on outward, State where nothing around keeps it
+captures_given(callee: Own, own: Own) := for c in callee.captured {
+	kept = if c.rebinding then own.made.contains(c.key) or own.given.contains(c.key) else own.made.contains(c.key) and not own.given.contains(c.key)
+	if not kept { own.captured += [c] }
 }
 # a divisor met: whether it is a whole number other than 0 and -1 written in place, which no division fails by (the
 # smallest int ÷ -1 traps); else the
@@ -183,34 +223,36 @@ divisor_met(divisor: Node, caught: bool, own: Own) as bool := {
 	if not caught and own.divisors != ø { own.divisors = if at > 0 then own.divisors! + [at] else ø }
 	no
 }
-# A write into what a place holds, `c.n = 1`, `xs.add(1)`, an item or field of what its root names (the target followed
-# through its first operand, `items_at(of) + k` of): a parameter's the function writes into, one a local it made itself
-# holds stays inside it; any other, a captured or global variable's or a local given anything else, is State
+# A write into a value, `xs.add(1)` into xs, `c.n = 1` into c: one a parameter holds, or a part of it (`boxes#1.n = 1`),
+# the function writes into; a local it made itself, a literal or a new record, keeps a write into that value itself,
+# never one into a value it holds (`ys = [p]; ys#1.n = 1` writes into p); any other is State
 written_into(target: Node, caught: bool, own: Own) := {
-	root = written_root(target)
-	at = if root == ø then 0 else parameter_at(root!, own)
+	root = written_root(target, 0) ?? return effect_added(Effect.State, caught, own)
+	at = parameter_at(root.name, own)
 	if at > 0 { own.written = (own.written + [at]).unique; return }
-	key = if root == ø then "" else place_key(fact_of(root!, DEFINED_AT) ?? Empty)
-	if not (own.made.contains(key) and not own.given.contains(key)) { effect_added(Effect.State, caught, own) }
+	key = local_key(root.name)
+	if root.steps == 0 and is_bound(root.name, DefinitionKind.Capture) { own.captured += [Captured(key, no)]; return }
+	if root.steps > 0 or not own.made.contains(key) or own.given.contains(key) { effect_added(Effect.State, caught, own) }
 }
-written_root(n: Node) as Node? := match n {
-	Symbol(name) => n
-	Get(subject, key) => written_root(subject)
-	Call(called, arguments) => if arguments is empty then ø else written_root(arguments#1)
-	Prim(operation, arguments) => if arguments is empty then ø else written_root(arguments#1)
+# the name a value written into is reached from, through fields and items, and how many of them; ø for a value of any
+# other expression, `pick(a, b).n`
+class Root { name: Node; steps: int }
+written_root(n: Node, steps: int) as Root? := match n {
+	Symbol(name) => Root(n, steps)
+	Get(subject, key) => written_root(subject, steps + 1)
+	Call(called, arguments) => if text(called) == PLACE_WORD and arguments is not empty then written_root(arguments#1, steps + 1) else ø
 	_ => ø
 }
 # a local given a value: one it made itself where the value is a literal or a new record, else one given anything
 local_set(place: Node, value: Node, own: Own) := {
-	key = place_key(fact_of(declared_name(place), DEFINED_AT) ?? declared_name(place))
+	key = local_key(declared_name(place))
 	if is_made(unwrapped(value)) then own.made += [key] else own.given += [key]
 }
 is_made(value: Node) as bool := match value { List(items, bracket, separator) => yes; Text(t) => yes; Call(called, arguments) => is_bound(called, DefinitionKind.Record) or is_bound(called, DefinitionKind.Case); _ => no }
 # which of the function's parameters a name is, 0 for none
-parameter_at(n: Node, own: Own) as int := {
-	named = fact_of(n, DEFINED_AT)
-	if named == ø then 0 else own.parameters.index_of(place_key(named!))
-}
+parameter_at(n: Node, own: Own) as int := if fact_of(n, DEFINED_AT) == ø then 0 else own.parameters.index_of(local_key(n))
+# the key of the variable a name means, the place it is defined; a defining name's own
+local_key(n: Node) as text := place_key(fact_of(n, DEFINED_AT) ?? n)
 # an effect a body does itself, none where it is ø, a Fail none where a `try` catches it
 effect_added(effect: Effect?, caught: bool, own: Own) := if effect != ø and not (caught and effect == Effect.Fail) {
 	own.effects += [effect!]
