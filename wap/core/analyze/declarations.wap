@@ -25,6 +25,7 @@ use "../../kernel/surface.wap"
 use "../parse/cascade.wap"
 
 use "../paths.wap"
+use "../type_notation.wap"
 
 USE_WORD = "use"
 INCLUDE_WORD = "include"
@@ -181,16 +182,25 @@ module_of(file: text, modules: list<Module>) as Module := modules.find(module =>
 # them, (Call := f(a, b) …), (Call = x 1); a class or an enum declares itself, its cases as lowering writes them
 declaration_of(statement: Node) as Node? := match statement {
 	Record(name, fields, variants) => with_facts_of(Record(name, fields, cases_lowered(variants)), statement)
-	Call(called, arguments) => if text(called) == ":=" then signature_of(arguments#1) else if text(called) == "=" then value_named(arguments#1) else ø
+	Call(called, arguments) => if text(called) == ":=" then type_named(signature_of(arguments#1) ?? return ø, arguments#2) else if text(called) == "=" then value_named(arguments#1) else ø
 	_ => ø
 }
+# a definition giving a type, `nat: Type := int where it >= 0` (sugar/definitions.wap `type nat = …`): its name holds
+# the type, which a type written by that name is (analyze/scope.wap type_bound)
+type_named(signature: Node, body: Node) as Node := match signature {
+	Key(name, op, parts) => if universe_written(fact_of(signature, WRITTEN_RESULT) ?? return signature) == ø then signature else with_facts_of(Key(type_named_by(name, body), op, parts), signature)
+	_ => signature
+}
+# a type's name holding the type it names; one that names itself is refused, as it never ends
+type_named_by(name: Node, body: Node) as Node := if names_used(body).contains(text(name)) then refused(name, "a type name names itself: an enum or a class declares a recursive type") else with_fact(name, TYPE_NAMED, body)
 # a Record's cases as lowering writes them, each case's fields as written, `Run(f: (int) -> int)` a function type
 cases_lowered(variants: Node) as Node := match variants { List(cases, bracket, separator) => List(cases.map(case_lowered), bracket, separator); _ => variants }
 # an enum's case as lowering writes it: `Leaf(value: int)` a call of its name with its fields, `Empty = "ø"` its name
 # keeping its spelling, a bare name as it is
 case_lowered(case: Node) as Node := match case {
 	Key(name, Op.None, group) => Call(name, arguments_of(group))
-	Key(name, Op.Colon, spelling) => with_fact(name, SPELLING, spelling)
+	# GUESS (T6a3's indices): a case written with the type it gives, `step(k: nat): Even(k + 2)`, lowers its shape (stage.wap case_shape)
+	Key(shape, Op.Colon, result) => if result is Text then with_fact(shape, SPELLING, result) else Key(case_lowered(shape), Op.Colon, result)
 	_ => case
 }
 # what `f(a, b)` or `n` before := declares: a function with its parameters, or a value, with the result type written
@@ -202,6 +212,8 @@ signature_of(head: Node) as Node? := match head {
 	_ => ø
 }
 WRITTEN_RESULT = "written result"
+# on a definition's name, the type it gives, where it gives a type: `nat: Type := int where it >= 0`
+TYPE_NAMED = "type named"
 # a declaration's parameters as written, none of a value's; its written result type, ø where none is written
 declared_parameters(declaration: Node) as list<Node> := match declaration { Key(name, Op.Colon, List(items, bracket, separator)) => items; _ => [] }
 declared_result(declaration: Node) as Node? := fact_of(declaration, WRITTEN_RESULT)
