@@ -25,6 +25,7 @@ use "../parse/operator_table.wap"
 use "../../types/operators.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/surface.wap"
+use "../../kernel/environment.wap"
 use "../rules/patterns.wap"
 
 # depth of the program's own statements: names defined there are globals and top-level functions
@@ -49,7 +50,7 @@ types_scope(types: list<Signature>) as list<Definition> := types.flat_map(signat
 # class or an enum it declares, its cases and its fields for methods, as the program's own
 library_words(signature: Signature, depth: int) as list<Definition> := match signature.kind {
 	DefinitionKind.Record => definitions_made_by(signature.record!, Scope(), depth)
-	DefinitionKind.Function => [Definition(signature.name, DefinitionKind.Library, signature.definer, depth)]
+	DefinitionKind.Function => [Definition(signature.name, DefinitionKind.Library, signature.definer, depth, "", 0, universe_level(signature.result) != ø)]
 	_ => [Definition(signature.name, signature.kind, signature.definer, depth)]
 }
 
@@ -63,7 +64,7 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	Fn(parameters, body) => with_captures(refitted(Fn(parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
 	Set(place, value) => refitted(Set(bound(place, if declares_global(n) then program_scope(scope) else scope, depth), bound(value, declaring(scope, declared_name(place)), depth)), n)
 	# a function type where a value stands, `(a, b) -> a + b`, is no value: types are written after a colon
-	Call(called, arguments) => if text(called) == FUNCTION_ARROW then refused(n, "-> writes a function type; a function value is written with =>: `(a, b) => a + b`") else module_call(n, called, arguments, scope, depth) ?? if core_word(called, TYPE_TEST_WORD, scope) then type_test_bound(n, called, arguments, scope, depth) else if QUESTION_WORDS.any(word => core_word(called, word, scope)) then refitted(Call(called, arguments.map(of => if names_value(of, scope) then bound(of, scope, depth) else of)), n) else if claims_effects(called, arguments) then refitted(Call(called, all_bound(arguments.take(1), scope, depth) + arguments.drop(1)), n) else if rest_named(n) != ø then refitted(Call(called, all_bound(arguments, scope, depth)), n) else field_called(n, called, arguments, scope, depth) ?? refitted(Call(called_bound(with_receiver(called, scope, depth), #arguments, scope, depth), arguments_bound(arguments, scope, depth)), n)
+	Call(called, arguments) => if text(called) == FUNCTION_ARROW then refused(n, "-> writes a function type; a function value is written with =>: `(a, b) => a + b`") else module_call(n, called, arguments, scope, depth) ?? if core_word(called, TYPE_TEST_WORD, scope) then type_test_bound(n, called, arguments, scope, depth) else if NAMING_WORDS.any(word => core_word(called, word, scope)) then refitted(Call(called, arguments.map(of => if names_value(of, scope) then bound(of, scope, depth) else of)), n) else if claims_effects(called, arguments) then refitted(Call(called, all_bound(arguments.take(1), scope, depth) + arguments.drop(1)), n) else if rest_named(n) != ø then refitted(Call(called, all_bound(arguments, scope, depth)), n) else field_called(n, called, arguments, scope, depth) ?? refitted(Call(called_bound(with_receiver(called, scope, depth), #arguments, scope, depth), arguments_bound(arguments, scope, depth)), n)
 	Prim(operation, arguments) => refitted(Prim(operation, all_bound(arguments, scope, depth)), n)
 	If(condition, then_part, else_part) => refitted(If(bound(condition, scope, depth), bound(then_part, scope, depth), bound(else_part, scope, depth)), n)
 	While(condition, body) => refitted(While(bound(condition, scope, depth), bound(body, looped_scope(scope, depth), depth)), n)
@@ -78,7 +79,7 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	List(items, Bracket.Square, separator) => refitted(List(all_bound(items, scope, depth), Bracket.Square, separator), n)
 	Key(name, Op.Colon, type) => refitted(Key(bound(name, scope, depth), Op.Colon, type_bound(type, scope, depth)), n)
 	# a function's name glued to a map calls it with the map, `style{a: 1}` style({a: 1}) (wiki/significant-whitespace.md)
-	Key(head, Op.None, List(items, Bracket.Curly, separator)) => if names_function_in(head, scope) then bound(refitted(Call(head, [refitted(List(items, Bracket.Curly, separator), n)]), n), scope, depth) else refitted(Key(type_bound(head, scope), Op.None, List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator)), n)
+	Key(head, Op.None, List(items, Bracket.Curly, separator)) => if names_function_in(head, scope) then bound(refitted(Call(head, [refitted(List(items, Bracket.Curly, separator), n)]), n), scope, depth) else refitted(Key(type_named_bound(head, scope), Op.None, List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator)), n)
 	List(items, Bracket.Curly, separator) => refitted(List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator), n)
 	Record(name, fields, variants) => refitted(Record(name, with_items(fields, items_of(fields).map(field => field_bound(field, scope))), with_items(variants, items_of(variants).map(variant => field_bound(variant, scope)))), n)
 	Number(value) => n
@@ -107,24 +108,34 @@ case_owner(scope: Scope, name: text) as Definition? := {
 }
 # a record's field, or a case with fields, its written types bound as a parameter's are
 field_bound(field: Node, scope: Scope) as Node := match field {
-	Key(name, Op.Colon, type) => refitted(Key(name, Op.Colon, type_bound(type, scope)), field)
+	Key(name, Op.Colon, type) => refitted(Key(name, Op.Colon, type_named_bound(type, scope)), field)
 	Set(place, value) => refitted(Set(field_bound(place, scope), value), field)
 	Call(called, fields) => refitted(Call(called, fields.map(each => field_bound(each, scope))), field)
 	_ => field
 }
-type_bound(type: Node, scope: Scope, depth: int = 0) as Node := match type {
-	# a call of a function in a type's place is code, a statement or a value a type names, `a + 0 == a`, `P(f)`
-	Call(called, arguments) => if names_function_in(called, scope) then bound(type, scope, depth) else refitted(Call(called, arguments.map(argument => type_bound(argument, scope, depth))), type)
+# a written type in its place: a call of code there, a statement or a value a type names, bound as code (is_code_call);
+# any other its record names bound
+type_bound(type: Node, scope: Scope, depth: int) as Node := {
+	code = fact_of(type, AS_CODE)
+	if code != ø and is_code_call(code!, scope) then bound(code!, scope, depth) else type_named_bound(type, scope)
+}
+type_named_bound(type: Node, scope: Scope) as Node := match type {
 	Symbol(name) => {
 		record = record_meant(scope, name)
 		# a case word narrows the enum its scope sees, whatever other enums hold a case so named
-		if record == ø { return with_fact(type, NARROWS, type_bound(symbol((case_owner(scope, name) ?? return type).name), scope, depth)) }
+		if record == ø { return with_fact(type, NARROWS, type_named_bound(symbol((case_owner(scope, name) ?? return type).name), scope)) }
 		with_fact(type, DECLARED_BY, record_declared(record!.definer))
 	}
-	List(items, bracket, separator) => refitted(List(items.map(item => type_bound(item, scope, depth)), bracket, separator), type)
-	Key(name, op, parts) => refitted(Key(name, op, type_bound(parts, scope, depth)), type)
+	List(items, bracket, separator) => refitted(List(items.map(item => type_named_bound(item, scope)), bracket, separator), type)
+	Call(called, arguments) => refitted(Call(called, arguments.map(argument => type_named_bound(argument, scope))), type)
+	Key(name, op, parts) => refitted(Key(name, op, type_named_bound(parts, scope)), type)
 	_ => type
 }
+# A call in a type's place is a type where a type's notation writes it, `int | text`, `3 * int`, `int where it > 0`,
+# or its head makes types, a record or a function giving a universe, `Even(n)`, `vector(int, 3)`, or the kernel's
+# family, `Equal(…)`; a call of any other function in scope is code, a statement or a value a type names, `a + 0 == a`,
+# `P(f)`, bound as code is
+is_code_call(type: Node, scope: Scope) as bool := match type { Call(called, arguments) => not is_type_written(type) and text(called) != ARRAY_TIMES and names_function_in(called, scope) and not definitions_meant(text(called), scope).any(definition => definition.types); _ => no }
 # An arm: the name its pattern holds a new variable of the arm, which its result sees; `_` and literals name none
 arm_bound(arm: Arm, scope: Scope, depth: int) as Node := match arm {
 	Arm(pattern, result) => {
@@ -296,9 +307,9 @@ resolved_taking(name: Node, given: int?, scope: Scope, depth: int) as Node := {
 	# a name nothing defines is read as the word its alias gives, `length` count (types/operators.wap word_aliases),
 	# else as a standard module's word
 	if meant is empty {
-		# a universe, `Prop`, and a proof's words, `refl`, are the language's own: typing reads them (types.wap
-		# names_type_value, proof_typed)
-		if universe_written(name) != ø or PROOF_WORDS.contains(text(name)) { return name }
+		# a universe, `Prop`, a proof's words, `refl`, and the kernel's declarations, `Equal`, are the language's own:
+		# typing reads them (types.wap names_type_value, proof_typed, type_notation.wap family_type)
+		if universe_written(name) != ø or PROOF_WORDS.contains(text(name)) or declaration(TYPES.environment, text(name)) != ø { return name }
 		alias = word_aliased(text(name))
 		if alias != text(name) and (not definitions_meant(alias, scope) is empty or scope.standard.has(alias)) { return resolved_taking(refitted(symbol(alias), name), given, scope, depth) }
 		return standard_word_bound(name, scope)
