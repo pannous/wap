@@ -5,7 +5,7 @@ A program's whole numbers reach the kernel as int, and int is the only number st
 
 int is Lean's shape, `enum int { natural(n: count); negative(n: count) }`, where `natural(n)` is n and
 `negative(n)` is −(n + 1), so each number has one form and Lean's Int theorems bind with no bridge (user, warp
-decisions aec483024d; card int-takes, after unify-typers, which carries the three cases `zero | positive | negative`).
+decisions aec483024d).
 Its payload is the kernel's count (next section). A numeral is `natural(k)` or `negative(k)`, k a count literal. An operator is a row constant, `prim i64.add int -> int -> int`,
 whose Defined value is its meaning: sum, minus, times, equal_integers, not_above, and the other comparisons. The count
 is only the payload of int's two signed cases. The provers never state a program's law over it; only the reader of an
@@ -212,7 +212,7 @@ written twice.
   condition `0 <= x` as one, and any `a <= b` in scope is another, each read by `bounds_of` as a row. No flag on the
   structure says an atom is at least 0.
 - **A hypothesis `a <= b`.** It is `Bound(a, d, b)`, with `d = sum(b, minus(a))` and two proofs:
-  `a + d == b` (`sum_difference`) and `0 <= d` (`difference_nonnegative`). An equation's d is `int.zero`.
+  `a + d == b` (`sum_difference`) and `0 <= d` (`difference_nonnegative`). An equation's d is `int.natural(0)`.
 - **The gap.** `eliminated` returns `t + gap == u` as today, the gap a sum of the used bounds' d's and a literal
   of at least 0. With it comes `0 <= gap`, built by `nonnegative_sum` from each d's proof and the literal's
   computation. `at_most_from` uses `not_above_add(t, g, h: 0 <= g): t <= t + g`.
@@ -357,7 +357,7 @@ core's int_declared (section "count_declared and int_declared").
 ### What replaces e.numbers
 
 int_declared sets `e.integers`, a kernel record beside `e.literals`, as numbers_declared set `e.numbers`:
-`Integers { type; zero; natural; negative; sum; minus; not_above; equal_integers; equals_sound; equals_complete }`,
+`Integers { type; natural; negative; sum; minus; not_above; equal_integers; equals_sound; equals_complete }`,
 each a constant (kernel +about 8 lines). `sums_of` builds Sums from it:
 
 ```
@@ -370,7 +370,7 @@ The row constants a law's body holds (`prim i64.add int -> int -> int`) are Defi
 | linear.wap today | after |
 |---|---|
 | `s.nat` (11 places: hypotheses' types, equations, congruences) | `s.i.type` |
-| `s.n.zero`, `zero_of(s)` | `s.i.zero`, `natural(·count.zero)` |
+| `s.n.zero`, `zero_of(s)` | `int_numeral(e, 0)`, `natural(·count.zero)` |
 | `s.n.successor` (normal :303, beyond :147) | gone: `b + 1` is `added(s, b, int_numeral(s, 1))` |
 | `numeral(v)` (:252, :345–349, :383) | `int_numeral(s, v)`: `natural(v)` for v ≥ 0, else `negative(−1 − v)` |
 | `normal`'s Numeral, zero and successor cases, `is_sum_part` (:300–303, :326–327) | `natural(lit)` → lit, `negative(lit)` → −lit−1, a sum, and `minus(t)` → t's Normal with each atom's minus and the number negated, by `minus_add` and computing |
