@@ -59,6 +59,8 @@ AT_MOST_BEYOND := "·at_most_beyond"
 AT_MOST_STEP := "·at_most_step"
 DIVISION_IDENTITY := "·division_identity"
 EUCLIDEAN_IDENTITY := "int.euclidean_identity"
+REMAINDER_NONNEGATIVE := "int.remainder_nonnegative"
+REMAINDER_BELOW := "int.remainder_below"
 # the count's division laws: (m ÷ k)·k + m % k == m, m ÷ 0 == 0, m % (k + 1) <= k
 COUNT_DIVISION := "·count_division"
 DIVIDED_BY_ZERO := "·divided_by_zero"
@@ -111,6 +113,7 @@ integer_laws_declared(e: Environment) := {
 	truth_laws_declared(b)
 	step_laws_declared(b)
 	word_laws_declared(b)
+	remainder_bounds_declared(b)
 }
 
 # --- equations as values
@@ -402,6 +405,24 @@ truth_cases(b: Building, c: Term, stated: (Term) -> Term, at_no: (Term) -> Term,
 	truths = b.e.literals!
 	called(b, BOOL_CASES, [c, function_of(b, "y", truths.truth, stated), assuming(b, truths_equal(b.e, c, truths.no_case), at_no), assuming(b, truths_equal(b.e, c, truths.yes_case), at_yes)])
 }
+# a condition a proof shows to be a truth, yes where it holds: `condition == yes`, else `condition == no`
+class Settled { condition: Term; holds: bool; proof: Term }
+truth_value(b: Building, holds: bool): Term := if holds then b.e.literals!.yes_case else b.e.literals!.no_case
+# a proof of `stated(c)` from a settled c and a proof of stated at its truth: at c's other truth the two proofs give
+# `no == yes`
+settled_cases(b: Building, s: Settled, stated: (Term) -> Term, at_settled: Term): Term := {
+	truths = b.e.literals!
+	clash = (at_no: Term, at_yes: Term) => followed(b.c, [flipped(b.c, Identity(truths.truth, s.condition, truths.no_case, at_no)), Identity(truths.truth, s.condition, truths.yes_case, at_yes)]).proof
+	truth_cases(b, s.condition, stated, h => if s.holds then absurd(b, stated(truths.no_case), clash(h, s.proof)) else at_settled, h => if s.holds then at_settled else absurd(b, stated(truths.yes_case), clash(s.proof, h)))
+}
+# a proof of `stated(conditions)` from one of stated at their settled truths, one condition at a time
+all_settled(b: Building, settled: list<Settled>, stated: (list<Term>) -> Term, at_settled: Term): Term := {
+	if settled is empty { return at_settled }
+	first = settled#1
+	rest = settled.drop(1)
+	value = truth_value(b, first.holds)
+	settled_cases(b, first, t => stated([t] + rest.map(s => s.condition)), all_settled(b, rest, values => stated([value] + values), at_settled))
+}
 # the count's division laws, each by induction on its dividend: what the Divide shortcut's recursion equations
 # (kernel/counting.wap) give for every count, not only for numerals
 division_laws_declared(b: Building) := {
@@ -504,10 +525,12 @@ crossed_product(b: Building, x: Term, y: Term): Term := apply_all(named(b, DIFFE
 # `difference(x, zero) == natural(x)`, by x's two forms
 difference_zero(b: Building, x: Term): Identity := Identity(int_of(b), difference(b, x, named(b, COUNT_ZERO)), valued(b, NATURAL_CASE, x), induced(b, t => ints_equal(b, difference(b, t, named(b, COUNT_ZERO)), valued(b, NATURAL_CASE, t)), reflexive(b.e, TYPE_LEVEL, int_of(b), valued(b, NATURAL_CASE, named(b, COUNT_ZERO))), (k, h) => reflexive(b.e, TYPE_LEVEL, int_of(b), valued(b, NATURAL_CASE, successor(b, k))), x))
 # a theorem of two ints by both their cases, each case's proof made from its indices and counts
-both_cases(b: Building, name: text, a: Local, c: Local, stated: (Term, Term) -> Term, case: (int, Term, int, Term) -> Term) := {
+both_cases(b: Building, name: text, a: Local, c: Local, stated: (Term, Term) -> Term, case: (int, Term, int, Term) -> Term) := theorem(b, name, [a, c], stated(a.variable, c.variable), both_split(b, stated, case, a.variable, c.variable))
+# a proof of `stated(x, y)` by both ints' cases, each case given the index and count of x's, then of y's
+both_split(b: Building, stated: (Term, Term) -> Term, case: (int, Term, int, Term) -> Term, x: Term, y: Term): Term := {
 	int = int_of(b)
-	against = (i: int, p: Term) => function_of(b, "c", int, y => int_split(b, Zero, t => stated(valued(b, i, p), t), (j, q) => case(i, p, j, q), y))
-	theorem(b, name, [a, c], stated(a.variable, c.variable), apply(int_split(b, Zero, t => for_every(b, int, y => stated(t, y)), against, a.variable), c.variable))
+	against = (i: int, p: Term) => function_of(b, "c", int, z => int_split(b, Zero, t => stated(valued(b, i, p), t), (j, q) => case(i, p, j, q), z))
+	apply(int_split(b, Zero, t => for_every(b, int, z => stated(t, z)), against, x), y)
 }
 crossed_laws_declared(b: Building) := {
 	num = numerals(b)
@@ -589,7 +612,12 @@ differences_laws_declared(b: Building, m: Local, n: Local, p: Local, q: Local) :
 # --- int's laws, each an equation or a comparison of its two sides' counts
 
 # t as `difference(up, down)`: a sum, a product and a minus by their parts' counts, any other int by its own
-counts_of(b: Building, t: Term): Counts := combined(b, t, SUM, SUM_DIFFERENCE, (l, r) => [add(b, l.up, r.up), add(b, l.down, r.down)]) ?? combined(b, t, TIMES, TIMES_DIFFERENCE, (l, r) => product_counts(b, l.up, l.down, r.up, r.down)) ?? negated_counts(b, t) ?? Counts(ups(b, t), downs(b, t), flipped(b.c, instance_of(b, PARTS_BACK, [t])))
+counts_of(b: Building, t: Term): Counts := combined(b, t, SUM, SUM_DIFFERENCE, (l, r) => [add(b, l.up, r.up), add(b, l.down, r.down)]) ?? combined(b, t, TIMES, TIMES_DIFFERENCE, (l, r) => product_counts(b, l.up, l.down, r.up, r.down)) ?? subtracted_counts(b, t) ?? negated_counts(b, t) ?? Counts(ups(b, t), downs(b, t), flipped(b.c, instance_of(b, PARTS_BACK, [t])))
+# a - c's counts, those of a + -c, which it is by its definition; ø for any t that is no difference
+subtracted_counts(b: Building, t: Term): Counts? := {
+	given = operands(b, t, SUBTRACTED) ?? return ø
+	counts_of(b, sum(b, given#1, minus(b, given#2)))
+}
 # t's counts where it is a call of a two-place int function whose law takes two differences to one: its operands'
 # counts combined; ø for any other t
 combined(b: Building, t: Term, function: text, law: text, combine: (Counts, Counts) -> list<Term>): Counts? := {
@@ -637,6 +665,11 @@ counts_known(b: Building, left: Term, right: Term, proof: Term): Identity := fol
 moved(b: Building, known: Identity, x: Term, y: Term): Identity := {
 	sides = arguments(known.left)
 	followed(b.c, [at_most_both(b, rearranged(count_sums(b), x, sides#1), rearranged(count_sums(b), y, sides#2)), known])
+}
+# `not_above(left, right) == yes` from a proof of its counts' comparison, which the kernel computes to the counts given
+counted_yes(b: Building, left: Term, right: Term, proof: Term): Term := {
+	counted = compared_counts(b, left, right)
+	followed(b.c, [counted, yes_known(b, counted.right, proof)]).proof
 }
 # `not_above(left, right) == yes` from a known comparison of the same counts made yes
 comparison_from(b: Building, left: Term, right: Term, known: Identity): Identity := {
@@ -719,6 +752,70 @@ euclidean_identity_declared(b: Building, a: Local, c: Local, rebuilt: (Term, Ter
 	proof = truth_cases(b, called(b, BELOW, [r, zero]), t => stated(t, positive), known => called(b, DIVISION_IDENTITY, [x, y]), known => moved)
 	nonzero = entered(b.c, "h", told_equal(b, UNEQUAL, y, zero))
 	theorem(b, EUCLIDEAN_IDENTITY, [a, c, nonzero], told(b, x, rebuilt(y, called(b, EUCLIDEAN_QUOTIENT, [x, y]), called(b, EUCLIDEAN_REMAINDER, [x, y]))), proof)
+}
+
+# 0 <= a % c and a % c < abs(c) of wap's Euclidean %, c no zero
+remainder_bounds_declared(b: Building) := {
+	zero = zero_of(b.e)
+	one = int_numeral(b.e, 1)
+	remainder_law(b, REMAINDER_NONNEGATIVE, (r, distance) => nonnegative(b, r), (r, distance, bound) => yes_proved(b), (r, distance, m, k, h) => comparison_from(b, zero, r, yes_known(b, at_most(b, successor(b, m), successor(b, k)), called(b, AT_MOST_BELOW, [m, k, h]))).proof)
+	# a moved remainder is the divisor's size less m + 1, which is at least 1
+	remainder_law(b, REMAINDER_BELOW, (r, distance) => truth_stated(b.e, called(b, BELOW, [r, distance])), (r, distance, bound) => counted_yes(b, sum(b, r, one), distance, bound), (r, distance, m, k, h) => {
+		first = ups(b, one)
+		reached = successor(b, m)
+		known = followed(b.c, [instance_of(b, AT_MOST_SHIFTED, [first, reached, ups(b, distance)]), yes_known(b, at_most(b, first, reached), yes_proved(b))])
+		comparison_from(b, sum(b, r, one), distance, known).proof
+	})
+}
+# A law of the Euclidean remainder r of every int a by every int c but zero, stated of r and abs(c), by both ints'
+# cases: a natural divisor split at zero, which the premise refuses, or a successor, so the divisor's size is k + 1
+# and the count remainder by it at most k. A natural dividend's truncated remainder is that count, kept: the law's
+# `kept` proof at the remainder and the divisor's distance, given the bound. A negative's is its minus, split at
+# zero, kept, or at m + 1, moved by the divisor: the `moved` proof at the moved remainder, the distance, m, k and
+# `m + 1 <= k`. The truths the remainder and abs branch on are settled first, each computed or its counts compared
+remainder_law(b: Building, name: text, stated: (Term, Term) -> Term, kept: (Term, Term, Term) -> Term, moved: (Term, Term, Term, Term, Term) -> Term) := {
+	int = int_of(b)
+	zero = zero_of(b.e)
+	one = int_numeral(b.e, 1)
+	truths = b.e.literals!
+	below = (l: Term, r: Term) => called(b, BELOW, [l, r])
+	nonzero = (y: Term) => told_equal(b, UNEQUAL, y, zero)
+	law = (x: Term, y: Term) => stated(called(b, EUCLIDEAN_REMAINDER, [x, y]), called(b, INT_ABS, [y]))
+	premised = (x: Term, y: Term) => pis(premise_locals(b, [nonzero(y)]), law(x, y))
+	never = reflexive(b.e, TYPE_LEVEL, truths.truth, truths.no_case)
+	# the law at a dividend's case and count, the divisor y of size k + 1
+	divided = (i: int, p: Term, j: int, y: Term, k: Term) => {
+		size = sized(b, i, p)
+		count_remainder = called(b, REMAINDER, [size, successor(b, k)])
+		bound = called(b, REMAINDER_BOUND, [size, k])
+		natural = j == NATURAL_CASE
+		distance = if natural then y else minus(b, y)
+		positive = Settled(below(zero, y), natural, if natural then counted_yes(b, sum(b, zero, one), y, yes_proved(b)) else compared_counts(b, sum(b, zero, one), y).proof)
+		negative = Settled(below(y, zero), not natural, if natural then never else counted_yes(b, sum(b, y, one), zero, yes_proved(b)))
+		# the law where the truncated remainder is t, at the truths its Euclidean value and abs branch on
+		at = (t: Term, values: list<Term>) => stated(euclidean_branched(b, values#1, values#2, t, sum(b, t, y), called(b, SUBTRACTED, [t, y])), branched(b, int, values#3, minus(b, y), y))
+		settled = (t: Term, holds: bool, proof: Term, body: Term) => all_settled(b, [Settled(below(t, zero), holds, proof), positive, negative], values => at(t, values), body)
+		kept_at = (t: Term, known: Term) => settled(t, no, never, kept(t, distance, known))
+		turned = (n: Term) => minus(b, valued(b, NATURAL_CASE, n))
+		bounded = (n: Term) => truth_stated(b.e, at_most(b, n, k))
+		unsettled = (t: Term) => at(t, [below(t, zero), positive.condition, negative.condition])
+		split_at = (remainder: Term) => induced(b, n => pis(premise_locals(b, [bounded(n)]), unsettled(turned(n))), assuming(b, bounded(count_zero(b)), known => kept_at(turned(count_zero(b)), known)), (m, before) => assuming(b, bounded(successor(b, m)), known => {
+			t = turned(successor(b, m))
+			r = if natural then sum(b, t, y) else called(b, SUBTRACTED, [t, y])
+			settled(t, yes, counted_yes(b, sum(b, t, one), zero, yes_proved(b)), moved(r, distance, m, k, known))
+		}), remainder)
+		if i == NATURAL_CASE then kept_at(valued(b, i, count_remainder), bound) else apply(split_at(count_remainder), bound)
+	}
+	a = entered(b.c, "a", int)
+	c = entered(b.c, "b", int)
+	h = entered(b.c, "h", nonzero(c.variable))
+	proof = both_split(b, premised, (i, p, j, q) => {
+		x = valued(b, i, p)
+		at_divisor = (y: Term, k: Term) => assuming(b, nonzero(y), given => divided(i, p, j, y, k))
+		at_zero = valued(b, j, count_zero(b))
+		if j != NATURAL_CASE then at_divisor(valued(b, j, q), q) else induced(b, n => premised(x, valued(b, j, n)), assuming(b, nonzero(at_zero), refused => absurd(b, law(x, at_zero), refused)), (k, before) => at_divisor(valued(b, j, successor(b, k)), k), q)
+	}, a.variable, c.variable)
+	theorem(b, name, [a, c, h], law(a.variable, c.variable), apply(proof, h.variable))
 }
 
 order_laws_declared(b: Building) := {
