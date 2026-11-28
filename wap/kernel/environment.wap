@@ -171,10 +171,14 @@ class Environment {
 	# module's (two modules may declare one name)
 	ids: map<text, int> = {}
 	outer: map<text, int> = {}
+	# the words core declares, whenever it first needs one: seen from every scope, below the scopes' own and outer names
+	core: map<text, int> = {}
 	# the axioms each declaration rests on, by id, through everything its type and its value name
 	axioms: map<int, list<int>> = {}
 	# the number type and the shortcuts, once the numbers statement bound them (numbers.wap)
 	numbers: Numbers? = ø
+	# core's int, its functions and the bridge between its two equalities, once core declared them (counting.wap)
+	integers: Integers? = ø
 	# the function a text literal stands for and the list it takes, once the texts statement bound them (numbers.wap)
 	texts: Texts? = ø
 	# the pair and the unit types, as core declares them (core/analyze/courses.wap)
@@ -205,18 +209,12 @@ class Products { pair: Term; intro: Term; unit: Term; one: Term }
 class Quotients { former: Term; made: Term }
 declaration(e: Environment, name: text): Declaration? := e.log#(named_id(e, name) ?? return ø)
 # the id a name means in the scope being read
-named_id(e: Environment, name: text): int? := e.ids.get(name) ?? e.outer.get(name)
+named_id(e: Environment, name: text): int? := e.ids.get(name) ?? e.outer.get(name) ?? e.core.get(name)
 # the id each name the scope being read sees means, its own names over those from outside
 seen_ids(e: Environment): map<text, int> := {
 	seen = copy(e.outer)
 	seen.update(e.ids)
 	seen
-}
-# the environment a module is read in on top of these declarations: they are its outside, which its own names hide
-opened(e: Environment): Environment := {
-	e.outer = seen_ids(e)
-	e.ids = {}
-	e
 }
 # the declaration of a name that must be declared, else refused
 # the declaration of an id while it is live; ø for an id taken back or never given
@@ -271,7 +269,7 @@ place(e: Environment, name: text): int := named_id(e, name) ?? 0
 # the ids given so far, the live ones and those taken back
 size(e: Environment): int := #e.log
 # the names the scope being read sees, those from outside first
-declared_names(e: Environment): list<text> := e.outer.keys().filter(name => not e.ids.has(name)) + e.ids.keys()
+declared_names(e: Environment): list<text> := e.core.keys().filter(name => not e.ids.has(name) and not e.outer.has(name)) + e.outer.keys().filter(name => not e.ids.has(name)) + e.ids.keys()
 # Every axiom a declaration rests on (`axioms of name`): an axiom rests on itself, any other declaration on what the
 # names in its type and its value rest on, an opaque value's names too
 axioms_of(e: Environment, constant: Term): list<text> := (e.axioms.get(constant_id(constant)) ?? []).map(id => e.log#id.name)
@@ -298,18 +296,18 @@ stated(d: Declaration): bool := match d.kind {
 	Row(operation) => no
 }
 # a declaration becomes part of the environment, checked first by typing.wap's `declared` or inductive.wap, its name
-# new in the scope being read; one stated as written is recorded for an export
-added(e: Environment, d: Declaration) := {
-	filled = filled_id(e, d)
+# new in the scope being read, or in core's, under every other; one stated as written is recorded for an export
+added(e: Environment, d: Declaration, core: bool = no) := {
+	filled = if core then ø else filled_id(e, d)
 	if filled is not ø {
 		e.fills += [Fill(filled!, e.log#filled!)]
 		at = filled!
 		e.log#at = d
 	} else {
-		if e.ids.has(d.name) { refused(NAME_TAKEN, "${d.name} is declared already") }
+		if (if core then e.core else e.ids).has(d.name) { refused(NAME_TAKEN, "${d.name} is declared already") }
 		e.log += [d]
 	}
-	e.ids[d.name] = filled ?? #e.log
+	if core { e.core[d.name] = #e.log } else { e.ids[d.name] = filled ?? #e.log }
 	if stated(d) { e.accepted += [AcceptedDeclaration(d)] }
 }
 
@@ -334,6 +332,7 @@ back_to(e: Environment, reach: Reach) := {
 		e.axioms.remove(id)
 		name = e.log#id.name
 		if e.ids.get(name) == id { e.ids.remove(name) }
+		if e.core.get(name) == id { e.core.remove(name) }
 	}
 	e.accepted = e.accepted.take(reach.accepted)
 	e.courses = e.courses.take(reach.courses)

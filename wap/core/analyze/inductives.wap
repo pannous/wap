@@ -2,11 +2,13 @@
 # the program and its library declare becomes a block of the compile's environment, its cases the block's
 # constructors, and its word, the axiom every typed node already names, is filled by it (kernel/environment.wap
 # declared_together): no typed node changes. Enums that name each other are one block. An enum stays the axiom it is
-# where a field's type is open (a bare field, a letter) or where the kernel refuses its block (a field of the enum
-# inside another type's parts), each counted by why.
+# where a field's type is open (a bare field, a letter), where its sort has indices, or where the kernel refuses its
+# block (a field of the enum inside another type's parts), each counted by why.
 
 use folder
 use "../stage.wap"
+use "../errors.wap"
+use "../paths.wap"
 use "../type_notation.wap"
 use "../../kernel/terms.wap"
 use "../../kernel/environment.wap"
@@ -18,8 +20,8 @@ ENUM_DEFINED = "defined"
 ENUM_OPEN = "open"
 ENUM_REFUSED = "refused"
 
-# an enum as a block reads it: its word, its key in the environment, and its cases
-class EnumRead { word: Term; key: text; cases: list<CaseTyped> }
+# an enum as a block reads it: its word, its key in the environment, its sort, ø for one with indices, and its cases
+class EnumRead { word: Term; key: text; sort: Term?; cases: list<CaseTyped>; written: Node }
 # every enum not met before entered, each with the enums it names that name it back, the ones it names first
 enums_entered(records: list<Node>) := {
 	enums: map<text, EnumRead> = {}
@@ -33,7 +35,7 @@ enums_entered(records: list<Node>) := {
 }
 enum_read(record: Node) as EnumRead := {
 	word = record_term(record)
-	EnumRead(word, word_key(word_id(word)), enum_cases(record))
+	EnumRead(word, word_key(word_id(word)), record_sort(record_declared(record)), enum_cases(record), record)
 }
 # a word's key, the name the environment declares it by
 word_key(id: int) as text := declared_at(TYPES.environment, id)!.name
@@ -52,17 +54,22 @@ closed_type(type: Term?) as Term? := if type == ø or has_letters(type) or has_u
 block_entered(enums: list<EnumRead>) := {
 	ids = enums.map(enum => word_id(enum.word))
 	keys = enums.map(enum => enum.key)
-	if enums.flat_map(enum => enum.cases).any(case => case.fields.any(field => field == ø)) { return enums_counted(ids, ENUM_OPEN) }
-	types = enums.map(enum => BlockType(enum.key, DATA_TERM, enum.cases.map(case => WrittenCase(case_constructed(enum.key, case.name), case_type(case, enum.word, ids, keys)))))
+	if enums.any(enum => enum.sort == ø or enum.cases.any(case => case.fields.any(field => field == ø))) { return enums_counted(ids, ENUM_OPEN) }
+	types = enums.map(enum => BlockType(enum.key, enum.sort!, enum.cases.map(case => WrittenCase(case_constructed(enum.key, case.name), case_type(case, enum.word, ids, keys)))))
 	try {
 		inductive_declared(TYPES.environment, InductiveBlock([], 0, types))
 	} catch refusal {
 		refusal_only(refusal)
+		# a library's refused enum is its owner's, counted by the census, never every program's hint
+		# TODO (card nested-inductive) the kernel takes an enum holding a list of itself, wap/nodes.wap's Node
+		if is_own_source(enums#1.written) { hint(warning_of(enums#1.written, "the kernel refuses ${keys.join(", ")} as a block, so their cases have no recursor and a law over them is only tested: ${refusal.message}")) }
 		return enums_counted(ids, ENUM_REFUSED)
 	}
 	enums_counted(ids, ENUM_DEFINED)
 	for enum in enums { for case in enum.cases { TYPES.constructors[case.definer] = named_id(TYPES.environment, case_constructed(enum.key, case.name))! } }
 }
+# whether code is the program's own, in no wap folder's library
+is_own_source(code: Node) as bool := { file = file_of(code) ?? return no; library_place(file) == file }
 enums_counted(ids: list<int>, why: text) := for id in ids { TYPES.enums[id] = why }
 # a case's type as a block writes it: a function of its fields giving its enum, under a binder for each type of the
 # block, which stands where a field names one
