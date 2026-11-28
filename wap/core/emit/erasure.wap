@@ -1,18 +1,32 @@
 # Erasure (wiki/proof.md): a proof has no run-time form. Code whose value is a proof, its type a law's statement or a
-# proposition, leaves the program before emission: a statement or a definition giving one, a parameter taking one, an
-# argument passing one. The kernel checked each as typing entered it.
+# proposition, leaves the program before emission: a statement or a definition giving one. A function's parameter of a
+# proposition type leaves its definition, and the argument at its place leaves every call, both read from the callee's
+# signature; an argument there that is no proof itself (a check, a bool) still runs, as a statement before the call.
+# The kernel checked each proof as typing entered it.
 use "../stage.wap"
 use "../type_notation.wap"
 use "../../kernel/forms.wap"
 
 erased_code(n: Node) as Node := match n {
 	Block(statements) => refitted(Block(statements.filter(statement => not proves(statement)).map(erased_code)), n)
-	Define(name, parameters, body) => refitted(Define(name, with_items(parameters, items_of(parameters).filter(parameter => not proves(declared_name(parameter)))), erased_code(body)), n)
-	Call(called, arguments) => refitted(Call(called, arguments.filter(argument => not proves(argument)).map(erased_code)), n)
-	_ => if direct_parts(n) is empty then n else refitted(with_parts(n, erased_code), n)
+	Define(name, parameters, body) => refitted(Define(name, with_items(parameters, kept(items_of(parameters), signature_parts(declared_name(name)))), erased_code(body)), n)
+	Fn(parameters, body) => refitted(Fn(with_items(parameters, kept(items_of(parameters), signature_parts(n))), erased_code(body)), n)
+	Call(called, arguments) => {
+		parts = signature_parts(called)
+		call = refitted(Call(erased_code(called), kept(arguments, parts).map(erased_code)), n)
+		run = (1 to #arguments).filter(at => erases(parts, at) and not proves(arguments#at)).map(at => erased_code(arguments#at))
+		if run is empty then call else refitted(Block(run + [call]), n)
+	}
+	_ => rebuilt(n, erased_code)
 }
+# a function's parameter types and result: a definition's signature, a call's callee's, else the type of the value called
+signature_parts(n: Node) as FunctionType? := function_parts(fact_type(fact_of(n, SIGNATURE) ?? fact_of(fact_of(n, DEFINED_AT) ?? n, SIGNATURE) ?? fact_of(n, TYPE)))
+# whether a function's parameter at a place takes a proof
+erases(parts: FunctionType?, at: int) as bool := parts != ø and at <= #parts!.parameters and is_proposition_type(parts!.parameters#at)
+# the parameters or arguments a function keeps, those at the places that take no proof
+kept(items: list<Node>, parts: FunctionType?) as list<Node> := (1 to #items).filter(at => not erases(parts, at)).map(at => items#at)
 # whether code gives a proof: a definition by its result's type, anything else by its value's
 proves(n: Node) as bool := match n {
-	Define(name, parameters, body) => is_proposition_type((function_parts(fact_type(fact_of(declared_name(name), SIGNATURE))) ?? return no).result)
+	Define(name, parameters, body) => is_proposition_type((signature_parts(declared_name(name)) ?? return no).result)
 	_ => is_proposition_type(fact_type(fact_of(n, TYPE)))
 }
