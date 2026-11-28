@@ -212,7 +212,7 @@ written twice.
   condition `0 <= x` as one, and any `a <= b` in scope is another, each read by `bounds_of` as a row. No flag on the
   structure says an atom is at least 0.
 - **A hypothesis `a <= b`.** It is `Bound(a, d, b)`, with `d = sum(b, minus(a))` and two proofs:
-  `a + d == b` (`sum_difference`) and `0 <= d` (`difference_nonnegative`). An equation's d is `int.zero`.
+  `a + d == b` (`sum_difference`) and `0 <= d` (`difference_nonnegative`). An equation's d is 0, `natural(0)` (`zero_of(e)`, kernel/numbers.wap).
 - **The gap.** `eliminated` returns `t + gap == u` as today, the gap a sum of the used bounds' d's and a literal
   of at least 0. With it comes `0 <= gap`, built by `nonnegative_sum` from each d's proof and the literal's
   computation. `at_most_from` uses `not_above_add(t, g, h: 0 <= g): t <= t + g`.
@@ -370,7 +370,7 @@ The row constants a law's body holds (`prim i64.add int -> int -> int`) are Defi
 | linear.wap today | after |
 |---|---|
 | `s.nat` (11 places: hypotheses' types, equations, congruences) | `s.i.type` |
-| `s.n.zero`, `zero_of(s)` | `s.i.zero`, `natural(·count.zero)` |
+| `s.n.zero`, `zero_of(s)` | `zero_of(e)`: the numeral 0 as int's natural case, `natural(0)` |
 | `s.n.successor` (normal :303, beyond :147) | gone: `b + 1` is `added(s, b, int_numeral(s, 1))` |
 | `numeral(v)` (:252, :345–349, :383) | `int_numeral(s, v)`: `natural(v)` for v ≥ 0, else `negative(−1 − v)` |
 | `normal`'s Numeral, zero and successor cases, `is_sum_part` (:300–303, :326–327) | `natural(lit)` → lit, `negative(lit)` → −lit−1, a sum, and `minus(t)` → t's Normal with each atom's minus and the number negated, by `minus_add` and computing |
