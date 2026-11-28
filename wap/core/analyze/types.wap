@@ -69,10 +69,18 @@ class TypingState {
 	# refusal keeps them only when it is that one
 	lacked: Lacked = Lacked()
 	functions: list<TypedFunction> = []
-	# the key of the function whose body is being typed, ø at the top level: where an obligation sits (dispatch.wap)
+	# the key of the function whose body is being typed, ø at the top level: where an obligation sits (dispatch.wap),
+	# and the frame its body is typed in
 	within: text? = ø
+	frame: TypeFrame? = ø
 	# the same typed functions by their function's key, where a call finds the instance it reuses
 	instances: map<text, list<TypedFunction>> = {}
+	# the typed functions by their Define's key, once they are entered into the kernel (core/analyze/terms.wap)
+	keyed: map<text, TypedFunction>? = ø
+	# the obligations this pass of typing leaves (dispatch.wap Obligation), the program's once the pass completes
+	obligations: list<Obligation> = []
+	# their places by their keys (dispatch.wap obligation_kept)
+	obligation_keys: map<text, int> = {}
 	globals: list<Binding> = []
 	# the keys of the globals functions read before the statements that give them their values, until those statements
 	unset: list<text> = []
@@ -88,6 +96,10 @@ class TypingState {
 	# what the conditions around a function value find of the variables it captures, by its function's key: the
 	# captures are copied when the value is made, so its body reads them as found there (core/analyze/function_values.wap)
 	found_in: map<text, list<Finding>> = {}
+	# the letters each function value's function sees, by its type's word: those of the function it is written in
+	carried: map<int, list<Binding>> = {}
+	# the letters only a call's result writes, as unknowns its uses settle, by the unknown's hole (letters.wap letters_settled)
+	result_letters: map<int, Node> = {}
 	# the empty lists' item types a use has to settle, α1, α2 …, holes of the elaboration that answers them, by id
 	unknowns: map<int, Term> = {}
 	el: Elaboration = elaboration(TYPES.environment, [])
@@ -114,6 +126,10 @@ class TypingState {
 	# by them (core/analyze/dispatch.wap)
 	boxed: list<Term> = []
 	dispatches: list<Dispatch> = []
+	# each dispatcher's choices tried by their tests, in turn, by its key (dispatch.wap choice_obliged)
+	choices: map<text, list<Signature>> = {}
+	# the obligations of the choices of the dispatcher a call last chose, by their places (calls.wap call_chosen)
+	dispatched: list<int> = []
 	# the own types of the function values that meet where one type holds them, by the unknown holding them until a
 	# call or a written type settles it to a signature (core/analyze/function_values.wap functions_joined)
 	members: map<int, list<Term>> = {}
@@ -249,6 +265,8 @@ typed_among(program: Block, library: list, rules: KindRules, library_scopes: map
 	entered = instances_entered(s.functions, s)
 	conditions_entered(conditions, entered, s)
 	obligations_entered(entered, s)
+	obligations.clear()
+	obligations.extend(s.obligations.filter(obligation => obligation.verdict == ø))
 	effects_written(s)
 	written = defines + s.lambdas.values() + s.dispatchers
 	# the records stand first, shaped: the program's own leave the statements
@@ -331,6 +349,14 @@ with_type_of(n: Node, type: Term?) as Node := if type == ø then n else with_fac
 type_value(type: Term, at: Node) as Node := with_fact(with_type_of(placed_like(Text(type_text(type)), at), universe_of(type)), DENOTES, type_fact(type))
 # whether a name in value position is the type it names: a universe, or a type word where no function type is wanted
 # (a function of its name is then meant) and no case of the enum wanted
+# a letter as its function's parameters bind it, ø for any other name; a letter they bind not at all is refused
+letter_bound(n: Node, f: TypeFrame) as Binding? := {
+	if not n is symbol or not is_letter_name(text(n)) or fact_of(n, BINDING) != ø { return ø }
+	f.letters.find(letter => letter.key == text(n)) ?? refused(n, "nothing defines ${n}: a one-letter name is a letter only in a function whose parameters' types write it")
+}
+# the function a letter is bound to, the S of `==(p: quotient(T, S), …)` in `S(a, b)`, at the letter's place: what
+# its word names (type_notation.wap value_word); ø for a letter bound to a type
+letter_function(letter: Binding, at: Node) as Node? := positioned_like(TYPES.values.get(word_id(letter.type)) ?? return ø, at)
 names_type_value(n: Node, expected: Term?, s: TypingState) as bool := universe_written(n) != ø or function_parts(expected) == ø and (fact_of(n, BINDING) == ø or names_function(n) and not names_constant(n, expected, s)) and names_type(n, s) and expected_case(n, expected, s) == ø
 
 # Statements typed in order, the last one expected the block's type. A function it defines stays as written until the
@@ -410,7 +436,37 @@ function_added(definition: Define, s: TypingState) as Signature := {
 # every unknown settled: instances one settling made alike are one (letters.wap distinct_instances)
 instances_placed(n: Node, s: TypingState) as Node := match n {
 	Block(statements) => refitted(Block(statements.flat_map(statement => if statement is Define then functions_typed_from([statement], s).map(define => instances_placed(define, s)) else [instances_placed(statement, s)])), n)
-	_ => refitted(with_parts(n, part => instances_placed(part, s)), n)
+	_ => decided_code(n, s) ?? refitted(with_parts(n, part => instances_placed(part, s)), n)
+}
+# Code whose obligations compiling decided, placed without the checks they need no more (wiki/type.md "Proved or
+# checked"): a narrowing decided yes as its value; a dispatcher's call as its choices tried in turn, one decided no
+# skipped, the first decided yes called directly, the dispatcher kept at the first undecided; ø, the code as it is
+decided_code(n: Node, s: TypingState) as Node? := match n {
+	Call(called, arguments) => {
+		records = obligation_places(n).map(at => s.obligations#at)
+		if records is empty { return ø }
+		if records.any(record => record.compared != ø) { return with_type(placed_like(if (records#1.verdict ?? refused(n, "two types compared were never decided")) then True else False, n), BOOL_TYPE) }
+		if records.all(record => record.choice == 0) { return if records.all(record => record.verdict == yes) then instances_placed(arguments#1, s) else ø }
+		key = place_key(fact_of(called, DEFINED_AT) ?? refused(n, "a dispatcher's call names no dispatcher"))
+		dispatcher = typed_named(key, s) ?? refused(n, "no typed dispatcher has the key ${key}")
+		code = match dispatcher.define { Define(name, parameters, body) => chosen_code(n, arguments, body, 1, records); _ => ø }
+		if code == ø then ø else instances_placed(code!, s)
+	}
+	_ => ø
+}
+# the code a dispatcher's call runs, from its choice at this place on: a call of that choice's definition where its
+# obligations are decided yes, the next choice's where one is decided no, ø where any waits on the run; past the
+# choices, the dispatcher's refusal refused at the call, while compiling
+chosen_code(n: Node, arguments: list, choices: Node, at: int, records: list<Obligation>) as Node? := match choices {
+	If(test, code, rest) => {
+		mine = records.filter(record => record.choice == at)
+		if mine is empty or mine.any(record => record.verdict == ø) { return ø }
+		if mine.any(record => record.verdict == no) { return chosen_code(n, arguments, rest, at + 1, records) }
+		# the call keeps the dispatcher's call's type, never its obligations, which chose it
+		match code { Call(chosen, reads) => obligations_noted(refitted(Call(chosen, arguments), n), []); _ => refused(code, "a dispatcher's choice ${at} is no call") }
+	}
+	Call(raise, raised) => if text(raise) == RAISE_WORD and #raised == 1 and raised#1 is Text then refused(n, text(raised#1)) else ø
+	_ => ø
 }
 # the Defines each of these definitions became, each definition's in the order typed
 functions_typed_from(definitions: list, s: TypingState) as list := definitions.flat_map(definition => instances_of(function_key(definition), s).map(typed => typed.define))
@@ -532,6 +588,8 @@ expected_case(n: Node, expected: Term?, s: TypingState) as Node? := {
 }
 # a name's value: a parameter, local or global, of the type given to it
 name_typed(n: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
+	letter = letter_bound(n, f)
+	if letter != ø { return typed_form(letter_function(letter!, n) ?? return type_value(letter!.type, n), s, f, expected) }
 	# a case name of two enums is the expected enum's, `True` where a Node is wanted Node.True (decision enum-case-unambiguous)
 	if is_bound(n, DefinitionKind.Case) {
 		case = expected_case(n, expected, s) ?? n

@@ -89,7 +89,7 @@ own_of(key: text, x: Joining) as Own := {
 }
 body_of(typed: TypedFunction) as Node := match typed.define { Define(name, parameters, body) => body; _ => Empty }
 parameters_of(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters); _ => [] }
-parameter_names(typed: TypedFunction) as list<text> := parameters_of(typed).map(parameter => text(declared_name(parameter)))
+parameter_names(typed: TypedFunction) as list<text> := parameter_nodes(typed).map(name => text(name))
 # a foreign function's claim taken as its own effects, a `Fail(b)` failing only where its parameter b is 0
 claimed_own(claim: Node, typed: TypedFunction, own: Own) := {
 	own.effects = effects_named(effect_words(claim))
@@ -115,6 +115,8 @@ effect_words(claim: Node) as list<text> := claim_words(claim).filter(word => not
 claim_words(claim: Node) as list<text> := match claim { Call(called, arguments) => [text(called)] + arguments.flat_map(word => claim_words(word)); _ => items_or_one(claim).map(word => text(word)) }
 # the parameters a claim's `Fail(b, …)` fails by
 fails_by(claim: Node) as list<text> := match claim { Call(called, arguments) => if text(called) == text(Effect.Fail) and not arguments.any(word => EFFECT_NAMES.contains(text(word))) then arguments.map(word => text(word)) else arguments.flat_map(word => fails_by(word)); _ => [] }
+effects_in_each(nodes: list<Node>, caught: bool, own: Own, x: Joining) := for node in nodes { effects_in(node, caught, own, x) }
+
 # what a typed body does itself, and the typed functions it names, called or given as values; a function value written
 # in it brings its function's, as what it is given may call it; a definition in it is its own function. The effects a
 # node brings itself: its operation's, a loop's, a global variable's, a block's sharing the program's variables,
@@ -136,7 +138,7 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		}
 	}
 	Call(called, arguments) => {
-		for argument in arguments { effects_in(argument, caught, own, x) }
+		effects_in_each(arguments, caught, own, x)
 		named = fact_of(called, DEFINED_AT)
 		key = if named == ø then "" else place_key(named!)
 		if not x.by_key.has(key) { return effects_in(called, caught, own, x) }
@@ -147,14 +149,14 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		own.calls += [Callee(key, caught or safe)]
 	}
 	Prim(operation, arguments) => {
-		for argument in arguments { effects_in(argument, caught, own, x) }
+		effects_in_each(arguments, caught, own, x)
 		if DIVIDING.contains(text(operation)) { if not divisor_met(arguments#2, caught, own) and not caught { own.effects += [Effect.Fail] } } else { effect_added(if text(operation) == FOREIGN then (if text(arguments#1) == WASI then Effect.IO else Effect.FFI) else OPERATION_EFFECT.get(text(operation)), caught, own) }
 	}
 	_ => {
 		if n is While { effect_added(Effect.Div, caught, own) }
 		if n is Block and globals_named(n) is not empty { effect_added(Effect.State, caught, own) }
 		match unwrapped(n) { Set(place, value) => own.assigned += [parameter_at(place, own)]; _ => ø }
-		for part in direct_parts(unwrapped(n)) { effects_in(part, caught, own, x) }
+		effects_in_each(direct_parts(unwrapped(n)), caught, own, x)
 	}
 }
 # a divisor met: whether it is a whole number other than 0 written in place, which no division fails by; else the
