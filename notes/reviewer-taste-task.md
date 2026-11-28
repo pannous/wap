@@ -4,7 +4,7 @@ Asked by the user 2026-11-23 via wap-interviewer. You are a wap session (AGENTS.
 wap-interviewer, questions go there too.
 
 ## The specimen
-Merge 013faf9 (round-spaced-list, core/rules/lowering.wap +19/-2, test/test_lists_page.wap, test/wap/test_reader.sh):
+Merge 013faf9 (round-spaced-list, core/rules/lowering.wap +19/-2, test/test_lists_page.wap, test/wap/test_reader.wap):
 "values parted by blanks are a list, (1 2) is [1, 2]; a number before a word still measures, 5 m". In it,
 measured() reads exactly two items, a number and a word, as a measure: `(1 x)` is 1 * x while `(1 x y)` is a list
 and `(1 2 m)` is [1, 2, m]. The reviewer at the time passed it; only later wap-reviewer flagged it (a unit special
