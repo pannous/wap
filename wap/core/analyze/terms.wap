@@ -17,6 +17,8 @@ use "function_values.wap"
 use "../../kernel/terms.wap"
 use "../../kernel/environment.wap"
 use "../../kernel/typing.wap"
+use "../../kernel/equal.wap"
+use "../../kernel/compute.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/primitives.wap"
 use "../../kernel/show.wap"
@@ -81,11 +83,16 @@ kernel_signature(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 parameters_locals(typed: TypedFunction, s: TypingState) as list<Local> := {
 	if typed.checker == ø {
 		typed.checker = checker(TYPES.environment, [])
-		typed.locals = (1 to #typed.arguments).list().map(at => entered(typed.checker!, text(parameter_names(typed)#at), settled_type(typed.arguments#at, s)))
+		typed.locals = (1 to #typed.arguments).list().map(at => entered(typed.checker!, parameter_name(typed, at), settled_type(typed.arguments#at, s)))
 	}
 	typed.locals
 }
 parameter_names(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters).map(parameter => declared_name(parameter)); _ => [] }
+# the name its definition gives the parameter at a place; a function defined elsewhere, the library's, names none
+parameter_name(typed: TypedFunction, at: int) as text := {
+	names = parameter_names(typed)
+	if at <= #names then text(names#at) else NO_BINDER
+}
 # GUESS (T6a3's value reader): the result as the kernel reads it: where a family is written applied to values, the head applied to its arguments
 # read as values under the parameters (`Even(double(n))`, each value through term_of and the checker's Locals); any other result as settled
 kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
@@ -95,7 +102,8 @@ kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 # the frame its parameters are typed in, as a body's is
 reading_frame(typed: TypedFunction) as TypeFrame := {
 	frame = TypeFrame()
-	for at in 1 to #typed.arguments { frame.variables += [Binding(place_key(parameter_names(typed)#at), typed.arguments#at)] }
+	names = parameter_names(typed)
+	for at in 1 to #names { frame.variables += [Binding(place_key(names#at), typed.arguments#at)] }
 	frame
 }
 # a body read under the function's own parameters
@@ -161,8 +169,9 @@ called_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
 	function = instance_entered(typed, x.by_key, x.s) ?? return ø
 	# GUESS: each argument against its domain and the call against the result, both under the arguments before them (kernel/recursors.wap with_parameters peels the same way)
 	callee = type_of(x.c, function)
-	given = arguments.map(argument => term_of(argument, x))
-	if given.any(term => term == ø) { return ø }
+	found = arguments.map(argument => term_of(argument, x))
+	if found.any(term => term == ø) { return ø }
+	given = found.map(term => term!)
 	for at in 1 to #arguments { if not equal(x.c, kernel_value(arguments#at) ?? return ø, next_domain(after_arguments(callee, given.take(at - 1)))) { return ø } }
 	if not equal(x.c, kernel_value(n) ?? return ø, after_arguments(callee, given)) { return ø }
 	terms_applied(function, arguments, x)
@@ -220,7 +229,7 @@ choice_term(n: Node, condition: Node, then_part: Node, else_part: Node, x: Enter
 }
 # `by f, g` in a law's proof: a hole of the statement typing wanted here, over every binder around it, kept with the
 # laws in the proof's record for verify; no term elsewhere
-by_term(n: Node, called: Node, laws: list, x: Entering) as Term? := {
+by_term(n: Node, called: Node, laws: list<Node>, x: Entering) as Term? := {
 	if not question_word(called, BY_WORD) { return ø }
 	type = kernel_value(n) ?? return ø
 	hole = hole_over(elaboration_over(x.c), BY_WORD, type, x.variables)
@@ -325,7 +334,7 @@ premised_arm(arm: Node, condition: Term, case: Term, x: Entering) as Term? := {
 	premise = entered(x.c, CASE_PREMISE, truths_equal(TYPES.environment, condition, case))
 	lambdas([premise], term_of(arm, x.under([premise], [CASE_PREMISE])) ?? return ø)
 }
-truth_arm(arms: list, held: bool) as Node? := arm_result(arms.find(arm => match arm { Arm(pattern, result) => if held then pattern is True else pattern is False }) ?? return ø)
+truth_arm(arms: list, held: bool) as Node? := arm_result(arms.find(arm => if held then arm_pattern(arm) is True else arm_pattern(arm) is False) ?? return ø)
 # a block of lets, each a name new to it given its value, ending in the value it gives
 lets_term(statements: list, x: Entering) as Term? := {
 	if statements is empty { return ø }
