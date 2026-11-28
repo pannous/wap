@@ -67,6 +67,8 @@ with_parts(n: Node, f: (Node) -> Node) as Node := match n {
 	List(items, bracket, separator) => List(items.map(f), bracket, separator)
 	_ => n
 }
+# code with each `name` in it read as another
+substituted(n: Node, name: text, value: Node) as Node := if n is symbol and text(n) == name then value else with_parts(n, part => substituted(part, name, value))
 # a node's direct parts: a key's two sides, a list's items; none of an atom
 direct_parts(n: Node) as list<Node> := match n {
 	Key(left, op, right) => [left, right]
@@ -80,6 +82,10 @@ nodes_in(n: Node) as list<Node> := [n] + direct_parts(n).flat_map(nodes_in)
 ANNOTATIONS = "meta"
 # the annotation naming the class a class extends
 EXTENDS_ANNOTATION = "extends"
+# the annotation naming the sort of an enum's values
+INDUCTIVE_ANNOTATION = "inductive"
+# the mark of a law's or a theorem's proof (extensions/law_for.wap)
+PROOF_ANNOTATION = "proof"
 # the annotations written before a node, each one: `@final @protocol` two
 annotations_of(n: Node) as list<Node> := match fact_of(n, ANNOTATIONS) ?? Empty { Empty => []; List(items, Bracket.None, Separator.Space) => items; said => [said] }
 # the annotation of one word written before a node, `@protocol` or `@extends(A)`, ø without it
@@ -99,6 +105,8 @@ data_list(items: list<Node>) as Node := List(items, Bracket.Square, Separator.Co
 has_fact(n: Node, name: text) as bool := fact_of(n, name) != ø
 # a fact's name, "" of an attribute that is no fact
 fact_name(fact: Node) as text := match fact { Key(Symbol(name), Op.Colon, value) => name; _ => "" }
+# a fact's text, ø for none
+text_of(fact: Node?) as text? := match fact { Text(value) => value; _ => ø }
 # the fact of that name, ø when no stage has learned it; both read a Meta's facts in place, never a copy of them
 fact_of(n: Node, name: text) as Node? := {
 	match n { Meta(node, List(data, bracket, separator)) => for at in META_FACTS to #data { match data#at { Key(Symbol(key), Op.Colon, value) => if key == name { return value }; _ => ø } }; _ => ø }
@@ -215,6 +223,8 @@ signature_key(definer: Node) as text := if fact_of(definer, SIGNATURE) == ø the
 # DEFINED_AT on a bound name: the name that defined it, positioned (core/analyze/scope.wap learns it; its other
 # facts are in core/bindings.wap)
 DEFINED_AT = "defined_at"
+# BINDING on a bound name: what it refers to, the word of its DefinitionKind as a Symbol
+BINDING = "binding"
 # REBOUND on a name read or set: the definer of the binding it holds there where an assignment of another type made
 # one of its own (core/analyze/flow.wap); the emitter keys its storage by it
 REBOUND = "rebound"
@@ -231,11 +241,35 @@ WRITTEN_CALL = "written_call"
 TYPED_WHEN_CALLED = "typed_when_called"
 # on a parameter, the value a call that leaves it out gives it: `f(x: int, y: int = 2)`, f(1) is f(1, 2)
 DEFAULT = "default"
+# on a written type shaped as a call, `a + 0 == a`, `P(f)`, its reading as code, lowered: what scope binds where its
+# head makes no type, a statement (scope.wap type_bound)
+AS_CODE = "as_code"
 # the words of a type test, `s is Circle`, where nothing else defines it, and of the equality `3 is 3` asks (scope.wap)
 TYPE_TEST_WORD = "is"
 # the word a value's static type is asked by, `type of x` (sugar/types.wap)
 TYPE_OF_WORD = "type_of"
+# the words of a proof (wiki/proof.md): `by` the laws it follows from, `refl` an equation's sides the same, `assume` and
+# `axiom` a statement taken as true
+BY_WORD = "by"
+REFL_WORD = "refl"
+ASSUME_WORD = "assume"
+AXIOM_WORD = "axiom"
+TAKEN_WORDS = [ASSUME_WORD, AXIOM_WORD]
+PROOF_WORDS = [REFL_WORD] + TAKEN_WORDS
+# a word the language reads itself where no program defines it: `is`, `type_of`, `by`, `refl`
+question_word(n: Node, word: text) as bool := n is symbol and text(n) == word and fact_of(n, BINDING) == ø
 EQUALITY_WORD = "=="
+# the word a function's effects are asked by, `effects of f` (sugar/types.wap)
+EFFECTS_OF_WORD = "effects_of"
+# the compiler's questions, each answered by the compiler itself where no definition takes its word, its argument left
+# as written but for a value it names (core/analyze/scope.wap, calls.wap answered)
+QUESTION_WORDS = [TYPE_OF_WORD, EFFECTS_OF_WORD]
+# the words whose arguments scope binds only where they name values: the questions, and `by`, whose arguments name laws
+NAMING_WORDS = QUESTION_WORDS + [BY_WORD]
+# on a body, the effects its function claims after it, `! IO` (core/analyze/effects.wap)
+CLAIMED = "claimed"
+# on a typed function's Define, the effects it has, each a word (core/analyze/effects.wap)
+EFFECTS = "effects"
 # A type test of a value any or a number holds, `x is int`, is asked at run time: the Prim BOXED_TEST of x, the type
 # it tests its fact TESTED. Where it holds, x reads as that type, the Prim OPTIONAL_VALUE of x, as a present optional
 # reads as its value.
@@ -244,6 +278,8 @@ BOXED_TEST = "boxed_test"
 ERROR_CASE = "Error"
 # `prim cast(x)`, x an any: its value as the Prim's type, checked, raising with the place when it holds another type
 CHECKED_CAST = "cast"
+# `prim as_is(x)`: x as another type of its layout, a type value as the text it holds (types/prelude.wap): x itself
+READ_AS_IS = "as_is"
 # `prim box(x)`, x a plain value (int, float, bool, char) going into an any or an optional: x in its box, the Prim's
 # type the one wanted; only typing writes it (notes/decisions.md wap-boxed-any-debt)
 BOXED_VALUE = "box"
@@ -278,6 +314,10 @@ rest_named(item: Node) as Node? := match item {
 # The facts of the typing stage, core/analyze/types.wap: a value's TYPE, `int`, as a program writes types; a function's
 # SIGNATURE on its name, `(int, text) -> int`; a call's DEFINED_AT then names the one function it means
 TYPE = "type"
+# on a type as a value, `int` in `identity(int, 3)`: the type it is (core/analyze/types.wap type_value)
+DENOTES = "denotes"
+# on a function's name called at a level, `identity[1](…)`: the level written (core/analyze/calls.wap level_written_call)
+LEVEL_WRITTEN = "level"
 SIGNATURE = "signature"
 # A list's places by name, for a list that only grows or is changed in place, as the typing state's definitions and a
 # program's records are: indexed up to `count`, extended for the items added since
@@ -315,7 +355,11 @@ record_named(records: Records, type: Term?) as Node? := {
 record_name(record: Record) as text := text(record_declared(record))
 record_declared(record: Record) as Node := match record { Record(name, fields, variants) => name }
 # the class a class extends, `@extends(A)` on its name (wap/sugar/records.wap), ø for one extending none
-class_extended(record: Node) as Node? := match annotation(record_declared(record), EXTENDS_ANNOTATION) { Key(name, op, List(items, bracket, separator)) => items#1; _ => ø }
+class_extended(record: Node) as Node? := annotated(record_declared(record), EXTENDS_ANNOTATION)
+# the sort an enum's header names, `@inductive(Prop)` on its name (wap/sugar/records.wap), ø for an enum naming none
+enum_sort(name: Node) as Node? := annotated(name, INDUCTIVE_ANNOTATION)
+# what an annotation of one word says, `A` of `@extends(A)`; ø without it
+annotated(n: Node, word: text) as Node? := match annotation(n, word) { Key(name, op, List(items, bracket, separator)) => items#1; _ => ø }
 # the type a subtype is (wiki/alias.md), `int` of `type Color < int` (core/rules/stages.wap): the type its record
 # extends, which is no record; ø for any other type
 subtype_base(type: Term, records: Records) as Term? := {
@@ -330,12 +374,16 @@ record_term(record: Record) as Term := type_term(record_type(record))
 fields_of(record: Record) as list := match record { Record(name, fields, variants) => items_of(fields) }
 # An enum's cases, as its Record's variants hold them: a bare name, `Dot`, or a name with its fields, `Circle(r: float)`
 cases_of(record: Record) as list<Node> := match record { Record(name, fields, variants) => items_of(variants) }
-case_name(case: Node) as Node := match case { Call(called, fields) => called; _ => case }
+# GUESS (T6a3's indices): a case written with the type it gives, `step(k: nat, h: Even(k)): Even(k + 2)`, is that type after a
+# colon beside its shape; case_result is that type's code, ø for a case giving its enum itself
+case_shape(case: Node) as Node := match case { Key(shape, Op.Colon, result) => shape; _ => case }
+case_result(case: Node) as Node? := match case { Key(shape, Op.Colon, result) => if result is Text then ø else result; _ => ø }
+case_name(case: Node) as Node := match case_shape(case) { Call(called, fields) => called; shape => shape }
 # a declared case's text, its spelling or else its name: `empty = "ø"` is "ø" (core/analyze/declarations.wap case_lowered)
 SPELLING = "spelling"
 case_text(case: Node) as text := text(fact_of(case_name(case), SPELLING) ?? case_name(case))
 # the patterns of a case pattern's fields, `r` and `0` of `Circle(r, 0)`
-case_fields(case: Node) as list<Node> := match case { Call(called, fields) => fields; _ => [] }
+case_fields(case: Node) as list<Node> := match case_shape(case) { Call(called, fields) => fields; _ => [] }
 # the declared case a bound case name means, by the place its DEFINED_AT names (core/analyze/scope.wap), and the enum
 # declaring it: two enums may each have a case of one spelling
 case_declaring(records: Records, name: Node) as Node := declaring(records, name)#2
