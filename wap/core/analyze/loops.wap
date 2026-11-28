@@ -1,8 +1,10 @@
-# Whether a loop ends (wiki/effects.md "Div"): `while i < b { … i += d … }`. Its condition is the kernel's comparison of
-# a variable i below, or not above, a bound b; its body steps i once, in a statement of its own, by a d the provers
-# show is above 0 there, knowing that the condition holds and that each `if c { … }` before the step whose block never
-# finishes leaves c false; nothing in the body sets what b reads, and no `continue` skips the step. Then b - i falls at
-# every round, and the loop leaves before it goes below 0. Any other loop may run on: it is Div
+# Whether a loop ends (wiki/effects.md "Div"): a whole number its variables compute, the measure, is at least 0 where
+# the loop's condition holds and falls in every round, both proved by the provers. A loop counting a variable up
+# toward a bound, `while i < b { … }`, has the measure `b - i`, and `b - i + 1` for `while i <= b`. A round is read
+# in order, its statements each at the top of the body: each assignment gives its variable a value of its own, of the
+# place's type and equal to the value assigned (`moved = memory_word(at)` keeps `moved: nat`), and an `if c { … }`
+# whose block never finishes leaves c false. A body assigning inside a part that finishes, or holding `continue`,
+# is read as no round: the loop may run on, and is Div
 
 use folder
 use "../stage.wap"
@@ -11,15 +13,16 @@ use "../rules/lowering.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/terms.wap"
 use "../../kernel/environment.wap"
+use "../../kernel/typing.wap"
 use "../../kernel/compute.wap"
 use "../../kernel/counting.wap"
 use "../../kernel/numbers.wap"
 use "../../kernel/recursors.wap"
 use "../../kernel/equality.wap"
 
-# the comparisons a counting loop's condition is
+# the comparisons a counting loop's condition is, the bound not above or not below the variable
 COUNTED_BY = [BELOW, NOT_ABOVE]
-# the binder of what a loop's round knows
+# the binder of a fact a round knows
 ROUND_FACT = "·round"
 # the bindings a loop's variables may be of
 LOOP_VARIABLES = [DefinitionKind.Local, DefinitionKind.Parameter, DefinitionKind.Capture]
@@ -28,32 +31,35 @@ loop_ends(loop: Node, by_key: map<text, TypedFunction>, s: TypingState) as bool 
 	While(condition, body) => {
 		if nodes_in(body).any(n => unwrapped(n) is Continue) { return no }
 		x = loop_reading(loop, by_key, s)
-		compared = meaning(x.c, term_of(condition, x) ?? return no, COUNTED_BY) ?? return no
-		counter = arguments(compared)#1
-		bound = arguments(compared)#2
-		set = variables_set(body, x) ?? return no
-		if variable_id(counter) == 0 or #set.filter(variable => same(variable, counter)) != 1 or set.any(variable => holds_variable(bound, variable)) { return no }
-		statements = statements_of(unwrapped(body))
-		step = statements.index_where(statement => stepped_by(statement, counter, x) != ø)
-		if step <= 0 { return no }
+		held = term_of(condition, x) ?? return no
+		measure = counted_measure(x.c, held) ?? return no
 		e = TYPES.environment
-		known = [truth_stated(e, compared)] + guards_known(statements.take(step - 1), x)
-		facts = known.map(fact => entered(x.c, ROUND_FACT, fact))
-		above_zero = truth_stated(e, apply_all(named_constant(BELOW), [int_numeral(e, 0), stepped_by(statements#step, counter, x)!]))
-		hole_term([], above_zero, x.under(facts, facts.map(fact => ROUND_FACT)), yes) != ø
+		holding = entered(x.c, ROUND_FACT, truth_stated(e, held))
+		round = round_read(statements_of(unwrapped(body)), x.under([holding], [ROUND_FACT])) ?? return no
+		[apply_all(named_constant(NOT_ABOVE), [int_numeral(e, 0), measure]), apply_all(named_constant(BELOW), [now_of(measure, round), measure])].all(goal => hole_term([], truth_stated(e, goal), round.x, yes) != ø)
 	}
 	_ => no
 }
 # a loop read with each variable it names a free variable of its type, a subtype kept so the provers read its
-# condition (`moved: nat` is at least 0)
+# condition
 loop_reading(loop: Node, by_key: map<text, TypedFunction>, s: TypingState) as Entering := {
 	c = checker(TYPES.environment, [])
 	named: map<text, Node> = {}
 	for n in nodes_in(loop) {
 		if unwrapped(n) is Symbol and LOOP_VARIABLES.any(kind => is_bound(n, kind)) and definer_of(n) != ø and not has_unknowns(value_type(n)) { named[place_key(definer_of(n)!)] = n }
 	}
-	locals = named.values().map(name => entered(c, text(name), kernel_headed(kernel_domain(settled_type(value_type(name), s)), c, s)))
-	fresh_reading(c, by_key, s).under(locals, named.keys())
+	keys = named.keys()
+	locals = keys.map(key => entered(c, text(named[key]), kernel_headed(kernel_domain(settled_type(value_type(named[key]), s)), c, s)))
+	fresh_reading(c, by_key, s).under(locals, keys)
+}
+# the measure of a condition counting a variable up toward a bound: the bound less the variable, one more where the
+# bound may be met; ø for any other condition
+counted_measure(c: Checker, held: Term) as Term? := {
+	compared = meaning(c, held, COUNTED_BY) ?? return ø
+	sides = arguments(compared)
+	if variable_id(sides#1) == 0 { return ø }
+	left = apply_all(named_constant(SUBTRACTED), [sides#2, sides#1])
+	if constant_name(head(compared)) == BELOW then left else apply_all(named_constant(SUM), [left, int_numeral(TYPES.environment, 1)])
 }
 # A term read through its head's definitions until its head is one of these constants, `i < b` the kernel's
 # `·below(i, b)`; ø where it never is
@@ -62,30 +68,37 @@ meaning(c: Checker, t: Term, names: list<text>) as Term? := {
 	while not names.contains(constant_name(head(at))) { at = computed_folded(c, unfolded(c, at) ?? return ø) }
 	at
 }
-# what a statement steps a variable by, `i += d` and `i = d + i` by d; ø for any other statement
-stepped_by(statement: Node, counter: Term, x: Entering) as Term? := {
-	value = match unwrapped(statement) {
-		Set(place, value) => if unwrapped(place) is Symbol and same(term_of(place, x) ?? return ø, counter) then value else return ø
-		_ => return ø
-	}
-	parts = arguments(meaning(x.c, term_of(value, x) ?? return ø, [SUM]) ?? return ø)
-	if same(parts#1, counter) then parts#2 else if same(parts#2, counter) then parts#1 else ø
-}
-# what these statements leave known, run in order: an `if c { … }` whose block never finishes that c is false, until
-# a later statement sets a variable c reads
-guards_known(statements: list<Node>, x: Entering) as list<Term> := {
-	known: list<Term> = []
+# a round read so far: the reading under its values and facts, and each variable's value now, by the variable's id
+class Round { x: Entering; now: map<int, Term> = {} }
+# a term with each variable a round assigned its value now
+now_of(t: Term, r: Round) as Term := r.now.keys().fold(t, (term, id) => replaced_by(term, id, r.now[id]))
+# the round of a body's statements, ø where one assigns inside a part that finishes
+round_read(statements: list<Node>, x: Entering) as Round? := {
+	r = Round(x, {})
+	e = TYPES.environment
 	for statement in statements {
-		set = variables_set(statement, x) ?? []
-		known = known.filter(fact => not set.any(variable => holds_variable(fact, variable)))
-		guard = guarded(statement, x)
-		if guard != ø { known += [guard!] }
+		value = match unwrapped(statement) {
+			Set(place, value) => if unwrapped(place) is Symbol then value else return ø
+			_ => ø
+		}
+		if value != ø {
+			place = set_place(statement)!
+			variable = term_of(place, x) ?? return ø
+			type = type_of(x.c, variable)
+			given = entered(x.c, text(place), type)
+			equal = entered(x.c, ROUND_FACT, equated(e, TYPE_LEVEL, type, given.variable, now_of(term_of(value!, x) ?? return ø, r)))
+			r.x = r.x.under([given, equal], [ROUND_FACT, ROUND_FACT])
+			r.now[variable_id(variable)] = given.variable
+		} else {
+			guard = guarded(statement, r) ?? (if (variables_set(statement, x) ?? return ø) is empty then ø else return ø)
+			if guard != ø { r.x = r.x.under([entered(x.c, ROUND_FACT, guard!)], [ROUND_FACT]) }
+		}
 	}
-	known
+	r
 }
-# `c == no` after an `if c { … }` whose block never finishes; ø for any other statement
-guarded(statement: Node, x: Entering) as Term? := match unwrapped(statement) {
-	If(condition, then_part, else_part) => if jumps(then_part) then truths_equal(TYPES.environment, term_of(condition, x) ?? return ø, TYPES.environment.literals!.no_case) else ø
+# `c == no` after an `if c { … }` whose block never finishes, c read at the round's values; ø for any other statement
+guarded(statement: Node, r: Round) as Term? := match unwrapped(statement) {
+	If(condition, then_part, else_part) => if jumps(then_part) and not jumps(else_part) then truths_equal(TYPES.environment, now_of(term_of(condition, r.x) ?? return ø, r), TYPES.environment.literals!.no_case) else ø
 	_ => ø
 }
 # the variables a node's assignments set, each place's root, `xs#1 = 2` setting xs; ø where one is no variable the
