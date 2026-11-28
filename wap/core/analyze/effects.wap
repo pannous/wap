@@ -36,8 +36,10 @@ class Callee { key: text; caught: bool }
 # (none), only where one of these parameters is 0, a divisor (their places), or whatever it is given (ø); the
 # parameters it writes into (their places), its State only where a caller gives it what the caller holds; the locals
 # it made itself, a literal or its own allocation, whose writes stay inside it, and those given anything else; the
-# variables of functions around it that it writes into
-class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = []; captured: list<text> = []; tentative: bool = no }
+# variables of functions around it that it writes into; the arguments it gives its callees
+class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = []; captured: list<text> = []; passes: list<Pass> = [] }
+# an argument given to a callee at its place there: what the callee writes into of it, the giver writes into too
+class Pass { key: text; at: int; argument: Node; caught: bool }
 # The effects of the typed functions, joined over the groups of functions that call each other round (groups.wap):
 # each function's own part and the effects found, each group's alike
 class Joining {
@@ -71,7 +73,7 @@ effects_joined(s: TypingState) as Joining := {
 # a group of functions that call each other round, each with the group's own effects and its calls' outside it: every
 # group it calls is joined before it
 effects_of_group(group: list<text>, x: Joining) := {
-	owns_settled(group, x)
+	writes_passed(group, x)
 	round = #group > 1 or own_of(group#1, x).calls.any(call => call.key == group#1)
 	effects: list<Effect> = if round then [Effect.Div] else []
 	for member in group {
@@ -87,40 +89,15 @@ found_of(key: text, x: Joining) as list<Effect> := x.found.get(key) ?? raise "ef
 # what a typed function's body does itself and calls, read once
 own_of(key: text, x: Joining) as Own := {
 	if x.own.has(key) { return x.own[key] }
-	# while its body is read, a call back to it may fail whatever it is given, and what it writes is not known yet: what
-	# reads it so far is tentative, read again once its group is settled (owns_settled)
-	x.own[key] = Own([], [], [], ø, tentative: yes)
-	x.own[key] = own_read(key, x)
-	x.own[key]
-}
-own_read(key: text, x: Joining) as Own := {
+	# while its body is read, a call back to it may fail whatever it is given
+	x.own[key] = Own([], [], [], ø)
 	own = Own([], [], parameter_words(x.by_key[key]).map(place_key))
 	body = body_of(x.by_key[key])
 	if fact_of(body, CLAIMED) != ø and is_foreign(body) { claimed_own(fact_of(body, CLAIMED)!, x.by_key[key], own) } else { effects_in(body, no, own, x) }
 	# a parameter the body assigns no longer holds what the caller gave
 	if own.divisors != ø and own.divisors!.any(at => own.assigned.contains(at)) { own.divisors = ø }
+	x.own[key] = own
 	own
-}
-# a callee's own part, the reader's tentative where the callee's is
-callee_own(key: text, own: Own, x: Joining) as Own := {
-	callee = own_of(key, x)
-	if callee.tentative { own.tentative = yes }
-	callee
-}
-# a group whose members read one another while being read, read again while what they write grows, each read seeing
-# the others' last: then final, as every group it calls is
-owns_settled(group: list<text>, x: Joining) := {
-	if not group.any(member => own_of(member, x).tentative) { return }
-	grown = yes
-	while grown {
-		grown = no
-		for member in group {
-			read = own_read(member, x)
-			grown = grown or #read.written > #own_of(member, x).written
-			x.own[member] = read
-		}
-	}
-	for member in group { x.own[member].tentative = no }
 }
 body_of(typed: TypedFunction) as Node := match typed.define { Define(name, parameters, body) => body; _ => Empty }
 parameters_of(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters); _ => [] }
@@ -174,12 +151,12 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		named = fact_of(called, DEFINED_AT)
 		key = if named == ø then "" else place_key(named!)
 		if not x.by_key.has(key) { return effects_in(called, caught, own, x) }
-		callee = callee_own(key, own, x)
+		callee = own_of(key, x)
 		divisors = callee.divisors
 		# each divisor met, so each one the caller is given is recorded
 		safe = divisors != ø and divisors!.map(at => divisor_met(arguments#at, caught, own)).all(met => met)
 		if divisors == ø { divisor_met(Empty, caught, own) }
-		for at in callee.written { written_into(arguments#at, caught, own) }
+		for at in 1 to #arguments { own.passes += [Pass(key, at, arguments#at, caught)] }
 		captures_given(callee, own)
 		own.calls += [Callee(key, caught or safe)]
 	}
@@ -197,10 +174,24 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		effects_in_each(direct_parts(unwrapped(n)), caught, own, x)
 	}
 }
+# A group's members write into what they give their callees what the callees write into: followed round until
+# nothing more is written, so a call back to a member read before its body is (own_of's placeholder) counts too
+writes_passed(group: list<text>, x: Joining) := {
+	changed = yes
+	while changed {
+		changed = no
+		for member in group {
+			own = own_of(member, x)
+			before = #own.written
+			for pass in own.passes { if own_of(pass.key, x).written.contains(pass.at) { written_into(pass.argument, pass.caught, own) } }
+			if #own.written != before { changed = yes }
+		}
+	}
+}
 # a function given as a value, named or written in place: it may be given anything, so it may fail by any divisor and
 # what it writes into is State
 value_given(key: text, caught: bool, own: Own, x: Joining) := {
-	callee = callee_own(key, own, x)
+	callee = own_of(key, x)
 	if callee.divisors != [] { divisor_met(Empty, caught, own) }
 	if callee.written is not empty { effect_added(Effect.State, caught, own) }
 	captures_given(callee, own)
