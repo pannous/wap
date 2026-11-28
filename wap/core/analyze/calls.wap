@@ -161,6 +161,8 @@ call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s
 	chosen = function_typed(meant, taken.map(argument => value_type(argument)), s, n)
 	if f != ø { called_reads(chosen, n, s, f!) }
 	typed = result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
+	# a result type reading the parameters or letters is the call's, filled by its arguments (earlier_filled)
+	if subset_condition(value_type(typed)) != ø { typed = with_type_of(typed, earlier_filled(value_type(typed)!, meant.parameters, parameters_in(meant, s), taken, #taken + 1, n, s)) }
 	# the letters only the result writes, never one the caller's frame binds (letters.wap letters_settled)
 	result = value_type(typed)
 	letters = letters_in(result).unique().filter(letter => f == ø or not f!.letters.any(bound => bound.key == letter))
@@ -330,28 +332,28 @@ arguments_fitted(definition: Signature, given: list, s: TypingState) as list := 
 	letters = (letters_bound(definition, given.map(value_type), s, denoted_types(given)) ?? NOTHING_CALLED).letters
 	parameters = parameters_in(definition, s)
 	types = definition.parameters.map(type => substituted(type, letters))
-	wanted = (1 to #given).map(at => earlier_filled(types, parameters, given, at, s))
+	wanted = (1 to #given).map(at => earlier_filled(types#at, types, parameters, given, at, given#at, s))
 	(1 to #given).map(at => if counted(value_type(given#at), wanted#at) then with_type_of(placed_like(Prim(symbol(COUNTING), [given#at]), given#at), wanted#at) else as_wanted(given#at, wanted#at, s))
 }
 # A parameter's type that reads the parameters before it, `xs: list<int> where #it == n` or `i: index(xs)`, as this call
-# wants it: their arguments written in (wiki/type.md "Dependent Types"), so its condition reads the call's own values,
+# wants it, and its result type, which reads them all, `vector(T, m + n)` of append: their arguments written in (wiki/type.md "Dependent Types"), so its condition reads the call's own values,
 # never a name where the call sits. A letter, a one-letter name nothing defines, `n` of `dot(a: vector(number, n), b:
 # vector(number, n))`, is written in as the call fills it (letter_filling). A name it reads of a parameter after it, or
 # of one of the function around the call that the callee does not bind, has no reading and is refused
-earlier_filled(types: list<Term>, parameters: list<Node>, given: list, at: int, s: TypingState) as Term := {
-	condition = subset_condition(types#at) ?? return types#at
+earlier_filled(type: Term, types: list<Term>, parameters: list<Node>, given: list, at: int, place: Node, s: TypingState) as Term := {
+	condition = subset_condition(type) ?? return type
 	names = condition_names(condition_of(condition))
 	places = (1 to #parameters).filter(place => names.contains(text(parameter_name(parameters#place))))
 	later = places.find(place => place >= at)
-	if later != ø { refused(given#at, "this parameter's type reads ${parameter_name(parameters#later!)}, which comes after it: put ${parameter_name(parameters#later!)} first") }
+	if later != ø { refused(place, "this parameter's type reads ${parameter_name(parameters#later!)}, which comes after it: put ${parameter_name(parameters#later!)} first") }
 	bound = places.map(place => text(parameter_name(parameters#place)))
 	letters = names.filter(name => not bound.contains(name) and is_letter_name(name) and named_in(s.kind_rules!.scope, name) is empty)
 	around = parameters_read(names.filter(name => not bound.contains(name) and not letters.contains(name)), s.functions.find(function => instance_key(function) == s.within))
-	if around is not empty { refused(given#at, "this parameter's type reads ${around.join(", ")}, which the function it is called from has as parameters too: rename one") }
-	if places is empty and letters is empty { return types#at }
+	if around is not empty { refused(place, "this parameter's type reads ${around.join(", ")}, which the function it is called from has as parameters too: rename one") }
+	if places is empty and letters is empty { return type }
 	written = places.fold(condition, (code, place) => parameter_written(code, text(parameter_name(parameters#place)), argument_written(given#place)))
-	filled = letters.fold(written, (code, letter) => parameter_written(code, letter, letter_filling(letter, types, given) ?? refused(given#at, "no argument says what ${letter} is: give a parameter the condition `#it == ${letter}`")))
-	subset_term(narrowed_type(types#at)!, filled)
+	filled = letters.fold(written, (code, letter) => parameter_written(code, letter, letter_filling(letter, types, given) ?? refused(place, "no argument says what ${letter} is: give a parameter the condition `#it == ${letter}`")))
+	subset_term(narrowed_type(type)!, filled)
 }
 # A letter's value at a call: the first parameter whose condition is an equation of it, `#it == n`, its other side read
 # of that parameter's argument, `#[1, 2, 3]`; ø where none is
