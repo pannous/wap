@@ -9,9 +9,12 @@ else slot_store=${WARP_COMPILER_STORE:-$HOME/.cache/warp/compilers}; fi
 FREE_CORES=2
 JOB_PEAK_MEMORY=$((3584 * 1024 * 1024))
 MEMORY_RESERVED=$((8 * 1024 * 1024 * 1024))
-memory_bytes() { sysctl -n hw.memsize 2>/dev/null || awk '$1 == "MemTotal:" { print $2 * 1024 }' /proc/meminfo; }
+# by full path: cron's PATH has no /usr/sbin
+memory_bytes() { /usr/sbin/sysctl -n hw.memsize 2>/dev/null || awk '$1 == "MemTotal:" { print $2 * 1024 }' /proc/meminfo; }
 job_slots() {
 	cat "$slot_store/job-slots/count" 2>/dev/null && return
 	local by_cores=$(( $(getconf _NPROCESSORS_ONLN) - FREE_CORES )) by_memory=$(( ($(memory_bytes) - MEMORY_RESERVED) / JOB_PEAK_MEMORY ))
-	echo $(( by_cores < by_memory ? by_cores : by_memory ))
+	local slots=$(( by_cores < by_memory ? by_cores : by_memory ))
+	[ "$slots" -ge 1 ] || { echo "job_slots: $slots job slots (cores $by_cores, memory $by_memory): memory_bytes or getconf read nothing; write a count to $slot_store/job-slots/count" >&2; return 1; }
+	echo "$slots"
 }

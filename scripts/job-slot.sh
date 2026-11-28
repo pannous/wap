@@ -15,7 +15,7 @@ source "$(dirname "$0")/lib/slots.sh"
 guarded="$(dirname "$0")/guarded.sh"
 # without lockf there are no slots: every command runs at once, an --alone one too
 command -v lockf >/dev/null || { [ "$1" = --alone ] && shift; exec nice -n 19 "$guarded" "$@"; }
-slots=$(job_slots)
+slots=$(job_slots) || exit 2
 for tree in "${INTEGRATION_TREES[@]}"; do [[ " $PWD/ $*/" == *" $tree/"* ]] && { slots=$((slots + 1)); break; }; done
 waited=
 # the command run in the first slot that frees, its status
