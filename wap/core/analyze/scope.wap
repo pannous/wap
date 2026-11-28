@@ -42,6 +42,10 @@ bound_program(program: Block, types: list<Signature>, modules: list<Module>, sta
 }
 # a type's name, `nat: Type := int where it >= 0`: no value to compute, each use of it the type it names (type_bound)
 is_type_name(statement: Node) as bool := match statement { Define(Key(name, Op.Colon, result), parameters, body) => items_of(parameters) is empty and universe_written(result) != ø; _ => no }
+# what a definition giving a type has its name hold (declarations.wap type_named_value), ø for any other statement;
+# the name as it defines, holding that
+type_definer(statement: Node, name: Node) as Node := with_fact(name, TYPE_NAMED, named_type_of(statement) ?? return name)
+named_type_of(statement: Node) as Node? := match statement { Define(Key(name, Op.Colon, result), parameters, body) => if universe_written(result) == ø then ø else type_named_value(parameters, body); _ => ø }
 # the words around a program: the modules it uses, then the types module's, outermost, and the standard library's
 # beyond them
 scope_around(types: list<Signature>, modules: list<Module>, standard: map<text, list<text>> = {}) as Scope := Scope([Layer(modules_scope(modules) + types_scope(types))], no, standard)
@@ -117,7 +121,7 @@ field_bound(field: Node, scope: Scope) as Node := match field {
 type_bound(type: Node, scope: Scope) as Node := match type {
 	Symbol(name) => {
 		# the record or the named type its scope sees, the innermost: a type's name is the type it names, as written
-		meant = named_in(scope, name).filter(definition => definition.kind == DefinitionKind.Record or fact_of(definition.definer, TYPE_NAMED) != ø)
+		meant = named_in(scope, name).filter(definition => definition.kind == DefinitionKind.Record or names_type(definition))
 		named = named_type(meant, name, scope)
 		if named != ø { return named! }
 		# a case word narrows the enum its scope sees, whatever other enums hold a case so named
@@ -125,12 +129,35 @@ type_bound(type: Node, scope: Scope) as Node := match type {
 		with_fact(type, DECLARED_BY, record_declared(meant#1.definer))
 	}
 	List(items, bracket, separator) => refitted(List(items.map(item => type_bound(item, scope)), bracket, separator), type)
-	Call(called, arguments) => refitted(Call(called, arguments.map(argument => type_bound(argument, scope))), type)
+	Call(called, arguments) => applied_type(type, called, arguments, scope) ?? refitted(Call(called, arguments.map(argument => type_bound(argument, scope))), type)
 	Key(name, op, parts) => refitted(Key(type_bound(name, scope), op, type_bound(parts, scope)), type)
 	_ => type
 }
+# A type name with parameters applied, `vector(int, 3)`: its body with the arguments written in for the parameters,
+# `list<int> where #it == 3`, shown by the use as written; ø where the call names no such type
+applied_type(type: Node, called: Node, arguments: list, scope: Scope) as Node? := {
+	if not called is symbol { return ø }
+	meant = named_in(scope, text(called)).filter(names_type)
+	if meant is empty { return ø }
+	match fact_of(meant#1.definer, TYPE_NAMED)! {
+		Fn(parameters, body) => {
+			names = items_of(parameters).map(parameter => text(parameter_name(parameter)))
+			if #names != #arguments { refused(type, "${text(called)} takes ${#names} arguments, ${names.join(", ")}: this gives ${#arguments}") }
+			written = (1 to #names).fold(body, (part, at) => substituted(part, names#at, arguments#at))
+			with_fact(type_bound(written, scope), WRITTEN, Text("${type}"))
+		}
+		_ => ø
+	}
+}
+names_type(definition: Definition) as bool := fact_of(definition.definer, TYPE_NAMED) != ø
 # the type the innermost of these definitions names, as written by its name; ø where it names none
-named_type(definitions: list<Definition>, name: text, scope: Scope) as Node? := if definitions is empty then ø else with_fact(type_bound(fact_of(definitions#1.definer, TYPE_NAMED) ?? return ø, scope), WRITTEN, Text(name))
+named_type(definitions: list<Definition>, name: text, scope: Scope) as Node? := {
+	if definitions is empty { return ø }
+	named = fact_of(definitions#1.definer, TYPE_NAMED) ?? return ø
+	# a name with parameters is a type only applied (applied_type)
+	if named is Fn { return ø }
+	with_fact(type_bound(named, scope), WRITTEN, Text(name))
+}
 # An arm: the name its pattern holds a new variable of the arm, which its result sees; `_` and literals name none
 arm_bound(arm: Arm, scope: Scope, depth: int) as Node := match arm {
 	Arm(pattern, result) => {
