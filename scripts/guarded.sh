@@ -11,6 +11,8 @@ MEMORY_CAP_GB=12        # a wap test, compile or census peaks under 2 GB
 TIME_CAP_SECONDS=1800   # one process's: the longest, wap1 compiling wap's compiler, takes about two minutes
 SAMPLE_SECONDS=1
 RUNAWAY_STATUS=137      # as if killed by SIGKILL, which it was
+MIN_BASH_MAJOR=5        # `wait -n -p` is bash 5's; macOS's /bin/bash is 3.2, found first on a bare PATH (cron's holds /opt/homebrew/bin)
+[ "${BASH_VERSINFO[0]}" -ge "$MIN_BASH_MAJOR" ] || { echo "guarded.sh needs bash $MIN_BASH_MAJOR (brew install bash), found $BASH_VERSION" >&2; exit 2; }
 
 while [ $# -gt 0 ]; do
 	case $1 in
