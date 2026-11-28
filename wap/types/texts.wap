@@ -16,6 +16,7 @@ LONG_TEXT_BYTES := 64
 BLANK_BYTES := [32, 9, 10, 13]
 # the exit status of a program stopped by a write that failed or took nothing
 WRITE_FAILED_STATUS := 1
+WRITE_FAILED_MESSAGE := "a write failed or took nothing: the program stops\n"
 # what a character's lead byte keeps of its code, by the character's byte count: all of 0xxxxxxx, five bits of
 # 110xxxxx, four of 1110xxxx, three of 11110xxx; each continuation byte keeps six
 LEAD_BITS := [128, 32, 16, 8]
@@ -64,20 +65,29 @@ place(t: text) := {
 }
 # a text written to a file, a line end after it when `line` says so: again from where a write stopped until every byte
 # is taken; a write that fails or takes none ends the program, as the host's own work does, never an Error a `try` catches
-# DEBT: A failed write stops without naming itself: a write that fails or takes none (closed stdout, `| head`) exits
-#   with WRITE_FAILED_STATUS and no message, as a message would write through this word again
 write(t: text, file: int, line: bool) := {
 	at = bytes_placed(t)
 	done = 0
 	while done < byte_count(t) {
-		set_memory_word(IOVEC_AT, at + done)
-		set_memory_word(IOVEC_AT + 4, byte_count(t) - done)
+		iovec_named(at + done, byte_count(t) - done)
 		failed = fd_write(file, IOVEC_AT, 1, MOVED_AT) != 0
 		moved = memory_word(MOVED_AT)
-		if failed or moved == 0 { exit(WRITE_FAILED_STATUS) }
+		if failed or moved == 0 { write_failed() }
 		done += moved
 	}
 	if line { write("\n", file, no) }
+}
+# the one iovec at IOVEC_AT naming count bytes from an address
+iovec_named(at: int, count: int) := {
+	set_memory_word(IOVEC_AT, at)
+	set_memory_word(IOVEC_AT + 4, count)
+}
+# the program ended by a write that failed or took nothing (closed stdout, `| head`): said once on stderr by the host's
+# write itself, never through write, which fails again where stderr is the file, then exit with WRITE_FAILED_STATUS
+write_failed(): never := {
+	iovec_named(bytes_placed(WRITE_FAILED_MESSAGE), byte_count(WRITE_FAILED_MESSAGE))
+	said = fd_write(STANDARD_ERROR, IOVEC_AT, 1, MOVED_AT)
+	exit(WRITE_FAILED_STATUS)
 }
 # WASI's write of the bytes the iovecs at an address name, the count written put at `moved_at`
 fd_write(file: int, iovecs_at: int, count: int, moved_at: int): int := prim fd_write(file, iovecs_at, count, moved_at)
