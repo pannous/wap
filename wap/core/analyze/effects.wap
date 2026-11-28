@@ -35,10 +35,9 @@ class Callee { key: text; caught: bool }
 # What a typed function does itself, the typed functions it calls, its parameters' keys, and when it may fail: never
 # (none), only where one of these parameters is 0, a divisor (their places), or whatever it is given (ø); the
 # parameters it writes into (their places), its State only where a caller gives it what the caller holds; the locals
-# it made itself, a literal or its own allocation, whose writes stay inside it, and those given anything else
-class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = []; captured: list<Captured> = []; tentative: bool = no }
-# a variable of a function around a function value that the value writes: given a new value, or written into
-class Captured { key: text; rebinding: bool }
+# it made itself, a literal or its own allocation, whose writes stay inside it, and those given anything else; the
+# variables of functions around it that it writes into
+class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = []; captured: list<text> = []; tentative: bool = no }
 # The effects of the typed functions, joined over the groups of functions that call each other round (groups.wap):
 # each function's own part and the effects found, each group's alike
 class Joining {
@@ -193,7 +192,7 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		if n is Block and globals_named(n) is not empty { effect_added(Effect.State, caught, own) }
 		match unwrapped(n) { Set(place, value) => {
 			own.assigned += [parameter_at(place, own)]
-			match place { Get(subject, key) => written_into(subject, caught, own); _ => if is_bound(place, DefinitionKind.Capture) then own.captured += [Captured(local_key(place), yes)] else local_set(place, value, own) }
+			match place { Get(subject, key) => written_into(subject, caught, own); _ => if is_bound(place, DefinitionKind.Capture) then effect_added(Effect.State, caught, own) else local_set(place, value, own) }
 		}; _ => ø }
 		effects_in_each(direct_parts(unwrapped(n)), caught, own, x)
 	}
@@ -207,12 +206,11 @@ value_given(key: text, caught: bool, own: Own, x: Joining) := {
 	captures_given(callee, own)
 	own.calls += [Callee(key, caught)]
 }
-# the variables a callee writes of the functions around it: one of the caller's own keeps it, a rebinding of any of
-# its locals or a write into one it made itself (`count(xs) := { n = 0; xs.map(x => { n += 1; x }); n }`); any other
-# is passed on outward, State where nothing around keeps it
-captures_given(callee: Own, own: Own) := for c in callee.captured {
-	kept = if c.rebinding then own.made.contains(c.key) or own.given.contains(c.key) else own.made.contains(c.key) and not own.given.contains(c.key)
-	if not kept { own.captured += [c] }
+# the variables of the functions around it a callee writes into: a list the caller made itself keeps the write,
+# `seen = []; xs.map(x => { seen.add(x); x })`; any other is passed on outward, State where nothing around keeps it
+captures_given(callee: Own, own: Own) := {
+	kept = own.made.filter(key => not own.given.contains(key))
+	own.captured = (own.captured + callee.captured.filter(key => not kept.contains(key))).unique
 }
 # a divisor met: whether it is a whole number other than 0 and -1 written in place, which no division fails by (the
 # smallest int ÷ -1 traps); else the
@@ -231,7 +229,7 @@ written_into(target: Node, caught: bool, own: Own) := {
 	at = parameter_at(root.name, own)
 	if at > 0 { own.written = (own.written + [at]).unique; return }
 	key = local_key(root.name)
-	if root.steps == 0 and is_bound(root.name, DefinitionKind.Capture) { own.captured += [Captured(key, no)]; return }
+	if root.steps == 0 and is_bound(root.name, DefinitionKind.Capture) { own.captured = (own.captured + [key]).unique; return }
 	if root.steps > 0 or not own.made.contains(key) or own.given.contains(key) { effect_added(Effect.State, caught, own) }
 }
 # the name a value written into is reached from, through fields and items, and how many of them; ø for a value of any
