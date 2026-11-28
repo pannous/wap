@@ -22,6 +22,7 @@ use "../kernel/logic.wap"
 use "../kernel/counting.wap"
 use "../kernel/inductive.wap"
 use "../kernel/typing.wap"
+use "../kernel/recursors.wap"
 use "../kernel/show.wap"
 use "analyze/courses.wap"
 
@@ -134,14 +135,19 @@ TYPE_WORDS = ATOM_TYPES + [BOOL_TYPE, ANY_TYPE, LIST_TYPE, MAP_TYPE, ENUM_TYPE, 
 # name kept and the words sharing one marked, so their texts tell them apart), the type a shape's word narrows
 # (core/analyze/shapes.wap), the condition a subtype's word holds, the subtypes met so far, the key of the function a
 # function value's word calls, how many typed functions the environment holds as assumptions and as definitions
-# (core/analyze/terms.wap), what became of each enum, by its word's id, and each case's constructor, by its
-# definer's place (core/analyze/inductives.wap). It is the compile's own, as a
+# (core/analyze/terms.wap), how many have each effect (core/analyze/effects.wap), what became of each enum, by its
+# word's id, and each case's constructor, by its definer's place (core/analyze/inductives.wap). It is the compile's own, as a
 # symbol table is: every stage reads a type fact through it, so it is one value for the whole run, not handed down
 # every call
 # (refused: where a compile keeps what it typed beside the functions it refuses, each refusal's message by the
-# function's key, as wap verify's laws do; ø where a refusal ends the compile)
-class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; shared: map<int, bool> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {}; conditions: map<int, Node> = {}; subsets: list<Term> = []; assumed: int = 0; defined: int = 0; enums: map<int, text> = {}; constructors: map<text, int> = {}; refused: map<text, text>? = ø }
+# function's key, as wap verify's laws do; ø where a refusal ends the compile; prove: what answers a `by`, the provers
+# wap verify gives; ø in a build, where a proof by laws gives no term and its function is assumed)
+class TypeTerms { terms: list<Term> = []; places: map<int, list<int>> = {}; environment: Environment = core_environment(); declared: map<int, Node> = {}; names: map<text, int> = {}; shared: map<int, bool> = {}; narrows: map<int, Term> = {}; functions: map<int, text> = {}; conditions: map<int, Node> = {}; subsets: list<Term> = []; assumed: int = 0; defined: int = 0; effects: map<text, int> = {}; enums: map<int, text> = {}; constructors: map<text, int> = {}; refused: map<text, text>? = ø; prove: ((ByHole) -> Term?)? = ø }
 TYPES: TypeTerms = TypeTerms()
+# A `by` read into a proof (core/analyze/terms.wap): the binders around it, free variables of the checker c, the
+# statement it proves, the laws it names, and the program's function of a name as the kernel holds it; the
+# provers TYPES.prove names answer it (extensions/verify/laws.wap)
+class ByHole { c: Checker; context: list<Term>; type: Term; laws: list<Node>; function: (text) -> Term? }
 core_environment() as Environment := {
 	e = Environment()
 	for core in CORE_WORDS { word_declared(e, core.word, kind_of(core.parts)) }
@@ -179,11 +185,17 @@ axiom_added(e: Environment, name: text, type: Term, core: bool = no) as int := {
 # a type word's term, the word declared by its key the first time
 word_term(word: text) as Term := word_keyed(word, word)
 word_keyed(word: text, key: text, type: Term = DATA_TERM) as Term := constant(TYPES.environment.core.get(key) ?? word_declared(TYPES.environment, key, type), word, [])
-# the universe a record's header names, `enum False: Prop {}` (wiki/proposition.md), data where it names none; ø
-# for a sort that is no universe, an enum's indices (`enum Even: nat -> Prop`)
-record_sort(declared: Node) as Term? := {
-	level = universe_written(enum_sort(declared) ?? return DATA_TERM) ?? return ø
-	universe(level)
+# the sort a record's header names, `enum False: Prop {}` (wiki/proposition.md), data where it names none: a universe, or the
+# types of the enum's indices and then a universe, `enum Even: nat -> Prop` (GUESS, T6a3's indices: a Pi over each index
+# type, so the word is declared a family and `Even(4)` kernel-checks); ø for any other sort
+record_sort(declared: Node) as Term? := sorted(enum_sort(declared) ?? return DATA_TERM)
+sorted(sort: Node) as Term? := {
+	level = universe_written(sort)
+	if level != ø { return universe(level!) }
+	match sort {
+		Call(arrow, items) => if text(arrow) == FUNCTION_ARROW and #items == 2 then indexed(items_or_one(items#1), sorted(items#2)) else ø
+		_ => ø
+	}
 }
 # a record's header as its word is declared: a function of its parameters giving its sort, each parameter of the type
 # its header writes, `a: Prop` of `enum And(a: Prop, b: Prop): Prop`, data for a bare letter, `T` of `enum list<T>`;
@@ -201,11 +213,12 @@ block_named(t: Term, ids: list<int>, depth: int) as Term := match t.shape {
 	Pi(binder, domain, body) => pi(binder, block_named(domain, ids, depth), block_named(body, ids, depth + 1))
 	_ => t
 }
+indexed(indices: list<Node>, sort: Term?) as Term? := if sort == ø then ø else indices.reverse.fold(sort!, (body, index) => pi("_", type_term(index), body))
 # a written word's term: a record's own by its declaration, a shape's with the type it narrows known
 word_named(n: Node) as Term := {
 	declared = fact_of(n, DECLARED_BY)
 	narrows = fact_of(n, NARROWS)
-	# a case's word is its own, named by its enum's declaration as a case shape's is (core/analyze/shapes.wap case_shape)
+	# a case's word is its own, named by its enum's declaration as a case shape's is (core/analyze/shapes.wap case_term_of)
 	word = if declared != ø then declared_word(text(n), declared!) else if narrows == ø then word_term(text(n)) else word_keyed(text(n), "${text(n)} ${declaration_place(fact_of(narrows!, DECLARED_BY)!)}")
 	if narrows == ø then word else narrowing(word, type_term(narrows!))
 }
@@ -394,7 +407,9 @@ function_value_parts(type: Term?) as list<Term>? := if function_value_key(type) 
 function_value_key(type: Term?) as text? := if type == ø then ø else TYPES.functions.get(word_id(head_of(type!)))
 
 # a type as the program wrote it, read into its term; ø where none is written
-written_type(written: Node?) as Term? := if written == ø then ø else type_term(written!)
+# (a statement in a result's or a parameter's place is a bool where a signature is read, its truth where typing reads
+# the function: core/analyze/calls.wap statement_held)
+written_type(written: Node?) as Term? := if written == ø then ø else if is_statement_written(written) then BOOL_TERM else type_term(written!)
 # a type the compiler writes into code it makes, as its notation carrying its term
 written_of(type: Term) as Node := with_fact(symbol(type_text(type)), TYPE, type_fact(type))
 # a type refused as code is, where it has no place of its own
@@ -415,7 +430,7 @@ type_term(n: Node) as Term := {
 	parts = written_parts(n)
 	if parts != ø { return type_built(word_named(parts#1), parts.drop(1).map(part => type_term(part))) }
 	match n {
-		Call(times, items) => if text(times) == ARRAY_TIMES and #items == 2 and items#1 is number then list_type(type_term(items#2)) else raise("${n} is no type")
+		Call(times, items) => if text(times) == ARRAY_TIMES and #items == 2 and items#1 is number then list_type(type_term(items#2)) else if is_family_call(n) then family_typed(times, items) else raise("${n} is no type")
 		Empty => EMPTY_TERM
 		_ => any_instance(word_named(n))
 	}
@@ -429,6 +444,40 @@ any_instance(word: Term) as Term := {
 is_parameter_of(type: Term?, record: Node) as bool := is_word(type) and record_letters(record_declared(record)).any(letter => text(letter) == type_text(type))
 # whether a type is a generic record's any instance, which each of its types fits as it is: one struct holds them all
 is_any_instance(type: Term) as bool := declared_by(type) != ø and parts_of(type) is not empty and parts_of(type).all(part => part == ANY_TERM)
+# GUESS (T6a3's value reader): a declared type applied to values, `Even(double(n))`. While typing, an argument that is no type stands as its
+# code, as a subtype's condition does (the type is keyed by it); terms.wap family_read reads the values under the function's parameters
+is_family_call(n: Node) as bool := match n { Call(head, items) => is_type_former(family_type(head)) and items.any(item => is_value_written(item)); _ => no }
+# the type of a call's head, its word's: the program's type word as declared with its header (word_named declares it
+# the first time, the same word each time), else the kernel's declaration of the name (`Equal`), which is looked up,
+# never declared; ø for a name neither holds yet
+family_type(head: Node) as Term? := {
+	if fact_of(head, DECLARED_BY) != ø { return (declared_at(TYPES.environment, word_id(word_named(head))) ?? return ø).type }
+	(declaration(TYPES.environment, text(head)) ?? return ø).type
+}
+# the head of a type applied to values as typing holds it: the program's word, or the kernel's family at its own
+# level parameters, never a word declared again. Those levels are typing's only, for the type as a value: the kernel's
+# reading heads it again at the levels its arguments give (core/analyze/terms.wap kernel_headed)
+family_word(head: Node) as Term := {
+	family = if fact_of(head, DECLARED_BY) != ø then ø else declaration(TYPES.environment, text(head))
+	if family == ø then word_named(head) else constant(named_id(TYPES.environment, family!.name)!, family!.name, family!.levels.map(name => Parameter(name)))
+}
+# a function type's parameter types and its result
+arrow_parts(type: Term) as list<Term> := match type.shape {
+	Pi(binder, domain, body) => [domain] + arrow_parts(body)
+	_ => [type]
+}
+# whether a type is a type former's: a function of one argument or more ending in a sort
+is_type_former(type: Term?) as bool := match (type ?? return no).shape { Pi(binder, domain, body) => match body.shape { Sort(level) => yes; _ => is_type_former(body) }; _ => no }
+# a type place written as a statement, `a + 0 == a`: a call of a function the program names that type_term reads as no
+# type, which states the truth it holds (core/analyze/calls.wap statement_held); a call of a name nothing defines,
+# `Lsit(int)`, is an unknown type
+is_statement_written(n: Node?) as bool := match n ?? Empty { Call(head, items) => fact_of(head, DEFINED_AT) != ø and text(head) != ARRAY_TIMES and not is_type_written(n!) and not is_family_call(n!); _ => no }
+# a value: an expression, or a name bound as a parameter or a value; any other name is no value, so a misspelt type is unknown as everywhere
+is_value_written(item: Node) as bool := not (is_type_written(item) or fact_of(item, DECLARED_BY) != ø or core_place(text(item)) != ø) and (not item is symbol or fact_of(item, DEFINED_AT) != ø)
+family_typed(head: Node, items: list<Node>) as Term := {
+	parts = items.map(item => if is_value_written(item) then word_term("${item}") else type_term(item))
+	type_built(family_word(head), parts)
+}
 # the level a universe is written at, `Prop`, `Type`, `Type(n)`, `Sort(n)`; ø for other code
 universe_written(n: Node) as Level? := {
 	call = call_written(n)
@@ -450,7 +499,16 @@ universe_text(type: Term) as text? := match type.shape { Sort(level) => sort_sho
 universe_level(type: Term?) as Level? := if type == ø then ø else match type!.shape { Sort(level) => level; _ => ø }
 # the universe a type lies in: the kernel's type of a universe, else Type, the universe of every data type (a letter, a
 # record, a union, a type former the kernel holds no judgement of)
-universe_of(type: Term) as Term := match type.shape { Sort(level) => judged_universe(type); Pi(binder, domain, body) => judged_universe(type); _ => DATA_TERM }
+universe_of(type: Term) as Term := match type.shape { Sort(level) => judged_universe(type); Pi(binder, domain, body) => judged_universe(type); Apply(function, argument) => applied_universe(type); _ => DATA_TERM }
+# an applied type's universe, `Equal(int, a, b)` Prop: the sort its head's type ends in, past a binder for each argument
+applied_universe(type: Term) as Term := match head(type).shape {
+	Constant(name, levels, id) => {
+		given = arguments(type)
+		ended = instantiated_all(peeled(type_of(checker(TYPES.environment, term_levels(head(type))), head(type)), #given), given)
+		if universe_level(ended) == ø then DATA_TERM else universe_plain(universe_level(ended)!)
+	}
+	_ => DATA_TERM
+}
 judged_universe(type: Term) as Term := universe_plain(universe_level(type_of(checker(TYPES.environment, term_levels(type)), type))!)
 # a universe at its level written plainest, Type(1) of Sort(max(2, 1)): one level, one term
 universe_plain(level: Level) as Term := universe(level_above(Zero, level_number(level) ?? return universe(simplified(level))))

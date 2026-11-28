@@ -147,7 +147,9 @@ bridge's own spelling, needing no new word.
   be proved by refl while the run fails at NaN: a plausible wrong verdict. A type's bridge (`equals_sound`,
   `equals_complete` for it) is the proof that its `==` decides Equal. Where it exists the two readings are one
   proposition, so the reading is a choice of form, never a guess. Today int has one (int_declared,
-  notes/unify-provers.md "The bridge"). bool gets one beside its block (4 cases by bool's recursor, about +6). An
+  notes/unify-provers.md "The bridge"). bool has none: its `==` is a host row no function defines, so a bridge for
+  it needs bool's equality function, its two theorems and a row meaning for bools (core/analyze/terms.wap gives one
+  only to ints), about +15 where `b == yes` already states the same; it waits for a law that needs it. An
   enum's derived `==` gets one when its `==` is derived (a later step, per type, never by hand).
 - **No special case.** `==` is not singled out in core by name: its row's Defined value is the type's equality
   function, and the bridge is found as `e.integers.equals_sound` is, by the row's type. The `implies` row already
@@ -191,16 +193,18 @@ bridge_of(e: Environment, head: Term): Bridge? := e.bridges.find(bridge => same(
 
 - `e.bridges: list<Bridge>` sits beside `e.literals`. int_declared adds int's, and `Integers` holds its bridge in
   place of its own equal_integers, equals_sound and equals_complete fields (notes/unify-provers.md "What replaces
-  e.numbers"), so the three are named once. literals_declared adds bool's.
+  e.numbers"), so the three are named once; e.bridges holds it, the one place it is kept.
 - truth_stated moves from verify/laws.wap to kernel/equality.wap beside `equated`. Every place that states a
   statement calls proposition_of: law_statement's body, `hypothesized` and T6a2's hypothesis binders. A subtype's
   condition (`it >= 0`) has no bridged head, so it comes out as today.
 - A bridged type sits at Type, so its Equal is at DATA_LEVEL, the level truth_stated uses (TRUTH_LEVEL there, the same
   `Successor(Zero)`: one constant, not two).
+- **A refusal shows wap's spelling.** A refused proof shows the statement it proves (wiki/proof.md), so T6a1, which
+  checks a law's proof, shows Equal at a bridged type as `l == r`: a `shown` case for Equal whose type has a bridge.
+  Until T6a1 a law with a proof gets nothing (`law($head := $proof) => ()`), so no refusal reaches the output yet.
 - **Lines.**
   - kernel/equality.wap: Bridge, proposition_of, bridge_of and truth_stated moved in, about +7.
   - environment.wap: the field, +1.
-  - bool's bridge: +6.
   - int_declared: Integers' three fields become one, −2.
   - verify/laws.wap: truth_stated out, −1, and two calls switched, ±0.
   - Net about +11, all kernel, none in analyze. The +18 above becomes +11.
