@@ -124,7 +124,13 @@ class TypingState {
 	# the globals the program gives values of other types, by key, and the functions' reads of globals
 	rebound_globals: list<text> = []
 	function_globals: list<Node> = []
+	# the used modules' values typed when first read (pipeline.wap called_only), by their globals' keys
+	values: map<text, HeldValue> = {}
 }
+# a value typed when first read: its statement and the frame of the block it stands in, once read the statement typed
+# (while it is typed, the statement itself, so a value its own typing reads is refused as read before any value is
+# given), and whether its block was placed without it
+class HeldValue { statement: Node; frame: TypeFrame; typed: Node? = ø; left_out: bool = no }
 # a function's typed instances so far, and one more
 instances_of(key: text, s: TypingState) as list<TypedFunction> := s.instances.get(key) ?? []
 instance_added(typed: TypedFunction, s: TypingState) := {
@@ -242,9 +248,7 @@ typed_among(program: Block, library: list, rules: KindRules, library_scopes: map
 	if memory_of(s) == ø { exported_dispatchers(defined, s) }
 	if s.unknowns is not empty { all_settled(s) }
 	if dispatches_completed(s) { return typed_among(program, library, rules, library_scopes, signatures, s) }
-	s.functions = distinct_instances(s.functions, s)
-	s.instances = {}
-	for instance in s.functions { instance_indexed(instance, s) }
+	instances_kept(distinct_instances(s.functions, s), s)
 	enums_entered(s.records.items)
 	entered = instances_entered(s.functions, s)
 	conditions_entered(conditions, entered, s)
@@ -344,11 +348,12 @@ block_typed(n: Node, written: list, s: TypingState, f: TypeFrame, expected: Term
 	# may come after a definition naming its type
 	statements = written.map(statement => if statement is Define then define_of(held_function(statement, s), s) else statement)
 	# a statement wap refuses still lets the definitions beside it be typed, so their refusals are said with its own
-	typed = try (1 to #statements).map(at => typed_form(statements#at, s, f, if at == #statements then expected else EMPTY_TERM)) catch e {
+	typed = try (1 to #statements).map(at => if fact_of(statements#at, TYPED_WHEN_READ) != ø then value_held(statements#at, s, f) else typed_form(statements#at, s, f, if at == #statements then expected else EMPTY_TERM)) catch e {
 		typed_alone(statements, s)
 		raise e.message
 	}
 	typed_alone(statements, s)
+	typed = values_placed(typed, s)
 	block = refitted(Block(typed), n)
 	if typed is empty then block else typed_like(block, typed.last)
 }
@@ -362,6 +367,43 @@ typed_alone(statements: list, s: TypingState) := for statement in statements {
 		types = if all_typed(held, s.records) then held.parameters else if annotation(statement, PROOF_ANNOTATION) != ø then letters_fixed(held) else ø
 		if types != ø { try function_typed(held, types!, s, statement) catch e { } }
 	}
+}
+# A used module's value of a written type, held untyped until a read reaches it (name_typed), then typed in its own
+# block's frame where it stands, so it runs where it is written
+value_key(statement: Node) as text := place_key(defined_at(declared_name(statement)))
+value_held(statement: Node, s: TypingState, f: TypeFrame) as Node := { s.values[value_key(statement)] = HeldValue(statement, f); statement }
+value_reached(key: text, s: TypingState) := {
+	held = s.values.get(key) ?? return
+	if held.typed != ø { return }
+	if held.left_out { refused(held.statement, "typing reads ${declared_name(held.statement)} after its block was placed without it, as nothing had read it: wap's bug") }
+	held.typed = held.statement
+	within = s.within
+	s.within = ø
+	held.typed = typed_form(held.statement, s, held.frame, EMPTY_TERM)
+	s.within = within
+}
+# The block's values in their places: each one read, typed; each one nothing read, typed now and kept where it acts
+# (effects.wap), else left out, with the functions typed for it and the values it read that only it read
+values_placed(statements: list, s: TypingState) as list := {
+	waiting = statements.filter(statement => fact_of(statement, TYPED_WHEN_READ) != ø).map(value_key)
+	for key in waiting { if s.values[key].typed == ø {
+		count = #s.functions
+		untyped = s.values.keys.filter(other => s.values[other].typed == ø)
+		value_reached(key, s)
+		if computes_only(s.values[key].typed!, s) {
+			for other in untyped { s.values[other].typed = ø }
+			instances_kept(s.functions.take(count), s)
+		}
+	} }
+	for key in waiting { s.values[key].left_out = s.values[key].typed == ø }
+	statements.flat_map(statement => if fact_of(statement, TYPED_WHEN_READ) == ø then [statement] else if s.values[value_key(statement)].typed != ø then [s.values[value_key(statement)].typed!] else [])
+}
+# the typed functions, indexed again by their functions' keys
+instances_kept(functions: list<TypedFunction>, s: TypingState) := {
+	s.functions = functions
+	s.instances = {}
+	for instance in s.functions { instance_indexed(instance, s) }
+	s.joined = ø
 }
 # A definition's parameter types for every letter at once: each level letter at Type, each type letter a type of its
 # own that nothing else is, so what holds of it holds for each (a proof's binders, wiki/proof.md); ø where a parameter
@@ -544,6 +586,7 @@ name_typed(n: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
 		if case != ø { return case_call_typed(case, case, [], s, f, expected) }
 		return if names_constant(n, expected, s) then call_typed(n, n, [], s, f, expected) else function_named_typed(n, expected, s)
 	}
+	if is_bound(n, DefinitionKind.Global) { value_reached(place_key(defined_at(n)), s) }
 	type = variable_type(n, s, f) ?? read_before_given(n, s, f)
 	if is_bound(n, DefinitionKind.Global) and f.function != ø {
 		s.function_globals += [n]
