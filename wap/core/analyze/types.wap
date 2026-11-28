@@ -37,6 +37,7 @@ use "../type_notation.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/surface.wap"
 use "../../kernel/primitives.wap"
+use "../../kernel/scalars.wap"
 use "../../kernel/terms.wap"
 use "../../kernel/levels.wap"
 use "../rules/typed.wap"
@@ -142,6 +143,8 @@ class TypingState {
 	assigned_values: map<text, list<Node>> = {}
 	counters: map<text, Node> = {}
 	bounds_found: map<text, Bounds?> = {}
+	# the carried words typed so far (runtime_asked)
+	asked_words: list<text> = []
 	# the globals the program gives values of other types, by key, and the functions' reads of globals
 	rebound_globals: list<text> = []
 	function_globals: list<Node> = []
@@ -279,8 +282,39 @@ typed_among(program: Block, library: list, rules: KindRules, library_scopes: map
 	whole = refitted(Block(s.records.items + functions_typed_from(written, s) + placed), typed)
 	if s.unknowns is not empty then settled_everywhere(whole, s) else whole
 }
-# the library's functions the emitter calls itself (kernel/primitives.wap RUNTIME_WORDS), typed as a call would
-runtime_typed(library: list, s: TypingState) := for definition in library.filter(define => runtime_named(text(defined_name(define)))).map(define => held_function(define, s)).filter(held => runtime_word(held.name, held.parameters) != ø) { function_typed(definition, definition.parameters, s, define_of(definition, s)) }
+# the library's functions the emitter calls itself (kernel/primitives.wap RUNTIME_WORDS), typed as a call would: the
+# text words before the program, each carried word (kernel/scalars.wap CARRIED_WORDS) once typing meets code the
+# emitter writes it for, so a program types none it never needs
+runtime_typed(library: list, s: TypingState) := for definition in library.filter(define => runtime_named(text(defined_name(define)))).map(define => held_function(define, s)).filter(held => typed_first(held)) { function_typed(definition, definition.parameters, s, define_of(definition, s)) }
+typed_first(held: Signature) as bool := {
+	word = runtime_word(held.name, held.parameters) ?? return no
+	not CARRIED_WORDS.contains(word)
+}
+# a carried word typed, once, where ints are exact (core/emit/strategy.wap exact_ints); one the library lacks is the
+# emitter's to refuse, naming it (core/emit/primitives.wap runtime_call)
+runtime_asked(word: text, s: TypingState) := {
+	if not strategy_of(s).exact_ints or s.asked_words.contains(word) { return }
+	s.asked_words.add(word)
+	definition = s.definitions.find(held => held.kind == DefinitionKind.Function and runtime_word(held.name, held.parameters) == word) ?? return
+	function_typed(definition, definition.parameters, s, define_of(definition, s))
+}
+# a typed node, the carried words the emitter writes for it asked first
+words_asked(typed: Node, s: TypingState) as Node := {
+	for word in carried_words_of(typed) { runtime_asked(word, s) }
+	typed
+}
+# the carried words of a typed node: a row on ints its own (core/emit/primitives.wap is_carried), a foreign call taking
+# or giving an int the boundary's (core/emit/host.wap foreign_code), an int literal below the scalars the widening
+carried_words_of(n: Node) as list<text> := match n {
+	Number(value) => if value is int and value < SMALLEST_SCALAR and value_type(n) == INT_TERM then [WIDENING] else []
+	Prim(operation, arguments) => {
+		name = text(operation)
+		if name == FOREIGN { return if value_type(n) == INT_TERM or arguments.any(argument => value_type(argument) == INT_TERM) then BOUNDARY_WORDS else [] }
+		if arguments is empty or value_type(arguments#1) != INT_TERM { return [] }
+		if CARRIED_ROWS.has(name) then ["${CARRIED_ROWS[name]}(int, int)"] else if name in ORDER_ROWS then ["${CARRIED_ORDER}(int, int)"] else if name == NARROWED_ROW then [NARROWING] else []
+	}
+	_ => []
+}
 # the values a compiled library takes from its module, each `c_outs: int = prim foreign(…)`: typed before the program
 # and its first statements, so the program imports each as it imports a used module's, and they hold before it reads one
 library_values(library: list) as list := library.filter(statement => match statement { Set(place, value) => value is Prim and declared_type(place) != ø; _ => no })
@@ -314,7 +348,7 @@ form_typed(n: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := ma
 	Define(name, parameters, body) => n
 	Set(place, value) => set_typed(n, place, value, s, f, expected)
 	Call(called, arguments) => call_typed(n, called, arguments, s, f, expected)
-	Prim(operation, arguments) => prim_typed(n, operation, arguments, s, f, expected)
+	Prim(operation, arguments) => words_asked(prim_typed(n, operation, arguments, s, f, expected), s)
 	If(condition, then_part, else_part) => if_typed(n, condition, then_part, else_part, s, f, expected)
 	While(condition, body) => refitted(While(condition_typed(condition, s, f), looped(body, s, f)), n)
 	For(place, count, body) => for_typed(n, place, typed_form(count, s, f, INT_TERM), body, s, f)
@@ -333,7 +367,7 @@ form_typed(n: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := ma
 	Fn(parameters, body) => function_value_typed(n, parameters, body, s, f)
 	Symbol(name) => if PROOF_WORDS.contains(name) and question_word(n, name) then proof_typed(n, name, expected) else name_typed(n, s, f, expected)
 	Char(value) => if expected == TEXT_TERM then char_text(n) else with_type(n, CHAR_TYPE)
-	Number(value) => with_type(n, if value is int then whole_type(n, value, expected) else FLOAT_TYPE)
+	Number(value) => words_asked(with_type(n, if value is int then whole_type(n, value, expected) else FLOAT_TYPE), s)
 	Text(value) => with_type(n, TEXT_TYPE)
 	True => with_type(n, BOOL_TYPE)
 	False => with_type(n, BOOL_TYPE)
