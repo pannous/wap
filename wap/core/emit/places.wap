@@ -15,23 +15,24 @@ typed_layout(n: Node, p: Emission) as list<int> := if fact_of(n, TYPE) == ø the
 # a type's layout as a value or a result: none for ø, NEVER for never
 result_layout(type: Term, p: Emission, at: Node? = ø) as list<int> := if type_text(type) == EMPTY_TYPE then [] else if type_text(type) == NEVER_TYPE then NEVER else known_layout(type, p, at)
 layout(n: Node, p: Emission) as list<int> := layout_of(type_of(n), p.m, p.records, n) ?? no_layout(type_of(n), n)
-# The way to a record's field: the instructions that reach it, then the one that reads it and the one that writes it;
-# a list's item or a map's entry comes as a call of its `#` and its set (core/analyze/data.wap item_got)
-class Place { reached: list<int>; read: list<int>; written: list<int> }
+# The way to a record's field: the instructions that reach it, then the one that reads it and the one that writes it,
+# and the layout it holds, any value for a letter's field; a list's item or a map's entry comes as a call of its `#` and
+# its set (core/analyze/data.wap item_got)
+class Place { reached: list<int>; read: list<int>; written: list<int>; held: list<int> }
 place_of(subject: Node, key: Node, p: Emission, f: Frame) as Place := {
 	record = record_named(p.records, type_of(subject)) ?? refused(subject, "a part reaching the emitter is a record's field: typing writes an item as a call of #")
 	field = index_where(fields_of(record), field => same_name(field, key))
 	if p.m.memory != ø { return field_place(code(subject, p, f).instructions, record_layouts(record, p), field) }
 	at = [struct_of(record, p.m, p.records), field]
-	Place(code(subject, p, f).instructions, instruction(STRUCT_GET, at), instruction(STRUCT_SET, at))
+	Place(code(subject, p, f).instructions, instruction(STRUCT_GET, at), instruction(STRUCT_SET, at), record_layouts(record, p)#field)
 }
 # A record's instance in the memory is laid out as C lays out a struct, so C reads it as one: its fields in its
 # record's order, each at the next multiple of its own width, the whole a multiple of its widest field's
-memory_place(reached: list<int>, offset: int, type: list<int>) as Place := Place(reached + i32_const(offset) + I32_ADD, item_loaded(type).code, item_stored(type).code)
+memory_place(reached: list<int>, offset: int, type: list<int>) as Place := Place(reached + i32_const(offset) + I32_ADD, item_loaded(type).code, item_stored(type).code, type)
 # the place of a field, from 1, of a struct of these layouts at the address reached, and its value read
 field_place(reached: list<int>, layouts: list<list<int>>, at: int) as Place := memory_place(reached, field_offset(layouts, at), layouts#at)
 field_read(reached: list<int>, layouts: list<list<int>>, at: int) as list<int> := read_code(layouts#at, field_place(reached, layouts, at)).instructions
-record_layouts(record: Record, p: Emission) as list<list<int>> := fields_of(record).map(field => known_layout(field_declared(field), p))
+record_layouts(record: Record, p: Emission) as list<list<int>> := fields_of(record).map(field => known_layout(field_declared(field, record), p))
 aligned(bytes: int, width: int) as int := (bytes + width - 1) ÷ width * width
 fields_end(layouts: list<list<int>>) as int := layouts.fold(0, (end, layout) => aligned(end, layout_bytes(layout)) + layout_bytes(layout))
 field_offset(layouts: list<list<int>>, field: int) as int := aligned(fields_end(layouts.take(field - 1)), layout_bytes(layouts#field))
@@ -57,20 +58,23 @@ map_code(form: Node, entries: list<Node>, p: Emission, f: Frame) as Code := {
 
 # An instance, `Point{x: 1, y: 2}`: its fields' values in the order its record writes them, a new struct
 instance_code(form: Node, record: Record, items: list<Node>, p: Emission, f: Frame) as Code := {
-	filled = fields_of(record).flat_map(field => field_filled(field, given_value(items.filter(item => same_name(item, field))#1), p, f))
+	filled = fields_of(record).flat_map(field => field_filled(field, record, given_value(items.filter(item => same_name(item, field))#1), p, f))
 	if p.m.memory != ø { return Code(layout(form, p), filled + memory_struct_made(record_layouts(record, p), p)) }
 	Code(layout(form, p), i32_const(class_tag(record)) + filled + instruction(STRUCT_NEW, [struct_of(record, p.m, p.records)]))
 }
 # the instructions of a value given to a field, made to fit the field's type
-field_filled(field: Node, value: Node, p: Emission, f: Frame) as list<int> := {
+field_filled(field: Node, record: Record, value: Node, p: Emission, f: Frame) as list<int> := {
 	given = code(value, p, f)
-	fitted(given, known_layout(field_declared(field), p), value, p).instructions
+	fitted(given, known_layout(field_declared(field, record), p), value, p).instructions
 }
 given_value(field: Node) as Node := match field { Key(name, Op.Colon, value) => value; _ => refused(field, NOT_A_FIELD) }
 
 # A value given to a place: a name, which then has that value, or a record's field
 assigned_code(form: Node, place: Node, value: Node, p: Emission, f: Frame) as Code := match place {
-	Get(subject, key) => written_code(place_of(subject, key, p, f), fitted(code(value, p, f), layout(place, p), value, p))
+	Get(subject, key) => {
+		field = place_of(subject, key, p, f)
+		written_code(field, fitted(code(value, p, f), field.held, value, p))
+	}
 	_ => set_code(form, declared_name(place), value, p, f)
 }
 
