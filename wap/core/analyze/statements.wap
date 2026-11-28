@@ -120,12 +120,16 @@ rounds(state: State, x: Entering, count: Term, round: (Entering, Term, Term, Ter
 # A value checked against a condition when the program runs, `narrowed(i, message, …)` (dispatch.wap narrowed_call),
 # read as the value itself where the provers show the condition here from what is known here (wiki/type.md "Proved or
 # checked"): the lets' values, a round's range, a while's condition, the parameters' conditions. Its obligations are
-# then proved, and the run checks nothing; else the call is read as it is
+# then proved, and the run checks nothing; else the call is read as it is. The trusted reading is how the known facts
+# are made (let_keyed, ranged, measured_loop), each over the binders' variables where it holds, the way loops.wap's
+# round is read: true only where nothing changes in place, so a function that may (changes_in_place) and the
+# program's own statements prove nothing here, `n = #xs; xs.pop(); at(xs, n)` keeps its check
 obliged_term(n: Node, arguments: list, x: Entering) as Term? := {
 	places = obligation_places(n)
 	if places is empty or #arguments < 2 or TYPES.prove == ø { return ø }
 	records = places.map(at => x.s.obligations#at)
 	if not records.all(record => record.choice == 0 and record.row == ø and record.compared == ø and record.call == ø and record.type != ø) { return ø }
+	if records.any(record => record.within == ø or changes_in_place(record.within!, effects_joined(x.s), [])) { return ø }
 	value = term_of(arguments#1, x) ?? return ø
 	read = arguments.drop(2).map(argument => term_of(argument, x))
 	if read.any(term => term == ø) { return ø }
@@ -135,11 +139,15 @@ obliged_term(n: Node, arguments: list, x: Entering) as Term? := {
 	for record in records { record.verdict = yes }
 	value
 }
-# whether the provers prove an obligation's condition at these values: its other names' first, then the value
+# whether the provers prove an obligation's condition at these values, its other names' first, then the value: their
+# proof checked by the kernel under the facts as hypotheses, since a wrong one would drop a check the run needs
 condition_proved(record: Obligation, given: list<Term>, x: Entering) as bool := {
 	condition = named_id(TYPES.environment, record.holds ?? condition_name(TYPES.environment, record.type!) ?? return no) ?? return no
 	held = match declared_at(TYPES.environment, condition)!.kind { Defined(value) => value; _ => return no }
-	hole_term([], truth_stated(TYPES.environment, beta(held, given)), x, yes) != ø
+	goal = truth_stated(TYPES.environment, beta(held, given))
+	proof = hole_term([], goal, x, yes) ?? return no
+	proved = try type_of(x.c, proof) catch e { return no }
+	equal(x.c, proved, goal)
 }
 
 # whether a function changes a value in place, itself or through what it calls, or has State, or calls a function
