@@ -24,7 +24,7 @@ What already landed:
      False than programs do.
    - `True.intro` comes from the same row (the case name follows its block).
 
-2. **wap/types/logic.wap, plain wap, about 25 lines.**
+2. **lib/logic.wap, plain wap, about 25 lines** (a `use` word, so a library file).
    ```wap
    enum And(a: Prop, b: Prop): Prop { intro(left: a, right: b) }
    enum Or(a: Prop, b: Prop): Prop { left(h: a); right(h: b) }
@@ -33,16 +33,16 @@ What already landed:
    enum Decidable(p: Prop): Type { yes(h: p); no(h: not p) }
    law and_swap(a: Prop, b: Prop, h: And(a, b)): And(b, a) := And.intro(h.right, h.left)
    axiom proposition_extensionality(a: Prop, b: Prop, ab: a -> b, ba: b -> a): a == b
-   Prop(b: bool): Prop := b == yes
+   holds(b: bool): Prop := b == yes
    ```
-   - `Prop(b)` is bool's conversion to a proposition: a function named as the type is its conversion (calls.wap:498,
-     reads_as).
-   - Through it, `not` on a bool keeps the prelude's `not(x): bool` and `not` on a proposition is the Prop overload.
+   - `holds(b)` reads a bool as a proposition, written where it is meant: no word is named as the universe, so no
+     conversion makes a bool a Prop unasked.
+   - `not` on a bool is the prelude's `not(x): bool`, `not` on a proposition the Prop overload.
      The overload test (calls.wap:405, fewer converted positions win) then picks the bool one for `not bool.yes`. No
      new rule is needed.
    - **Build check:** reads_as reads `s.records`. Prop is a sort term, not a record. If `read_type` finds no function
      named Prop, the fix is to look the conversion up by `type_word(held)`, at most core +2.
-   - `use classical` is a library file, wap/types/classical.wap:
+   - `use classical` is a library file, lib/classical.wap:
      ```wap
      axiom excluded_middle(a: Prop): a or not a
      ```
@@ -69,7 +69,7 @@ What already landed:
 5. **A comparison's type.** proposition.md:6-7 says `type of (2 + 2 == 4)` is Prop. :55 says a comparison where a
    bool is wanted is decided.
    - Today a comparison is a bool, and a law reads it as its proposition (proposition_of, verify/laws.wap:232).
-   - (A), recommended: the comparison stays a bool. Where a Prop is wanted it reads as one through `Prop(b)`,
+   - (A), recommended: the comparison stays a bool. Where a Prop is wanted it reads as one through `holds(b)`,
      proposition_of making `Equal(T, l, r)` at a bridged type. Core 0. `type of (2 + 2 == 4)` then says bool, so
      proposition.md:6-7 becomes `type of (2 + 2 == 4) // bool, and a proposition where one is wanted`. That is a wiki
      rewrite: old and new text go to warp-interviewer.

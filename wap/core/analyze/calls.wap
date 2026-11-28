@@ -48,12 +48,11 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	if is_bound(called, DefinitionKind.Case) { return case_call_typed(n, called, arguments, s, f, expected) }
 	if called is symbol and text(called) == TYPE_TEST_WORD and fact_of(called, BINDING) == ø { return type_test_typed(n, arguments, s, f) }
 	if called is symbol and text(called) == TYPE_OF_WORD and fact_of(called, BINDING) == ø { return type_of_typed(n, arguments#1, s, f) }
-	# a function type is a type where its parameters are types, `not(x: Prop): Prop := x -> False`; before values, a slip
-	if text(called) == FUNCTION_ARROW { return if items_or_one(arguments#1).all(part => is_type_part(part, s, f)) then type_value(type_term(n), n) else refused(n, ARROW_SLIP) }
+	if text(called) == FUNCTION_ARROW { return arrow_typed(n, arguments, s, f) }
 	# an enum's name given its header's parts, `And(a, b)`, `Even(4)`, is the type they make (wiki/proposition.md,
 	# wiki/enum.md); a class's makes one of its values
 	record = if called is symbol and fact_of(called, BINDING) == ø then record_written(s.records, called) else ø
-	if record != ø and is_enum(record!) { return enum_type_typed(n, with_fact(called, DECLARED_BY, record_declared(record!)), arguments) }
+	if record != ø and is_enum(record!) { return enum_type_typed(n, type_named(called, s), arguments) }
 	if rest_named(n) != ø { refused(n, "a list's items spread, `...xs`, stand only in a list, `[...xs, 4]`") }
 	levelled = level_written_call(called)
 	if levelled != ø { return call_typed(n, levelled!, arguments, s, f, expected) }
@@ -92,15 +91,17 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	if candidates.all(definition => level_names(definition) is empty) { return implicit_typed(n, called, given, written!, candidates, s, f, expected) ?? refused(n, "${called}[${written!}](…) reads as a level written to ${called}, which has no level letter like the u of Sort(u), or as the item of a list ${called}, which is a function: give ${called} a level letter, or write the item's call as (${called}[${written!}])(…)") }
 	call_chosen(n, called, scopes, given, expected, s, f, [level_written(written!, 0) ?? refused(written!, "a level is a whole number from 0, Sort(0) Prop")])
 }
+# the one of these definitions a name at a written level means, refused naming them where several fit; ø for none
+level_meant(called: Node, fitting: list<Signature>, s: TypingState) as Signature? := {
+	if #fitting > 1 { refused(called, "${called} at a level reads as each of ${candidates_text(fitting, s)}; write the call's arguments' types") }
+	if fitting is empty then ø else fitting#1
+}
 # A call at a written level giving the types of a definition's letters first, `identity[1](int, 3)` of `identity(a:
 # T)`: each letter an implicit parameter `T: Sort(u)` in front (wiki/universe.md), given a type at that level, and the
 # call that of the rest with each letter bound to its type; ø where no definition has letters and these arguments
 implicit_typed(n: Node, called: Node, given: list, written: Node, candidates: list<Signature>, s: TypingState, f: TypeFrame, expected: Term?) as Node? := {
 	level = level_written(written, 0) ?? return ø
-	fitting = candidates.filter(one => not letters_written(one) is empty and takes_count(one, #given - #letters_written(one), s))
-	if fitting is empty { return ø }
-	if #fitting > 1 { refused(n, "${called}[${written}](…) gives the types of the letters of each of ${candidates_text(fitting, s)}; write the arguments' types") }
-	definition = fitting#1
+	definition = level_meant(called, candidates.filter(one => not letters_written(one) is empty and takes_count(one, #given - #letters_written(one), s)), s) ?? return ø
 	letters = letters_written(definition)
 	types = (1 to #letters).map(at => fact_type(fact_of(given#at, DENOTES)) ?? refused(given#at, "${called}[${written}] takes the type of ${letters#at} here, and this is no type"))
 	for at in 1 to #letters {
@@ -128,14 +129,23 @@ call_shown(n: Node) as text := match n { Call(called, arguments) => "${called}($
 # (the levels the call writes and the types it gives its letters, `identity[1](text, "a")`, are its definitions' only
 # while it chooses among them and fits its arguments, never the body's calls: letters.wap letters_bound)
 call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s: TypingState, f: TypeFrame?, levels: list<Level> = [], letters: list<Binding> = []) as Node := {
-	s.levels_written[text(called)] = levels
-	s.letters_given[text(called)] = letters
-	# where no definition takes the arguments, one whose class has a get is read through it, `x > 5` of a signal
-	if given.any(argument => got_from(argument, s)) and not (try { chosen_definition(n, called, scopes, given, expected, s); yes } catch e { no }) { given = given.map(argument => got(argument, s)) }
-	meant = chosen_definition(n, called, scopes, given, expected, s)
-	taken = arguments_fitted(meant, given, s) + defaults_given(meant, #given, s, f ?? TypeFrame())
-	s.levels_written.remove(text(called))
-	s.letters_given.remove(text(called))
+	name = text(called)
+	outer_levels = s.levels_written.get(name)
+	outer_letters = s.letters_given.get(name)
+	s.levels_written[name] = levels
+	s.letters_given[name] = letters
+	# the levels and letters are the call's while it chooses and fits, put back after it, a refusal too, so a call of the
+	# same name among its arguments, `f(f(1))`, leaves the outer one's
+	restored = () => { if outer_levels == ø then s.levels_written.remove(name) else s.levels_written[name] = outer_levels!; if outer_letters == ø then s.letters_given.remove(name) else s.letters_given[name] = outer_letters! }
+	chosen_taken = try {
+		# where no definition takes the arguments, one whose class has a get is read through it, `x > 5` of a signal
+		if given.any(argument => got_from(argument, s)) and not (try { chosen_definition(n, called, scopes, given, expected, s); yes } catch e { no }) { given = given.map(argument => got(argument, s)) }
+		meant_here = chosen_definition(n, called, scopes, given, expected, s)
+		Chosen(meant_here, arguments_fitted(meant_here, given, s) + defaults_given(meant_here, #given, s, f ?? TypeFrame()))
+	} catch e { restored(); raise e.message }
+	restored()
+	meant = chosen_taken.meant
+	taken = chosen_taken.taken
 	chosen = function_typed(meant, taken.map(argument => value_type(argument)), s, n)
 	if f != ø { called_reads(chosen, n, s, f!) }
 	result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
@@ -179,9 +189,25 @@ results_written(argument: Node, s: TypingState) as list<Term> := match argument 
 	_ => []
 }
 parameter_type_at(definition: Signature, at: int) as Term? := if #definition.parameters < at then ø else definition.parameters#at
+# A function type where a value stands, a type where its parameters are types, `not(x: Prop): Prop := x -> False`, a
+# proposition where it gives one, `a -> b` of propositions; before values a slip for =>
+arrow_typed(n: Node, arguments: list, s: TypingState, f: TypeFrame) as Node := {
+	if not items_or_one(arguments#1).all(part => is_type_part(part, s, f)) { refused(n, ARROW_SLIP) }
+	typed = type_value(type_term(n), n)
+	gives = arguments.last
+	if is_proposition(part_type(gives, s, f)) then with_type_of(typed, universe(Zero)) else typed
+}
+# a type's name as typing reads it, a record's the word its declaration declares, `Holds` of `enum Holds: Prop`
+type_named(name: Node, s: TypingState) as Node := {
+	record = record_written(s.records, name) ?? return name
+	with_fact(name, DECLARED_BY, record_declared(record))
+}
 # whether a function type's parameter is a type: written as one, `(n: int)`, `text`, or a value of a universe, a
 # proposition
-is_type_part(part: Node, s: TypingState, f: TypeFrame) as bool := part is Key or names_type(part, s) or fact_of(part, BINDING) != ø and universe_level(value_type(typed_form(part, s, f, ø))) != ø
+is_type_part(part: Node, s: TypingState, f: TypeFrame) as bool := part is Key or names_type(part, s) or universe_level(part_type(part, s, f)) != ø
+# the type of a function type's part as a value: its own where a rule's hole gave it typed, else as typed where it names
+# something; ø for a part written as type notation
+part_type(part: Node, s: TypingState, f: TypeFrame) as Term? := value_type(part) ?? (if fact_of(part, BINDING) == ø then ø else value_type(typed_form(part, s, f, ø)))
 # whether a record is an enum, cases or a header's sort written, never a class
 is_enum(record: Node) as bool := cases_of(record) is not empty or enum_sort(record_declared(record)) != ø
 # an enum's type of the parts written, as many as its header takes
@@ -191,6 +217,8 @@ enum_type_typed(n: Node, called: Node, arguments: list) as Node := {
 	if #domains_of(taken) != #arguments { refused(n, "${called} takes ${#domains_of(taken)} parts, as its header says: ${type_text(taken)}") }
 	type_value(applied(word, parts_read(arguments, word)), n)
 }
+# the definition a call chose and its arguments fitted to it
+class Chosen { meant: Signature; taken: list<Node> }
 # A call's arguments with the named ones, `f(b: 1, a: 5)`, put in their parameters' places, a left-out parameter
 # given its default: the same places for every definition the name may mean, else refused
 arranged_arguments(n: Node, called: Node, arguments: list, candidates: list<Signature>, s: TypingState) as list := {
@@ -706,10 +734,7 @@ type_of_typed(n: Node, of: Node, s: TypingState, f: TypeFrame) as Node := {
 # parameter in front at that level (wiki/universe.md); ø where no definition has as many level letters
 levelled_type(called: Node, s: TypingState) as Term? := {
 	written = [level_written(fact_of(called, LEVEL_WRITTEN)!, 0) ?? return ø]
-	fitting = scoped_definitions(called, s).flat_map(scope => scope).filter(one => #level_names(one) == #written or level_names(one) is empty and not letters_written(one) is empty)
-	if fitting is empty { return ø }
-	if #fitting > 1 { refused(called, "${called} at a level reads as each of ${candidates_text(fitting, s)}; write the call's arguments") }
-	definition = fitting#1
+	definition = level_meant(called, scoped_definitions(called, s).flat_map(scope => scope).filter(one => #level_names(one) == #written or level_names(one) is empty and not letters_written(one) is empty), s) ?? return ø
 	if definition.parameters.any(type => type == ø) { refused(called, "${called}'s type at a level takes the type of each of its parameters: give each one its type") }
 	names = level_names(definition)
 	bound = levels_bound(names, written)
@@ -721,5 +746,6 @@ levelled_type(called: Node, s: TypingState) as Term? := {
 		variables.add(hypothesis(c, binder.key, type_substituted(binder.type, bound)))
 		bound.add(Binding(binder.key, variables.last!))
 	}
-	closed_over(c, type_substituted(definition.result ?? return ø, bound), variables, no)
+	result = definition.result ?? refused(called, "${called}'s type at a level is read from its written result: write it, `${definition.name}(…): T := …`")
+	closed_over(c, type_substituted(result, bound), variables, no)
 }
