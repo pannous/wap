@@ -13,7 +13,8 @@ use "../bindings.wap"
 # for the type its argument gives, every T of one signature the same; `list<T>` takes a list of any one item type. A
 # letter the program declares as a class or an enum is that type.
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-is_letter(type: Term?) as bool := is_word(type) and #type_text(type) == 1 and LETTERS.contains(type_text(type)) and declared_by(type) == ø
+is_letter(type: Term?) as bool := is_word(type) and is_letter_name(type_text(type)) and declared_by(type) == ø
+is_letter_name(name: text) as bool := #name == 1 and LETTERS.contains(name)
 # (a level letter, the u of Sort(u), is one too)
 has_letters(type: Term?) as bool := is_letter(type) or type != ø and type!.holds_parameter or (type_parts(type) ?? []).any(part => has_letters(part))
 # An empty list's item type before a use settles it, α1, α2 … (data.wap list_typed): a hole of the typing state's
@@ -67,6 +68,7 @@ deferred_typed(definition: Signature, types: list, letters: list<Binding>, s: Ty
 # typed for the settled types; a function's own deferred calls are typed in turn
 all_settled(s: TypingState) := {
 	while s.deferred or s.unknowns.values().any(unknown_hole => is_unknown(filled(s.el, unknown_hole))) {
+		for hole in s.result_letters.keys() { if is_unknown(filled(s.el, s.unknowns.get(hole)!)) { refused(s.result_letters.get(hole)!, "${s.result_letters.get(hole)!} is a letter only this call's result writes, and no use of the call settles it: write the type its place expects") } }
 		for hole in s.unknowns.keys() { settled_by([Answer(hole, ANY_TERM)], s) }
 		waiting = s.deferred
 		s.deferred = []
@@ -177,7 +179,7 @@ level_letters(definition: Signature, s: TypingState) as list<Binding>? := {
 }
 # level letters bound to the universes of these levels, in order
 levels_bound(names: list<text>, levels: list<Level>) as list<Binding> := (1 to #names).map(at => Binding(names#at, universe(levels#at)))
-# The letters a definition's parameters write, each a hole of the definition's own, by its letter. A call binds them
+# The letters a definition's parameters and result write, each a hole of the definition's own, by its letter. A call binds them
 # in a list of its own, so two calls of `first(xs: list<T>)` bind two Ts, and the holes are made once
 letter_holes(definition: Signature, s: TypingState) as list<Binding> := {
 	made = s.letter_holes.get(definition.key)
@@ -185,9 +187,22 @@ letter_holes(definition: Signature, s: TypingState) as list<Binding> := {
 	holes: list<Binding> = []
 	# a record's parameters are its case's letters, `a` of `enum And(a: Prop, b: Prop)` too
 	named = if definition.record == ø then [] else record_letters(record_declared(definition.record!)).map(letter => text(letter))
-	for letter in named + definition.parameters.flat_map(type => letters_in(type)) { if type_keyed(letter, holes) == ø { holes += [Binding(letter, hole(s.el, letter, DATA_TERM))] } }
+	for letter in named + (definition.parameters + [definition.result]).flat_map(type => letters_in(type)) { if type_keyed(letter, holes) == ø { holes += [Binding(letter, hole(s.el, letter, DATA_TERM))] } }
 	s.letter_holes[definition.key] = holes
 	holes
+}
+# A call's result with the letters only it writes found (the S of `of(a: T): quotient(T, S)`): a wanted type of its
+# own word, settled, where the definition's holes of them fit it, a trial whose answers are taken back (letter_holes); else
+# unknowns its uses settle, each one nothing settles refused (all_settled)
+letters_settled(type: Term, letters: list<text>, definition: Signature, at: Node, expected: Term?, s: TypingState) as Term := {
+	holed = substituted(type, letter_holes(definition, s).filter(hole => letters.contains(hole.key)))!
+	if expected != ø and word_id(head_of(type)) == word_id(head_of(expected!)) and not has_unknowns(expected) and not has_letters(expected) and taken_back(s.el, () => unified(holed, expected!, [], s) != ø) { return expected! }
+	substituted(type, letters.map(letter => Binding(letter, letter_unknown(placed_like(symbol(letter), at), s))))!
+}
+letter_unknown(letter: Node, s: TypingState) as Term := {
+	unknown = unknown_type(s)
+	s.result_letters[variable_id(unknown)] = letter
+	unknown
 }
 # a definition's parameter types with its letters as their holes, as a call binds them
 parameters_holed(definition: Signature, s: TypingState) as list<Term?> := definition.parameters.map(type => substituted(type, letter_holes(definition, s)))

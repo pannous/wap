@@ -26,10 +26,15 @@ UNFAILED_WORD = "unfailed"
 # argument and the type it must fit, and the key of the function it sits in, ø at the top level. An obligation is a law of
 # that function: for every value of its parameters the condition holds of the argument. Its statement, `function_type`
 # and `value` (the function of the parameters giving the condition at the argument), is entered with the functions
-# (core/analyze/terms.wap obligations_entered); ø where the argument or the type has no kernel term
-class Obligation { line: text; argument: Node; type: Term; within: text?; function_type: Term? = ø; value: Term? = ø }
+# (core/analyze/terms.wap obligations_entered); ø where the argument or the type has no kernel term. A proof a call
+# leaves to the provers, its `by` at the place of a parameter's statement, is one too: the call and the place, no
+# argument or type, its statement the kernel's goal there (core/analyze/calls.wap
+# proofs_held). `check` is the code that checks it when the program runs, ø for one only a proof decides
+class Obligation { line: text; argument: Node?; type: Term?; within: text?; function_type: Term? = ø; value: Term? = ø; call: Node? = ø; place: int = 0; statement: Term? = ø; check: Node? = ø }
+# (the program's: those of the pass of typing that completed it, core/analyze/types.wap typed_among)
 obligations: list<Obligation> = []
 OBLIGATION_LEFT = "is checked when the program runs"
+PROOF_LEFT = "needs a proof, which the run cannot check"
 
 # The dispatching function a call of these definitions with arguments of these types means; ø when no argument is an
 # any or a number that some definition wants of a type it may hold
@@ -219,6 +224,13 @@ dispatcher_made(name: Node, reads: list, body: Node, results: list<Term?>, s: Ty
 	s.dispatchers += [dispatcher]
 	function_added(dispatcher, s)
 }
+# a function typing writes once by its name, of parameters of these types, its body made of their reads: a narrowing,
+# an unfailing, a statement's check (core/analyze/calls.wap statement_checker)
+written_once(name: Node, types: list, body: (list) -> Node, result: Term, s: TypingState) := {
+	if definitions_named(text(name), s) is not empty { return }
+	reads = parameters_of(name, types)
+	dispatcher_made(name, reads, placed_like(body(reads), name), [result], s)
+}
 # a dispatcher's name with its result written where every choice writes one: joined_type is ø where either is. A
 # choice among an any's types gives an any where the choices give unlike types, or where no type it takes is boxed
 # yet: its result stays as written while later boxed types add choices
@@ -268,32 +280,32 @@ raising(raised: Node, at: Node, s: TypingState) as Node := named_call(RAISE_WORD
 narrowed_call(n: Node, wanted: Term, at: Node, s: TypingState) as Node := {
 	name = name_once("${NARROWING_WORD}(${type_text(wanted, yes)})", n, s)
 	# one for each shape, wherever it is wanted
-	if definitions_named(text(name), s) is empty {
-		reads = parameters_of(name, [narrowed_type(wanted) ?? NODE_TERM, TEXT_TERM])
-		body = placed_like(If(narrowing_test(reads#1, wanted, name, s), reads#1, raising(reads#2, name, s)), name)
-		dispatcher_made(name, reads, body, [wanted], s)
-	}
-	obliged(at, n, wanted, s)
-	word_called(n, text(name), [n, with_type(placed_like(Text(other_shape(wanted, at, s)), at), TEXT_TYPE)], wanted, s)
+	written_once(name, [narrowed_type(wanted) ?? NODE_TERM, TEXT_TERM], reads => If(narrowing_test(reads#1, wanted, name, s), reads#1, raising(reads#2, name, s)), wanted, s)
+	check = word_called(n, text(name), [n, message_given(other_shape(wanted, at, s), at)], wanted, s)
+	obliged(at, n, wanted, s, check)
+	check
 }
 # A value of a union holding an Error where a type is wanted that holds none: the Error raised, any other value checked
 # as an any's is (wiki/Error.md: no other variable holds an Error), one function for each pair of types
 unfailed_call(n: Node, given: Term, wanted: Term, s: TypingState) as Node := {
 	name = name_once("${UNFAILED_WORD}(${type_text(given, yes)}, ${type_text(wanted, yes)})", n, s)
-	if definitions_named(text(name), s) is empty {
-		read = parameters_of(name, [given])#1
+	written_once(name, [given], reads => {
 		error = error_part(given)!
-		cast = type => with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [read]), name), type)
-		dispatcher_made(name, [read], placed_like(If(narrowing_test(read, error, name, s), raising(cast(error), name, s), cast(wanted)), name), [wanted], s)
-	}
+		cast = type => with_type_of(placed_like(Prim(symbol(CHECKED_CAST), reads), name), type)
+		If(narrowing_test(reads#1, error, name, s), raising(cast(error), name, s), cast(wanted))
+	}, wanted, s)
 	word_called(n, text(name), [n], wanted, s)
 }
 error_part(type: Term) as Term? := union_parts(type).find(is_error)
 is_error(type: Term) as bool := narrowed_type(type) == NODE_TERM and type_text(type) == ERROR_CASE
 # a narrowing left to the run at a place, its warning in the obligations once: a subtype's condition as written, a shape
 # by its name
-obliged(at: Node, argument: Node, type: Term, s: TypingState) := {
+obliged(at: Node, argument: Node, type: Term, s: TypingState, check: Node? = ø) := {
 	condition = subset_condition(type)
 	line = warning_of(at, "${if condition == ø then type_text(type) else condition_shown(condition!)} ${OBLIGATION_LEFT}")
-	if not obligations.any(kept => kept.line == line) { obligations.add(Obligation(line, argument, type, s.within)) }
+	obligation_kept(Obligation(line, argument, type, s.within, check: check), s)
 }
+# an obligation kept once for its warning line, wherever typing meets its code again
+obligation_kept(obligation: Obligation, s: TypingState) := if not s.obligations.any(kept => kept.line == obligation.line) { s.obligations.add(obligation) }
+# a run's error message as an argument of the code that raises it
+message_given(message: text, at: Node) as Node := with_type(placed_like(Text(message), at), TEXT_TYPE)

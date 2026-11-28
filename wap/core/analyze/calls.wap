@@ -73,6 +73,8 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	if rest_named(n) != ø { refused(n, "a list's items spread, `...xs`, stand only in a list, `[...xs, 4]`") }
 	levelled = level_written_call(called)
 	if levelled != ø { return call_typed(n, levelled!, arguments, s, f, expected) }
+	letter = letter_bound(called, f)
+	if letter != ø { return call_typed(n, letter_function(letter!, called) ?? refused(called, "${called} stands for the type ${type_text(letter!.type)} here, which is no function"), arguments, s, f, expected) }
 	if holds_value(called) { return value_call_typed(n, called, arguments, s, f, expected) }
 	scopes = scoped_definitions(called, s)
 	candidates = scopes.flat_map(scope => scope)
@@ -149,12 +151,50 @@ call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s
 	# where no definition takes the arguments, one whose class has a get is read through it, `x > 5` of a signal
 	if given.any(argument => got_from(argument, s)) and not (try { chosen_definition(n, called, scopes, given, expected, s); yes } catch e { no }) { given = given.map(argument => got(argument, s)) }
 	meant = chosen_definition(n, called, scopes, given, expected, s)
-	taken = arguments_fitted(meant, given, s) + defaults_given(meant, #given, s, f ?? TypeFrame())
+	kept = #s.obligations
+	taken = proofs_held(n, meant, arguments_fitted(meant, given, s) + defaults_given(meant, #given, s, f ?? TypeFrame()), s)
 	s.levels_written.remove(text(called))
 	s.letters_given.remove(text(called))
 	chosen = function_typed(meant, taken.map(argument => value_type(argument)), s, n)
 	if f != ø { called_reads(chosen, n, s, f!) }
-	result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
+	typed = result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
+	# the letters only the result writes, never one the caller's frame binds (letters.wap letters_settled)
+	result = value_type(typed)
+	letters = letters_in(result).unique().filter(letter => f == ø or not f!.letters.any(bound => bound.key == letter))
+	if not letters is empty { typed = with_type_of(typed, letters_settled(result!, letters, meant, n, expected, s)) }
+	# the call's proof holes, those kept since it began, are the typed call's, whose arguments the kernel reads
+	for obligation in s.obligations.drop(kept) { if obligation.call === n { obligation.call = typed } }
+	typed
+}
+# A call's arguments with each proof it leaves to the provers, a `by` at a statement's place, held for the run (wiki/
+# type.md "Proved or checked"): a truth its arguments compute, by the function of the parameters before it the
+# statement is, checked when the program runs as a subtype's condition is; `yes`, a proof's value, where only a proof
+# decides it. Each is an obligation the kernel's reading settles (core/analyze/terms.wap hole_entered), its `by` kept on it
+proofs_held(n: Node, definition: Signature, taken: list, s: TypingState) as list := {
+	parameters = parameters_in(definition, s)
+	(1 to #taken).map(at => if by_laws(taken#at) == ø or not is_statement_written(declared_type(parameters#at)) then taken#at else proof_held(n, definition, parameters, taken, at, s))
+}
+proof_held(n: Node, definition: Signature, parameters: list, taken: list, at: int, s: TypingState) as Node := {
+	statement = declared_type(parameters#at)!
+	shown = written_span(statement) ?? text(statement)
+	decided = is_decided(statement, s)
+	check = if decided then with_fact(word_called(n, text(statement_checker(definition, parameters, at, s)), taken.take(at - 1) + [message_given(condition_refused(shown, n), n)], BOOL_TERM, s), PROOF_HOLE, taken#at) else ø
+	obligation_kept(Obligation(warning_of(n, "${shown} ${if decided then OBLIGATION_LEFT else PROOF_LEFT}"), ø, ø, s.within, call: n, place: at, check: check), s)
+	check ?? with_fact(with_type(placed_like(True, n), BOOL_TYPE), PROOF_HOLE, taken#at)
+}
+# whether a statement is a truth its values compute, a bool function's call, which the run can check; one a Prop
+# function states, `respects(f, S)`, only a proof decides
+is_decided(statement: Node, s: TypingState) as bool := match statement { Call(head, items) => definitions_named(text(head), s).any(definition => definition.result == BOOL_TERM); _ => no }
+# the function of a callee's parameters before a statement's place that checks it, written once for each: `b != 0`
+# of `divided(a, b, nonzero: b != 0 = by)` as yes where it holds, else the message given raised
+statement_checker(definition: Signature, parameters: list, at: int, s: TypingState) as Node := {
+	name = name_once("${definition.name} ${declared_name(parameters#at)} held", parameters#at, s)
+	before = parameters.take(at - 1)
+	written_once(name, before.map(parameter => type_given(parameter)) + [TEXT_TERM], reads => {
+		statement = (1 to #before).fold(declared_type(parameters#at)!, (inner, place) => substituted(inner, text(declared_name(before#place)), reads#place))
+		If(statement, True, raising(reads.last, name, s))
+	}, BOOL_TERM, s)
+	name
 }
 # whether a value is of a record its class reads through `get(of: Signal)`
 got_from(argument: Node, s: TypingState) as bool := record_named(s.records, value_type(argument)) != ø and definitions_named(GETTER_WORD, s).any(definition => #definition.parameters == 1 and (definition.parameters#1 ?? ANY_TERM) == value_type(argument)!)
@@ -476,9 +516,11 @@ innermost(definitions: list<Signature>, scopes: list) as list<Signature> := {
 # given type's own area.
 protocol_named(records: Records, type: Term?) as Node? := {
 	record = record_named(records, type)
-	if record == ø or annotation(record, PROTOCOL_ANNOTATION) == ø { return ø }
+	if record == ø or not is_protocol(record!) { return ø }
 	record
 }
+# whether a record is a protocol: its declaration carries the mark
+is_protocol(record: Node) as bool := annotation(record, PROTOCOL_ANNOTATION) != ø
 # whether a value of the given type fits the protocol wanted: no protocol wanted, or every word of it done for the type
 # DEBT: Protocols fit structurally, by specialisation only: a function of a protocol parameter is typed anew for each
 #   type given, so a list of mixed protocol values (run-time dispatch), a protocol's default bodies, `x is shape` and
@@ -658,24 +700,35 @@ body_typed(typed: TypedFunction, definition: Signature, name: Node, parameters: 
 	frame = TypeFrame()
 	frame.present = (s.found_in.get(definition.key) ?? []).copy()
 	frame.result = typed.result
-	frame.letters = letters
+	frame.letters = letters + letters_carried(definition.key, typed.arguments, s)
 	frame.function = declared_name(name)
 	frame.typed_function = typed
 	typed_parameters = (1 to #typed.arguments).map(at => parameter_typed(items_of(parameters)#at, typed.arguments#at, frame))
 	frame.variables += captured_by(define_of(definition, s), typed.arguments)
+	typed_within(function_key(define_of(definition, s)), [definition.key] + typed.arguments.map(type => type_text(type, yes)), s, () => {
+		typed_body = typed_form(body, s, frame, typed.result)
+		given = result_given(typed_body, frame, name, s)
+		# a written result stays the result, `show(x: any): text := raise(…)`; one that writes none and never returns jumps
+		typed.jumps = typed.jumps or written == ø and jumps(typed_body) and frame.returns is empty
+		# the body gives the result, the one written or the body's and the returns' types joined: an int beside `return` an int?
+		result = written ?? given
+		if result != ø and not typed.jumps { typed_body = converted(typed_body, result!, s, body, FUNCTION_GIVES) }
+		typed.result = typed.result ?? (if given != ø and given != EMPTY_TERM and base_of_optional(written) != ø then optional_type(given) else given)
+		typed.define = refitted(Define(signed_name(typed, s), with_items(parameters, typed_parameters), typed_body), define_of(definition, s))
+		typed.late = frame.late
+	})
+}
+# work typed within a function's instance: s.within names the function (its obligations') and TYPES.instance the
+# instance, keyed under the instance it is first typed within (a nested function of a generic one is one per instance), both put
+# back after work runs, a raise too
+typed_within(function: text, instance: list<text>, s: TypingState, work: () -> ø) := {
 	enclosing = s.within
-	s.within = function_key(define_of(definition, s))
-	typed_body = typed_form(body, s, frame, typed.result)
-	given = result_given(typed_body, frame, name, s)
-	# a written result stays the result, `show(x: any): text := raise(…)`; one that writes none and never returns jumps
-	typed.jumps = typed.jumps or written == ø and jumps(typed_body) and frame.returns is empty
-	# the body gives the result, the one written or the body's and the returns' types joined: an int beside `return` an int?
-	result = written ?? given
-	if result != ø and not typed.jumps { typed_body = converted(typed_body, result!, s, body, FUNCTION_GIVES) }
-	typed.result = typed.result ?? (if given != ø and given != EMPTY_TERM and base_of_optional(written) != ø then optional_type(given) else given)
-	typed.define = refitted(Define(signed_name(typed, s), with_items(parameters, typed_parameters), typed_body), define_of(definition, s))
-	typed.late = frame.late
-	s.within = enclosing
+	enclosing_instance = TYPES.instance
+	put_back = () => { s.within = enclosing; TYPES.instance = enclosing_instance }
+	s.within = function
+	TYPES.instance = keyed_text([enclosing_instance] + instance)
+	try work() catch e { put_back(); raise e.message }
+	put_back()
 }
 # a call typed by the function it calls: of its result, or jumping when that never returns
 result_of(n: Node, chosen: TypedFunction) as Node := if chosen.jumps then jumping(n) else if chosen.result == ø and not chosen.done then with_fact(n, RESULT_UNKNOWN, Text(chosen.unknown_result)) else with_type_of(n, value_bearing(chosen.result))

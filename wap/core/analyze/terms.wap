@@ -37,6 +37,7 @@ CASE_PREMISE = "·case"
 # the typed functions entered, callees before their callers: each by its key, once
 instances_entered(functions: list<TypedFunction>, s: TypingState) as map<text, TypedFunction> := {
 	by_key = instances_keyed(functions)
+	s.keyed = by_key
 	for typed in by_key.values() { instance_entered(typed, by_key, s) }
 	by_key
 }
@@ -108,7 +109,7 @@ parameters_entered(typed: TypedFunction, c: Checker, s: TypingState) as list<Loc
 	names = parameter_nodes(typed)
 	for at in 1 to #typed.arguments {
 		before = fresh_reading(c, {}, s).under(locals, names.take(at - 1).map(place_key))
-		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c))]
+		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c, s))]
 	}
 	locals
 }
@@ -118,7 +119,7 @@ parameters_checker(typed: TypedFunction, s: TypingState) as Checker := {
 	typed.checker!
 }
 # the names its definition gives its parameters, as written
-parameter_nodes(typed: TypedFunction) as list := parameters_of(typed).map(parameter => declared_name(parameter))
+parameter_nodes(typed: TypedFunction) as list<Node> := parameters_of(typed).map(parameter => declared_name(parameter))
 # GUESS (T6a3's value reader): the result as the kernel reads it: where a family is written applied to values, the head applied to its arguments
 # read as values under the parameters (`Even(double(n))`, each value through term_of and the checker's Locals); any other result as settled
 kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
@@ -126,48 +127,99 @@ kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 	match typed.written! {
 		Call(head, items) => {
 			given = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), parameters_reading(typed, by_key, s)) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)
-			kernel_headed(apply_all(kernel_type(family_word(head))!, given), typed.checker!)
+			kernel_headed(apply_all(kernel_type(family_word(head))!, given), typed.checker!, s)
 		}
 		_ => ø
 	}
 }
 # A type as the kernel reads it, on the checker its terms are read on: every kernel family applied in it, under its
-# binders and in its arguments too, is headed at the levels its arguments give (family_head); a term holding no level
-# parameter, typing's bare levels, is as it is
-kernel_headed(t: Term, c: Checker) as Term := if not t.holds_parameter then t else match t.shape {
+# binders and in its arguments too, is headed at the levels its arguments give (family_applied); a term holding no level
+# parameter, typing's bare levels, is as it is. A function named as a family's argument, `same_value` of
+# `quotient(fraction, same_value)`, is that function
+kernel_headed(t: Term, c: Checker, s: TypingState) as Term := if not t.holds_parameter then t else match t.shape {
 	Apply(function, argument) => {
-		given = arguments(t).map(part => kernel_headed(part, c))
+		given = arguments(t).map(part => function_valued(part, s) ?? kernel_headed(part, c, s))
 		family = declared_at(TYPES.environment, constant_id(head_of(t)))
-		if family == ø or family!.levels is empty then apply_all(kernel_headed(head_of(t), c), given) else apply_all(family_head(family!, given, c), given)
+		if family == ø or family!.levels is empty then apply_all(kernel_headed(head_of(t), c, s), given) else family_applied(family!, given, c)
 	}
-	Pi(binder, domain, body) => binder_headed(c, binder, domain, body, pi)
-	Lambda(binder, domain, body) => binder_headed(c, binder, domain, body, lambda)
-	Projection(structure, field, of) => projection(structure, field, kernel_headed(of, c))
+	Pi(binder, domain, body) => binder_headed(c, s, binder, domain, body, pi)
+	Lambda(binder, domain, body) => binder_headed(c, s, binder, domain, body, lambda)
+	Projection(structure, field, of) => projection(structure, field, kernel_headed(of, c, s))
 	_ => t
+}
+# the function a type's argument word names, by its definer, as the kernel holds it (type_notation.wap value_word); ø
+# for any other part, a parameter's name too, which stays a word family_applied refuses
+function_valued(part: Term, s: TypingState) as Term? := {
+	key = place_key(fact_of(TYPES.values.get(word_id(part)) ?? return ø, DEFINED_AT) ?? return ø)
+	keyed = s.keyed ?? refused_type(part, "a type's argument is read as the function it names only once the functions are entered")
+	if #instances_of(key, s) > 1 { refused_type(part, "${type_text(part)} is a type's argument typed at several types, and the kernel reads a type's function at one: name each its own function") }
+	instance_entered(keyed.get(key) ?? refused_type(part, "${type_text(part)} is a type's argument, a function nothing calls, so the kernel holds no value of it"), keyed, s)
 }
 # a binder made again of its domain headed and its body headed with the binder entered as a variable of that domain
 # GUESS: a named kernel maker (pi, lambda) passes as a function value
-binder_headed(c: Checker, binder: text, domain: Term, body: Term, made: (text, Term, Term) -> Term) as Term := {
-	headed = kernel_headed(domain, c)
+binder_headed(c: Checker, s: TypingState, binder: text, domain: Term, body: Term, made: (text, Term, Term) -> Term) as Term := {
+	headed = kernel_headed(domain, c, s)
 	inside = entered(c, binder, headed)
-	made(binder, headed, abstracted(kernel_headed(instantiated(body, inside.variable), c), variable_id(inside.variable)))
+	made(binder, headed, abstracted(kernel_headed(instantiated(body, inside.variable), c, s), variable_id(inside.variable)))
 }
-# a kernel family with a level hole for each level parameter, its arguments unified with its binders' types in turn,
-# each dependent binder taking the argument before it, so the levels found fill the holes (`Equal(nat, a, b)`: u from
-# nat's Type); an argument of another type, or a level no argument gives, is refused
-family_head(family: Declaration, arguments: list<Term>, c: Checker) as Term := elaborated_over(c, el => {
-	holes = family.levels.map(name => level_hole(el))
-	type = with_levels(family.type, family.levels, holes)
-	for argument in arguments {
+# a kernel family applied to its arguments in order (`Equal(nat, a, b)`: u from nat's Type); applied to fewer than
+# it takes, a function of the rest (`Equal(nat, a)`)
+family_applied(family: Declaration, arguments: list<Term>, c: Checker) as Term := {
+	if #arguments > #binder_names(family.type) { refused_type(family.type, "${family.name} takes fewer arguments than ${#arguments}") }
+	declared_applied(family, (at, binder) => Placed(arguments#at, ø), (place, laws, goal) => ø, c, #arguments)!
+}
+# what a call gives a kernel declaration's binder: a term, or a proof's laws the provers prove its goal from; ø where
+# the binder is found from the others
+# (at: its place among the call's arguments; domain: a proof's goal)
+class Placed { term: Term?; laws: list?; at: int = 0; domain: Term? = ø }
+# A kernel declaration applied: a level hole for each level parameter and, at each binder, what `given` places there or
+# a hole the others fill, each term unified with its binder's type, the binders after it taking it, a bool relation
+# where a relation into Prop is wanted its truth (truth_adapted); a proof proved last, at its goal with the holes
+# filled, by `proved` (ø where it gives none); its first `walked` binders only, where given. A binder or a level nothing
+# gives, or a term of another type, a proof's among them, is refused, naming it; its result unified with the type
+# `wanted`, where one is, finds the binders only the result writes (the S of quotient.of)
+declared_applied(d: Declaration, given: (int, text) -> Placed?, proved: (int, list, Term) -> Term?, c: Checker, walked: int? = ø, wanted: Term? = ø) as Term? := elaborated_over(c, el => {
+	holes = d.levels.map(name => level_hole(el))
+	type = with_levels(d.type, d.levels, holes)
+	binders = binder_names(d.type).take(walked ?? #binder_names(d.type))
+	placed: list<Term> = []
+	proofs: list<Placed> = []
+	for binder in binders {
 		type = match type.shape {
-			Pi(binder, domain, body) => if unified(el, domain, type_of(el.c, argument)) then instantiated(body, argument) else refused_type(family.type, "${family.name} takes ${shown(domain)} here, and this is ${shown(type_of(el.c, argument))}")
-			_ => refused_type(family.type, "${family.name} takes fewer arguments than ${#arguments}")
+			Pi(name, domain, body) => {
+				written = given(#placed + 1, binder)
+				argument = if written == ø or written!.term == ø then hole(el, binder, domain) else truth_adapted(el.c, written!.term!, domain)
+				if written != ø and written!.laws != ø { proofs += [Placed(argument, written!.laws!, written!.at, domain)] }
+				if written != ø and written!.term != ø and not unified(el, domain, type_of(el.c, argument)) { refused_type(d.type, "${d.name} takes ${shown(domain)} as ${binder}, and this is ${shown(type_of(el.c, argument))}") }
+				placed += [argument]
+				instantiated(body, argument)
+			}
+			_ => type
 		}
 	}
+	if wanted != ø and not unified(el, type, wanted!) { refused_type(d.type, "${d.name} gives ${shown(filled(el, type))} here, where ${shown(wanted!)} is wanted") }
+	if not problems_retried(el) { refused_type(d.type, "the levels of ${d.name} are found from none of its arguments") }
+	missing = (1 to #placed).find(at => not proofs.any(proof => same(proof.term!, placed#at)) and holes_in(el, filled(el, placed#at)) is not empty)
+	if missing != ø { refused_type(d.type, "the ${binders#missing!} of ${d.name} is found from none of the arguments") }
+	for proof in proofs {
+		goal = filled(el, proof.domain!)
+		answer = proved(proof.at, proof.laws!, goal) ?? return ø
+		if not unified(el, proof.term!, answer) { refused_type(d.type, "the provers answer ${shown(goal)} for ${d.name} with a proof of ${shown(type_of(el.c, answer))}") }
+	}
+	terms = placed.map(argument => filled(el, argument))
 	levels = holes.map(hole => level_filled(el, hole))
-	if not problems_retried(el) or levels.any(level => level_holes_in(level) is not empty) { refused_type(family.type, "the levels of ${family.name} are found from none of its arguments") }
-	constant(named_id(TYPES.environment, family.name)!, family.name, levels)
-})!
+	if levels.any(level => level_holes_in(level) is not empty) { refused_type(d.type, "the levels of ${d.name} are found from none of its arguments") }
+	apply_all(constant(named_id(TYPES.environment, d.name)!, d.name, levels), terms)
+})
+# A function into bool where one into Prop is wanted, of the same parameters, read as its truth: `same_value` as
+# `(a, b) => same_value(a, b) == yes` (types/quotients.wap joined, the library's one spelling of it); any other value
+# as it is
+truth_adapted(c: Checker, value: Term, wanted: Term) as Term := {
+	given = arrow_parts(type_of(c, value))
+	if #given < 2 or #given != #arrow_parts(wanted) or given.last != BOOL_TERM or arrow_parts(wanted).last != PROP { return value }
+	binders = given.take(#given - 1).map(domain => entered(c, NO_BINDER, domain))
+	lambdas(binders, truth_stated(TYPES.environment, apply_all(value, variables(binders))))
+}
 # the frame its parameters are typed in, as a body's is
 reading_frame(typed: TypedFunction) as TypeFrame := {
 	frame = TypeFrame()
@@ -215,8 +267,10 @@ term_of(n: Node, x: Entering) as Term? := match n {
 	Text(value) => if universe_level(kernel_value(n)) == ø then quoted(value) else ø
 	True => TYPES.environment.literals!.yes_case
 	False => TYPES.environment.literals!.no_case
-	Symbol(name) => binder_term(n, x) ?? refl_term(n) ?? case_term(n, n, [], x)
-	Call(called, arguments) => by_term(n, called, arguments, x) ?? recursive_called(called, arguments, x) ?? called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
+	Symbol(name) => binder_term(n, x) ?? refl_term(n) ?? by_term(n, x) ?? case_term(n, n, [], x)
+	Get(receiver, field) => field_term(receiver, field, x)
+	Key(head, Op.None, List(items, Bracket.Curly, separator)) => instance_term(n, head, items, x)
+	Call(called, arguments) => by_term(n, x) ?? recursive_called(called, arguments, x) ?? called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
 	Prim(operation, arguments) => row_term(n, text(operation), arguments, x)
 	If(condition, then_part, else_part) => choice_term(n, condition, then_part, else_part, x)
 	Case(subject, arms) => choice_term(n, subject, truth_arm(arms, yes), truth_arm(arms, no), x) ?? match_term(n, subject, arms, x)
@@ -225,6 +279,24 @@ term_of(n: Node, x: Entering) as Term? := match n {
 }
 # a whole literal's numeral: by its digits past i64, else by its int
 whole_term(value: number, digits: text?) as Term? := if digits != ø then digits_numeral(TYPES.environment, digits!) else if value is int then int_numeral(TYPES.environment, value) else ø
+# GUESS (C1b): a field read of a class the kernel holds as a one-case block, `p.x` is Get(p, "x"): the projection of the instance, which
+# the kernel computes through field_of (kernel/compute.wap)
+field_term(receiver: Node, field: Node, x: Entering) as Term? := {
+	type = value_type(receiver) ?? return ø
+	record = record_named(x.s.records, type) ?? return ø
+	if structure_facts(TYPES.environment, head_of(type)) == ø { return ø }
+	at = fields_of(record).index_where(each => text(declared_name(each)) == text(field))
+	if at <= 0 then ø else projection(head_of(type), at, term_of(receiver, x) ?? return ø)
+}
+# GUESS (C1b): a class block's record literal, `Point{x: 1, y: 2}`, is its constructor applied to the fields in their
+# order, so the constructor function is a definition and field_of computes
+instance_term(n: Node, head: Node, items: list, x: Entering) as Term? := {
+	record = record_named(x.s.records, value_type(n)) ?? return ø
+	if not is_structure(record) { return ø }
+	values = fields_of(record).map(field => items.find(item => same_name(item, field)))
+	if values.any(value => value == ø) { return ø }
+	case_term(n, head, values.map(value => match value! { Key(name, op, held) => held; _ => value! }), x)
+}
 # a name a binder around it holds, its free variable
 binder_term(n: Node, x: Entering) as Term? := {
 	definer = fact_of(n, REBOUND) ?? fact_of(n, DEFINED_AT) ?? return ø
@@ -233,18 +305,67 @@ binder_term(n: Node, x: Entering) as Term? := {
 }
 # a call of a typed function the kernel took in, each argument of its parameter's own type, giving its own result
 called_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
+	# a proof the call leaves to the provers, where they give none, leaves the call no term: the obligation decides it
+	wanted = kernel_value(n) ?? return ø
+	read = call_read(called, arguments, x, wanted, (at, laws, goal) => proof_tried(laws, goal, x)) ?? return ø
+	if equal(x.c, wanted, type_of(x.c, read)) then read else ø
+}
+# A call's kernel term: a word that is a kernel constant as that constant (kernel_called), any other function of the
+# program applied to its arguments read in order; a proof the call leaves to the provers given by `proved`, from its
+# place among the arguments, its laws and its goal; a kernel constant's binders found from the call's type too
+call_read(called: Node, arguments: list, x: Entering, wanted: Term?, proved: (int, list, Term) -> Term?) as Term? := {
+	typed = called_typed(called, arguments, x) ?? return ø
+	kernel = kernel_declaration(typed)
+	if kernel != ø { return kernel_called(kernel!, typed, arguments, x, wanted, proved) }
+	function = instance_entered(typed, x.by_key, x.s) ?? return ø
+	apply_all(function, arguments_read(function, arguments, x, proved) ?? return ø)
+}
+# the typed function a call calls; ø for a call of no function of the program
+called_typed(called: Node, arguments: list, x: Entering) as TypedFunction? := {
 	definer = fact_of(called, DEFINED_AT) ?? return ø
 	typed = x.by_key.get(place_key(definer)) ?? return ø
-	if #arguments != #typed.arguments { return ø }
-	function = instance_entered(typed, x.by_key, x.s) ?? return ø
-	# GUESS: each argument against its domain and the call against the result, both under the arguments before them (kernel/recursors.wap with_parameters peels the same way)
+	if #arguments == #typed.arguments then typed else ø
+}
+# A word of the library that is a kernel constant, `@kernel(quotient.lift) lift(q, f, respected)`: its calls are that
+# constant, the function's body the run's only. A function cannot say it: the constant's binders it takes no parameter
+# for (T, S, R) are found from the others, as the kernel's quotient.lift takes them, where a function's call is applied
+# to its own parameters alone. Its parameters are the constant's binders by name, each a binder or refused
+KERNEL_ANNOTATION = "kernel"
+kernel_declaration(typed: TypedFunction) as Declaration? := {
+	marked = annotated_all(typed.define, KERNEL_ANNOTATION)
+	if marked is empty { return ø }
+	declaration(TYPES.environment, text(marked#1)) ?? refused(typed.define, "@kernel names ${marked#1}, which the kernel declares nothing of")
+}
+# a call of a word that is a kernel constant: the constant at its arguments by binder name, the binders it gives none
+# found from them, a proof it leaves to the provers proved at its goal
+kernel_called(d: Declaration, typed: TypedFunction, arguments: list, x: Entering, wanted: Term?, proved: (int, list, Term) -> Term?) as Term? := {
+	names = parameter_names(typed)
+	binders = binder_names(d.type)
+	extra = names.find(name => not binders.contains(name))
+	if extra != ø { refused(typed.define, "${defined_name(typed.define)} is the kernel's ${d.name}, which takes no ${extra!}: its binders are ${binders.join(", ")}") }
+	laws = arguments.map(argument => by_laws(fact_of(argument, PROOF_HOLE) ?? argument))
+	terms = (1 to #arguments).map(at => if laws#at != ø then ø else term_of(arguments#at, x))
+	if (1 to #arguments).any(at => laws#at == ø and terms#at == ø) { return ø }
+	declared_applied(d, (at, binder) => {
+		place = names.index_of(binder)
+		if place == 0 then ø else Placed(terms#place, laws#place, place)
+	}, proved, x.c, ø, wanted)
+}
+# A call's arguments read against its function's domains in turn, each the function's type after the arguments before
+# it (kernel/recursors.wap with_parameters peels the same way); a proof the call leaves to the provers given by
+# `proved`, from its laws and the goal at its place; ø where one is no term
+arguments_read(function: Term, arguments: list, x: Entering, proved: (int, list, Term) -> Term?) as list<Term>? := {
 	callee = type_of(x.c, function)
-	found = arguments.map(argument => term_of(argument, x))
-	if found.any(term => term == ø) { return ø }
-	given = found.map(term => term!)
-	for at in 1 to #arguments { if not equal(x.c, kernel_value(arguments#at) ?? return ø, taken(after_arguments(callee, given.take(at - 1)))) { return ø } }
-	if not equal(x.c, kernel_value(n) ?? return ø, after_arguments(callee, given)) { return ø }
-	terms_applied(function, arguments, x)
+	given: list<Term> = []
+	for argument in arguments {
+		domain = next_domain(after_arguments(callee, given))
+		laws = by_laws(fact_of(argument, PROOF_HOLE) ?? argument)
+		if laws != ø { given += [proved(#given + 1, laws!, domain) ?? return ø] } else {
+			if not equal(x.c, kernel_value(argument) ?? return ø, domain) { return ø }
+			given += [term_of(argument, x) ?? return ø]
+		}
+	}
+	given
 }
 # GUESS (item 1, notes/coc-t6a4.md): an arm of a match on a bare parameter, directly in the function's result, is expected the result
 # with the parameter taken for the arm's case applied to its fields (entered on the function's checker); any other arm keeps `expected`.
@@ -267,7 +388,7 @@ arm_expected(pattern: Node, subject: Node, f: TypeFrame, expected: Term?, s: Typ
 declared_constructor(id: int) as Declaration := declared_at(TYPES.environment, id)!
 # a function type after the arguments given to its first places, and what it takes at the next
 after_arguments(callee: Term, given: list<Term>) as Term := instantiated_all(peeled(callee, #given), given)
-taken(callee: Term) as Term := match callee.shape { Pi(binder, domain, body) => domain; _ => callee }
+next_domain(callee: Term) as Term := match callee.shape { Pi(binder, domain, body) => domain; _ => callee }
 # a host operation on whole numbers, its row's constant of the operands' types
 row_term(n: Node, operation: text, arguments: list, x: Entering) as Term? := {
 	if not FOLDED_ROWS.contains(operation) { return ø }
@@ -299,12 +420,24 @@ choice_term(n: Node, condition: Node, at_yes: Node?, at_no: Node?, x: Entering) 
 	terms = [else_part, then_part, condition].map(part => term_of(part, x))
 	if terms.any(term => term == ø) then ø else recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, type), terms.map(term => term!))
 }
-# `by f, g` in a proof: the proof TYPES.prove finds of the statement typing wanted here, from the laws it names, over
-# every binder around it; ø where nothing proves, a build's, so the function is assumed
-by_term(n: Node, called: Node, laws: list<Node>, x: Entering) as Term? := {
-	if not question_word(called, BY_WORD) { return ø }
+# `by f, g`, or a bare `by`, as a proof: of the statement typing wanted here
+by_term(n: Node, x: Entering) as Term? := {
+	laws = by_laws(n) ?? return ø
+	hole_term(laws, kernel_value(n) ?? return ø, x)
+}
+# the proof TYPES.prove finds of the goal, from the laws named, over every binder around it; ø where no prover is
+# loaded, a build's, so a law proved so is assumed (wiki/law.md: a build runs no law)
+hole_term(laws: list<Node>, goal: Term, x: Entering, quiet: bool = no) as Term? := {
 	prove = TYPES.prove ?? return ø
-	prove(ByHole(x.c, x.variables, kernel_value(n) ?? return ø, laws, name => function_named(name, x)))
+	prove(ByHole(x.c, x.variables, goal, laws, name => function_named(name, x), quiet))
+}
+# the proof the provers give, ø where they find none
+proof_tried(laws: list<Node>, goal: Term, x: Entering) as Term? := hole_term(laws, goal, x, yes)
+# the laws a proof hole names; ø for code that is no `by`
+by_laws(n: Node) as list<Node>? := match n {
+	Symbol(name) => if question_word(n, BY_WORD) then [] else ø
+	Call(called, laws) => if question_word(called, BY_WORD) then laws else ø
+	_ => ø
 }
 # the function of a name among those typed, as the kernel holds it: entered first where it is not yet
 function_named(name: text, x: Entering) as Term? := instance_entered(x.by_key.values().find(typed => text(defined_name(typed.define)) == name) ?? return ø, x.by_key, x.s)
@@ -417,7 +550,7 @@ terms_applied(function: Term, arguments: list, x: Entering) as Term? := {
 # a type as the kernel reads a value's: a subtype by condition is its parent's
 kernel_type(type: Term?) as Term? := if type != ø and subset_condition(type) != ø then kernel_type(narrowed_type(type)) else type
 # (every typing type becomes a kernel term here, its families headed at their levels on the checker its terms are of)
-kernel_settled(type: Term, s: TypingState, c: Checker = checker(TYPES.environment, [])) as Term := kernel_headed(kernel_type(settled_type(type, s))!, c)
+kernel_settled(type: Term, s: TypingState, c: Checker = checker(TYPES.environment, [])) as Term := kernel_headed(kernel_type(settled_type(type, s))!, c, s)
 kernel_value(n: Node) as Term? := kernel_type(value_type(n))
 
 # Each subtype's condition, a definition of the parent's values named after the subtype, `int where it >= 0 holds`:
@@ -455,15 +588,38 @@ condition_entered(condition: Condition, by_key: map<text, TypedFunction>, s: Typ
 # an obligation's statement, a law of its function: its condition (a subtype's, entered above) at the argument's term, read
 # under the function's parameters, `it` replaced by beta; none for a shape's narrowing or an argument of no term, which stay
 # listed for the run (extensions/verify/check.wap proves the rest)
-obligations_entered(by_key: map<text, TypedFunction>, s: TypingState) := for obligation in obligations { obligation_entered(obligation, by_key, s) }
+obligations_entered(by_key: map<text, TypedFunction>, s: TypingState) := for obligation in s.obligations { obligation_entered(obligation, by_key, s) }
 obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) := {
+	if obligation.call != ø { return hole_entered(obligation, by_key, s) }
 	if subset_condition(obligation.type) == ø { return }
 	typed = by_key.get(obligation.within ?? return) ?? return
 	condition = named_id(TYPES.environment, condition_name(TYPES.environment, obligation.type)!) ?? return
 	held = match declared_at(TYPES.environment, condition)!.kind { Defined(value) => value; _ => return }
-	argument = term_of(obligation.argument, parameters_reading(typed, by_key, s)) ?? return
+	argument = term_of(obligation.argument!, parameters_reading(typed, by_key, s)) ?? return
 	obligation.function_type = pis(typed.locals, BOOL_TERM)
 	obligation.value = lambdas(typed.locals, beta(held, [argument]))
+}
+# A proof a call leaves to the provers, as a law of the function the call sits in (of none at the top level): the goal at
+# its place, the callee's domain after the arguments before it, for every value of that function's parameters. One the
+# run cannot check is refused where no prover is loaded (wiki/type.md "Proved or checked": the last step)
+hole_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) := match obligation.call! {
+	Call(called, arguments) => {
+		typed = by_key.get(obligation.within ?? "")
+		x = if typed == ø then fresh_reading(checker(TYPES.environment, []), by_key, s) else parameters_reading(typed!, by_key, s)
+		# each proof the provers give, or a hypothesis standing for it, so the goals after it are stated; a goal the run
+		# checks stays a warning where they find none, one only a proof decides is refused
+		goals: list<Term> = []
+		if called_typed(called, arguments, x) == ø { refused(obligation.call!, "this call leaves a proof to the provers, and the kernel holds no function of the program it calls") }
+		call_read(called, arguments, x, kernel_value(obligation.call!), (at, laws, domain) => {
+			if at == obligation.place { goals.add(domain) }
+			(if obligation.check != ø then proof_tried(laws, domain, x) else hole_term(laws, domain, x)) ?? entered(x.c, NO_BINDER, domain).variable
+		}) ?? refused(obligation.call!, "a call's proof is stated by the arguments before it, which the kernel reads only as values computed without acting: name them first")
+		if goals is empty { refused(obligation.call!, "the kernel reads no proof at argument ${obligation.place} of this call") }
+		goal = goals#1
+		obligation.statement = pis(if typed == ø then [] else typed!.locals, goal)
+		if TYPES.prove == ø and obligation.check == ø { refused(obligation.call!, "this call leaves the proof of ${shown(goal)} to the provers (by), and this compile loads none: the verify extension proves it") }
+	}
+	_ => ø
 }
 # the name of a subtype's condition: its word's name and "holds"
 condition_name(e: Environment, type: Term) as text? := (declared_at(e, word_id(type)) ?? return ø).name + CONDITION_HOLDS
