@@ -53,7 +53,7 @@ int-takes b75d1257.
 | (1) nat's cases in a match: the arm names read as count's under int's natural arm, k bound as `natural(c)`, the negative arm | analyze/terms.wap (beside T5c3's `course_term`) | core +25 |
 | (2) a call through `natural(field)` | the same | core +10 |
 | (3) choice_by_cases, waiting_on, within_parameter | analyze/terms.wap or analyze/recursion.wap | core +45 |
-| `·difference` by its second count | kernel/counting.wap:162 (0), kernel/integer_laws.wap difference_parts and its uses | kernel about +5 |
+| `·difference` by its second count | kernel/counting.wap:162 (0), extensions/prove/integer_laws.wap difference_parts and its uses | kernel about +5 |
 | nat's recursor | types/integers.wap; T5b5's lookup for a subtype's word | types +3, core +3 |
 
 Net: core about +83, kernel about +5, types +3. coc-t5c.md's row counted +45 for (3) alone. (1) and (2) are new: the
