@@ -14,7 +14,7 @@
 # scripts/lib/wap-beside.sh wap_linked's for the native wap (driver.wap)
 # The compiler runs on the native wap given by --wap (`wap build` passes itself, so it works from any folder, from
 # the seed folder beside an installed wap), else on the native wap on PATH, else on wasmtime (scripts/lib/wap-host.sh).
-# The C headers are the compiler's own: lib/ beside it. The build's files go in
+# The C headers are lib/ beside this script (the seed folder's or the tree's). The build's files go in
 # <executable>.build/
 set -euo pipefail
 C_COMPILER=cc
@@ -28,11 +28,17 @@ STANDALONE_OPTION=--standalone
 # the seed's name: the first digits of its parts' contents hashed, so a seed built again unchanged finds its unpacked folder
 SEED_NAME_DIGITS=12
 
+# spelled the same in wap/extensions/native/driver.wap WAP_OPTION, which passes it
 WAP_OPTION=--wap
 standalone="" wap_executable=""
-[ "${1-}" = "$STANDALONE_OPTION" ] && standalone=1 && shift
-[ "${1-}" = "$WAP_OPTION" ] && wap_executable=$2 && shift 2
-[ $# -ge 3 ] || { echo "usage: $0 [$STANDALONE_OPTION] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]" >&2; exit 2; }
+while true; do
+	case ${1-} in
+		"$STANDALONE_OPTION") standalone=1; shift ;;
+		"$WAP_OPTION") wap_executable=${2-}; shift $(($# > 1 ? 2 : 1)) ;;
+		*) break ;;
+	esac
+done
+[ $# -ge 3 ] || { echo "usage: $0 [$STANDALONE_OPTION] [$WAP_OPTION <executable>] <compiler.wasm> <program.wap> <executable> [<C compiler arguments>…]" >&2; exit 2; }
 compiler=$1 program=$2 executable=$3
 shift 3
 # whole_archive <static library>: the linker's arguments that link all of it
@@ -67,7 +73,9 @@ if [ -n "$standalone" ] && [ $# -gt 0 ]; then
 	set -- "${linked[@]}"
 fi
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-library="$(cd -P "$(dirname "$compiler")/lib" && pwd -P)"
+# the C headers travel with this script, never with the compiler: the seed folder's lib/ (two folders up) or the tree's (three)
+library=$(for up in ../.. ../../..; do [ -d "$here/$up/lib/native" ] && { cd -P "$here/$up/lib" && pwd -P; break; }; done)
+[ -n "$library" ] || { echo "build.sh: no lib/native beside this script ($here)" >&2; exit 1; }
 # wap_compiled <arguments>: the compiler run by the wap given, else by the host
 if [ -n "$wap_executable" ]; then wap_compiled() { "$wap_executable" "$@"; }
 else source "$here/../../../scripts/lib/wap-host.sh"; wap_compiled() { wap_ran "$@"; }; fi
