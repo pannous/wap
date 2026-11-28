@@ -68,9 +68,10 @@ for name in $STAGES; do
 done
 chosen=$previous
 
-# the seed and the compiler that built the last stage, timed in turns, each by its best round, both warm, as the tests
-# run them: a seed holds no source to read wap's types module from, and the tree's may use forms only the new one knows
-round_timed() { prepared "$1" && timed "$1" "$scratch/timed.wasm" "$1"; }
+# the seed and the compiler that built the last stage, timed in turns, each by its best round, both alike: the seed holds
+# no library or warm state (it cannot write the tree's, whose forms only the new compiler knows), so neither compiler is
+# given one, each reads wap's types module beside it, and only the compile is timed
+round_timed() { prepared "$seed_run" && timed "$1" "$scratch/timed.wasm" "$1"; }
 old_cost=
 new_cost=
 for round in $(seq "$TIMING_ROUNDS"); do

@@ -2,8 +2,8 @@
 
 `axiom name: T` states a constant of type T that nothing defines: the kernel takes it as given (wiki/proof.md,
 wiki/proposition.md). The one typer does not read it, so these are red (test/reds.txt):
-- wap/test_native.sh "wap verify gives each axiom and law its verdict, from any folder" (Darwin and Linux, :294);
-- wap/test_theory_verify.wap "an axiom is taken as true" (:16, `axiom choice: Prop` → `choice: Axiom`), and with it
+- test/wap/test_native.sh "wap verify gives each axiom and law its verdict, from any folder" (Darwin and Linux, :294);
+- test/wap/test_theory_verify.wap "an axiom is taken as true" (:16, `axiom choice: Prop` → `choice: Axiom`), and with it
   "a proof that uses an axiom is Proved and names what it rests on" (:25);
 - and everywhere a test states its givens as axioms: about twenty of test_theory.wap's red lines (`axiom int: Type`,
   `axiom h: False`) wait on this card beside T6a7's universes and T6a3's headers.
