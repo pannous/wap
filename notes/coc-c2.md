@@ -1,8 +1,8 @@
 # C2: a trait as a value's type
 
 coc-plan.md's C2 row: a value whose type is not known at the call carries its instance, a record of its type's
-function references, and C1b's structure (notes/coc-c1.md) joins it. Read on unify-typers 2b0e87be. This plan sets the
-row's instance mechanism beside a smaller one that the wiki describes, and recommends the smaller one now.
+function references, and C1b's structure (notes/coc-c1.md) joins it. Read on unify-typers 2b0e87be. Decided: A, the
+row's instances, written by the trait's own class rule in plain wap (the plan below).
 
 ## The wiki passages
 
@@ -33,12 +33,12 @@ optimization.
 - A trait value is the pair of the value and its instance, the record of its type's function references, built where
   a value is boxed into the trait (`x as shape`, a `list<shape>` literal).
 - A word called on it reads its field (call_ref).
-- Cost: core +110, emit +20.
-- It pays C4: dispatch.wap's per-type retyping rounds go, core −90, net about +40.
+- Cost: core +19, sugar +7, emit 0 (the plan below).
+- It opens C4: dispatch.wap's per-type retyping rounds go, core −90.
 - It is the only way across a module boundary: a compiled library (T5g) taking a `shape` from a program it has never
   seen.
 
-**B (recommended now): a trait in a value's place is the union of the program's types that do its words.**
+**B, the alternative: a trait in a value's place is the union of the program's types that do its words.**
 - `list<shape>`, `x as shape`, or a mixed list's items is the union `square or circle` of the records that conform
   (C1's `conforms`, over the program's records once typing knows them).
 - A call on it dispatches by the existing `is` chain, the wiki's match cases.
@@ -49,15 +49,13 @@ optimization.
 - It needs the whole program, which every wap compile has today. A trait parameter of a separately compiled module
   has no conformers to union over, and that is where A becomes needed.
 
-Decided: B as C2 now, at core +15. A, with C4's −90, comes with T5g, compiled libraries: the first place a
-trait value crosses a module boundary. It is the wiki's "later optimization", and it is measured then, against B's
-`is` chains.
+Decided: A. It is plain wap written by the protocol rule, at core +19 against B's +15; it crosses module boundaries
+(T5g), and it opens C4's −90. wiki/trait.md "Dispatch" allows both, run-time match cases or a witness table.
 
 ## C1b, the structures
 
-Under A, the instance is C1b's structure at run time, so the two land together (the supervisor's earlier call).
-Under B nothing at run time reads the structure. Its readers are laws over a trait, which V3 (proved laws as facts)
-and Q1 (a quotient's `same`, over Equatable) need. C1b then lands with the first of those, at the same core about +22.
+The instance is C1b's structure at run time. C1b is a class entering the kernel as a one-case block (core +8, the plan
+below), and it lands first; its law readers are V3 (proved laws as facts) and Q1 (a quotient's `same`, over Equatable).
 
 ## Gap lines
 
@@ -73,9 +71,9 @@ No line pins a trait value today. For a builder, both from trait.md "Declaring a
   `check("a list of a trait sorts by each item's compare", (sort ranked)#1.name, "Bob")`. The file's `aged`, with its
   `compare`, stands in for the page's person.
 
-## Estimate
+## B's estimate, for comparison
 
-| part | B | A |
+| part | B | A, as the instance mechanism without the class rule |
 |---|---|---|
 | the trait as a value's type | core +10 (the union of conformers) | core +40 (the instance built at boxing) |
 | a word called on it | 0 (dispatch.wap's `is` chain) | core +30 (its field read) |
@@ -88,12 +86,11 @@ No line pins a trait value today. For a builder, both from trait.md "Declaring a
 
 Kernel 0 for both. B: normal path, test_trait_wanted and test_protocols, after C1a. A: careful path (value layout).
 
-Decided B: it is trait.md's dispatch by run-time match cases, at core +15 on the normal path. A comes back with C4 and T5g's compiled libraries, measured against B's chains. C1b's structure lands with its first law reader.
+A in the plan below replaces that column: the trait's class rule writes the instance, so its core is +19.
 
 ## Re-read on 5285eb86 and c1-traits eefc9b94: C1b, then instances at boxing (A)
 
-wap-supervisor asked for A's plan with its functions and cost, beside B's "decided" above. The reading below makes A
-much smaller than the +132 this note estimated, because the trait's own class rule can write it in plain wap.
+The trait's own class rule writes A in plain wap, so A costs core +19, not the +132 of the table above.
 
 **What stands of origin/c2-trait-values da60505e (option B, unbuilt, on unify-typers 323ba86a, not on c1-traits).**
 - The gap line stands: test_trait_wanted's mixed list `[square(2), circle(1)].map(area)` is `[4, 3]`. It is the
@@ -172,7 +169,8 @@ could not:
 - a trait value crossing a module boundary (T5g), since the boxing travels with the value;
 - C4's per-type rounds, whose −90 can follow.
 
-Recommended: A in this form. It is plain wap except the one reading of a protocol in a value's place.
+A is plain wap except the one reading of a protocol in a value's place. If the census shows the built-in traits'
+classes cost, the rule writes them only for traits a value place names.
 
 **Risks for the builder.**
 - (a) `v as T` of an any, with T bound at specialisation.
