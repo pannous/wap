@@ -179,3 +179,43 @@ cases). Careful path: a new type's conversions.
 
 **Green.** The table above, unchanged. The `sign` lift lines (test_quotient_wanted:10-11) hold only once the three sign
 laws are Proved.
+
+## Lift read on q1 (3b58de53 library, c389ee1c M1, dacfb13a M2)
+
+**The shape.** `lift(q: quotient(T, S), f: (T) -> R, respected: respects(f, S) = by): R := f(prim as_is(q))` is
+Lean's `Quot.lift f h q` with the respect proof a hypothesis parameter the provers fill.
+- The kernel's `quotient.lift(T, r, B, f, respects, q)` (kernel/quotients.wap:65) takes `respects: Π a b (joined: r a
+  b), Equal(B, f a, f b)`. `respects(f, S)`'s for-lines read `same(a, b) implies f(a) == f(b)` as exactly that, once
+  `r` is the bool relation's adaptation `(a, b) => S(a, b) == yes`, the one `quotient(T, S)` itself is read with.
+  The quotient type, quotient_sound and lift share that one adaptation.
+- The body `f(prim as_is(q))` is the run's only. In the kernel, a call of lift is `quotient.lift` with the found
+  relation (part 5 above), never lift's body. `as_is` is not a folded row (terms.wap row_term), so the body has no
+  kernel value: lift alone would be an axiom, consistent because quotient.lift inhabits it, but `lift_of := refl`
+  computes only through part 5.
+- `as_is` never gets a kernel meaning. With `as_is(of(a)) ≡ a`, quotient_sound gives `a == b` for any joined a and b:
+  `fraction(1, 2) == fraction(2, 4)`, then False.
+
+**M1, a value letter.** S of `quotient(T, S)` is a letter as T is, bound from the argument's type at the former's
+value place. Sound: the letter is the relation the argument's type holds, so lift reads the quotient's own relation and
+no other.
+
+**M2, a hypothesis's `by` default.** Each argument is read against `next_domain(after_arguments(callee, given))`, the
+callee's Π instantiated with the arguments before it, which is the kernel's application rule (B[a/x]). The proof found
+for that domain is checked with the whole term, so a wrong one is refused by the kernel. Two places change under the
+obligation ruling (coc-plan.md "A call's proof hole"):
+- proof_given refuses every hole in a compile without provers. A decidable goal (`nonzero: b != 0 = by`) is an
+  obligation and is checked when the program runs, as the subtype `b: int where it != 0` is. Only an undecidable one
+  (respects, a for-line) is refused.
+- M2b, a call never read into the kernel (the top level, an acting function), is recorded at typing as an
+  obligation, so it is never left undecided.
+
+## Hashing a constant by its id (wap-annotation-attachment-fix 71dee881)
+
+kernel/terms.wap:110 hashes a constant by its id, what `same` compares (:308), so core's word and the kernel's key of
+one id are one term. Its readers:
+- hash_rank (integer_laws.wap:78, linear.wap:371) orders a sum's terms. Each reordering is proved by commutativity,
+  so the order is free; it follows declaration order now.
+- linear.wap:210 names a lemma by a type's hash, within one compile.
+- union_type sorts its parts by type_text (type_notation.wap:288), not by hash, so nothing depends on a name's hash.
+  The old comment at :109 ("orders by hash (a union's parts)") was stale.
+- A prover's failure message that shows a sum may show its terms in another order.

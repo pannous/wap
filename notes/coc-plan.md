@@ -1175,6 +1175,18 @@ None of the second reading remains: no PROOF_MARK and no stated_proof_typed or s
 or hole fold, no reading key in the state or the Entering, no written_proof, and law_proved only for laws without a
 proof. Core about −20 against T6a1b's first form; one field, `TYPES.prove`.
 
+#### A call's proof hole is an obligation
+
+A `by` a call leaves (a hypothesis parameter's default, `nonzero: b != 0 = by`, lift's respect) is an obligation on
+wiki/type.md's "Proved or checked" ladder, as a subtype's narrowing is (V3's Obligation, with its goal the parameter's
+statement at the call's arguments):
+- `wap check` and `wap verify` prove it under the laws proved before it; a proved one leaves no run check.
+- In a compile without provers, a decidable goal is checked when the program runs, and an undecidable one (a for-line,
+  lift's respect) is refused, naming the verify extension.
+- A `by` inside a law's proof is no obligation: in a build the law's function is assumed (T6a1b).
+- Typing records every call's hole, at the top level and in acting functions too; reading a pure body into the kernel
+  discharges the ones it meets. V3's Obligation takes the goal as a term beside its subtype condition (core about +2).
+
 #### Each step's wiki lines and the tests that pin them
 
 A builder starts from these lines red. "red" is the last recorded full run (test/reds.txt); `_wanted` files are
