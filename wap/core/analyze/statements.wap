@@ -1,10 +1,11 @@
 # Statements read as terms (notes/coc-plan.md 9.5): a local variable, a choice made as a statement and a loop are ways
 # to write a function, no action on the world. An assignment is a new binding of its name. A statement whose parts
 # assign names bound before it (a block, an if, a loop) gives the tuple of their values, its state, and binds them
-# again after it. A `for` is the count's recursor folding its rounds over the state; a `while` is the same recursion
-# on one more than the measure the provers show falls in every round (loops.wap), so it runs out of no round the loop
-# runs. A statement assigning none of them, a write into a part of a value, a capture's or a global's write, and an
-# exit from inside a part give no term: the function is then no definition the kernel holds.
+# again after it. A `for` is the count's recursor folding its rounds over the state; a `while` the count's recursor
+# on a bound above its measure, each round carrying the proof that the measure fell (measured_loop). A statement
+# assigning none of them, a write into a part of a value, a capture's or a global's write, and an exit from inside a
+# part give no term, and so does a function that changes a value in place or calls one that does (changes_in_place):
+# the function is then no definition the kernel holds.
 # TODO (card statement-terms) `return`, `break` and `continue` a mark in the state; a write into a part of a value the
 #   function made itself a new binding of its name
 
@@ -20,6 +21,9 @@ use "../../kernel/typing.wap"
 use "../../kernel/counting.wap"
 use "../../kernel/numbers.wap"
 use "../../kernel/recursors.wap"
+use "../../kernel/equality.wap"
+use "../../kernel/logic.wap"
+use "../../types/effects.wap"
 
 # the binders of a state, of the rounds a fold has made and of the rounds below
 STATE_BINDER = "·state"
@@ -80,11 +84,7 @@ state_after(statement: Node, state: State, x: Entering) as Term? := match statem
 		place_type = kernel_value(place) ?? return ø
 		rounds(state, x, apply(named_constant(UPS), term_of(count, x) ?? return ø), (inside, made, below, before) => counted_round(place, place_type, body, state, inside, made, apply(below, before)))
 	}
-	While(condition, body) => {
-		if loop_measured(statement, x.by_key, x.s) == ø { return ø }
-		measure = counted_measure(x.c, term_of(condition, x) ?? return ø) ?? return ø
-		rounds(state, x, successor_of(TYPES.environment, apply(named_constant(UPS), measure)), (inside, made, below, before) => state_bound(state, before, inside, at => tested_round(condition, body, state, at, below, before)))
-	}
+	While(condition, body) => measured_loop(statement, condition, body, state, x)
 	_ => ø
 }
 # a part's statements read under the state's names, giving the state's values after them
@@ -93,12 +93,6 @@ round_state(part: Node, state: State, x: Entering) as Term? := block_term(statem
 counted_round(place: Node, place_type: Term, body: Node, state: State, x: Entering, made: Term, before: Term) as Term? := {
 	place_value = apply(TYPES.environment.integers!.natural, successor_of(TYPES.environment, made))
 	state_bound(state, before, x, inside => let_read(inside, place, place_type, place_value, at => round_state(body, state, at)))
-}
-# a while's round: where its condition holds, the rounds below after its body, else the state as it is
-tested_round(condition: Node, body: Node, state: State, x: Entering, below: Term, before: Term) as Term? := {
-	held = term_of(condition, x) ?? return ø
-	ran = round_state(body, state, x) ?? return ø
-	recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, state_type(state, x.c)), [before, apply(below, ran), held])
 }
 # The count's recursor folding rounds over a state, at a count of rounds: at zero the state as it is, at one more than
 # k the round given k, the function of the k rounds below and the state before
@@ -114,6 +108,82 @@ rounds(state: State, x: Entering, count: Term, round: (Entering, Term, Term, Ter
 	recursor = named_constant(recursor_name(COUNT), [level_of(x.c, step)])
 	apply(apply_all(recursor, [lambda("_", named_constant(COUNT), step), lambdas([unchanged], unchanged.variable), at_step, count]), state_tuple(state, x))
 }
+
+# whether a function changes a value in place, itself or through what it calls, or has State: a name let-bound to a
+# value would then be read as unchanged where the run changes it, `k = grown(xs); #xs`
+changes_in_place(key: text, x: Joining, seen: list<text>) as bool := {
+	if seen.contains(key) or not x.by_key.has(key) { return no }
+	own = own_of(key, x)
+	own.in_place or (x.found.get(key) ?? []).contains(Effect.State) or own.calls.any(call => changes_in_place(call.key, x, seen + [key]))
+}
+
+# A while as measured_defined reads a recursion (coc-plan 9.3): the count's recursor on a bound k, its motive the loop
+# from a state whose measure is below k, the proof of that its premise. At zero a state where the condition holds is
+# none: its measure is at least 0 and below 0. At k + 1 a state where it holds runs the body, and the rounds below
+# take the state after it, whose measure fell below k. The provers show each, so a measure loops.wap reads wrongly
+# gives no term, never a wrong one. The loop starts at one more than the measure's whole part (ups). The condition,
+# the body and the measure are read once over the state's names as variables, then taken at each state
+measured_loop(loop: Node, condition: Node, body: Node, state: State, x: Entering) as Term? := {
+	if loop_measured(loop, x.by_key, x.s) == ø { return ø }
+	c = x.c
+	named = (1 to #state.keys).list().map(at => entered(c, state.names#at, state.types#at))
+	inner = x.under(named, state.keys)
+	held = term_of(condition, inner) ?? return ø
+	measure = counted_measure(c, held) ?? return ø
+	ran = round_state(body, state, inner) ?? return ø
+	m = Measuring(state, named, held, measure, ran)
+	k = entered(c, ROUNDS_BINDER, named_constant(COUNT))
+	start = successor_of(TYPES.environment, apply(named_constant(UPS), measure_at(m, state_tuple(state, x))))
+	below = entered(c, BELOW_BINDER_ROUNDS, bounded(m, k.variable, c))
+	at_zero = loop_round(m, named_constant(COUNT_ZERO), ø, x) ?? return ø
+	at_step = lambdas([k, below], loop_round(m, successor_of(TYPES.environment, k.variable), below.variable, x.under([k, below], [ROUNDS_BINDER, BELOW_BINDER_ROUNDS])) ?? return ø)
+	recursor = named_constant(recursor_name(COUNT), [level_of(c, bounded(m, k.variable, c))])
+	started = hole_term([], measure_below(m, state_tuple(state, x), start), x, yes) ?? return ø
+	apply_all(recursor, [lambdas([k], bounded(m, k.variable, c)), at_zero, at_step, start, state_tuple(state, x), started])
+}
+# a while read over its state's names as variables: the condition, the measure and the state after a round
+class Measuring { state: State; named: list<Local>; held: Term; measure: Term; ran: Term }
+# a term of the state's names taken at a value of the state
+at_state(t: Term, m: Measuring, value: Term) as Term := (1 to #m.named).list().fold(t, (term, at) => replaced_by(term, variable_id(m.named#at.variable), parts_of(#m.named, value)#at))
+measure_at(m: Measuring, value: Term) as Term := at_state(m.measure, m, value)
+# `measure(s) < bound`, the bound a count read as an int
+measure_below(m: Measuring, value: Term, bound: Term) as Term := truth_stated(TYPES.environment, apply_all(named_constant(BELOW), [measure_at(m, value), apply(TYPES.environment.integers!.natural, bound)]))
+# the motive at a bound: from every state whose measure is below it, the state the loop leaves
+bounded(m: Measuring, bound: Term, c: Checker) as Term := {
+	type = state_type(m.state, c)
+	before = entered(c, STATE_BINDER, type)
+	pis([before, entered(c, MEASURE_PREMISE, measure_below(m, before.variable, bound))], type)
+}
+# a round at a bound, of a state and its premise: where the condition holds, the rounds below after the body given
+# the proof that its measure fell below what is left, or at zero the proof that there is no such state; else the
+# state as it is
+loop_round(m: Measuring, bound: Term, below: Term?, x: Entering) as Term? := {
+	e = TYPES.environment
+	c = x.c
+	type = state_type(m.state, c)
+	before = entered(c, STATE_BINDER, type)
+	premise = entered(c, MEASURE_PREMISE, measure_below(m, before.variable, bound))
+	inside = x.under([before, premise], [STATE_BINDER, MEASURE_PREMISE])
+	condition = at_state(m.held, m, before.variable)
+	holds = entered(c, CASE_PREMISE, truths_equal(e, condition, e.literals!.yes_case))
+	fails = entered(c, CASE_PREMISE, truths_equal(e, condition, e.literals!.no_case))
+	proving = inside.under([holds], [CASE_PREMISE])
+	after = at_state(m.ran, m, before.variable)
+	at_yes = if below == ø then {
+		absurd = hole_term([], truths_equal(e, e.literals!.no_case, e.literals!.yes_case), proving, yes) ?? return ø
+		apply_all(named_constant(FALSE_ELIM, [level_of(c, type)]), [type, apply(named_constant(NO_IS_NOT_YES), absurd)])
+	} else {
+		left = predecessor_of(bound)
+		fell = hole_term([], measure_below(m, after, left), proving, yes) ?? return ø
+		apply_all(below!, [after, fell])
+	}
+	b = entered(c, "b", BOOL_TERM)
+	motive = lambdas([b], pis([entered(c, CASE_PREMISE, truths_equal(e, condition, b.variable))], type))
+	chosen = apply(recursor_applied(BOOL_TERM, motive, [lambdas([fails], before.variable), lambdas([holds], at_yes), condition]), reflexive(e, TYPE_LEVEL, BOOL_TERM, condition))
+	lambdas([before, premise], chosen)
+}
+# the count a successor was made of, k of k + 1
+predecessor_of(bound: Term) as Term := arguments(bound)#1
 
 # The state as one value: its names' values paired from the right, one name's its own
 state_type(state: State, c: Checker) as Term := types_paired(state.types, c)
