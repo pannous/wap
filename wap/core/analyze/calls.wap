@@ -175,6 +175,7 @@ call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s
 # decides it. Each is an obligation the kernel's reading settles (core/analyze/terms.wap hole_entered), its `by` kept on it
 proofs_held(n: Node, definition: Signature, taken: list, s: TypingState) as list := {
 	parameters = parameters_in(definition, s)
+	types = definition.parameters.map(type => substituted(type, letters))
 	(1 to #taken).map(at => if by_laws(taken#at) == ø or not is_statement_written(declared_type(parameters#at)) then taken#at else proof_held(n, definition, parameters, taken, at, s))
 }
 proof_held(n: Node, definition: Signature, parameters: list, taken: list, at: int, s: TypingState) as Node := {
@@ -265,6 +266,7 @@ named_value(argument: Node) as Node := match argument { Key(name, Op.Colon, valu
 # whether a definition takes this many arguments: one for each parameter, those with defaults at the end left out or not
 takes_count(definition: Signature, count: int, s: TypingState) as bool := {
 	parameters = parameters_in(definition, s)
+	types = definition.parameters.map(type => substituted(type, letters))
 	count <= #parameters and parameters.drop(count).all(defaulted)
 }
 defaulted(parameter: Node) as bool := has_fact(parameter, DEFAULT)
@@ -327,28 +329,51 @@ char_text(character: Node) as Node := with_type(refitted(Text(text(character)), 
 arguments_fitted(definition: Signature, given: list, s: TypingState) as list := {
 	letters = (letters_bound(definition, given.map(value_type), s, denoted_types(given)) ?? NOTHING_CALLED).letters
 	parameters = parameters_in(definition, s)
-	wanted = (1 to #given).map(at => earlier_filled(substituted(definition.parameters#at, letters), parameters, given, at, s))
+	types = definition.parameters.map(type => substituted(type, letters))
+	wanted = (1 to #given).map(at => earlier_filled(types, parameters, given, at, s))
 	(1 to #given).map(at => if counted(value_type(given#at), wanted#at) then with_type_of(placed_like(Prim(symbol(COUNTING), [given#at]), given#at), wanted#at) else as_wanted(given#at, wanted#at, s))
 }
 # A parameter's type that reads the parameters before it, `xs: list<int> where #it == n` or `i: index(xs)`, as this call
 # wants it: their arguments written in (wiki/type.md "Dependent Types"), so its condition reads the call's own values,
-# never a name where the call sits. A name it reads of a parameter after it, or of one of the function around the
-# call that the callee does not bind, has no reading and is refused
-earlier_filled(type: Term, parameters: list<Node>, given: list, at: int, s: TypingState) as Term := {
-	condition = subset_condition(type) ?? return type
+# never a name where the call sits. A letter, a one-letter name nothing defines, `n` of `dot(a: vector(number, n), b:
+# vector(number, n))`, is written in as the call fills it (letter_filling). A name it reads of a parameter after it, or
+# of one of the function around the call that the callee does not bind, has no reading and is refused
+earlier_filled(types: list<Term>, parameters: list<Node>, given: list, at: int, s: TypingState) as Term := {
+	condition = subset_condition(types#at) ?? return types#at
 	names = condition_names(condition_of(condition))
 	places = (1 to #parameters).filter(place => names.contains(text(parameter_name(parameters#place))))
 	later = places.find(place => place >= at)
 	if later != ø { refused(given#at, "this parameter's type reads ${parameter_name(parameters#later!)}, which comes after it: put ${parameter_name(parameters#later!)} first") }
 	bound = places.map(place => text(parameter_name(parameters#place)))
-	around = parameters_read(names.filter(name => not bound.contains(name)), s.functions.find(function => instance_key(function) == s.within))
+	letters = names.filter(name => not bound.contains(name) and is_letter_name(name) and named_in(s.kind_rules!.scope, name) is empty)
+	around = parameters_read(names.filter(name => not bound.contains(name) and not letters.contains(name)), s.functions.find(function => instance_key(function) == s.within))
 	if around is not empty { refused(given#at, "this parameter's type reads ${around.join(", ")}, which the function it is called from has as parameters too: rename one") }
-	if places is empty { return type }
-	subset_term(narrowed_type(type)!, places.fold(condition, (code, place) => parameter_written(code, text(parameter_name(parameters#place)), argument_written(given#place))))
+	if places is empty and letters is empty { return types#at }
+	written = places.fold(condition, (code, place) => parameter_written(code, text(parameter_name(parameters#place)), argument_written(given#place)))
+	filled = letters.fold(written, (code, letter) => parameter_written(code, letter, letter_filling(letter, types, given) ?? refused(given#at, "no argument says what ${letter} is: give a parameter the condition `#it == ${letter}`")))
+	subset_term(narrowed_type(types#at)!, filled)
 }
-# an argument a later parameter's type reads, written into it: a value written in place or a parameter of the function
-# around, which the kernel reads as they are; any other would be computed again by the check, and is refused
-argument_written(argument: Node) as Node := if is_bound(argument, DefinitionKind.Parameter) or not argument is symbol and direct_parts(argument) is empty then argument else refused(argument, "a parameter after this one reads it in its type: give a value written in place or a parameter here")
+# A letter's value at a call: the first parameter whose condition is an equation of it, `#it == n`, its other side read
+# of that parameter's argument, `#[1, 2, 3]`; ø where none is
+letter_filling(letter: text, types: list<Term>, given: list) as Node? := {
+	for place in 1 to #given {
+		side = equated_side(subset_condition(types#place) ?? continue, letter) ?? continue
+		return parameter_written(side, IT_WORD, argument_written(given#place))
+	}
+	ø
+}
+# the side of a condition `side == n` that the letter is equal to, the letter as written or made into its parameter's
+# type by an applied type name, `#it == (n as nat)`
+equated_side(condition: Node, letter: text) as Node? := match condition_of(condition) {
+	Call(called, arguments) => if text(called) == EQUALITY_WORD and #arguments == 2 and text(as_written(arguments#2)) == letter then arguments#1 else ø
+	_ => ø
+}
+as_written(n: Node) as Node := match n { Call(called, arguments) => if text(called) == RESULT_WORD and #arguments == 2 then arguments#1 else n; _ => n }
+# an argument a later parameter's type reads, written into it: a parameter of the function around or a value written
+# in place, a list of such values too, which the kernel reads as they are; any other would be computed again by the
+# check, and is refused
+argument_written(argument: Node) as Node := if written_in_place(argument) then argument else refused(argument, "a parameter after this one reads it in its type: give a value written in place or a parameter here")
+written_in_place(n: Node) as bool := is_bound(n, DefinitionKind.Parameter) or not n is symbol and (n is List or direct_parts(n) is empty) and direct_parts(n).all(written_in_place)
 # the call of a word with these typed arguments, the definition chosen among all of the word's
 word_called(n: Node, word: text, given: list, expected: Term?, s: TypingState) as Node := call_chosen(n, symbol(word), word_scopes(word, s), given, expected, s, ø)
 # a word's definitions layer by layer, as a call written at the program's top finds them, the program's hiding the
@@ -445,6 +470,7 @@ denoted_types(given: list) as list<Term?> := given.map(argument => fact_type(fac
 # none of the other arguments (`items.map(item => named(item))` is no map over a Range)
 takes(definition: Signature, given: list, s: TypingState, fit: function) as bool := {
 	parameters = parameters_in(definition, s)
+	types = definition.parameters.map(type => substituted(type, letters))
 	if not takes_count(definition, #given, s) { return no }
 	plain = (1 to #given).filter(at => not has_letters(definition.parameters#at) and not has_unknowns(value_type(given#at)))
 	if not plain.all(at => argument_taken(given#at, parameters#at, NOTHING_CALLED, s, fit)) { return no }
