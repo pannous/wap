@@ -435,8 +435,37 @@ function_added(definition: Define, s: TypingState) as Signature := {
 # The typed program with each definition it writes standing where it was written as the functions it became, once
 # every unknown settled: instances one settling made alike are one (letters.wap distinct_instances)
 instances_placed(n: Node, s: TypingState) as Node := match n {
-	Block(statements) => refitted(Block(statements.flat_map(statement => if statement is Define then functions_typed_from([statement], s).map(define => instances_placed(define, s)) else [instances_placed(statement, s)])), n)
-	_ => decided_code(n, s) ?? refitted(with_parts(n, part => instances_placed(part, s)), n)
+	Block(statements) => refitted(Block(statements.flat_map(statement => if statement is Define then functions_typed_from([statement], s).map(define => instances_placed(proofs_erased(define, s), s)) else [instances_placed(statement, s)])), n)
+	_ => decided_code(n, s) ?? refitted(with_parts(proofs_dropped(n, s) ?? n, part => instances_placed(part, s)), n)
+}
+# Erasure (notes/coc-t5f.md T5f3): a binder whose values are proofs, its type a proposition or a statement only a proof
+# decides, emits nothing, as the run would only pass it `yes` (calls.wap proof_held). Its function takes it no more, a
+# read of it is the truth it held, and each call drops the argument there, running before the call a check it makes
+proof_places(definition: Signature, s: TypingState) as list<int> := {
+	parameters = parameters_in(definition, s)
+	(1 to #definition.parameters).filter(at => is_proof_type(definition.parameters#at) or (definition.parameters#at == STATEMENT_TERM and not is_decided(declared_type(parameters#at)!, s)))
+}
+proofs_erased(define: Node, s: TypingState) as Node := match define {
+	Define(name, parameters, body) => {
+		places = proof_places(definition_keyed(function_key(define), s) ?? return define, s)
+		if places is empty { return define }
+		items = items_of(parameters)
+		erased = places.map(at => place_key(declared_name(items#at)))
+		refitted(Define(name, with_items(parameters, others_than(items, places)), proofs_read(body, erased)), define)
+	}
+	_ => define
+}
+others_than(items: list, places: list<int>) as list := (1 to #items).filter(at => not places.contains(at)).map(at => items#at)
+proofs_read(n: Node, erased: list<text>) as Node := if n is symbol and fact_of(n, DEFINED_AT) != ø and erased.contains(place_key(fact_of(n, DEFINED_AT)!)) then with_type(placed_like(True, n), BOOL_TYPE) else refitted(with_parts(n, part => proofs_read(part, erased)), n)
+proofs_dropped(n: Node, s: TypingState) as Node? := match n {
+	Call(called, arguments) => {
+		places = proof_places(definition_keyed(place_key(fact_of(called, DEFINED_AT) ?? return ø), s) ?? return ø, s)
+		if places is empty { return ø }
+		call = refitted(Call(called, others_than(arguments, places)), n)
+		checks = places.map(at => arguments#at).filter(argument => not argument is True)
+		if checks is empty then call else with_type_of(refitted(Block(checks + [call]), n), value_type(n))
+	}
+	_ => ø
 }
 # Code whose obligations compiling decided, placed without the checks they need no more (wiki/type.md "Proved or
 # checked"): a narrowing decided yes as its value; a dispatcher's call as its choices tried in turn, one decided no
