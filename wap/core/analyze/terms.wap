@@ -138,8 +138,9 @@ kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 # `quotient(fraction, same_value)`, is that function
 kernel_headed(t: Term, c: Checker, s: TypingState) as Term := if not t.holds_parameter then t else match t.shape {
 	Apply(function, argument) => {
-		given = arguments(t).map(part => function_valued(part, s) ?? kernel_headed(part, c, s))
 		family = declared_at(TYPES.environment, constant_id(head_of(t)))
+		given: list<Term> = []
+		for part in arguments(t) { given += [function_valued(part, if family == ø then ø else next_domain(after_arguments(family!.type, given)), s) ?? kernel_headed(part, c, s)] }
 		if family == ø or family!.levels is empty then apply_all(kernel_headed(head_of(t), c, s), given) else family_applied(family!, given, c)
 	}
 	Pi(binder, domain, body) => binder_headed(c, s, binder, domain, body, pi)
@@ -147,21 +148,22 @@ kernel_headed(t: Term, c: Checker, s: TypingState) as Term := if not t.holds_par
 	Projection(structure, field, of) => projection(structure, field, kernel_headed(of, c, s))
 	_ => t
 }
-# the function a type's argument word names, by its definer, as the kernel holds it (type_notation.wap value_word): its
-# instance at the type's arguments before it, `same_items` of `quotient(list<int>, same_items)` the one taking lists of
-# ints, typed there when nothing calls it, so naming it in a type is a use; ø for any other part, a parameter's name
-# too, which stays a word family_applied refuses
-function_valued(part: Term, s: TypingState) as Term? := {
+# the function a type's argument word names, by its definer, as the kernel holds it (type_notation.wap value_word): the
+# instance whose parameters are the family's at that place, its binder's domain with the arguments before it put in,
+# `same_items` of `quotient(list<int>, same_items)` the one taking lists of ints; where none is, the function typed at its
+# own parameters' types, so naming it in a type is a use; ø for any other part, a parameter's name too, which stays a
+# word family_applied refuses
+function_valued(part: Term, domain: Term?, s: TypingState) as Term? := {
 	item = TYPES.values.get(word_id(part)) ?? return ø
 	key = place_key(fact_of(item, DEFINED_AT) ?? return ø)
 	keyed = s.keyed ?? refused_type(part, "a type's argument is read as the function it names only once the functions are entered")
-	before = TYPES.before.get(word_id(part)) ?? []
-	fitting = instances_of(key, s).filter(instance => instance.arguments.all(argument => before.any(type => same(type, argument))))
-	if #fitting > 1 { refused_type(part, "${type_text(part)} is a type's argument typed at several types for the same arguments: name each its own function") }
+	taking = (type: Term) => arrow_parts(type).take(#arrow_parts(type) - 1)
+	fitting = instances_of(key, s).filter(instance => domain != ø and taking(kernel_settled(instance_type(instance), s)) == taking(domain!))
+	if #fitting > 1 { refused_type(part, "${type_text(part)} is a type's argument typed twice at the types it takes here: name each its own function") }
 	if fitting is not empty { return instance_entered(fitting#1, keyed, s) }
-	if before is empty { refused_type(part, "${type_text(part)} is a type's first argument, so no type before it says where the kernel reads it") }
 	definition = definitions_keyed(key, s)#1
-	instance_entered(function_typed(definition, definition.parameters.map(parameter => before.last), s, item), keyed, s)
+	written = definition.parameters.map(type => type ?? refused_type(part, "${type_text(part)} is a type's argument, so each of its parameters needs a written type"))
+	instance_entered(function_typed(definition, written, s, item), keyed, s)
 }
 # a binder made again of its domain headed and its body headed with the binder entered as a variable of that domain
 # GUESS: a named kernel maker (pi, lambda) passes as a function value
