@@ -54,7 +54,7 @@ instance_entered(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 	if s.entering.has(name) { return ø }
 	s.entering[name] = yes
 	type = kernel_settled(instance_type(typed), s)
-	value = try definition_of(typed, by_key, s) catch e { entering_refused(name, e.message) }
+	value = try definition_of(typed, by_key, s) catch e { entering_refused(name, e) }
 	kind = if value == ø then DeclarationKind.Axiom else Defined(value!)
 	signature = kernel_signature(typed, by_key, s)
 	if value != ø and signature != ø {
@@ -64,13 +64,13 @@ instance_entered(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 		axiom_added(TYPES.environment, name, signature ?? type)
 		TYPES.assumed += 1
 	}
-	constant(named_id(TYPES.environment, name)!, name, [])
+	named_constant(name)
 }
 # a refusal met reading a function's value, a proof's `by` the provers find none for: kept by its key where the compile
 # keeps refusals (wap verify's laws), the function then assumed; else it ends the compile
-entering_refused(key: text, message: text) as Term? := {
-	kept = TYPES.refused ?? raise message
-	kept[key] = message
+entering_refused(key: text, e: Error) as Term? := {
+	kept = TYPES.refused ?? raise e
+	kept[key] = e.message
 	TYPES.refused = kept
 	ø
 }
@@ -84,14 +84,24 @@ kernel_signature(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 	if has_letters(signature) or has_unknowns(signature) then ø else signature
 }
 # a function's parameters as Locals, entered once on one checker: every term made of the function names the same Free variables
+# (a hypothesis, a parameter written as a statement, is entered as its truth under the parameters before it, and
+# typed as it, so its name's value proves it)
 parameters_locals(typed: TypedFunction, s: TypingState) as list<Local> := {
 	if typed.checker == ø {
 		typed.checker = checker(TYPES.environment, [])
-		typed.locals = (1 to #typed.arguments).list().map(at => entered(typed.checker!, text(parameter_names(typed)#at), settled_type(typed.arguments#at, s)))
+		typed.locals = []
+		names = parameter_names(typed)
+		written = parameters_of(typed).map(declared_type)
+		for at in 1 to #typed.arguments {
+			before = fresh_reading(typed.checker!, {}, s).under(typed.locals, names.take(at - 1).map(place_key))
+			typed.locals += [entered(typed.checker!, text(names#at), statement_held(written#at, typed, before, s) ?? settled_type(typed.arguments#at, s))]
+		}
+		typed.arguments = (1 to #typed.arguments).list().map(at => if is_statement_written(written#at) then typed.locals#at.domain else typed.arguments#at)
 	}
 	typed.locals
 }
-parameter_names(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters).map(parameter => declared_name(parameter)); _ => [] }
+parameters_of(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters); _ => [] }
+parameter_names(typed: TypedFunction) as list := parameters_of(typed).map(parameter => declared_name(parameter))
 # GUESS (T6a3's value reader): the result as the kernel reads it: where a family is written applied to values, the head applied to its arguments
 # read as values under the parameters (`Even(double(n))`, each value through term_of and the checker's Locals); any other result as settled
 kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
@@ -150,8 +160,8 @@ term_of(n: Node, x: Entering) as Term? := match n {
 	Key(head, Op.None, List(items, Bracket.Curly, separator)) => instance_term(n, head, items, x)
 	Call(called, arguments) => by_term(n, called, arguments, x) ?? recursive_called(called, arguments, x) ?? called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
 	Prim(operation, arguments) => row_term(n, text(operation), arguments, x)
-	If(condition, then_part, else_part) => cases_term(n, condition, then_part, else_part, x) ?? choice_term(n, condition, then_part, else_part, x)
-	Case(subject, arms) => cases_term(n, subject, truth_arm(arms, yes), truth_arm(arms, no), x) ?? match_term(n, subject, arms, x)
+	If(condition, then_part, else_part) => choice_term(n, condition, then_part, else_part, x)
+	Case(subject, arms) => choice_term(n, subject, truth_arm(arms, yes), truth_arm(arms, no), x) ?? match_term(n, subject, arms, x)
 	Block(statements) => lets_term(statements, x)
 	_ => ø
 }
@@ -205,11 +215,13 @@ arm_expected(pattern: Node, subject: Node, f: TypeFrame, expected: Term?, s: Typ
 	id = pattern_constructor(pattern) ?? return expected
 	if place <= 0 { return expected }
 	locals = parameters_locals(typed, s)
-	constructor = declared_at(TYPES.environment, id)!
+	constructor = declared_constructor(id)
 	fields = field_types(constructor.type).map(domain => entered(typed.checker!, NO_BINDER, domain))
 	# GUESS: no by_key exists while typing, so the result is read with none: a family argument that calls another function is not found (the one-term reading, wap-supervisor's item 3, replaces this)
 	replaced_by(kernel_result(typed, {}, s)!, variable_id(locals#place.variable), apply_all(constant(id, constructor.name, []), variables(fields)))
 }
+# the declaration a case's constructor id names
+declared_constructor(id: int) as Declaration := declared_at(TYPES.environment, id)!
 # a function type after the arguments given to its first places, and what it takes at the next
 after_arguments(callee: Term, given: list<Term>) as Term := instantiated_all(peeled(callee, #given), given)
 next_domain(callee: Term) as Term := match callee.shape { Pi(binder, domain, body) => domain; _ => callee }
@@ -226,7 +238,7 @@ row_constant(operation: text, types: list<Term?>) as Term := {
 	name = row_name(operation, type)
 	meaning = if types.take(2).all(part => part == INT_TERM) then int_meaning(TYPES.environment, operation) else ø
 	if named_id(TYPES.environment, name) == ø { added(TYPES.environment, Declaration(name, [], type, if meaning == ø then Row(operation) else Defined(meaning!))) }
-	constant(named_id(TYPES.environment, name)!, name, [])
+	named_constant(name)
 }
 # the name a row's constant takes: its operation and the types it takes and gives, `prim i64.add int -> int -> int`
 row_name(operation: text, type: Term) as text := "${ROW_MARK} ${operation} ${arrow_parts(type).map(part => shown(part)).join(" -> ")}"
@@ -235,9 +247,14 @@ arrow_parts(type: Term) as list<Term> := match type.shape {
 	Pi(binder, domain, body) => [domain] + arrow_parts(body)
 	_ => [type]
 }
-# an `if` on a bool: bool's recursor into the type both arms give, the arm at no before the arm at yes
-choice_term(n: Node, condition: Node, then_part: Node, else_part: Node, x: Entering) as Term? := {
+# a choice on a bool, an `if` or a match of yes and no: a proof by its cases where its type is a proposition, else
+# bool's recursor into the type both arms give, the arm at no before the arm at yes
+choice_term(n: Node, condition: Node, at_yes: Node?, at_no: Node?, x: Entering) as Term? := {
 	type = bool_choice_type(n, condition) ?? return ø
+	then_part = at_yes ?? return ø
+	else_part = at_no ?? return ø
+	cases = if is_proposition_typed(n) then cases_term(type, condition, then_part, else_part, x) else ø
+	if cases != ø { return cases }
 	guarded = if x.recursion == ø then ø else guard_read(n, condition, then_part, else_part, x)
 	if guarded != ø { return guarded }
 	if kernel_value(then_part) != type or kernel_value(else_part) != type { return ø }
@@ -259,10 +276,12 @@ refl_term(n: Node) as Term? := {
 	sides = arguments(kernel_value(n) ?? return ø)
 	if #sides != 3 then ø else reflexive(TYPES.environment, TYPE_LEVEL, sides#1, sides#2)
 }
+# the constant the environment holds by a name, at these levels
+named_constant(name: text, levels: list<Level> = []) as Term := constant(named_id(TYPES.environment, name)!, name, levels)
 # a type's recursor into a motive, applied to its minor premises and then the major premise
 recursor_applied(type: Term, motive: Term, arguments: list<Term>) as Term := {
 	name = recursor_name(word_key(word_id(type)))
-	apply_all(apply(constant(named_id(TYPES.environment, name)!, name, [TYPE_LEVEL]), motive), arguments)
+	apply_all(apply(named_constant(name, [TYPE_LEVEL]), motive), arguments)
 }
 # a `match` with every arm's result of its type: on a defined enum, a minor premise for each case of its recursor, on
 # whole numbers a chain of choices (guards and nested patterns give no term)
@@ -295,7 +314,7 @@ arm_minor(id: int, arms: list, domain: Term, motive: Term, riding: (Term) -> Ter
 NO_BINDER = "·unnamed"
 field_types(constructor_type: Term) as list<Term> := arrow_parts(constructor_type).take(#arrow_parts(constructor_type) - 1)
 minor_of(id: int, given_names: list<Node>?, domain: Term, motive: Term, riding: (Term) -> Term?, x: Entering, body: (Entering, Term) -> Term?) as Term? := {
-	constructor = declared_at(TYPES.environment, id)!
+	constructor = declared_constructor(id)
 	fields = field_types(constructor.type)
 	names = given_names ?? fields.map(field => symbol(NO_BINDER))
 	if #names != #fields or names.any(name => not name is symbol) { return ø }
@@ -321,16 +340,14 @@ literals_term(subject: Node, arms: list, type: Term, x: Entering) as Term? := {
 	given = term_of(subject, x) ?? return ø
 	recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, type), [rest, result, apply_all(row_constant("i64.eq", [INT_TERM, INT_TERM, BOOL_TERM]), [given, literal])])
 }
-# A choice on a bool whose type is a proposition, an `if` or a match of yes and no, is a proof by the bool's cases:
+# A choice on a bool whose type is a proposition is a proof by the bool's cases:
 # ·bool_cases(c, y => type, (e: c == no) => the no arm, (e: c == yes) => the yes arm)
-cases_term(n: Node, condition: Node, at_yes: Node?, at_no: Node?, x: Entering) as Term? := {
-	type = bool_choice_type(n, condition) ?? return ø
-	if not is_proposition_typed(n) { return ø }
+cases_term(type: Term, condition: Node, at_yes: Node, at_no: Node, x: Entering) as Term? := {
 	c = term_of(condition, x) ?? return ø
 	truths = TYPES.environment.literals!
-	no_arm = premised_arm(at_no ?? return ø, c, truths.no_case, x) ?? return ø
-	yes_arm = premised_arm(at_yes ?? return ø, c, truths.yes_case, x) ?? return ø
-	apply_all(constant(named_id(TYPES.environment, BOOL_CASES)!, BOOL_CASES, []), [c, lambda("_", BOOL_TERM, type), no_arm, yes_arm])
+	no_arm = premised_arm(at_no, c, truths.no_case, x) ?? return ø
+	yes_arm = premised_arm(at_yes, c, truths.yes_case, x) ?? return ø
+	apply_all(named_constant(BOOL_CASES), [c, lambda("_", BOOL_TERM, type), no_arm, yes_arm])
 }
 bool_choice_type(n: Node, condition: Node) as Term? := if kernel_value(condition) == BOOL_TERM then kernel_value(n) else ø
 # whether a typed node is a proof: its type a proposition, lying in Prop
