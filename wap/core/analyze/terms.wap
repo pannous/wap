@@ -131,14 +131,14 @@ kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 	}
 }
 # A type as the kernel reads it, on the checker its terms are read on: every kernel family applied in it, under its
-# binders and in its arguments too, is headed at the levels its arguments give (family_head); a term holding no level
+# binders and in its arguments too, is headed at the levels its arguments give (family_applied); a term holding no level
 # parameter, typing's bare levels, is as it is. A function named as a family's argument, `same_value` of
 # `quotient(fraction, same_value)`, is that function
 kernel_headed(t: Term, c: Checker, s: TypingState) as Term := if not t.holds_parameter then t else match t.shape {
 	Apply(function, argument) => {
 		given = arguments(t).map(part => function_valued(part, s) ?? kernel_headed(part, c, s))
 		family = declared_at(TYPES.environment, constant_id(head_of(t)))
-		if family == ø or family!.levels is empty then apply_all(kernel_headed(head_of(t), c, s), given) else apply_all(family_head(family!, given, c), given)
+		if family == ø or family!.levels is empty then apply_all(kernel_headed(head_of(t), c, s), given) else family_applied(family!, given, c)
 	}
 	Pi(binder, domain, body) => binder_headed(c, s, binder, domain, body, pi)
 	Lambda(binder, domain, body) => binder_headed(c, s, binder, domain, body, lambda)
@@ -146,7 +146,7 @@ kernel_headed(t: Term, c: Checker, s: TypingState) as Term := if not t.holds_par
 	_ => t
 }
 # the function a type's argument word names, by its definer, as the kernel holds it (type_notation.wap value_word); ø
-# for any other part, a parameter's name too, which stays a word family_head refuses
+# for any other part, a parameter's name too, which stays a word family_applied refuses
 function_valued(part: Term, s: TypingState) as Term? := {
 	key = TYPES.values.get(word_id(part)) ?? return ø
 	instance_entered(s.keyed.get(key) ?? return ø, s.keyed, s)
@@ -158,22 +158,37 @@ binder_headed(c: Checker, s: TypingState, binder: text, domain: Term, body: Term
 	inside = entered(c, binder, headed)
 	made(binder, headed, abstracted(kernel_headed(instantiated(body, inside.variable), c, s), variable_id(inside.variable)))
 }
-# a kernel family with a level hole for each level parameter, its arguments unified with its binders' types in turn,
-# each dependent binder taking the argument before it, so the levels found fill the holes (`Equal(nat, a, b)`: u from
-# nat's Type); an argument of another type, or a level no argument gives, is refused
-family_head(family: Declaration, arguments: list<Term>, c: Checker) as Term := elaborated_over(c, el => {
+# a kernel family applied to its arguments, with a level hole for each level parameter, its arguments unified with its
+# binders' types in turn, each dependent binder taking the argument before it, so the levels found fill the holes
+# (`Equal(nat, a, b)`: u from nat's Type); a bool relation where the family takes a relation into Prop is its truth
+# (truth_adapted); an argument of another type, or a level no argument gives, is refused
+family_applied(family: Declaration, arguments: list<Term>, c: Checker) as Term := elaborated_over(c, el => {
 	holes = family.levels.map(name => level_hole(el))
 	type = with_levels(family.type, family.levels, holes)
+	given: list<Term> = []
 	for argument in arguments {
 		type = match type.shape {
-			Pi(binder, domain, body) => if unified(el, domain, type_of(el.c, argument)) then instantiated(body, argument) else refused_type(family.type, "${family.name} takes ${shown(domain)} here, and this is ${shown(type_of(el.c, argument))}")
+			Pi(binder, domain, body) => {
+				adapted = truth_adapted(el.c, argument, domain)
+				given += [adapted]
+				if unified(el, domain, type_of(el.c, adapted)) then instantiated(body, adapted) else refused_type(family.type, "${family.name} takes ${shown(domain)} here, and this is ${shown(type_of(el.c, adapted))}")
+			}
 			_ => refused_type(family.type, "${family.name} takes fewer arguments than ${#arguments}")
 		}
 	}
 	levels = holes.map(hole => level_filled(el, hole))
 	if not problems_retried(el) or levels.any(level => level_holes_in(level) is not empty) { refused_type(family.type, "the levels of ${family.name} are found from none of its arguments") }
-	constant(named_id(TYPES.environment, family.name)!, family.name, levels)
+	apply_all(constant(named_id(TYPES.environment, family.name)!, family.name, levels), given)
 })!
+# A function into bool where one into Prop is wanted, of the same parameters, read as its truth: `same_value` as
+# `(a, b) => same_value(a, b) == yes` (types/quotients.wap joined, the library's one spelling of it); any other value
+# as it is
+truth_adapted(c: Checker, value: Term, wanted: Term) as Term := {
+	given = arrow_parts(type_of(c, value))
+	if #given < 2 or #given != #arrow_parts(wanted) or given.last != BOOL_TERM or arrow_parts(wanted).last != PROP { return value }
+	binders = given.take(#given - 1).map(domain => entered(c, NO_BINDER, domain))
+	lambdas(binders, truth_stated(TYPES.environment, apply_all(value, variables(binders))))
+}
 # the frame its parameters are typed in, as a body's is
 reading_frame(typed: TypedFunction) as TypeFrame := {
 	frame = TypeFrame()
