@@ -33,6 +33,8 @@ BUILD_RUN := "wap/extensions/native/build.sh"
 # whose wap folder it reads (wap/extensions/verify/options.wap)
 VERIFY_PART := "verify.wasm"
 SEED_OPTION := "--seed"
+# `wap verify --explain`: also why the theory refused a law the run gave a verdict
+EXPLAIN_OPTION := "--explain"
 # the compiler's command that compiles a program's laws into functions (wap/compiler.wap), the verdicts of the kernel
 # and of the run each written to a temporary file of this template, and how a verdict line reads
 LAWS_COMMAND := "laws"
@@ -43,7 +45,7 @@ TESTED_VERDICT := "Tested"
 UNTESTED_VERDICT := "Untested"
 FAILED_VERDICT := "FAILED"
 VERDICT_WORDS := ["Proved", TESTED_VERDICT, FAILED_VERDICT, UNTESTED_VERDICT, "Assumed", "Axiom"]
-# what an option word of `wap build` starts with, the program's file the word without it
+# what an option word of a command starts with, the program's file the word without it
 OPTION_START := "--"
 WAP_SUFFIX := ".wap"
 # a wait status's exit code, the byte above its signal's
@@ -84,7 +86,8 @@ tested(words: list<text>) := script_ran(followed(TESTS_RUN, words, 2))
 # the program's laws verified (laws_checked), each verdict a line, what was said beside them on standard error; the run
 # exits 1 when a law fails
 verified(words: list<text>) := {
-	checked = laws_checked(words#2)
+	given = given_of(words)
+	checked = laws_checked(given.program, given.options.contains(EXPLAIN_OPTION))
 	for line in checked.said { eprint(line) }
 	for line in checked.verdicts { print line }
 	exit(if checked.verdicts.any(line => line.contains(VERDICT_SEPARATOR + FAILED_VERDICT)) then 1 else 0)
@@ -92,9 +95,10 @@ verified(words: list<text>) := {
 # What checking a program's laws found: the verify program's verdicts, the kernel's, joined with those of the laws run
 # (the program compiled by the compiler's laws command and its laws called, run.wap laws_ran, never its main), then the
 # laws of each module it uses by their stamps (wap build --wasm writes them); and what was said beside: the theory's
-# refusal, and why the laws did not run where a law needed the run, one left Untested or none given a verdict
+# refusal where a law needed the run or it is explained, and why the laws did not run where a law needed the run, one
+# left Untested or none given a verdict
 class LawsChecked { verdicts: list<text>; said: list<text> }
-laws_checked(program: text): LawsChecked := {
+laws_checked(program: text, explained: bool = no): LawsChecked := {
 	proved = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
 	ran = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
 	module = temporary_made(MODULE_TEMPLATE, MODULE_SUFFIX)
@@ -106,7 +110,7 @@ laws_checked(program: text): LawsChecked := {
 	kernel = lines_of(file_text(proved))
 	shown = verdicts_joined(kernel, lines_of(file_text(ran)))
 	unran = not compiled and (shown is empty or shown.any(line => line.ends_with(VERDICT_SEPARATOR + UNTESTED_VERDICT)))
-	said = kernel.filter(line => verdict_read(line) == ø) + (if unran then [file_text(compiling)] else [])
+	said = (if unran or explained then kernel.filter(line => verdict_read(line) == ø) else []) + (if unran then [file_text(compiling)] else [])
 	used = if laws == 0 then [] else imported_modules(laws).map(name => module_path(name, program))
 	stamped = used.filter(path => path != "" and not path.starts_with(seed_part(""))).flat_map(stamps_of)
 	for path in [proved, ran, module, compiling] { unlink(path) }
@@ -162,14 +166,19 @@ format_checked(file: text) := {
 }
 # the line at the place, "" past the last
 line_at(lines: list<text>, at: int): text := if at < #lines then lines[at] else ""
+# a command's options and the program file it is given, in any order after the command
+class Given { options: list<text>; program: text }
+given_of(words: list<text>): Given := {
+	given = words.drop(1)
+	Given(given.filter(word => word.starts_with(OPTION_START)), given.find(word => not word.starts_with(OPTION_START)) ?? "")
+}
 # the program built by the compiler this wap runs
 built(words: list<text>) := {
-	given = words.drop(1)
-	options = given.filter(word => word.starts_with(OPTION_START))
-	program = given.find(word => not word.starts_with(OPTION_START)) ?? ""
+	given = given_of(words)
+	program = given.program
 	if not program.ends_with(WAP_SUFFIX) { eprint("wap build takes a .wap file: wap build app.wap makes app"); exit(2) }
 	base = bytes_between(program, 0, byte_count(program) - byte_count(WAP_SUFFIX))
-	if options.contains(WASM_OPTION) { return wasm_built(program, base, trim_passes(options)) }
+	if given.options.contains(WASM_OPTION) { return wasm_built(program, base, trim_passes(given.options)) }
 	script_ran([BUILD_RUN, compiler_path, program, base])
 }
 # the program compiled into app.mod.wasm, linked with the modules it uses into app.full.wasm, trimmed into app.wasm
