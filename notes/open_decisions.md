@@ -8,4 +8,5 @@ An entry goes once decided (its decision then lives on its card, in the wiki or 
 
 ## Pending questions
 
-- After track T: a general property setter (writing `x.f` calls a declared `f=(x, value)`), so `canvas.width = 320` resizes as wiki/graphics.md "Sizes" says. Core ~10-20 (estimate); against: a new mechanism; no library does it without a quiet compensation. Recommend: build it after T.
+- Property setter (user 11-28 corrected "no setter": "we need a setter, but the syntax seemed wrong; queue it for later"): writing `x.f = v` should call something the type declares, so `canvas.width = 320` resizes (wiki/graphics.md "Sizes" stays). The shape `f=(x, value)` was wrong; a better spelling is needed, after T.
+- GitHub ruleset against agent-named commits on main (user 11-28: "discuss later"): require author and committer emails to be the owner's; today only the Mac hooks and the cloud routine's own check guard it. Check the rule exists on the repo's plan before asking again.

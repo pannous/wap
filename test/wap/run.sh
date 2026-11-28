@@ -180,6 +180,17 @@ all_run() {
 	return $status
 }
 
+# a test program prints one line for each check statement it holds; fewer is one ✗ saying how many, so a check that
+# vanished (never reached, its statement dropped silently) can never leave passed and failed short of the file; a test
+# that did not compile or run says so already
+CHECK_STATEMENT='^check('
+checks_missing() {
+	local written printed
+	! grep -q " compiled and ran$" "$2" || return 0
+	written=$(grep -c "$CHECK_STATEMENT" "$1")
+	printed=$(grep -c '^[✓✗⊘]' "$2")
+	[ "$printed" -ge "$written" ] || echo "✗ $(basename "$1") printed $printed of its $written checks"
+}
 # a test that fails without a ✗ of its own, by its exit status or by printing no check at all, fails as one ✗ (a script
 # that printed its ✗ lines exits 1 and is counted by them)
 [ "$1" = one_run ] && {
@@ -190,6 +201,7 @@ all_run() {
 	(one_run "$@") >"$output" 2>&1; status=$?
 	[ $status = 0 ] || grep -q '^✗' "$output" || echo "✗ $(basename "$1") exited $status" >>"$output"
 	grep -q '^[✓✗⊘]' "$output" || echo "✗ $(basename "$1") printed no check" >>"$output"
+	case $1 in "$here"/*) ;; *.wap) checks_missing "$1" "$output" >>"$output" ;; esac
 	echo "$TOOK $(($(date +%s) - began)) s" >>"$output"
 	echo "$ENDED" >>"$output"
 	exit

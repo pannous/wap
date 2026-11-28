@@ -298,19 +298,9 @@ rules of a warm state are believed as built.
 
 ## A second opinion
 
-`export.wap` writes an environment out in Lean 4's export format with wap's own names, one JSON record a line,
-described at its top: a declaration as stated, a block as written, a binding statement with its names. A block's
-cases, recursors and the quotients' constants are never written: the reader makes them again. No door calls it.
-
-`second/` checks an export again, `wap second/check.wap <export> [<name>…]`, silent when it accepts and printing the
-first refusal otherwise; each name given prints the axioms it rests on. It shares no function with the kernel and
-reads only the export, so a mistake in one is caught by the other unless both make it. It is kept as small as it can
-be: no elaboration, no caches, a term compared by its tree. Its files: `check.wap` (the command: the export read and
-checked, the names' axioms printed), `expressions.wap` (levels and terms),
-`read.wap` (the export read, a record out of order or of no known kind refused), `judge.wap` (typing, computing,
-equality, a declaration admitted), `blocks.wap` (a block checked, its recursors and their computation, structures),
-`nested.wap` (a nested block made plain, apart from the kernel's), `bindings.wap` (numbers, shortcuts and
-quotients).
+The second checker, which checked an export of the kernel's environment again with nothing of the kernel, sits in
+parked/theory-second/ with its exporter: not built, and wired in again later by moving it back with the kernel's log
+of accepted statements.
 
 ## Costs
 
