@@ -36,8 +36,9 @@ class Callee { key: text; caught: bool }
 # (none), only where one of these parameters is 0, a divisor (their places), or whatever it is given (ø); the
 # parameters it writes into (their places), its State only where a caller gives it what the caller holds; the locals
 # it made itself, a literal or its own allocation, whose writes stay inside it, and those given anything else; the
-# variables of functions around it that it writes into; the arguments it gives its callees
-class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = []; captured: list<text> = []; passes: list<Pass> = [] }
+# variables of functions around it that it writes into; the arguments it gives its callees, and the functions it gives
+# as values
+class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = []; written: list<int> = []; made: list<text> = []; given: list<text> = []; captured: list<text> = []; passes: list<Pass> = []; values: list<Callee> = [] }
 # an argument given to a callee at its place there: what the callee writes into of it, the giver writes into too
 class Pass { key: text; at: int; argument: Node; caught: bool }
 # The effects of the typed functions, joined over the groups of functions that call each other round (groups.wap):
@@ -157,7 +158,6 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		safe = divisors != ø and divisors!.map(at => divisor_met(arguments#at, caught, own)).all(met => met)
 		if divisors == ø { divisor_met(Empty, caught, own) }
 		for at in 1 to #arguments { own.passes += [Pass(key, at, arguments#at, caught)] }
-		captures_given(callee, own)
 		own.calls += [Callee(key, caught or safe)]
 	}
 	Prim(operation, arguments) => {
@@ -174,27 +174,29 @@ effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
 		effects_in_each(direct_parts(unwrapped(n)), caught, own, x)
 	}
 }
-# A group's members write into what they give their callees what the callees write into: followed round until
-# nothing more is written, so a call back to a member read before its body is (own_of's placeholder) counts too
+# What a group's members write, once each body is read: into what they give their callees what the callees write
+# into, State where a function they give as a value writes into anything (it may be given anything), and the
+# variables around them their callees write into; followed round until nothing more is written, so a callee read
+# before its body is (own_of's placeholder) counts too
 writes_passed(group: list<text>, x: Joining) := {
 	changed = yes
 	while changed {
 		changed = no
 		for member in group {
 			own = own_of(member, x)
-			before = #own.written
+			before = #own.written + #own.captured
 			for pass in own.passes { if own_of(pass.key, x).written.contains(pass.at) { written_into(pass.argument, pass.caught, own) } }
-			if #own.written != before { changed = yes }
+			for value in own.values { if own_of(value.key, x).written is not empty { effect_added(Effect.State, value.caught, own) } }
+			for call in own.calls { captures_given(own_of(call.key, x), own) }
+			if #own.written + #own.captured != before { changed = yes }
 		}
 	}
 }
-# a function given as a value, named or written in place: it may be given anything, so it may fail by any divisor and
-# what it writes into is State
+# a function given as a value, named or written in place: it may be given anything, so it may fail by any divisor,
+# and what it writes into is State (writes_passed)
 value_given(key: text, caught: bool, own: Own, x: Joining) := {
-	callee = own_of(key, x)
-	if callee.divisors != [] { divisor_met(Empty, caught, own) }
-	if callee.written is not empty { effect_added(Effect.State, caught, own) }
-	captures_given(callee, own)
+	if own_of(key, x).divisors != [] { divisor_met(Empty, caught, own) }
+	own.values += [Callee(key, caught)]
 	own.calls += [Callee(key, caught)]
 }
 # the variables of the functions around it a callee writes into: a list the caller made itself keeps the write,
