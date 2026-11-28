@@ -15,11 +15,14 @@ use "errors.wap"
 use "../kernel/forms.wap"
 use "../kernel/primitives.wap"
 use "../kernel/terms.wap"
+use "../kernel/levels.wap"
 use "../kernel/environment.wap"
 use "../kernel/equality.wap"
 use "../kernel/logic.wap"
 use "../kernel/counting.wap"
 use "../kernel/inductive.wap"
+use "../kernel/typing.wap"
+use "../kernel/show.wap"
 use "analyze/courses.wap"
 
 # a written `block`: code run by its call, a function of no parameters (wiki/block.md)
@@ -81,6 +84,12 @@ FUNCTION_WORD = "function"
 ARRAY_TIMES = "*"
 # the universe of data types, the type of every type word without parts and of every hole a type stands for
 DATA_TERM = universe(TYPE_LEVEL)
+# the words of the universes: Prop is Sort(0), Type is Sort(1), Type(n) is Sort(n + 1) (wiki/universe.md "Levels")
+PROP_WORD = "Prop"
+TYPE_UNIVERSE_WORD = "Type"
+SORT_WORD = "Sort"
+# the larger of two levels, `Type(max(u, v))`
+LEVEL_MAX_WORD = "max"
 # the words of the truths, bool's cases in their order, the terms the kernel forms False and True stand for
 # (literals_declared)
 TRUTH_WORDS = ["no", "yes"]
@@ -271,6 +280,8 @@ function_parts(type: Term?) as FunctionType? := if type == ø then ø else match
 	Pi(binder, domain, body) => FunctionType(parameters_listed(domain), body)
 	_ => ø
 }
+# a Π as the kernel writes it, `(T: Type) -> T -> T`, over no parameter list of a function type
+kernel_pi(type: Term) as bool := match type.shape { Pi(binder, domain, body) => not same(domain, NO_PARAMETERS_TERM) and word_of(domain) != PARAMETERS_WORD; _ => no }
 parameters_listed(parameters: Term) as list<Term> := {
 	parts = parts_of_type(PARAMETERS_WORD, parameters) ?? return []
 	[parts#1] + parameters_listed(parts#2)
@@ -312,11 +323,14 @@ type_text(type: Term?, whole: bool = no) as text := {
 	if type == ø { return "no type" }
 	hole = variable_id(type!)
 	if hole != 0 { return "${UNKNOWN_MARK}${hole}" }
+	sort = universe_text(type!)
+	if sort != ø { return sort! }
 	if is_word(type) { return if whole or TYPES.shared.has(word_id(type!)) then declared_at(TYPES.environment, word_id(type!))!.name else if TYPES.functions.has(word_id(type!)) then FUNCTION_WORD else word_of(type)! }
 	if function_value_key(type) != ø and not whole { return FUNCTION_WORD }
 	base = base_of_optional(type)
 	if base != ø { return if is_union(base) then failable_text(base!, whole) ?? "(${type_text(base, whole)})${OPTIONAL_MARK}" else type_text(base, whole) + OPTIONAL_MARK }
 	if is_union(type) { return union_parts(type!).map(part => type_text(part, whole)).join(" ${UNION_WORD} ") }
+	if kernel_pi(type!) { return shown(type!) }
 	function = function_parts(type)
 	if function != ø { return "(${types_text(function.parameters, whole)}) ${FUNCTION_ARROW} ${type_text(function.result, whole)}" }
 	"${type_text(head_of(type!), whole)}<${types_text(parts_of(type!), whole)}>"
@@ -366,10 +380,14 @@ refused_type(type: Term, why: text) as never := raise("${why}: ${type_text(type)
 type_term(n: Node) as Term := {
 	known = fact_type(fact_of(n, TYPE))
 	if known != ø { return known! }
+	sort = universe_written(n)
+	if sort != ø { return universe(sort!) }
 	subset = subset_written(n)
 	if subset != ø { return subset_term(type_term(subset#1), subset#2) }
 	union = union_written(n)
 	if union != ø { return union_type(union.map(part => type_term(part))) }
+	binder = universe_binder(n)
+	if binder != ø { return binder! }
 	parts = written_parts(n)
 	if parts != ø { return type_built(word_term(text(parts#1)), parts.drop(1).map(part => type_term(part))) }
 	match n {
@@ -378,8 +396,56 @@ type_term(n: Node) as Term := {
 		_ => word_named(n)
 	}
 }
-# whether code is a type as written with parts or a condition, `list<int>`, `int?`, `int where it > 0`
-is_type_written(n: Node) as bool := written_parts(n) != ø or subset_written(n) != ø or union_written(n) != ø
+# the level a universe is written at, `Prop`, `Type`, `Type(n)`, `Sort(n)`; ø for other code
+universe_written(n: Node) as Level? := {
+	call = call_written(n)
+	if call != ø { return if #call == 2 and [TYPE_UNIVERSE_WORD, SORT_WORD].contains(text(call#1)) then level_written(call#2, if text(call#1) == TYPE_UNIVERSE_WORD then 1 else 0) else ø }
+	if not n is symbol then ø else if text(n) == PROP_WORD then Zero else if text(n) == TYPE_UNIVERSE_WORD then TYPE_LEVEL else ø
+}
+# a level as written, `steps` above it: a number, `max(u, v)`, or a one-letter name, a level parameter found where it is
+# used (wiki/universe.md); ø for other code
+level_written(n: Node, steps: int) as Level? := {
+	call = call_written(n)
+	if call != ø { return if text(call#1) == LEVEL_MAX_WORD and #call == 3 then Max(level_written(call#2, steps) ?? return ø, level_written(call#3, steps) ?? return ø) else ø }
+	match n {
+		Number(value) => if value is int and value >= 0 then level_above(Zero, value + steps) else ø
+		_ => if n is symbol and #text(n) == 1 then level_above(Parameter(text(n)), steps) else ø
+	}
+}
+# a universe in the words that write it (kernel/show.wap sort_shown)
+universe_text(type: Term) as text? := match type.shape { Sort(level) => sort_shown(level); _ => ø }
+universe_level(type: Term?) as Level? := if type == ø then ø else match type!.shape { Sort(level) => level; _ => ø }
+# the universe a type lies in: the kernel's type of a universe, else Type, the universe of every data type (a letter, a
+# record, a union, a type former the kernel holds no judgement of)
+universe_of(type: Term) as Term := match type.shape { Sort(level) => judged_universe(type); Pi(binder, domain, body) => judged_universe(type); _ => DATA_TERM }
+judged_universe(type: Term) as Term := universe_plain(universe_level(type_of(checker(TYPES.environment, term_levels(type)), type))!)
+# a universe at its level written plainest, Type(1) of Sort(max(2, 1)): one level, one term
+universe_plain(level: Level) as Term := universe(level_above(Zero, level_number(level) ?? return universe(simplified(level))))
+# the level parameters and holes a term names, each once
+term_levels(t: Term) as list<text> := {
+	if not t.holds_parameter { return [] }
+	match t.shape {
+		Sort(level) => level_parameters(level)
+		Constant(name, levels, _) => levels.flat_map(level_parameters).unique()
+		_ => parts(t).flat_map(term_levels).unique()
+	}
+}
+# a function type over a universe, `(A: Type) -> A`: the kernel's Π over it, the result reading the parameter as the
+# binder's variable; ø for other code
+universe_binder(n: Node) as Term? := {
+	parts = written_parts_of(FUNCTION_ARROW, n) ?? return ø
+	if #parts != 2 { return ø }
+	match parts#1 {
+		Key(name, Op.Colon, type) => {
+			domain = universe(universe_written(type) ?? return ø)
+			variable = hypothesis(checker(TYPES.environment, []), text(name), domain)
+			pi(text(name), domain, abstracted(type_term(substituted(parts#2, text(name), with_fact(name, TYPE, type_fact(variable)))), variable_id(variable)))
+		}
+		_ => ø
+	}
+}
+# whether code is a type as written with parts or a condition, or a universe, `list<int>`, `int?`, `int where it > 0`, `Type(1)`
+is_type_written(n: Node) as bool := written_parts(n) != ø or subset_written(n) != ø or union_written(n) != ø or universe_written(n) != ø
 # a union as written, read as `or` reads (both_parts), or `int | text`: its two parts; ø for other code
 union_written(n: Node) as list<Node>? := {
 	or_parts = both_parts(n)
@@ -416,9 +482,14 @@ assignment_parts(n: Node) as list<Node>? := match n {
 }
 # a subtype as written, `where(T, it => p)`, as notation or lowered: its parent and its condition's function; ø for
 # other code
-subset_written(n: Node) as list<Node>? := match n {
-	Key(name, Op.None, List(items, Bracket.Round, separator)) => if text(name) == WHERE_WORD and #items == 2 then items else ø
-	Call(called, items) => if text(called) == WHERE_WORD and #items == 2 then items else ø
+subset_written(n: Node) as list<Node>? := {
+	call = call_written(n) ?? return ø
+	if text(call#1) == WHERE_WORD and #call == 3 then call.drop(1) else ø
+}
+# a call as written or as the lowering made it, `Sort(1)`: what it calls, then its arguments; ø for other code
+call_written(n: Node) as list<Node>? := match n {
+	Key(called, Op.None, List(items, Bracket.Round, separator)) => [called] + items
+	Call(called, items) => [called] + items
 	_ => ø
 }
 # A written type with parts read as its word and then the parts, as type_parts reads a term: `list<int>` as list and
