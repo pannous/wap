@@ -80,7 +80,7 @@ operated_form(language: Language, n: Node) as Node := match n {
 definition_row(language: Language, items: list<Node>) as Node := {
 	if not defines(language, items#1) { return comma_row(items) }
 	groups: list<Node> = []
-	for item in items { groups = if groups is not empty and not defines(language, item) then groups[.. #groups - 1] + [joined(groups.last, item)] else groups + [item] }
+	for item in items { groups = if groups is not empty and not defines(language, item) then groups[.. #groups - 1] + [joined(language, groups.last, item)] else groups + [item] }
 	if #groups == 1 then groups#1 else comma_row(groups)
 }
 defines(language: Language, n: Node) as bool := match n {
@@ -88,14 +88,25 @@ defines(language: Language, n: Node) as bool := match n {
 	_ => no
 }
 # a definition with an item put into the last part of its value, the row there grown by it
-joined(definition: Node, item: Node) as Node := match definition {
-	Call(called, parts) => Call(called, [parts#1, last_joined(parts#2, item)])
+joined(language: Language, definition: Node, item: Node) as Node := match definition {
+	Call(called, parts) => Call(called, [parts#1, last_joined(language, parts#2, item)])
 	_ => definition
 }
-last_joined(n: Node, item: Node) as Node := match n {
-	List(items, Bracket.None, Separator.Space) => List(items[.. #items - 1] + [last_joined(items.last, item)], Bracket.None, Separator.Space)
+last_joined(language: Language, n: Node, item: Node) as Node := match n {
+	List(items, Bracket.None, Separator.Space) => List(items[.. #items - 1] + [last_joined(language, items.last, item)], Bracket.None, Separator.Space)
 	List(items, Bracket.None, Separator.Comma) => comma_row(items + [item])
+	# a group that gathers takes the items after it into its right operand: `! IO, FFI` claims IO and FFI, as `! (IO FFI)` does
+	Call(called, parts) => if #parts == 2 and gathers(language, text(called)) then Call(called, [parts#1, gathered(parts#2, item)]) else comma_row([n, item])
 	_ => comma_row([n, item])
+}
+# whether a spelling is an infix operator of a group that gathers; a plain word has no infix group
+gathers(language: Language, spelling: text) as bool := {
+	group = group_of(language, spelling, Fixity.Infix)
+	group != "" and group_named(language, group).gathers
+}
+gathered(operand: Node, item: Node) as Node := match operand {
+	List(items, Bracket.Round, Separator.Space) => List(items + [item], Bracket.Round, Separator.Space)
+	_ => List([operand, item], Bracket.Round, Separator.Space)
 }
 comma_row(items: list<Node>) as Node := List(items, Bracket.None, Separator.Comma)
 
@@ -195,13 +206,14 @@ continuation_word(language: Language, word: text) as bool := language.grammar.ph
 # after an operand, the token as an infix or postfix operator, by the minus rule (notes/backbone.md "Minus"): spaced
 # on both sides or on neither it is infix; attached only to what follows it is prefix, so juxtaposition comes first
 # (ø here), and so is one glued to brackets, a call of it like any `f(x)` (`⊕(a, b)`); attached only to what
-# precedes it is postfix where it has a postfix, else infix. Infix and prefix need an operand after them.
+# precedes it is postfix where it has a postfix, else infix; so is one glued between an operand and a prefix
+# operator, `xs!#1`. Infix and prefix need an operand after them.
 operator_after_operand(language: Language, token: Spaced, next: Spaced?) as Use? := {
 	operand = operand_after(language, next)
 	infix = if operand != ø then reading_as(language, token.item, Fixity.Infix) else ø
 	postfix = reading_as(language, token.item, Fixity.Postfix)
 	if token.glued_after and not token.glued_before and operand != ø and (reading_as(language, token.item, Fixity.Prefix) != ø or is_bracketed(operand.item)) { return ø }
-	if token.glued_before and not token.glued_after and postfix != ø { return postfix }
+	if token.glued_before and postfix != ø and (not token.glued_after or next != ø and reading_as(language, next!.item, Fixity.Prefix) != ø) { return postfix }
 	if infix != ø { return infix }
 	postfix
 }

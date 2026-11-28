@@ -17,14 +17,22 @@ use "function_values.wap"
 use "../../kernel/terms.wap"
 use "../../kernel/environment.wap"
 use "../../kernel/typing.wap"
+use "../../kernel/equal.wap"
+use "../../kernel/compute.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/primitives.wap"
 use "../../kernel/show.wap"
 use "../../kernel/counting.wap"
 use "../../kernel/numbers.wap"
 use "../../kernel/recursors.wap"
+use "../../kernel/inductive.wap"
+use "../../kernel/equality.wap"
+use "../../kernel/logic.wap"
+use "../../kernel/levels.wap"
 
 ROW_MARK = "prim"
+# the binder of an arm's premise in a proof by a bool's cases, that the bool is the arm's case
+CASE_PREMISE = "·case"
 
 # the typed functions entered, callees before their callers: each by its key, once
 instances_entered(functions: list<TypedFunction>, s: TypingState) as map<text, TypedFunction> := {
@@ -48,9 +56,9 @@ instance_entered(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 	if s.entering.has(name) { return ø }
 	s.entering[name] = yes
 	type = kernel_settled(instance_type(typed), s)
-	value = definition_of(typed, by_key, s)
+	value = try definition_of(typed, by_key, s) catch e { entering_refused(name, e) }
 	kind = if value == ø then DeclarationKind.Axiom else Defined(value!)
-	signature = kernel_signature(typed, s)
+	signature = kernel_signature(typed, by_key, s)
 	if value != ø and signature != ø {
 		try declared(TYPES.environment, Declaration(name, [], signature!, kind)) catch e { refused(written_name(typed.define), "the kernel refuses what typing made of this function: ${e.message}") }
 		TYPES.defined += 1
@@ -58,83 +66,351 @@ instance_entered(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 		axiom_added(TYPES.environment, name, signature ?? type)
 		TYPES.assumed += 1
 	}
-	constant(named_id(TYPES.environment, name)!, name, [])
+	named_constant(name)
+}
+# a refusal met reading a function's value, a proof's `by` the provers find none for: kept by its key where the compile
+# keeps refusals (wap verify's laws), the function then assumed; else it ends the compile
+entering_refused(key: text, e: Error) as Term? := {
+	# GUESS: raise takes a text (types/prelude.wap), so the error is raised again by its message, which names its place
+	kept = TYPES.refused ?? raise e.message
+	kept[key] = e.message
+	TYPES.refused = kept
+	ø
 }
 # a function's type as the kernel reads it, a function of its parameters' types: ø where one is open or it never
 # returns
-kernel_signature(typed: TypedFunction, s: TypingState) as Term? := {
+kernel_signature(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
 	if typed.jumps { return ø }
 	# a parameter keeps its subtype, the parent by definition, so a law reads its binders' conditions
-	parameters = typed.arguments.map(type => settled_type(type, s))
-	result = kernel_settled(typed.result ?? return ø, s)
-	if (parameters + [result]).any(type => has_letters(type) or has_unknowns(type)) { return ø }
-	parameters.reverse.fold(result, (body, parameter) => pi("_", parameter, body))
+	# (the result names the parameters, so only the whole signature, closed over them, is open or not)
+	signature = pis(parameters_locals(typed, s, by_key), kernel_result(typed, by_key, s) ?? return ø)
+	if has_letters(signature) or has_unknowns(signature) then ø else signature
 }
+# a function's parameters as Locals, entered once on one checker: every term made of the function names the same Free variables
+# (a hypothesis, a parameter written as a statement, is entered as its truth under the parameters before it, and
+# typed as it, so its name's value proves it)
+parameters_locals(typed: TypedFunction, s: TypingState, by_key: map<text, TypedFunction> = {}) as list<Local> := {
+	if typed.checker == ø {
+		if typed.entering_locals { refused(typed.define, "a hypothesis reads its own law's parameters: a statement in a parameter's place reads only the parameters before it") }
+		typed.entering_locals = yes
+		c = checker(TYPES.environment, [])
+		# its variables numbered on typing's own list, after its holes, so a hole never reads as a parameter of its number
+		c.hypotheses = s.el.c.hypotheses
+		# GUESS: raise takes a text, so the error is raised again by its message
+		locals = try parameters_entered(typed, c, s, by_key) catch e { typed.entering_locals = no; raise e.message }
+		typed.entering_locals = no
+		typed.arguments = (1 to #typed.arguments).list().map(at => if is_statement_written(declared_type(parameters_of(typed)#at)) then locals#at.domain else typed.arguments#at)
+		typed.locals = locals
+		typed.checker = c
+	}
+	typed.locals
+}
+parameters_entered(typed: TypedFunction, c: Checker, s: TypingState, by_key: map<text, TypedFunction>) as list<Local> := {
+	locals: list<Local> = []
+	names = parameter_nodes(typed)
+	for at in 1 to #typed.arguments {
+		before = fresh_reading(c, by_key, s).under(locals, names.take(at - 1).map(place_key))
+		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c))]
+	}
+	locals
+}
+# the checker a function's parameters are entered on
+parameters_checker(typed: TypedFunction, s: TypingState) as Checker := {
+	parameters_locals(typed, s)
+	typed.checker!
+}
+# the names its definition gives its parameters, as written
+parameter_nodes(typed: TypedFunction) as list := parameters_of(typed).map(parameter => declared_name(parameter))
+# GUESS (T6a3's value reader): the result as the kernel reads it: where a family is written applied to values, the head applied to its arguments
+# read as values under the parameters (`Even(double(n))`, each value through term_of and the checker's Locals); any other result as settled
+kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
+	if is_statement_written(typed.written) { return statement_held(typed.written, typed, parameters_reading(typed, by_key, s), s) }
+	if typed.written == ø or not is_family_call(typed.written!) { return kernel_settled(typed.result ?? return ø, s, parameters_checker(typed, s)) }
+	match typed.written! {
+		Call(head, items) => {
+			given = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), parameters_reading(typed, by_key, s)) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)
+			kernel_headed(apply_all(kernel_type(family_word(head))!, given), typed.checker!)
+		}
+		_ => ø
+	}
+}
+# A type as the kernel reads it, on the checker its terms are read on: every kernel family applied in it, under its
+# binders and in its arguments too, is headed at the levels its arguments give (family_head); a term holding no level
+# parameter, typing's bare levels, is as it is
+kernel_headed(t: Term, c: Checker) as Term := if not t.holds_parameter then t else match t.shape {
+	Apply(function, argument) => {
+		given = arguments(t).map(part => kernel_headed(part, c))
+		family = declared_at(TYPES.environment, constant_id(head_of(t)))
+		if family == ø or family!.levels is empty then apply_all(kernel_headed(head_of(t), c), given) else apply_all(family_head(family!, given, c), given)
+	}
+	Pi(binder, domain, body) => binder_headed(c, binder, domain, body, pi)
+	Lambda(binder, domain, body) => binder_headed(c, binder, domain, body, lambda)
+	Projection(structure, field, of) => projection(structure, field, kernel_headed(of, c))
+	_ => t
+}
+# a binder made again of its domain headed and its body headed with the binder entered as a variable of that domain
+# GUESS: a named kernel maker (pi, lambda) passes as a function value
+binder_headed(c: Checker, binder: text, domain: Term, body: Term, made: (text, Term, Term) -> Term) as Term := {
+	headed = kernel_headed(domain, c)
+	inside = entered(c, binder, headed)
+	made(binder, headed, abstracted(kernel_headed(instantiated(body, inside.variable), c), variable_id(inside.variable)))
+}
+# a kernel family with a level hole for each level parameter, its arguments unified with its binders' types in turn,
+# each dependent binder taking the argument before it, so the levels found fill the holes (`Equal(nat, a, b)`: u from
+# nat's Type); an argument of another type, or a level no argument gives, is refused
+family_head(family: Declaration, arguments: list<Term>, c: Checker) as Term := elaborated_over(c, el => {
+	holes = family.levels.map(name => level_hole(el))
+	type = with_levels(family.type, family.levels, holes)
+	for argument in arguments {
+		type = match type.shape {
+			Pi(binder, domain, body) => if unified(el, domain, type_of(el.c, argument)) then instantiated(body, argument) else refused_type(family.type, "${family.name} takes ${shown(domain)} here, and this is ${shown(type_of(el.c, argument))}")
+			_ => refused_type(family.type, "${family.name} takes fewer arguments than ${#arguments}")
+		}
+	}
+	levels = holes.map(hole => level_filled(el, hole))
+	if not problems_retried(el) or levels.any(level => level_holes_in(level) is not empty) { refused_type(family.type, "the levels of ${family.name} are found from none of its arguments") }
+	constant(named_id(TYPES.environment, family.name)!, family.name, levels)
+})!
+# the frame its parameters are typed in, as a body's is
+reading_frame(typed: TypedFunction) as TypeFrame := {
+	frame = TypeFrame()
+	for at in 1 to #typed.arguments { frame.variables += [Binding(place_key(parameter_nodes(typed)#at), typed.arguments#at)] }
+	frame
+}
+# a body read under the function's own parameters
+# (its locals entered first, so the reading is on the checker they were entered with)
+parameters_reading(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Entering := {
+	locals = parameters_locals(typed, s, by_key)
+	fresh_reading(typed.checker!, by_key, s).under(locals, parameter_nodes(typed).map(place_key))
+}
+# a reading under no binders yet, on this checker
+fresh_reading(c: Checker, by_key: map<text, TypedFunction>, s: TypingState) as Entering := Entering([], [], c, by_key, s)
 # a pure function's value, the function of its parameters its body computes; ø for any other
 definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := match typed.define {
 	Define(name, parameters, body) => {
+		if is_axiom(typed.define) { return ø }
 		# a body converted to the result, an int given where an int? is, is no term yet
-		if kernel_value(body) != kernel_settled(typed.result ?? return ø, s) { return ø }
-		names = items_of(parameters).map(parameter => declared_name(parameter))
-		value = term_of(body, Entering(names.map(place_key), by_key, s)) ?? return ø
-		(1 to #names).reverse.fold(value, (inner, at) => lambda(text(names#at), settled_type(typed.arguments#at, s), inner))
+		inside = parameters_reading(typed, by_key, s)
+		# GUESS: the body's type and the result name the same Free variables, so `Even(n + n)` meets `Even(double(n))` by unfolding double
+		wanted = kernel_result(typed, by_key, s) ?? return ø
+		# a proof typed against a statement not read yet (calls.wap statement_term) proves the statement as read now: the
+		# kernel checks it against the function's type as it enters it
+		stood_in = typed.result == STATEMENT_TERM
+		proof = if stood_in then with_type_of(body, wanted) else body
+		if not stood_in and not equal(inside.c, kernel_value(proof) ?? return ø, wanted) { return ø }
+		lambdas(typed.locals, term_of(proof, inside) ?? course_defined(typed, proof, inside) ?? return ø)
 	}
 	_ => ø
 }
-# what a body is read in: the binders around it by their keys, the innermost last
-class Entering { binders: list<text>; by_key: map<text, TypedFunction>; s: TypingState }
+# what a body is read in, locally nameless (kernel/terms.wap): the binders around it by their keys, the innermost last,
+# each the free variable of the checker c it was entered with; a term read under them is closed over them with `lambdas`
+class Entering { binders: list<text>; variables: list<Term>; c: Checker; by_key: map<text, TypedFunction>; s: TypingState; recursion: Recursion? = ø }
+# the same reading under more binders, entered as locals under these keys
+# (a course's case names the values of the parameter at the fields its values below hold hypotheses of)
+under(x: Entering, locals: list<Local>, keys: list<text>, fields: list<Term> = []) as Entering := if #keys != #locals then raise "a reading's binders and their variables go out of step: ${keys.join(", ")} for ${#locals} variables" else reread(x, x.binders + keys, x.variables + variables(locals), if fields is empty or x.recursion == ø then x.recursion else Recursion(x.recursion!.key, x.recursion!.place, x.recursion!.held, x.recursion!.of, fields))
+# the same reading with a free variable taken for a value, in every binder's term
+valued(x: Entering, of: Term, value: Term) as Entering := reread(x, x.binders, x.variables.map(variable => replaced_by(variable, variable_id(of), value)), x.recursion)
+# the same reading over other binders, their variables and a recursion, every other part carried
+reread(x: Entering, binders: list<text>, variables: list<Term>, recursion: Recursion?) as Entering := Entering(binders, variables, x.c, x.by_key, x.s, recursion)
+# a let of a name: its body read with the name a free variable of the type, closed over it again
+let_read(x: Entering, name: Node, type: Term, given: Term, body: (Entering) -> Term?) as Term? := {
+	local = entered(x.c, text(name), type)
+	read = body(x.under([local], [place_key(name)])) ?? return ø
+	let_in(text(name), type, given, abstracted(read, variable_id(local.variable)))
+}
 # a typed node's term, ø where it is not pure
 term_of(n: Node, x: Entering) as Term? := match n {
 	Number(value) => if value is int and kernel_value(n) == INT_TERM then int_numeral(TYPES.environment, value) else ø
-	Text(value) => quoted(value)
+	Text(value) => if universe_level(kernel_value(n)) == ø then quoted(value) else ø
 	True => TYPES.environment.literals!.yes_case
 	False => TYPES.environment.literals!.no_case
-	Symbol(name) => binder_term(n, x) ?? case_term(n, n, [], x)
-	Call(called, arguments) => called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
+	Symbol(name) => binder_term(n, x) ?? refl_term(n) ?? case_term(n, n, [], x)
+	Call(called, arguments) => by_term(n, called, arguments, x) ?? recursive_called(called, arguments, x) ?? called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
 	Prim(operation, arguments) => row_term(n, text(operation), arguments, x)
 	If(condition, then_part, else_part) => choice_term(n, condition, then_part, else_part, x)
+	Case(subject, arms) => choice_term(n, subject, truth_arm(arms, yes), truth_arm(arms, no), x) ?? match_term(n, subject, arms, x)
 	Block(statements) => lets_term(statements, x)
 	_ => ø
 }
-# a name a binder around it holds, by its distance to it
+# a name a binder around it holds, its free variable
 binder_term(n: Node, x: Entering) as Term? := {
 	definer = fact_of(n, REBOUND) ?? fact_of(n, DEFINED_AT) ?? return ø
 	at = x.binders.index_of(place_key(definer))
-	if at <= 0 then ø else bound(#x.binders - at)
+	if at <= 0 then ø else x.variables#at
 }
 # a call of a typed function the kernel took in, each argument of its parameter's own type, giving its own result
 called_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
 	definer = fact_of(called, DEFINED_AT) ?? return ø
 	typed = x.by_key.get(place_key(definer)) ?? return ø
-	if kernel_value(n) != kernel_settled(typed.result ?? return ø, x.s) or #arguments != #typed.arguments or (1 to #arguments).any(at => kernel_value(arguments#at) != kernel_settled(typed.arguments#at, x.s)) { return ø }
+	if #arguments != #typed.arguments { return ø }
 	function = instance_entered(typed, x.by_key, x.s) ?? return ø
+	if computes_unknown(function, x.c) { return ø }
+	# GUESS: each argument against its domain and the call against the result, both under the arguments before them (kernel/recursors.wap with_parameters peels the same way)
+	callee = type_of(x.c, function)
+	found = arguments.map(argument => term_of(argument, x))
+	if found.any(term => term == ø) { return ø }
+	given = found.map(term => term!)
+	for at in 1 to #arguments { if not equal(x.c, kernel_value(arguments#at) ?? return ø, taken(after_arguments(callee, given.take(at - 1)))) { return ø } }
+	if not equal(x.c, kernel_value(n) ?? return ø, after_arguments(callee, given)) { return ø }
 	terms_applied(function, arguments, x)
 }
+# whether a function is one the kernel only assumes and that computes a value: what it does is unknown (it may write,
+# raise or never end), so a call of it is no term and its caller is assumed too; an assumed proof states a proposition
+computes_unknown(function: Term, c: Checker) as bool := {
+	d = declaration_of(TYPES.environment, function)
+	d.kind is Axiom and not is_proposition(c, d.type)
+}
+# GUESS (item 1, notes/coc-t6a4.md): an arm of a match on a bare parameter, directly in the function's result, is expected the result
+# with the parameter taken for the arm's case applied to its fields (entered on the function's checker); any other arm keeps `expected`.
+# case_typed still joins the arms' types by parts_type, which must compare each arm with its own expected instead
+arm_expected(pattern: Node, subject: Node, f: TypeFrame, expected: Term?, s: TypingState) as Term? := {
+	typed = f.typed_function ?? return expected
+	# only a family result names the parameters; a subtype result keeps its parent
+	if typed.written == ø or not is_family_call(typed.written!) { return expected }
+	if typed.result == ø or expected != typed.result or not is_variable(subject) { return expected }
+	place = parameter_nodes(typed).map(place_key).index_of(place_key(defined_at(subject)))
+	id = pattern_constructor(pattern) ?? return expected
+	if place <= 0 { return expected }
+	locals = parameters_locals(typed, s)
+	constructor = declared_constructor(id)
+	fields = field_types(constructor.type).map(domain => entered(typed.checker!, NO_BINDER, domain))
+	# no by_key exists while typing: a result it cannot read without one leaves the arm at the unrefined type
+	replaced_by(kernel_result(typed, {}, s) ?? return expected, variable_id(locals#place.variable), apply_all(constant(id, constructor.name, []), variables(fields)))
+}
+# the declaration a case's constructor id names
+declared_constructor(id: int) as Declaration := declared_at(TYPES.environment, id)!
+# a function type after the arguments given to its first places, and what it takes at the next
+after_arguments(callee: Term, given: list<Term>) as Term := instantiated_all(peeled(callee, #given), given)
+taken(callee: Term) as Term := match callee.shape { Pi(binder, domain, body) => domain; _ => callee }
 # a host operation on whole numbers, its row's constant of the operands' types
 row_term(n: Node, operation: text, arguments: list, x: Entering) as Term? := {
 	if not FOLDED_ROWS.contains(operation) { return ø }
 	types = (arguments + [n]).map(part => kernel_value(part))
 	if types.any(type => type == ø) { return ø }
+	terms_applied(row_constant(operation, types), arguments, x)
+}
+# a host operation's constant of the types it takes and gives, declared once
+row_constant(operation: text, types: list<Term?>) as Term := {
 	type = types.take(#types - 1).reverse.fold(types.last!, (body, parameter) => pi("_", parameter!, body))
 	name = row_name(operation, type)
 	meaning = if types.take(2).all(part => part == INT_TERM) then int_meaning(TYPES.environment, operation) else ø
 	if named_id(TYPES.environment, name) == ø { added(TYPES.environment, Declaration(name, [], type, if meaning == ø then Row(operation) else Defined(meaning!))) }
-	terms_applied(constant(named_id(TYPES.environment, name)!, name, []), arguments, x)
+	named_constant(name)
 }
 # the name a row's constant takes: its operation and the types it takes and gives, `prim i64.add int -> int -> int`
 row_name(operation: text, type: Term) as text := "${ROW_MARK} ${operation} ${arrow_parts(type).map(part => shown(part)).join(" -> ")}"
-# a function type's parameter types and its result
-arrow_parts(type: Term) as list<Term> := match type.shape {
-	Pi(binder, domain, body) => [domain] + arrow_parts(body)
-	_ => [type]
+# a choice on a bool, an `if` or a match of yes and no: a proof by its cases where its type is a proposition, else
+# bool's recursor into the type both arms give, the arm at no before the arm at yes
+choice_term(n: Node, condition: Node, at_yes: Node?, at_no: Node?, x: Entering) as Term? := {
+	type = bool_choice_type(n, condition) ?? return ø
+	then_part = at_yes ?? return ø
+	else_part = at_no ?? return ø
+	cases = if is_proposition_typed(n) then cases_term(type, condition, then_part, else_part, x) else ø
+	if cases != ø { return cases }
+	guarded = if x.recursion == ø then ø else guard_read(n, condition, then_part, else_part, x)
+	if guarded != ø { return guarded }
+	if kernel_value(then_part) != type or kernel_value(else_part) != type { return ø }
+	terms = [else_part, then_part, condition].map(part => term_of(part, x))
+	if terms.any(term => term == ø) then ø else recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, type), terms.map(term => term!))
 }
-# an `if` on a bool: bool's recursor into the type both arms give, the arm at no before the arm at yes
-choice_term(n: Node, condition: Node, then_part: Node, else_part: Node, x: Entering) as Term? := {
+# `by f, g` in a proof: the proof TYPES.prove finds of the statement typing wanted here, from the laws it names, over
+# every binder around it; ø where nothing proves, a build's, so the function is assumed
+by_term(n: Node, called: Node, laws: list<Node>, x: Entering) as Term? := {
+	if not question_word(called, BY_WORD) { return ø }
+	prove = TYPES.prove ?? return ø
+	prove(ByHole(x.c, x.variables, kernel_value(n) ?? return ø, laws, name => function_named(name, x)))
+}
+# the function of a name among those typed, as the kernel holds it: entered first where it is not yet
+function_named(name: text, x: Entering) as Term? := instance_entered(x.by_key.values().find(typed => text(defined_name(typed.define)) == name) ?? return ø, x.by_key, x.s)
+# `refl`: the proof that the wanted equation's left side equals itself
+refl_term(n: Node) as Term? := {
+	if not question_word(n, REFL_WORD) { return ø }
+	sides = arguments(kernel_value(n) ?? return ø)
+	if #sides != 3 then ø else reflexive(TYPES.environment, TYPE_LEVEL, sides#1, sides#2)
+}
+# the constant the environment holds by a name, at these levels
+named_constant(name: text, levels: list<Level> = []) as Term := constant(named_id(TYPES.environment, name)!, name, levels)
+# a type's recursor into a motive, applied to its minor premises and then the major premise
+recursor_applied(type: Term, motive: Term, arguments: list<Term>) as Term := {
+	name = recursor_name(word_key(word_id(type)))
+	apply_all(apply(named_constant(name, [TYPE_LEVEL]), motive), arguments)
+}
+# a `match` with every arm's result of its type: on a defined enum, a minor premise for each case of its recursor, on
+# whole numbers a chain of choices (guards and nested patterns give no term)
+match_term(n: Node, subject: Node, arms: list, x: Entering) as Term? := {
 	type = kernel_value(n) ?? return ø
-	if kernel_value(condition) != BOOL_TERM or kernel_value(then_part) != type or kernel_value(else_part) != type { return ø }
-	name = recursor_name(BOOL_TYPE)
-	terms_applied(apply(constant(named_id(TYPES.environment, name)!, name, [TYPE_LEVEL]), lambda("_", BOOL_TERM, type)), [else_part, then_part, condition], x)
+	domain = kernel_value(subject) ?? return ø
+	if arms.any(arm => kernel_value(arm_result(arm)) != type) { return ø }
+	if domain == INT_TERM { return literals_term(subject, arms, type, x) }
+	if TYPES.enums.get(word_id(domain)) != ENUM_DEFINED { return ø }
+	block = block_of(TYPES.environment, domain, "match").block
+	if #block.types != 1 { return ø }
+	motive = lambda("_", domain, type)
+	minors = block.types#1.cases.map(case => arm_minor(named_id(TYPES.environment, case.name)!, arms, domain, motive, value => ø, x))
+	major = term_of(subject, x) ?? return ø
+	if minors.any(minor => minor == ø) then ø else recursor_applied(domain, motive, minors.map(minor => minor!) + [major])
 }
+arm_pattern(arm: Arm) as Node := match arm { Arm(pattern, result) => pattern }
+# the constructor a pattern names, ø for a name or `_`
+pattern_constructor(pattern: Node) as int? := TYPES.constructors.get(place_key(fact_of(case_name(pattern), DEFINED_AT) ?? return ø))
+# a case's minor premise from the arm that names the case or fits any value, a name there holding the case's value
+arm_minor(id: int, arms: list, domain: Term, motive: Term, riding: (Term) -> Term?, x: Entering) as Term? := {
+	arm = arms.find(arm => [id, ø].contains(pattern_constructor(arm_pattern(arm)))) ?? return ø
+	pattern = arm_pattern(arm)
+	named = pattern_constructor(pattern) == id
+	minor_of(id, if named then case_fields(pattern) else ø, domain, motive, riding, x, (inside, value) => if named or pattern == symbol(WILDCARD) then term_of(arm_result(arm), inside) else let_read(inside, pattern, domain, value, bound_in => term_of(arm_result(arm), bound_in)))
+}
+# a case's minor premise: the fields (named by the pattern, else unnamed), then a hypothesis for each field of the enum
+# itself, the motive at it, then what riding gives for the case's value (a course's values below); what body reads is
+# the minor's result, given the case's value
+NO_BINDER = "·unnamed"
+field_types(constructor_type: Term) as list<Term> := arrow_parts(constructor_type).take(#arrow_parts(constructor_type) - 1)
+minor_of(id: int, given_names: list<Node>?, domain: Term, motive: Term, riding: (Term) -> Term?, x: Entering, body: (Entering, Term) -> Term?) as Term? := {
+	constructor = declared_constructor(id)
+	fields = field_types(constructor.type)
+	names = given_names ?? fields.map(field => symbol(NO_BINDER))
+	if #names != #fields or names.any(name => not name is symbol) { return ø }
+	recursive = (1 to #fields).list().filter(at => fields#at == domain)
+	field_locals = (1 to #fields).list().map(at => entered(x.c, text(names#at), fields#at))
+	value = apply_all(constant(id, constructor.name, []), variables(field_locals))
+	hypothesis_locals = recursive.map(at => entered(x.c, NO_BINDER, apply(motive, (field_locals#at).variable)))
+	below = riding(value)
+	below_locals = if below == ø then [] else [entered(x.c, NO_BINDER, below!)]
+	locals = field_locals + hypothesis_locals + below_locals
+	keys = names.map(name => if fact_of(name, DEFINER) == ø then NO_BINDER else place_key(name)) + recursive.map(at => NO_BINDER) + (if below == ø then [] else [BELOW_BINDER])
+	subjects = if x.recursion == ø or x.recursion!.of == ø then [] else recursive.map(at => replaced_by(x.recursion!.held!, variable_id(x.recursion!.of!), (field_locals#at).variable))
+	result = body(x.under(locals, keys, subjects), value) ?? return ø
+	lambdas(locals, result)
+}
+# whole-number arms, `0 => a; 1 => b; _ => c`, as chained choices on their equality, the last arm fitting any value
+literals_term(subject: Node, arms: list, type: Term, x: Entering) as Term? := {
+	pattern = arm_pattern(arms#1)
+	result = term_of(arm_result(arms#1), x) ?? return ø
+	if #arms == 1 { return if pattern == symbol(WILDCARD) then result else ø }
+	literal = term_of(pattern, x) ?? return ø
+	rest = literals_term(subject, arms.drop(1), type, x) ?? return ø
+	given = term_of(subject, x) ?? return ø
+	recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, type), [rest, result, apply_all(row_constant("i64.eq", [INT_TERM, INT_TERM, BOOL_TERM]), [given, literal])])
+}
+# A choice on a bool whose type is a proposition is a proof by the bool's cases:
+# ·bool_cases(c, y => type, (e: c == no) => the no arm, (e: c == yes) => the yes arm)
+cases_term(type: Term, condition: Node, at_yes: Node, at_no: Node, x: Entering) as Term? := {
+	c = term_of(condition, x) ?? return ø
+	truths = TYPES.environment.literals!
+	no_arm = premised_arm(at_no, c, truths.no_case, x) ?? return ø
+	yes_arm = premised_arm(at_yes, c, truths.yes_case, x) ?? return ø
+	apply_all(named_constant(BOOL_CASES), [c, lambda("_", BOOL_TERM, type), no_arm, yes_arm])
+}
+bool_choice_type(n: Node, condition: Node) as Term? := if kernel_value(condition) == BOOL_TERM then kernel_value(n) else ø
+# whether a typed node is a proof: its type a proposition, lying in Prop
+is_proposition_typed(n: Node) as bool := levels_equal(universe_level(universe_of(value_type(n) ?? return no)) ?? Successor(Zero), Zero)
+# an arm of a proof by a bool's cases: a function of the premise that the bool is the arm's case, the arm read with
+# the premise among the binders, where its `by` finds it
+premised_arm(arm: Node, condition: Term, case: Term, x: Entering) as Term? := {
+	premise = entered(x.c, CASE_PREMISE, truths_equal(TYPES.environment, condition, case))
+	lambdas([premise], term_of(arm, x.under([premise], [CASE_PREMISE])) ?? return ø)
+}
+truth_arm(arms: list, held: bool) as Node? := arm_result(arms.find(arm => if held then arm_pattern(arm) is True else arm_pattern(arm) is False) ?? return ø)
 # a block of lets, each a name new to it given its value, ending in the value it gives
 lets_term(statements: list, x: Entering) as Term? := {
 	if statements is empty { return ø }
@@ -143,8 +419,7 @@ lets_term(statements: list, x: Entering) as Term? := {
 			if #statements == 1 or not place is Symbol or fact_of(place, DEFINER) == ø or x.binders.contains(place_key(place)) { return ø }
 			type = kernel_value(value) ?? return ø
 			given = term_of(value, x) ?? return ø
-			rest = lets_term(statements.drop(1), Entering(x.binders + [place_key(place)], x.by_key, x.s)) ?? return ø
-			let_in(text(place), type, given, rest)
+			let_read(x, place, type, given, inside => lets_term(statements.drop(1), inside))
 		}
 		_ => if #statements == 1 then term_of(statements#1, x) else ø
 	}
@@ -155,7 +430,8 @@ terms_applied(function: Term, arguments: list, x: Entering) as Term? := {
 }
 # a type as the kernel reads a value's: a subtype by condition is its parent's
 kernel_type(type: Term?) as Term? := if type != ø and subset_condition(type) != ø then kernel_type(narrowed_type(type)) else type
-kernel_settled(type: Term, s: TypingState) as Term := kernel_type(settled_type(type, s))!
+# (every typing type becomes a kernel term here, its families headed at their levels on the checker its terms are of)
+kernel_settled(type: Term, s: TypingState, c: Checker = checker(TYPES.environment, [])) as Term := kernel_headed(kernel_type(settled_type(type, s))!, c)
 kernel_value(n: Node) as Term? := kernel_type(value_type(n))
 
 # Each subtype's condition, a definition of the parent's values named after the subtype, `int where it >= 0 holds`:
@@ -181,12 +457,27 @@ conditions_typed(s: TypingState) as list<Condition> := {
 conditions_entered(conditions: list<Condition>, by_key: map<text, TypedFunction>, s: TypingState) := for condition in conditions { condition_entered(condition, by_key, s) }
 condition_entered(condition: Condition, by_key: map<text, TypedFunction>, s: TypingState) := match condition.typed.define {
 	Define(name, parameters, body) => {
-		keys = items_of(parameters).map(parameter => place_key(declared_name(parameter)))
-		value = term_of(body, Entering(keys, by_key, s)) ?? return
+		keys = items_of(parameters).filter(parameter => text(declared_name(parameter)) != CLOSURE_NAME).map(parameter => place_key(declared_name(parameter)))
+		reading = fresh_reading(checker(TYPES.environment, []), by_key, s)
 		parent = narrowed_type(condition.type)!
-		added(TYPES.environment, Declaration(condition_name(TYPES.environment, condition.type)!, [], pi("_", parent, BOOL_TERM), Defined(lambda(IT_WORD, parent, value))))
+		checked = entered(reading.c, IT_WORD, parent)
+		value = term_of(body, reading.under([checked], keys)) ?? return
+		added(TYPES.environment, Declaration(condition_name(TYPES.environment, condition.type)!, [], pi("_", parent, BOOL_TERM), Defined(lambdas([checked], value))))
 	}
 	_ => ø
+}
+# an obligation's statement, a law of its function: its condition (a subtype's, entered above) at the argument's term, read
+# under the function's parameters, `it` replaced by beta; none for a shape's narrowing or an argument of no term, which stay
+# listed for the run (extensions/verify/check.wap proves the rest)
+obligations_entered(by_key: map<text, TypedFunction>, s: TypingState) := for obligation in obligations { obligation_entered(obligation, by_key, s) }
+obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) := {
+	if subset_condition(obligation.type) == ø { return }
+	typed = by_key.get(obligation.within ?? return) ?? return
+	condition = named_id(TYPES.environment, condition_name(TYPES.environment, obligation.type)!) ?? return
+	held = match declared_at(TYPES.environment, condition)!.kind { Defined(value) => value; _ => return }
+	argument = term_of(obligation.argument, parameters_reading(typed, by_key, s)) ?? return
+	obligation.function_type = pis(typed.locals, BOOL_TERM)
+	obligation.value = lambdas(typed.locals, beta(held, [argument]))
 }
 # the name of a subtype's condition: its word's name and "holds"
 condition_name(e: Environment, type: Term) as text? := (declared_at(e, word_id(type)) ?? return ø).name + CONDITION_HOLDS
