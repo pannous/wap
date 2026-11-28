@@ -277,7 +277,7 @@ last column says what the unification already gives.
 | T6a2 hypotheses and connectives | bool-statement binders as hypotheses; `not`/`and`/`or` of propositions by the operands' sort | core +40 (hypothesis binders +25, the law run's skip +5, the sort-chosen rows +10), types +3 (Not, And, Or rows) | 13: connectives 16 implied, 20 smaller, 21 no_is_no_yes, 22, 23; connectives_wanted positive_product; induction 12 positive_product; arithmetic 12 to 16 (five laws with `h:`); verify 32 same_as_given. The arithmetic five with the provers over int | `implies` is a row already (types/operators.wap); hypothesis binders are not M2b's, so they are this step's whole |
 | T6a3a propositions in wap spelling | `proposition_of`: `==` of a type with a bridge is `Equal(T, l, r)`, `implies` a Π, any other bool `b == yes`; law_statement through it; bool's bridge (section "How wap source states a proposition") | core +18 | test_theory_connectives' `==` laws (M2b step 5's gate); every `theorem … : a == b` reads as Equal | Equal in core_environment, int's bridge in int_declared, T6a2's hypothesis binders |
 | T6a3 indexed families | enums over indices with a result per case, letters found as fields, mutual families one block; constructor calls typed by unifying their result; Equal as a family, replacing T6a1's core declaration (`==`'s place is T6a3a's) | core +100 (header and cases with indices +50, found fields +20, constructor typing +30), kernel −20 (T6a1's Equal declaration) | 9: proposition_wanted 15 four_is_even, wap proposition_wanted 10 and 12 (two, mutual), proof_wanted wrong, verify 13 hard, 17 uses_hard, 20 wrong, 26 any_even (Untested), connectives 18, 19 (And, Or as families) | int as an enum over nat in wap/types is the first two-case block analyze declares for the kernel; the found fields are blocks.wap's, ported from 384b1e4e |
-| T6a4 proofs by cases and induction | a dependent motive; the theorem's own call on a field its hypothesis; a proof match missing a case refused by covering | core +60 (`motive_made` ported +35, the course with a dependent motive +25, after T5c3) | 7: double_even (test_proof_wanted 8, wap proof_wanted 7, elaborate 50 and 87, verify 12), wap proof_wanted 13 partial, verify 34 multiply_one_left | a nat subject is int's case split with the carrier's induction under it (the provers' step 5), so no nat induction theorem waits; `motive_made` ported from 384b1e4e |
+| T6a4 proofs by cases and induction (plan: notes/coc-t6a4.md, core about +92 with the types module's nat) | a dependent motive; the theorem's own call on a field its hypothesis; a proof match missing a case refused by covering | core +60 (`motive_made` ported +35, the course with a dependent motive +25, after T5c3) | 7: double_even (test_proof_wanted 8, wap proof_wanted 7, elaborate 50 and 87, verify 12), wap proof_wanted 13 partial, verify 34 multiply_one_left | a nat subject is int's case split with the carrier's induction under it (the provers' step 5), so no nat induction theorem waits; `motive_made` ported from 384b1e4e |
 | T6a5 False, Exists, undecidable | `False`; a proof's effects checked pure and total; `exists … where`; `if` on an undecided proposition refused | core +35 (False +8, the effect check +12, Exists +15), types +2 | 5: wap proof_wanted 14 and 15 (loop, raise), effects 15 and 16 (spin, loop), proposition_wanted 8 some_sum; plus the two undecidable-condition checks | the effects are facts on each typed function (T5b1, t5b-effects): the check reads EFFECTS and refuses Fail and Div in a proof |
 | T6a6 propositions as values, the logic in wap/types | a type in a value's place compared at Type; Prop binders; False, True, And, Or, Not, Exists, Decidable and the axiom proposition_extensionality in types/logic.wap | core +30 (types as values +20, Prop binders +10), types +35 (the rest of the logic in wap spelling) | 4: elaborate 107, 108, 153 (unions at Type); logic 18 anything; and logic's own checks (10 to 17) read on wap/types | the prelude is gone already (the deletion commit); the glue laws moved in T6a1, Equal in T6a3 |
 
@@ -315,3 +315,28 @@ T6a is done when:
   `sum_*`; notes/unify-provers.md's table follows.
 - **test_theory_second:** its laws check the second checker (extensions/theory/second). If the deletion removes that
   checker, its three T6a1 statements leave with it as unpinned, not red.
+
+## T6a3, T6a5 and T6a6 re-read on unify-typers 2b0e87be
+
+- **T6a3 indexed families.**
+  - analyze/inductives.wap (T5b2) declares an enum's block with no indices: every case's result is the enum
+    itself. T6a3's header and cases with indices (+50), the found fields (+20) and constructor typing by unifying
+    their result (+30) are all still to do.
+  - Two parts of the row are gone:
+    - "int as an enum over nat in wap/types": core declares int on unify-typers, in Lean's shape on int-takes.
+    - "Equal as a family, replacing T6a1's core declaration (kernel −20)": Equal is kernel/equality.wap's, beside
+      refl and its laws, and a program's family would be a second Equal. Equal stays the kernel's.
+  - Estimate: core +100, kernel 0.
+- **T6a5 False, Exists, undecidable.**
+  - kernel/logic.wap has `·False`, `·True`, `·True.intro` and `·false_elim`, marked as the kernel's. `False` for
+    programs is the types word naming it (T6a6's types/logic.wap), so it costs +2 here, not +8.
+  - The effect check reads T5b1's EFFECTS fact (+12).
+  - Exists is a family with one case (+15, on T6a3's indices).
+  - Estimate: core about +29, types +2. Lands after T5b1 and T6a3.
+- **T6a6 the logic in wap/types.** The prelude is gone, and the kernel's logic is internal (`·`).
+  - types/logic.wap declares False and True (the kernel's), And, Or, Not, Exists (T6a5), Decidable, and the axiom
+    proposition_extensionality.
+  - A comparison is a proposition where a type is wanted, and is decided to a bool where a bool is wanted
+    (proposition.md:55): T6a3a's `proposition_of`, read the other way at `type of`.
+  - T6a2's Not, And and Or rows over propositions land here (coc-t6a12.md).
+  - Estimate: core +30 (types as values +20, Prop binders +10), types +38 (+35, and T6a2's +3).
