@@ -169,8 +169,9 @@ call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s
 	chosen = function_typed(meant, taken.map(argument => value_type(argument)), s, n)
 	if f != ø { called_reads(chosen, n, s, f!) }
 	typed = result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
-	# a result type reading the parameters or letters is the call's, filled by its arguments (earlier_filled)
-	if subset_condition(value_type(typed)) != ø { typed = with_type_of(typed, earlier_filled(value_type(typed)!, meant, meant.parameters, taken, #taken + 1, n, s)!) }
+	# a result type reading the parameters or letters is the call's, filled by its arguments as given, before their
+	# conversions (earlier_filled)
+	if subset_condition(value_type(typed)) != ø { typed = with_type_of(typed, earlier_filled(value_type(typed)!, meant, meant.parameters, holding.arguments + taken.drop(#holding.arguments), #taken + 1, n, s)!) }
 	# the letters only the result writes, never one the caller's frame binds (letters.wap letters_settled)
 	result = value_type(typed)
 	letters = letters_in(result).unique().filter(letter => f == ø or not f!.letters.any(bound => bound.key == letter))
@@ -410,7 +411,9 @@ places_read(definition: Signature, s: TypingState) as list<int> := {
 HELD_WORD = "held"
 class Holding { sets: list<Node> = []; arguments: list = [] }
 arguments_held(definition: Signature, given: list, s: TypingState, f: TypeFrame?) as Holding := {
-	read = if f == ø then [] else places_read(definition, s).filter(at => at <= #given and not written_in_place(given#at))
+	# every argument up to the last one read is held, so the arguments run in the order written
+	last = if f == ø then 0 else places_read(definition, s).filter(at => at <= #given and not written_in_place(given#at)).fold(0, (most, at) => if at > most then at else most)
+	read = (1 to last).filter(at => not written_in_place(given#at))
 	if read is empty { return Holding([], given) }
 	holding = Holding([], [])
 	for at in 1 to #given {
@@ -825,7 +828,7 @@ body_typed(typed: TypedFunction, definition: Signature, name: Node, parameters: 
 	frame.typed_function = typed
 	typed_parameters = (1 to #typed.arguments).map(at => parameter_typed(items_of(parameters)#at, typed.arguments#at, frame))
 	frame.variables += captured_by(define_of(definition, s), typed.arguments)
-	typed_within(function_key(define_of(definition, s)), [definition.key] + typed.arguments.map(type => type_text(type, yes)), s, () => {
+	typed_within(function_key(define_of(definition, s)), [definition.key] + typed.arguments.map(type => type_text(type, yes)), s, frame, () => {
 		typed_body = typed_form(body, s, frame, typed.result)
 		given = result_given(typed_body, frame, name, s)
 		# a written result stays the result, `show(x: any): text := raise(…)`; one that writes none and never returns jumps
@@ -841,11 +844,13 @@ body_typed(typed: TypedFunction, definition: Signature, name: Node, parameters: 
 # work typed within a function's instance: s.within names the function (its obligations') and TYPES.instance the
 # instance, keyed under the instance around it (a nested function of a generic one is one per instance), both put
 # back after work runs, a raise too
-typed_within(function: text, instance: list<text>, s: TypingState, work: () -> ø) := {
+typed_within(function: text, instance: list<text>, s: TypingState, frame: TypeFrame?, work: () -> ø) := {
 	enclosing = s.within
+	enclosing_frame = s.frame
 	enclosing_instance = TYPES.instance
-	put_back = () => { s.within = enclosing; TYPES.instance = enclosing_instance }
+	put_back = () => { s.within = enclosing; s.frame = enclosing_frame; TYPES.instance = enclosing_instance }
 	s.within = function
+	s.frame = frame
 	# GUESS (for wap-q1-kernel): the enclosing key is already keyed, so it is joined, never escaped again: each level
 	# escaped anew doubled its marks, a key growing as 2 ^ depth
 	TYPES.instance = enclosing_instance + LEVEL_MARK + keyed_text(instance)

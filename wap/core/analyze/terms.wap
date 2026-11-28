@@ -585,7 +585,7 @@ conditions_typed(s: TypingState) as list<Condition> := {
 		if variables is empty { conditions += [condition_typed(type, written_bound(code, s), [], s) ?? raise A_CONDITION_FUNCTION]; continue }
 		for obligation in s.obligations.filter(obligation => obligation.type == type and obligation.compared == ø) {
 			within = function_within(obligation.within, s)
-			types = variables.map(variable => read_type(variable, within) ?? refused(obligation.argument!, "${condition_shown(code)} reads ${variable}, which is no variable where it is checked"))
+			types = if obligation.reads is not empty then obligation.reads.map(read => value_type(read)!) else variables.map(variable => type_where(variable, within, s) ?? refused(obligation.argument!, "${condition_shown(code)} reads ${variable}, which is no variable where it is checked"))
 			condition = condition_typed(type, written_bound(condition_over(code, variables), s), types, s) ?? raise A_CONDITION_FUNCTION
 			condition.name = "${condition_name(TYPES.environment, type)!} ${instance_key(condition.typed)}"
 			obligation.holds = condition.name
@@ -608,10 +608,11 @@ variables_read(code: Node) as list<Node> := {
 	read
 }
 same_declaration(a: Node, b: Node) as bool := reads_declared(a, fact_of(b, DEFINED_AT) ?? return no)
-# a variable's type: its own where typing wrote it in (a call's argument), else the parameter of the function around
-# that it is bound to; ø where neither is
-read_type(variable: Node, within: TypedFunction?) as Term? := {
+# a variable's type: its own where typing wrote it in (a call's argument), a local's as the frame typing is in holds
+# it, else the parameter of the function around that it is bound to; ø where none is
+type_where(variable: Node, within: TypedFunction?, s: TypingState) as Term? := {
 	if value_type(variable) != ø { return value_type(variable) }
+	if s.frame != ø and not is_bound(variable, DefinitionKind.Parameter) { return variable_type(variable, s, s.frame!) }
 	names = parameter_nodes(within ?? return ø)
 	place = (1 to #names).find(at => reads_declared(variable, names#at)) ?? return ø
 	within!.arguments#place
@@ -643,8 +644,8 @@ condition_over(code: Node, variables: list<Node>) as Node := if variables is emp
 # the variables a subtype's condition reads, each as a read of it where typing is, typed (read_type)
 condition_reads(type: Term, at: Node, s: TypingState) as list<Node> := {
 	code = subset_condition(type) ?? return []
-	within = function_within(s.within, s)
-	variables_read(code).map(variable => with_type_of(placed_like(variable, at), read_type(variable, within) ?? refused(at, "${condition_shown(code)} reads ${variable}, which is no variable here")))
+	within = if s.frame != ø then s.frame!.typed_function else function_within(s.within, s)
+	variables_read(code).map(variable => with_type_of(placed_like(variable, at), type_where(variable, within, s) ?? refused(at, "${condition_shown(code)} reads ${variable}, which is no variable here")))
 }
 # a value made into a type, `v` of `(v as T)`; any other code as it is
 made_value(n: Node) as Node := match n { Call(called, arguments) => if text(called) == RESULT_WORD and #arguments == 2 then arguments#1 else n; _ => n }
@@ -691,21 +692,21 @@ obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: 
 # (types_same); one wap cannot decide is refused: never a no for want of a proof
 comparison_decided(obligation: Obligation, s: TypingState) := {
 	types = [obligation.type!, obligation.compared!]
-	obligation.verdict = types_same(types#1, types#2, checker(TYPES.environment, [])) ?? refused(obligation.argument!, "wap cannot decide whether ${type_text(types#1)} and ${type_text(types#2)} are one type")
+	obligation.verdict = types_same(types#1, types#2, checker(TYPES.environment, []), s) ?? refused(obligation.argument!, "wap cannot decide whether ${type_text(types#1)} and ${type_text(types#2)} are one type")
 }
-# whether two types are one: yes where their heads and parts are, and two subtypes' parents are and their conditions
+# whether two types are one: yes where their heads and parts are, and two leaves compute alike, and two subtypes' parents are and their conditions
 # compute alike; no where a head or a part differs; ø where it is not known: a condition against none, one the kernel
 # does not hold (it reads a parameter or calls what is only assumed), two that compute unlike
-types_same(a: Term, b: Term, c: Checker) as bool? := {
+types_same(a: Term, b: Term, c: Checker, s: TypingState) as bool? := {
 	if subset_condition(a) != ø or subset_condition(b) != ø {
-		parents = types_same(parent_or_self(a), parent_or_self(b), c)
+		parents = types_same(parent_or_self(a), parent_or_self(b), c, s)
 		if parents != yes { return parents }
 		conditions = [a, b].map(type => condition_value(type))
 		return if conditions.all(condition => condition != ø) and equal(c, conditions#1!, conditions#2!) then yes else ø
 	}
 	parts = [a, b].map(type => type_parts(type))
-	if parts.any(each => each == ø) or head_of(a) != head_of(b) or #parts#1! != #parts#2! { return a == b }
-	verdicts = (1 to #parts#1!).map(at => types_same(parts#1!#at, parts#2!#at, c))
+	if parts.any(each => each == ø) or head_of(a) != head_of(b) or #parts#1! != #parts#2! { return equal(c, kernel_settled(a, s), kernel_settled(b, s)) }
+	verdicts = (1 to #parts#1!).map(at => types_same(parts#1!#at, parts#2!#at, c, s))
 	if verdicts.any(verdict => verdict == no) then no else if verdicts.all(verdict => verdict == yes) then yes else ø
 }
 parent_or_self(type: Term) as Term := if subset_condition(type) != ø then narrowed_type(type)! else type

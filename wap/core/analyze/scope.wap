@@ -140,21 +140,22 @@ type_part_bound(type: Node, scope: Scope) as Node := match type {
 	Key(name, op, parts) => refitted(Key(type_bound(name, scope), op, type_bound(parts, scope)), type)
 	_ => type
 }
-# A subtype's condition with each name bound to the parameter of that name its signature sees, by declaration, `n`
-# of `xs: list<int> where #it == n` (its DEFINED_AT the parameter n): a name of no parameter, and a field's name after a
-# dot, as written; the type a value is made into, `(xs as list<T>)`, as a type
+# A subtype's condition with each name bound to the variable of that name its scope sees, by declaration, `n` of `xs:
+# list<int> where #it == n` (its DEFINED_AT the parameter n), a parameter, a local or a capture: a name of no variable,
+# and a field's name after a dot, as written; the type a value is made into, `(xs as list<T>)`, as a type
 condition_bound(n: Node, scope: Scope) as Node := match n {
 	Symbol(name) => {
 		if fact_of(n, BINDING) != ø { return n }
 		innermost = named_in(scope, name)
-		if innermost is empty or innermost#1.kind != DefinitionKind.Parameter then n else with_fact(with_binding(n, DefinitionKind.Parameter), DEFINED_AT, innermost#1.definer)
+		if innermost is empty or not VARIABLE_KINDS.contains(innermost#1.kind) then n else with_fact(with_binding(n, innermost#1.kind), DEFINED_AT, innermost#1.definer)
 	}
 	Get(subject, key) => refitted(Get(condition_bound(subject, scope), key), n)
 	Call(called, arguments) => if not made_value(n) === n then refitted(Call(called, [condition_bound(arguments#1, scope), type_bound(arguments#2, scope)]), n) else refitted(Call(called, arguments.map(argument => condition_bound(argument, scope))), n)
 	_ => with_parts(n, part => condition_bound(part, scope))
 }
-# a scope without the parameters it sees: a type name's definition reads none of the signature it is used in
-without_parameters(scope: Scope) as Scope := Scope(scope.layers.map(layer => if layer.definitions.any(definition => definition.kind == DefinitionKind.Parameter) then Layer(layer.definitions.filter(definition => definition.kind != DefinitionKind.Parameter)) else layer), scope.looped, scope.standard, scope.declaring)
+# the scope a type name's definition is bound in: the use's, with every definition deeper than the type's own
+# declaration left out, so it reads the names around where it is declared, a function's parameters and locals among them
+declared_scope(scope: Scope, depth: int) as Scope := Scope(scope.layers.map(layer => if layer.definitions.any(definition => definition.depth > depth) then Layer(layer.definitions.filter(definition => definition.depth <= depth)) else layer), scope.looped, scope.standard, scope.declaring)
 # A type name with parameters applied, `vector(int, 3)`: its body with the arguments written in for the parameters,
 # `list<int> where #it == 3`, shown by the use as written; ø where the call names no such type
 applied_type(type: Node, called: Node, arguments: list, scope: Scope) as Node? := {
@@ -166,7 +167,7 @@ applied_type(type: Node, called: Node, arguments: list, scope: Scope) as Node? :
 			taken = items_of(parameters)
 			if #taken != #arguments { arguments_refused(type, text(called), taken) }
 			# the definition bound where it is declared, the arguments where they are written
-			outer = without_parameters(scope)
+			outer = declared_scope(scope, meant#1.depth)
 			unread_names_refused(body, text(called), within(outer, parameter_definitions(parameters, 0)))
 			written = (1 to #taken).fold(type_bound(body, outer), (part, at) => parameter_written(part, text(parameter_name(taken#at)), condition_bound(argument_given(taken#at, arguments#at, text(called)), scope)))
 			with_fact(written, WRITTEN, Text("${type}"))
@@ -196,7 +197,7 @@ named_type(definitions: list<Definition>, name: text, scope: Scope) as Node? := 
 	named = fact_of(definitions#1.definer, TYPE_NAMED) ?? return ø
 	# a name with parameters is a type only applied (applied_type)
 	if named is Fn { return ø }
-	outer = without_parameters(scope)
+	outer = declared_scope(scope, definitions#1.depth)
 	unread_names_refused(named, name, outer)
 	with_fact(type_bound(named, outer), WRITTEN, Text(name))
 }
