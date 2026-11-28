@@ -1049,7 +1049,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | TM | landed (TM1 to TM3); TM4, the restart after a standard module, folded into T5 | 10bd563b (TM1), f9c06b41 (TM2, TM3) | |
 | T3 | landed, closed with machine-words | 896823f3 (T3a), 551ffd93 and 471a8882 (T3e), e0dea1d8 (T3f), d3791cd3, f5d9d5a8 | |
 | T4a, T4b | landed | 3410aa94 | |
-| T4d computed obligations | planned (notes/coc-t4d.md: T4d1 decided, T4d2 no check, T4d3 texts), no branch | | unify-typers (`conditions_entered`) |
+| T4d computed obligations | planned (notes/coc-t4d.md, built on the Obligation below "T4d: one verdict per obligation"); builder wap-q1-kernel; origin/t4d3 5db581f7 the source, never built | | the batch's Obligation (typed-by-result) |
 | T4c char | waits, no branch | | T4d1 to T4d3 |
 | T4e types that take values | planned (notes/coc-t4e.md) | | T4d1 to T4d3, unify-typers; its (8) T5b1 |
 | T5u | landed | 3410aa94, d0b3c9e8 (failable values, `T??`) | |
@@ -1077,14 +1077,14 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T6a5 False, Exists, undecidable | waits | | T5b1; Exists also generic records with T6a3's parameters |
 | T6a6 the logic in wap/types | planned (notes/coc-t6a6.md) | | generic records with T6a3's parameters, unify-axioms, lazy-implies; Exists lines T6a5 |
 | T6a7 universes | planned (notes/coc-t6a7.md) | | T6a6 |
-| V1 one verdict per law | planned (notes/coc-v1.md; the plain-compile report cut, no wiki passage); builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
+| V1 one verdict per law | in progress (notes/coc-v1.md; below "V1: every law gets its line"); origin/v1-rest 314c868f, builder wap-primitive-lookup-tables | | T6a1, exact-big-literals (show.wap) |
 | V2 `wap check`, V3 proved laws as facts | planned (notes/coc-v2.md, notes/coc-v3.md) | | V1 (V3 also T6a2 and unify-dedup) |
 | C1 traits | planned (notes/coc-c1.md: C1a now, the structures with C2); builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
 | C2 instances passed, C4 generic dispatch | planned (notes/coc-c2.md: B decided, a trait value as the union of its conformers, core +15; A, instances, with C4 at T5g) | | C1 (C2 also T5e's type arguments) |
 | Q1 quotients | planned (notes/coc-q1.md; also after T4e and V3) | | C1, T6a3, T6a4 |
 | T7 the theory extension retires | planned (notes/coc-t7.md) | | T6 |
 | T8a the reader | planned (notes/coc-t8.md); its first commit is whole()'s sign | | exact-big-literals |
-| T8b the machine words | planned (notes/coc-t8.md) | | Q1, T4d |
+| T8b the machine words | planned (notes/coc-t8.md; below "T8b: what a word's row means"); origin/t8b-q1 a739da9b holds its types part; builder wap-q1-kernel | | Q1, T4d, int's division identity |
 | T8c exact int on the run | planned (notes/coc-t8.md) | | T8a, T5f |
 
 ### What each open step costs now
@@ -1094,7 +1094,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 
 | step | plan | core | kernel | types, sugar | other |
 |---|---|---|---|---|---|
-| T4d1 to T4d3 | coc-t4d.md | +52 | +20 | | |
+| T4d1 to T4d3 | coc-t4d.md, coc-plan.md (below) | +40 | +20 | | |
 | T4c char | coc-t4.md | −10 | | +30 | |
 | T4e types that take values | coc-t4e.md | +74 | +6 | +4 | |
 | T5b1 effects | coc-t5b.md | +120 | +10 | +1 | |
@@ -1116,7 +1116,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | T6a5 False, Exists | coc-t6a.md | +29 | | +2 | |
 | T6a6 the logic in wap/types | coc-t6a6.md | +3 to +7 | +8 | +26 | sugar −2 |
 | T6a7 universes | coc-t6a7.md | +61 | | | |
-| V1 verdicts | coc-v1.md | +7 | | +2 | verify +23, extension +1 |
+| V1 verdicts | coc-v1.md, coc-plan.md (below) | +7 | | +2 | verify +26, extension +1 |
 | V2 `wap check` | coc-v2.md | +4 | | | native +2 |
 | V3 proved laws as facts | coc-v3.md | −6 | | | check +25, prove +15, verify +4, native +3 |
 | C1 traits (C1a) | coc-c1.md | +13 | | +19 | |
@@ -1126,7 +1126,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | Q1 quotients | coc-q1.md | +37 | | +27 | prove +5 |
 | T7 the extension retires | coc-t7.md | 0 (moves) | | | native +12 |
 | T8a the reader | coc-t8.md | +12 | +2 | | |
-| T8b machine words | coc-t8.md | | | +15 | |
+| T8b machine words | coc-t8.md, coc-plan.md (below) | +1 | +8, and the division identity | +15 | |
 | T8c exact int on the run | coc-t8.md | +50 | −10 | +60 | emit +150, native +10 |
 | T5d statements | coc-t5d.md | parked | | | |
 
@@ -1290,6 +1290,52 @@ Steps 2-3 need nothing. Step 4 is normal path. Step 5 is careful. Totals: kernel
 - pattern-arms-t5c4 is consistently two-case (T5c4's nat recursor over int's cases), so it should land after step 1,
   not before.
 
+#### T4d: one verdict per obligation
+
+- The batch's `class Obligation { line; argument; type; within; function_type; value }` (core/analyze/dispatch.wap) is
+  the one record of a value wanted of a narrowing. T4d1 decides each one where its argument is a closed term: its
+  subtype's condition computed at the argument, through `decided(e, term): bool?`, the one function beside the
+  kernel's literals that V1's closed laws use too. No is refused at the place; yes is the obligation's verdict, kept on
+  the Obligation (a field or a PROVED fact on its node, the door "A proved obligation loses its run check" reads), never
+  in a list keyed by the printed line: two values at one place and one condition share a line, not a verdict.
+- T4d2: a narrowed call whose obligation is decided yes is placed as its argument. A dispatcher call folds its chain
+  at compile time, in the chain's own order (`chained`, most specific first): a choice with a test decided no is
+  skipped, the first with every test decided yes is called directly, and the first with an undecided test keeps the
+  dispatcher. It is the known_arm rule of an If, over the chain; about 6 lines.
+- T4d3: the text rows of origin/t4d3 (a3166416, 5db581f7) as written, careful path.
+- An obligation the computing leaves open goes to the provers as a law of its function (V3): law_statement and
+  proof_found, the path verify's laws take, not a second one.
+- Gap lines: test_subtype_wanted:5 and :6, and `wap check` listing no obligation that computes.
+
+#### T8b: what a word's row means
+
+- i64 is `int where WORD_SMALLEST <= it <= WORD_LARGEST` with the wasm rows as one-prim definitions, and
+  `type wrapped = quotient(int, same_wrapped)`, `same_wrapped(a, b) := (a - b) % 2^64 == 0` (types/words.wap).
+- The kernel reads a subtype as its parent (core/analyze/terms.wap "a subtype by condition is its parent's"), so a
+  row's meaning is chosen by the definition's written parameter types, not the operands' kernel types: an int row
+  means int's SUM, TIMES and the comparisons; an i64 row means its wrapping: WRAPPED_SUM(a, b) := wrap(SUM(a, b)) with
+  wrap(x) := (x - WORD_SMALLEST) % 2^64 + WORD_SMALLEST, the same for subtract and multiply; ==, <, <= keep int's;
+  ÷ and % keep int's but at MIN ÷ -1, which raises. core +1 (row_term), kernel about +8.
+- Then the word laws are laws: `(quotient.of((a + b) as int) as wrapped) == quotient.of((a as int) + (b as int))` is
+  same_wrapped(wrap(s), s) through quotient_sound, and a prim's result needs no range check because wrap lands in the
+  range.
+- Int's division identity, `a == (a ÷ m) * m + a % m`, is one kernel theorem before T8b: with Q1's distribute and
+  times_negated it gives same_wrapped's symmetric and transitive, the congruences lift asks for and the wrap law.
+  reflexive comes from ADD_MINUS.
+- words.wap is included from types.wap with quotients.wap; numbers.wap's `type i64 < int` goes in the same commit.
+- Gap lines: `x: i64 = WORD_LARGEST` then `x + 1 == WORD_SMALLEST`; `wap verify` of word_sum_wraps Proved by its
+  proof, not by refl; `law up(a: i64): a + 1 > a` not Proved.
+
+#### V1: every law gets its line
+
+- A law typing refuses, or one whose hypothesis the kernel does not hold, is a TypedLaw with its reason
+  (`refused: text?`): verify prints `name: <why>` in its place and the run exits 1, as verify.wap's header says.
+  A law written with a proof is never left to the run's Tested.
+- verify decides its exit from the TypedVerdict values, not from the printed lines; native/driver.wap parses each line
+  once (verdict_read) and exits on the parsed verdicts, so an answer printed beside them (`type of`, `axioms of`) never
+  reads as one.
+- A closed law's verdict computes through `decided(e, term)`, shared with T4d1.
+
 #### Each step's wiki lines and the tests that pin them
 
 A builder starts from these lines red. "red" is the last recorded full run (test/reds.txt); `_wanted` files are
@@ -1411,7 +1457,7 @@ Each step is one builder; T8a and T8c take the careful path (the reader; a value
 | step | what works after it | core / kernel / types (estimate) | extension, emit, native | wiki pages it serves | outcome tests |
 |---|---|---|---|---|---|
 | T8a the reader keeps whole literals whole | A whole literal is an int at every size. One in the signed i64 range, `-9223372036854775808` included, reads as today. One past it reads as the digits it is (an atom holding its digit text), which analyze types as an `int` and the kernel holds as a `Large` (magnitude_of_digits). The reader's comparison goes: core/parse/atoms.wap's `LARGEST_INT` text copy and `whole`'s length test (and its DEBT) are replaced by one test against WHOLE_LARGEST. Until T8c a literal past i64 in code that runs is refused while compiling, with "an int past 2^63 runs once ints are exact"; laws and proofs take it at once | core +12 (the atom +5, its int typing +4, the range test against WHOLE_LARGEST +3, LARGEST_INT and the DEBT −3), kernel +2 (a numeral from digits) | 0 | int.md:4, number.md:107-112 | test_theory_prelude_numbers `big` (`law big: 4294967296 * 4294967296 == 18446744073709551616`, red); test_number_wanted:35 and test_quotient_wanted:14 `(9223372036854775807 as i64) + 1 == -9223372036854775808 as i64` (red today because `-9223372036854775808` reads as a float: "nothing defines i64 … as a field of float"). Gap: `type of 18446744073709551616` → `int` (int.md:4) |
-| T8b the machine words | `i64` and `i32` are wap/types' wrapping words, refinements of int by their range whose operations are T1's rows and wrap (number.md:109-111), and `i64` is the quotient of int by differences that are multiples of 2^64 (quotient.md:43-44), so laws that hold modulo 2^64 prove on it and `a + 1 > a` is refused there (coc-plan 13). A literal that does not fit its declared word is refused while compiling, by the range condition T4 computes | core 0, kernel 0, types +15 (the two words, `wrapped_alike`, the quotient) | 0 | number.md:109-112, quotient.md:43-44 | test_number_page "i64 wraps as the machine does" (green); the two T8a lines. Gap: `x: i64 = 2^70` → refused, naming the range (number.md:112) |
+| T8b the machine words | `i64` and `i32` are wap/types' wrapping words, refinements of int by their range whose operations are T1's rows and wrap (number.md:109-111), and `i64` is the quotient of int by differences that are multiples of 2^64 (quotient.md:43-44), so laws that hold modulo 2^64 prove on it and `a + 1 > a` is refused there (coc-plan 13). A literal that does not fit its declared word is refused while compiling, by the range condition T4 computes. A row's kernel meaning is chosen by the definition's written parameter types, so i64's `+` means the wrapping sum (below "T8b: what a word's row means") | core +1 (row_term), kernel +8 (the wrapping meanings) and int's division identity, types +15 (the two words, `same_wrapped`, the quotient) | 0 | number.md:109-112, quotient.md:43-44 | test_number_page "i64 wraps as the machine does" (green); the two T8a lines. Gap: `x: i64 = 2^70` → refused, naming the range (number.md:112) |
 | T8c exact int on the run, stored by context | An `int` runs exact: its operations check for overflow and carry a value past i64 into a big int, which comes from a library only the programs that need one load (lib/magnitude.wap with a sign). Where computing or a fact in scope (a parameter's condition, a range's bounds, an `if`) shows that a value fits, it is stored as an i64 with no check. `wap fast` builds with every int as a wrapping i64 and no checks (fast.md, int.md:4-5). The kernel's ROW_OVERFLOW and FOLDED_ARITHMETIC guard go, since the rows are exact on the run as in the kernel | core +40 (analyze: the storage chosen from facts), kernel −10 (ROW_OVERFLOW, the fold's guard), types +60 (the signed big int over magnitude) | emit +150 (checked operations, the carry into a big int, the int value's layout as a row of T1's table), native +10 (`wap fast`) | int.md:4-5, number.md:107-108, fast.md, bignum.md | test_number_wanted "text(xs#1 * 4)" (`xs = [2^62]`, red: got "0") and "an int is unbounded: big: int = 2^70" (red); test_exact "a whole number past 64 bits" (green, through `use exact`), which must stay green. Gaps: `wap fast` of `xs = [2^62]\nprint xs#1 * 4` → `0`; `for i in 1 to 10 { s += i }` with `s = 0` compiles its loop counter to an i64 with no check, measured by the benchmarks' guardrails (coc-plan's T8 row) |
 
 Net: core about +52, kernel −8, types +75, emit +150, native +10, about +280 in all.
@@ -1425,7 +1471,8 @@ conditions. T8c after T8a and T5's erasure stage (the int layout is one of its b
 **Beside the other work.**
 - T8a touches core/parse/atoms.wap and analyze's numerals. No T6 step and no dedup file does, so it runs beside
   them, but alone in its careful run.
-- T8b is wap/types only and runs beside anything after its two prerequisites.
+- T8b is wap/types but for one row_term line and the kernel's wrapping meanings; it runs beside anything after its
+  prerequisites, careful path for the kernel meanings.
 - T8c touches the emitter's value layouts. It is the one T8 step no other careful landing may share (C2 included),
   and it reports the self-compile time and the benchmarks against main.
 
