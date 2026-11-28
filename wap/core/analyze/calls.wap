@@ -15,6 +15,10 @@ use "../bindings.wap"
 use "../type_notation.wap"
 use "../../kernel/environment.wap"
 use "../../kernel/forms.wap"
+use "../../kernel/surface.wap"
+use "../../kernel/levels.wap"
+use "../../kernel/terms.wap"
+use "../../kernel/equality.wap"
 use "../parse/operator_table.wap"
 
 # the word an item taken by its place calls on a value that is no list, `r#2` is `#(r, 2)`
@@ -31,33 +35,54 @@ RESULT_UNKNOWN = "result_unknown"
 # the word making an enum's value the Node of its text where a Node is wanted (nodes.wap), and the case it builds
 SYMBOL_WORD = "symbol"
 SYMBOL_CASE = "Symbol"
-# a type's type, as its text (wiki/type.md "The type of a value")
-TYPE_OF_TYPE = "Type"
 # the annotation the class rule writes on a protocol's record (sugar/records.wap)
 PROTOCOL_ANNOTATION = "protocol"
 
-# whether a call asks the compiler by a word of its own, which no definition of the program took: `type of x`
-asks(called: Node, word: text) as bool := called is symbol and text(called) == word and fact_of(called, BINDING) == ø
 # the compiler's answer to a question by one of its own words (stage.wap QUESTION_WORDS): `type of x` the static type
 # of x, `effects of f` what f may do (core/analyze/effects.wap)
 answered(n: Node, word: text, of: Node, s: TypingState, f: TypeFrame) as Node := with_fact(if word == TYPE_OF_WORD then type_of_typed(n, of, s, f) else effects_of_typed(n, of, s, f), ANSWERED, of)
 # whether a call claims the effects of the body it follows, `x * 2 ! Pure`
 claims_effects(called: Node, arguments: list) as bool := text(called) == REQUIRED_WORD and #arguments == 2
+# a call at a level written in brackets glued to the function's name, `identity[1](int, 3)` (wiki/universe.md): the
+# name, the level its fact; ø for other code, a list's item called among it, `fs[1](3)`
+level_written_call(called: Node) as Node? := match called {
+	Item(subject, key) => if names_function(subject) and key is number then with_fact(subject, LEVEL_WRITTEN, key) else ø
+	_ => ø
+}
+# a proof's word, `by f` or `refl`, is of the statement wanted, which it makes hold (wiki/proof.md)
+proof_typed(n: Node, word: text, expected: Term?) as Node := with_type_of(n, expected ?? refused(n, "${word} proves the statement wanted here: write the statement"))
+# A statement in a type's place is the truth it holds, read in this reading of the parameters (wiki/proof.md): in the
+# result's, `swap(a: int, b: int): a + b == b + a := …`, what the body proves; in a parameter's, `h: a <= b`, a
+# hypothesis, a proof of it; ø for a type
+statement_held(written: Node?, typed: TypedFunction, reading: Entering, s: TypingState) as Term? := {
+	if not is_statement_written(written) { return ø }
+	held = term_of(typed_form(written!, s, reading_frame(typed), BOOL_TERM), reading) ?? refused(written!, "a statement is computed without acting, so a proof can state it")
+	proposition_of(TYPES.environment, held)
+}
+# whether a function states a truth in its result's or a parameter's place
+states(typed: TypedFunction) as bool := ([typed.written] + parameters_of(typed).map(declared_type)).any(is_statement_written)
 # A call: its arguments typed, each expecting its parameter's written type when only one definition takes that many
 # arguments; then the function it means, typed for these argument types
 call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
 	if is_bound(called, DefinitionKind.Case) { return case_call_typed(n, called, arguments, s, f) }
-	if asks(called, TYPE_TEST_WORD) { return type_test_typed(n, arguments, s, f) }
-	if QUESTION_WORDS.any(word => asks(called, word)) { return answered(n, text(called), arguments#1, s, f) }
+	if is_type_written(called) and #arguments == 1 { return converted(typed_form(arguments#1, s, f, ø), type_term(called), s, n, "the type made is") }
+	if is_type_written(called) and not (called is symbol) { refused(n, "a type makes its value of one other, ${text(fact_of(called, WRITTEN) ?? called)}(x): this gives ${#arguments}") }
+	if question_word(called, TYPE_TEST_WORD) { return type_test_typed(n, arguments, s, f) }
+	if QUESTION_WORDS.any(word => question_word(called, word)) { return answered(n, text(called), arguments#1, s, f) }
+	# a proof's `by f, g` is of the statement wanted, which its laws make hold (wiki/proof.md)
+	if question_word(called, BY_WORD) { return proof_typed(n, BY_WORD, expected) }
 	if claims_effects(called, arguments) { return claim_typed(n, arguments, s, f, expected) }
 	if rest_named(n) != ø { refused(n, "a list's items spread, `...xs`, stand only in a list, `[...xs, 4]`") }
+	levelled = level_written_call(called)
+	if levelled != ø { return call_typed(n, levelled!, arguments, s, f, expected) }
 	if holds_value(called) { return value_call_typed(n, called, arguments, s, f, expected) }
 	scopes = scoped_definitions(called, s)
 	candidates = scopes.flat_map(scope => scope)
 	placed = spread_alone(if arguments.any(is_named) then arranged_arguments(n, called, arguments, candidates, s) else arguments, candidates, s)
 	by_count = candidates.filter(definition => takes_count(definition, #placed, s))
 	# a function's name among arguments no definition takes takes the rest, `sin cos 0` is sin(cos(0)) (wiki/call.md)
-	reading = nested_read(n, called, placed, candidates, s)
+	# (a call writing a level gives its arguments as written, the types of letters among them: implicit_typed)
+	reading = if fact_of(called, LEVEL_WRITTEN) == ø then nested_read(n, called, placed, candidates, s) else ø
 	if reading != ø { hint(warning_of(n, "the parameter counts read it as ${call_shown(reading!)}")); typed_readings[reading_key(called)] = reading!; return typed_form(reading!, s, f, expected) }
 	receiver = fact_of(called, RECEIVER)
 	held = if by_count is empty and receiver != ø then value_type(typed_form(receiver, s, f, ø)) else ø
@@ -78,8 +103,32 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	if fact_of(n, COMPOUND) != ø { scopes = [definitions_named(text(fact_of(n, COMPOUND)!), s)] + scopes }
 	made = made_from_map(n, called, candidates, given, s)
 	if made != ø { return typed_form(made, s, f, expected) }
-	call_chosen(n, called, scopes, given, expected, s, f)
+	written = fact_of(called, LEVEL_WRITTEN)
+	if written == ø { return call_chosen(n, called, scopes, given, expected, s, f) }
+	# the level the call writes is its definitions' level letters' (letters.wap level_letters) while the call chooses
+	# among them, and no other call's; where none has a level letter, the brackets read two ways
+	if candidates.all(definition => level_names(definition) is empty) { return implicit_typed(n, called, given, written!, candidates, s, f, expected) ?? refused(n, "${called}[${written!}](…) reads as a level written to ${called}, which has no level letter like the u of Sort(u), or as the item of a list ${called}, which is a function: give ${called} a level letter, or write the item's call as (${called}[${written!}])(…)") }
+	call_chosen(n, called, scopes, given, expected, s, f, [level_written(written!, 0) ?? refused(written!, "a level is a whole number from 0, Sort(0) Prop")])
 }
+# A call at a written level giving the types of a definition's letters first, `identity[1](int, 3)` of `identity(a:
+# T)`: each letter an implicit parameter `T: Sort(u)` in front (wiki/universe.md), given a type at that level, and the
+# call that of the rest with each letter bound to its type; ø where no definition has letters and these arguments
+implicit_typed(n: Node, called: Node, given: list, written: Node, candidates: list<Signature>, s: TypingState, f: TypeFrame, expected: Term?) as Node? := {
+	level = level_written(written, 0) ?? return ø
+	fitting = candidates.filter(one => not letters_written(one) is empty and takes_count(one, #given - #letters_written(one), s))
+	if fitting is empty { return ø }
+	if #fitting > 1 { refused(n, "${called}[${written}](…) gives the types of the letters of each of ${candidates_text(fitting, s)}; write the arguments' types") }
+	definition = fitting#1
+	letters = letters_written(definition)
+	types = (1 to #letters).map(at => fact_type(fact_of(given#at, DENOTES)) ?? refused(given#at, "${called}[${written}] takes the type of ${letters#at} here, and this is no type"))
+	for at in 1 to #letters {
+		universe = universe_of(types#at!)
+		if not levels_equal(universe_level(universe)!, level) { refused(given#at, "${called}[${written}] takes ${letters#at} at level ${written}, and ${type_text(types#at!)} is a ${type_text(universe)}") }
+	}
+	call_chosen(n, called, [[definition]], given.drop(#letters), expected, s, f, [], (1 to #letters).map(at => Binding(letters#at, types#at!)))
+}
+# the letters a definition's parameters write, each once, in the order they first appear
+letters_written(definition: Signature) as list<text> := definition.parameters.flat_map(type => letters_in(type)).unique()
 # where no definition takes them all, a function's name among the arguments takes the rest, in turn: `print sin cos 0`
 # is print(sin(cos(0))) (wiki/call.md), said whole in one note
 nested_read(n: Node, called: Node, placed: list, candidates: list<Signature>, s: TypingState) as Node? := {
@@ -94,11 +143,17 @@ reading_key(head: Node) as text := place_of(head) + "${head}"
 call_shown(n: Node) as text := match n { Call(called, arguments) => "${called}(${arguments.map(call_shown).join(", ")})"; _ => "${n}" }
 # A call of the definition chosen among these scopes for typed arguments, each fitted as its parameter takes it, a
 # left-out one given its default; a call made without a frame, word_called, types its defaults on their own
-call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s: TypingState, f: TypeFrame?) as Node := {
+# (the levels the call writes and the types it gives its letters, `identity[1](text, "a")`, are its definitions' only
+# while it chooses among them and fits its arguments, never the body's calls: letters.wap letters_bound)
+call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s: TypingState, f: TypeFrame?, levels: list<Level> = [], letters: list<Binding> = []) as Node := {
+	s.levels_written[text(called)] = levels
+	s.letters_given[text(called)] = letters
 	# where no definition takes the arguments, one whose class has a get is read through it, `x > 5` of a signal
 	if given.any(argument => got_from(argument, s)) and not (try { chosen_definition(n, called, scopes, given, expected, s); yes } catch e { no }) { given = given.map(argument => got(argument, s)) }
 	meant = chosen_definition(n, called, scopes, given, expected, s)
 	taken = arguments_fitted(meant, given, s) + defaults_given(meant, #given, s, f ?? TypeFrame())
+	s.levels_written.remove(text(called))
+	s.letters_given.remove(text(called))
 	chosen = function_typed(meant, taken.map(argument => value_type(argument)), s, n)
 	if f != ø { called_reads(chosen, n, s, f!) }
 	result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
@@ -228,7 +283,7 @@ char_text(character: Node) as Node := with_type(refitted(Text(text(character)), 
 # a call's typed arguments as their parameters (their letters bound by the call) have them: a char read as its text,
 # a plain value boxed for an any or an optional
 arguments_fitted(definition: Signature, given: list, s: TypingState) as list := {
-	letters = (letters_bound(definition, given.map(value_type), s) ?? NOTHING_CALLED).letters
+	letters = (letters_bound(definition, given.map(value_type), s, denoted_types(given)) ?? NOTHING_CALLED).letters
 	wanted = definition.parameters.map(type => substituted(type, letters))
 	(1 to #given).map(at => if counted(value_type(given#at), wanted#at) then with_type_of(placed_like(Prim(symbol(COUNTING), [given#at]), given#at), wanted#at) else as_wanted(given#at, wanted#at, s))
 }
@@ -305,16 +360,23 @@ chosen_definition(n: Node, called: Node, scopes: list, given: list, expected: Te
 	owner = text_of(fact_of(called, OWNER))
 	if owner != ø { candidates = candidates.filter(definition => definition.parameters.any(parameter => type_text(parameter) == owner!)) }
 	types = given.map(argument => value_of(argument, "to pass"))
-	dispatcher = dispatching(called, candidates, types, s)
+	dispatcher = dispatching(called, candidates, given, types, s)
 	if dispatcher != ø { return dispatcher }
 	fitting = candidates.filter(definition => takes_fitting(definition, given, s) and not reads_all_nodes(definition, given, s))
 	if #fitting > 1 { fitting = most_specific(fitting, types, s) }
 	if #fitting > 1 { fitting = innermost(fitting, scopes) }
 	if #fitting > 1 and wants_value(expected) { fitting = fitting.filter(definition => definition.result != ø and (definition.result) == expected!) }
-	if fitting is empty { refused(n, "no ${called} takes (${types_text(types)}): ${candidates_text(candidates, s)}${words_missing(candidates, types, s)}; define ${called}(${(1 to #types).map(at => "${PARAMETER_NAMES#at}: ${type_text(types#at)}").join(", ")}) to take them") }
+	if fitting is empty {
+		lacking = words_missing(candidates, types, s)
+		why = if lacking is empty then "no ${called} takes (${types_text(types)}): ${candidates_text(candidates, s)}; define ${called}(${parameters_proposed(types)}) to take them" else lacks_text(lacking, "${called}")
+		s.lacked = Lacked(why, lacking)
+		refused(n, why)
+	}
 	if #fitting > 1 { refused(n, "this reads as a call of each of ${candidates_text(fitting, s)}; write the arguments' types or the type wanted") }
 	fitting#1
 }
+# the types the arguments are where they are types, `int` of `identity(int, 3)`; ø for other values
+denoted_types(given: list) as list<Term?> := given.map(argument => fact_type(fact_of(argument, DENOTES)))
 # whether a definition takes these arguments, each one fitting its parameter
 # (a parameter typed by generic letters takes an argument whose type binds them alike, and one of a function type a
 # function value whose function gives that type's result for its parameters, see letters_bound); the arguments known
@@ -325,7 +387,7 @@ takes(definition: Signature, given: list, s: TypingState, fit: function) as bool
 	if not takes_count(definition, #given, s) { return no }
 	plain = (1 to #given).filter(at => not has_letters(definition.parameters#at) and not has_unknowns(value_type(given#at)))
 	if not plain.all(at => argument_taken(given#at, parameters#at, NOTHING_CALLED, s, fit)) { return no }
-	called = letters_bound(definition, given.map(value_type), s) ?? return no
+	called = letters_bound(definition, given.map(value_type), s, denoted_types(given)) ?? return no
 	(1 to #given).all(at => argument_taken(given#at, parameters#at, called, s, fit))
 }
 # whether a definition takes these arguments, each one fitting its parameter by fits
@@ -358,12 +420,12 @@ candidates_of(definitions: list<Signature>, types: list, s: TypingState) as list
 })
 # an argument converted to its parameter's type: wrapped where the parameter is written as an optional or becomes one
 # as the call binds its letters (`==(a: T, b: T)` of a Node? and a Node wraps the Node), else converted to a type
-# that writes no letters as bound (an int to a float, an enum's value to a Node); a function value is typed for a
-# function type, not converted
+# that writes no letters as bound (an int to a float, an enum's value to a Node)
 converted_at(written: Term?, called: Called, given: Term?, s: TypingState) as bool := {
 	if wraps(written, given) { return yes }
 	wanted = substituted(written, called.letters) ?? return no
-	if function_parts(wanted) != ø { return no }
+	# a function value is typed for a function type, a value for a protocol its type does: neither is converted
+	if function_parts(wanted) != ø or protocol_named(s.records, wanted) != ø { return no }
 	if has_letters(wanted) or has_unknowns(wanted) then wraps(wanted, given) else conversion(given, wanted, s) != Conversion.Same
 }
 more_specific(one: Candidate, other: Candidate, s: TypingState) as bool := {
@@ -375,13 +437,15 @@ more_specific(one: Candidate, other: Candidate, s: TypingState) as bool := {
 decided(forward: bool, back: bool) as bool? := if forward == back then ø else forward
 # whether each of these parameter types converts into the other's at its place
 converts_into(given: list<Term?>, wanted: list<Term?>, s: TypingState) as bool := #given == #wanted and (1 to #given).all(at => type_converts(given#at, wanted#at, s))
-# whether a parameter type converts into another: none takes every type and is taken only by none, a letter, a hole
-# and a protocol take every written type; a type that writes letters takes those whose parts convert into its parts,
-# read as such where they read so (a Range as a list<int>), an optional the type of its value too
+# whether a parameter type converts into another: none takes every type and is taken only by none, a letter and a hole
+# take every type, a protocol every written type but not a letter, which takes more; a type that writes letters takes
+# those whose parts convert into its parts, read as such where they read so (a Range as a list<int>), an optional the
+# type of its value too
 type_converts(given: Term?, wanted: Term?, s: TypingState) as bool := {
 	if wanted == ø or given == ø { return wanted == ø }
-	if is_letter(wanted) or is_unknown(wanted) or protocol_named(s.records, wanted) != ø { return yes }
+	if is_letter(wanted) or is_unknown(wanted) { return yes }
 	if is_letter(given) or is_unknown(given) { return no }
+	if protocol_named(s.records, wanted) != ø { return yes }
 	if not has_letters(wanted) and not has_unknowns(wanted) { return conversion(given, wanted, s) in STATIC_CONVERSIONS }
 	if wraps(wanted, given) { return type_converts(given, base_of_optional(wanted), s) }
 	given_parts = type_parts(read_type(given, wanted, s.records) ?? given) ?? return no
@@ -422,8 +486,11 @@ protocol_named(records: Records, type: Term?) as Node? := {
 #   a class's field counting as a word are not there. Paid off by function references in core/emit/ and the typing of
 #   defaults here; `map default ListMap` waits for its declaration rule.
 conforms(given: Term?, wanted: Term?, s: TypingState) as bool := {
-	protocol = protocol_named(s.records, wanted)
-	protocol != ø and given != ø and fields_of(protocol).all(word => does_word(given, word, s))
+	protocol = protocol_named(s.records, wanted) ?? return no
+	if given == ø { return no }
+	key = "${type_text(given, yes)} ${type_text(wanted, yes)}"
+	if not s.conforming.has(key) { s.conforming[key] = fields_of(protocol).all(word => does_word(given, word, s)) }
+	s.conforming[key]
 }
 # A program adds to a function every program has only where none of its definitions takes these types already
 # (wiki/function.md): `+(n: int, t: Ship)` adds one, `round(x)` and `missing(x: int?)` are taken; a function taking a
@@ -449,8 +516,8 @@ taken_alike(word: Signature, signature: Signature, s: TypingState) as bool := {
 either_takes(a: Term?, b: Term?, s: TypingState) as bool := a == ø or b == ø or [[a!, b!], [b!, a!]].any(pair => conversion(pair#2, pair#1, s) in STATIC_CONVERSIONS or unified(pair#1, pair#2, [], s) != ø or conforms(pair#2, pair#1, s))
 # whether a written type names one of these types, inside list<…>, an optional or a function type too
 mentions_type(type: Term?, names: list<text>) as bool := type != ø and (names.contains(type_text(type!)) or (type_parts(type) ?? []).any(part => mentions_type(part, names)))
-# the protocol words these types lack for these definitions' protocol parameters, as a refusal's fix-it
-words_missing(definitions: list<Signature>, types: list, s: TypingState) as text := {
+# the protocol words these types lack for these definitions' protocol parameters, each once
+words_missing(definitions: list<Signature>, types: list, s: TypingState) as list<Lack> := {
 	lacking = []
 	for definition in definitions {
 		if #definition.parameters == #types {
@@ -460,7 +527,7 @@ words_missing(definitions: list<Signature>, types: list, s: TypingState) as text
 			}
 		}
 	}
-	if lacking is empty then "" else "; " + lacking.join("; ")
+	lacking.unique
 }
 # a function named as a protocol is its conversion, `x as shape`, and a class's claim of it, `class square: shape {…}`:
 # it takes a typed value whose type does the protocol's words
@@ -468,17 +535,23 @@ claim_checked(claim: Signature, s: TypingState) := {
 	protocol = if #claim.parameters == 1 then protocol_named(s.records, word_term(claim.name)) else ø
 	given = if protocol == ø then ø else claim.parameters#1 ?? refused(claim.definer, "a function named as the protocol ${claim.name} takes a type doing it: `${claim.name}(x: square)`")
 	lacking = if given == ø then [] else words_lacking(given!, protocol!, s)
-	if lacking is not empty { refused(claim.definer, lacking.join("; ")) }
+	if lacking is not empty { refused(claim.definer, lacks_text(lacking, claim.name)) }
 }
-# the required words of a protocol a type does not do, each as the fix-it defining it
-words_lacking(given: Term, protocol: Record, s: TypingState) as list<text> := fields_of(protocol).filter(word => not does_word(given, word, s)).map(word => "${type_text(given)} is no ${record_name(protocol)}: define ${declared_name(word)}(x: ${type_text(given)}${", …" * (parameter_count(word) - 1)})")
+# the required words of a protocol a type does not do
+words_lacking(given: Term, protocol: Record, s: TypingState) as list<Lack> := fields_of(protocol).filter(word => not does_word(given, word, s)).map(word => Lack(type_text(given), record_name(protocol), "${declared_name(word)}(${parameters_proposed((1 to parameter_count(word)).map(_ => given))})"))
+# the lacking words as wiki/trait.md "Conforming" says what a caller needs, each with the fix-it defining it:
+# `dot is not Comparable: < needs compare(a: dot, b: dot); define compare(a: dot, b: dot) := …`
+lacks_text(lacking: list<Lack>, caller: text) as text := lacking.map(lack => "${lack.type} is not ${lack.protocol}: ${caller} needs ${lack.word}; define ${lack.word} := …").join("; ")
+# the parameters a fix-it proposes for values of these types, `a: dot, b: dot`
+parameters_proposed(types: list) as text := (1 to #types).map(at => "${PARAMETER_NAMES#at}: ${type_text(types#at)}").join(", ")
 does_word(given: Term, word: Node, s: TypingState) as bool := definitions_named(text(declared_name(word)), s).any(definition => does_as(definition, shaped(given, s), parameter_count(word), s))
 # how many parameters a protocol's required word takes, the value's own first
 parameter_count(word: Node) as int := #((function_parts(written_type(declared_type(word))) ?? refused(word, "a protocol's word is a function type")).parameters)
-# whether a definition takes a value of this type first, then as many parameters as a protocol's word
+# whether a definition takes a value of this type first, then as many parameters as a protocol's word: untyped or a
+# letter, it takes every type's, `equals(a: T, b: T)` making every value Equatable
 does_as(definition: Signature, given: Term, arity: int, s: TypingState) as bool := {
 	types = definition.parameters
-	#types == arity and (types#1 == ø or shaped(types#1!, s) == given)
+	#types == arity and (types#1 == ø or is_letter(types#1!) or shaped(types#1!, s) == given)
 }
 
 # whether the Nodes a definition takes, two or more, are all values read as one: values that are no Nodes never meet as
@@ -514,20 +587,24 @@ written_at(definition: Signature, s: TypingState) as text := "line ${line_of(def
 # a function as a refusal names it, its place telling apart the functions of one name and the function values, each a λ
 called_name(definition: Signature, s: TypingState) as text := "${definition.name} (${written_at(definition, s)})"
 
+# a call of a function wap refuses: a library function refused for a word a type lacks says that its caller needs
+# it, the program's own call named, `< needs compare(a: dot, b: dot)`; else the call names the function and,
+# for the library's, the first reason
+callee_refused(at: Node, definition: Signature, refusal: Refusal, library: bool, s: TypingState) := if library and refusal.lacking is not empty then refused(at, lacks_text(refusal.lacking, definition.name)) else calling_refused(at, called_name(definition, s), refusal.first, library)
 # A function typed for these argument types, its written types' shapes known first, so it types alike however it is
 # reached: from a block, a call, or alone
 # It ends alone when wap refuses it: refused once, and each caller is refused naming it
 function_typed(definition: Signature, argument_types: list, s: TypingState, at: Node) as TypedFunction := {
 	key = definition.key
-	name = called_name(definition, s)
 	library = has_fact(define_of(definition, s), UNBOUND)
 	known = s.refusals.find(each => each.key == key)
-	if known != ø { calling_refused(at, name, known!.first, library) }
+	if known != ø { callee_refused(at, definition, known!, library, s) }
 	before = #s.refusals
 	try shaped_typed(shaped_once(definition, s), argument_types, s, at) catch e {
-		first = if #s.refusals > before then s.refusals#(before + 1).first else e.message
-		s.refusals += [Refusal(key, e.message, first)]
-		calling_refused(at, name, first, library)
+		inner = if #s.refusals > before then s.refusals#(before + 1) else Refusal(key, e.message, e.message, if e.message.contains(s.lacked.why) then s.lacked.lacking else [])
+		refusal = Refusal(key, e.message, inner.first, inner.lacking)
+		s.refusals += [refusal]
+		callee_refused(at, definition, refusal, library, s)
 	}
 }
 # A function typed for these argument types, once per tuple: its parameters, then its body, its result the written
@@ -559,7 +636,9 @@ shaped_typed(definition: Signature, argument_types: list, s: TypingState, at: No
 		}
 	}
 	typed = TypedFunction(definition, types)
-	written = substituted(written_type(declared_type(name)), letters)
+	typed.written = declared_type(name)
+	stated = if states(typed) then statement_held(typed.written, typed, parameters_reading(typed, {}, s), s) else ø
+	written = stated ?? substituted(written_type(typed.written), letters)
 	# a bare `list` (or `list?`) written takes the body's own type, as a bare list parameter takes its argument's
 	typed.jumps = written == NEVER_TERM
 	typed.result = if names_bare_kind(written) or typed.jumps then ø else written
@@ -582,8 +661,11 @@ body_typed(typed: TypedFunction, definition: Signature, name: Node, parameters: 
 	frame.result = typed.result
 	frame.letters = letters
 	frame.function = declared_name(name)
+	frame.typed_function = typed
 	typed_parameters = (1 to #typed.arguments).map(at => parameter_typed(items_of(parameters)#at, typed.arguments#at, frame))
 	frame.variables += captured_by(define_of(definition, s), typed.arguments)
+	enclosing = s.within
+	s.within = function_key(define_of(definition, s))
 	typed_body = typed_form(body, s, frame, typed.result)
 	given = result_given(typed_body, frame, name, s)
 	# a written result stays the result, `show(x: any): text := raise(…)`; one that writes none and never returns jumps
@@ -594,6 +676,7 @@ body_typed(typed: TypedFunction, definition: Signature, name: Node, parameters: 
 	typed.result = typed.result ?? (if given != ø and given != EMPTY_TERM and base_of_optional(written) != ø then optional_type(given) else given)
 	typed.define = refitted(Define(signed_name(typed, s), with_items(parameters, typed_parameters), typed_body), define_of(definition, s))
 	typed.late = frame.late
+	s.within = enclosing
 }
 # a call typed by the function it calls: of its result, or jumping when that never returns
 result_of(n: Node, chosen: TypedFunction) as Node := if chosen.jumps then jumping(n) else if chosen.result == ø and not chosen.done then with_fact(n, RESULT_UNKNOWN, Text(chosen.unknown_result)) else with_type_of(n, value_bearing(chosen.result))
@@ -622,5 +705,32 @@ function_of(definition: Define) as Signature := match definition { Define(name, 
 all_typed(definition: Signature, records: Records) as bool := definition.parameters.all(type => once_typed(type, records))
 # a written type that types its parameter once for every call: none missing, no generic letter, none typed anew
 once_typed(type: Term?, records: Records) as bool := type != ø and not has_letters(type) and not takes_own_type(type, records)
-# `type of x`: the text of x's static type, x itself never run; a type's type is Type
-type_of_typed(n: Node, of: Node, s: TypingState, f: TypeFrame) as Node := with_type(placed_like(Text(if names_type(of, s) then TYPE_OF_TYPE else type_text(value_type(typed_form(of, s, f, ø)))), n), TEXT_TYPE)
+# `type of x`: x's static type as a value, x itself never run; a type's type is its universe; a function at a
+# written level, `type of identity[1]`, is its definition's type at that level
+type_of_typed(n: Node, of: Node, s: TypingState, f: TypeFrame) as Node := {
+	levelled = level_written_call(of)
+	if levelled != ø { return type_value(levelled_type(levelled!, s) ?? refused(of, "no ${levelled} has the levels ${fact_of(levelled!, LEVEL_WRITTEN)}"), n) }
+	type_value(if names_type(of, s) then universe_of(type_term(of)) else value_type(typed_form(of, s, f, ø))!, n)
+}
+# A definition's type at the level written to its name, `(T: Type) -> T -> T` of `identity[1]` with identity(T:
+# Sort(u), a: T): T: each parameter a binder the ones after it may name, each letter no parameter names an implicit
+# parameter in front at that level (wiki/universe.md); ø where no definition has as many level letters
+levelled_type(called: Node, s: TypingState) as Term? := {
+	written = [level_written(fact_of(called, LEVEL_WRITTEN)!, 0) ?? return ø]
+	fitting = scoped_definitions(called, s).flat_map(scope => scope).filter(one => #level_names(one) == #written or level_names(one) is empty and not letters_written(one) is empty)
+	if fitting is empty { return ø }
+	if #fitting > 1 { refused(called, "${called} at a level reads as each of ${candidates_text(fitting, s)}; write the call's arguments") }
+	definition = fitting#1
+	if definition.parameters.any(type => type == ø) { refused(called, "${called}'s type at a level takes the type of each of its parameters: give each one its type") }
+	names = level_names(definition)
+	bound = levels_bound(names, written)
+	named = parameters_in(definition, s).map(parameter => text(declared_name(parameter)))
+	binders = letters_written(definition).filter(letter => not named.has(letter)).map(letter => Binding(letter, universe(written#1))) + (1 to #named).map(at => Binding(named#at, definition.parameters#at!))
+	c = checker(TYPES.environment, [])
+	variables: list<Term> = []
+	for binder in binders {
+		variables.add(hypothesis(c, binder.key, type_substituted(binder.type, bound)))
+		bound.add(Binding(binder.key, variables.last!))
+	}
+	closed_over(c, type_substituted(definition.result ?? return ø, bound), variables, no)
+}

@@ -18,25 +18,49 @@ RESTS_ON := ", rests on "
 # one whose typing is refused; a proved law resting on an assume is Assumed, one resting on axioms names them
 # (wiki/proof.md "What a proof rests on")
 class Shown { said: text; fails: bool = no }
-verdict(law: TypedLaw, assumed: list<text>): Shown := {
+verdict(law: TypedLaw, assumed: list<text>, names: map<text, text>): Shown := {
 	if law.refused != ø { return Shown("${law.name}: ${law.refused!}", yes) }
 	typed = try typed_verdict(law) catch refusal {
 		refusal_only(refusal)
 		return Shown(refusal.message)
 	}
-	Shown("${law.name}: ${match typed { Holds => proved_said(law.name, assumed); Breaks => BROKEN; Open => UNTESTED; Assumed => ASSUMED; Axiom => AXIOM }}", typed == TypedVerdict.Breaks)
+	Shown("${law.name}: ${match typed { Holds => proved_said(law, assumed, names); Breaks => BROKEN; Open => UNTESTED; Assumed => ASSUMED; Axiom => AXIOM }}", typed == TypedVerdict.Breaks)
 }
-proved_said(name: text, assumed: list<text>): text := {
-	resting = resting_on(name)
+# the axioms a theorem of the kernel rests on, by their laws' names (a proof's theorem goes by its function's key)
+resting_named(kernel: text, names: map<text, text>): list<text> := resting_on(kernel).map(name => names.get(name) ?? name)
+proved_said(law: TypedLaw, assumed: list<text>, names: map<text, text>): text := {
+	resting = resting_named(kernel_name(law), names)
 	if resting.any(axiom => assumed.contains(axiom)) then ASSUMED else if resting is empty then PROVED else PROVED + RESTS_ON + resting.join(", ")
+}
+
+# The rule the law run reads a law with hypotheses by (native/driver.wap): the law as sugar writes it, its binders
+# holes, taken to the law of its other binders whose statement holds where its hypotheses do, `if h then statement else
+# yes`, so a trial where a hypothesis computes to no holds without its statement running
+run_rule(law: TypedLaw): text := {
+	holes = (1 to #law.binders).map(at => "$p${at}: $t${at}")
+	hypotheses = (1 to #law.binders).filter(at => law.given.any(premise => premise.binder == law.binders#at))
+	kept = (1 to #law.binders).filter(at => not hypotheses.contains(at)).map(at => holes#at)
+	held = hypotheses.reverse.fold("$statement", (statement, at) => "(if $t${at} then ${statement} else yes)")
+	"rule law(${law.name}: ((${holes.join(", ")}) -> $statement)) => law(${law.name}: ((${kept.join(", ")}) -> ${held}))"
+}
+
+# the answer to `axioms of name`, the axioms it rests on, a law computed to yes resting on none
+axioms_said(name: text, laws: list<TypedLaw>, names: map<text, text>): text := {
+	law = laws.find(law => law.name == name)
+	if law == ø and declared_constant(name) == ø { return "axioms of ${name}: ${name} names no law, axiom or definition" }
+	"[${resting_named(if law == ø then name else kernel_name(law!), names).join(", ")}]"
 }
 
 try {
 	arguments = door_arguments(args)
 	typed = laws_typed(arguments.wap_folder, door_program(arguments))
-	assumed = typed.laws.filter(law => is_assume(law.proof)).map(law => law.name)
-	verdicts = typed.laws.map(law => verdict(law, assumed))
-	for answer in typed.answers + typed.asked.map(name => axioms_said(name, typed.laws)) { print answer }
+	laws = typed.laws
+	if arguments.run_rules != "" { write(arguments.run_rules, laws.filter(law => law.given is not empty).map(run_rule).map(rule => rule + "\n").join("")) }
+	assumed = laws.filter(law => is_assume(law.proof)).map(law => law.name)
+	names: map<text, text> = {}
+	for law in laws { names[kernel_name(law)] = law.name }
+	verdicts = laws.map(law => verdict(law, assumed, names))
+	for answer in typed.answers + typed.asked.map(name => axioms_said(name, laws, names)) { print answer }
 	for shown in verdicts { print shown.said }
 	if verdicts.any(shown => shown.fails) { exit(FAILED_EXIT) }
 } catch refusal { stopped_by(refusal) }

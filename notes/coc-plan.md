@@ -1027,7 +1027,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | K6 | landed | 4e49e80f, 438cf07e | |
 | K7 | landed | 0b72075e | |
 | L1 logic | landed; leaves with the theory prelude on unify-typers, back in wap/types at T6a6 | c9f1a8fd | |
-| L2 numbers | landed; on unify-typers int's laws live in the kernel (kernel/integer_laws.wap) | f1220084 | |
+| L2 numbers | landed; on unify-typers int's laws live in the kernel (extensions/prove/integer_laws.wap) | f1220084 | |
 | L3 data | landed; its tests go as unpinned (lists as an enum is parked, "Not in T6") | 67154fad | |
 | L4 effects | landed; the effect facts are T5b1, computation types cut | 62ce375f | |
 | L5 collections | folded: `rational` and `set` are Q1, `i64` is T8b | | Q1, T8b |
@@ -1085,7 +1085,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T7 the theory extension retires | planned (notes/coc-t7.md) | | T6 |
 | T8a the reader | planned (notes/coc-t8.md); its first commit is whole()'s sign | | exact-big-literals |
 | T8b the machine words | planned (notes/coc-t8.md; below "T8b: what a word's row means"); origin/t8b-q1 a739da9b holds its types part; builder wap-q1-kernel | | Q1, T4d |
-| T8b-k the words' kernel part | planned (below "T8b-k: the kernel's division and the wrapping meanings") | | exact-big-literals, int-takes, T8b |
+| T8b-k the words' kernel part | planned (below "T8b-k: the kernel's division and the wrapping meanings"); origin/t8b-kernel 8dd2847b holds its code, unbuilt; builder wap-q1-kernel | | exact-big-literals, int-takes, kernel-length, T8b |
 | T8c exact int on the run | planned (notes/coc-t8.md) | | T8a, T5f |
 
 ### What each open step costs now
@@ -1110,7 +1110,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | kernel-length | kernel-length.md | | −55, and about −37 dead | | |
 | T6a1 proofs | coc-t6a12.md | +10 | | | verify +35, extension +3 |
 | T6a2 hypotheses (what is left) | coc-plan.md (below) | 0 | 0 | 0 | extension +2, prove +4, verify −35 |
-| T6a3 indexed families | coc-t6a.md | +100 | | | |
+| T6a3 indexed families | coc-plan.md (below) | +70 | 0 | 0 | |
 | generic records with T6a3's parameters | coc-generic-records.md | its plan's | | | |
 | T6a4 cases and induction | coc-t6a4.md | +92 | 0 (apart's builder moved, net 0) | | |
 | T6a1b `by` as a term | coc-plan.md (below) | +12 | | | verify −30 |
@@ -1128,7 +1128,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | T7 the extension retires | coc-t7.md | 0 (moves) | | | native +12 |
 | T8a the reader | coc-t8.md | +12 | +2 | | |
 | T8b machine words | coc-t8.md, coc-plan.md (below) | +1 | | +15 | |
-| T8b-k the words' kernel part | coc-plan.md (below) | | +24 | | |
+| T8b-k the words' kernel part | coc-plan.md (below) | 0 | +18 | | prove +110 |
 | T8c exact int on the run | coc-t8.md | +50 | −10 | +60 | emit +150, native +10 |
 | T5d statements | coc-t5d.md | parked | | | |
 
@@ -1143,7 +1143,7 @@ are counted apart, since a plain compile does not load them.
 | step | what works after it | core / kernel / types (estimate) | extension | wiki pages it serves | outcome tests |
 |---|---|---|---|---|---|
 | T6a7 universes in analyze | A binder's type may be a universe, `Sort(u)`, `Type(u)` or `Prop`, and a one-letter level name nothing defines is found as `T` is (universe.md "One definition at every level"); `type of Type` is `Type(1)`; a level written as an argument, `identity[1](int, 3)`, is read where the name before it is a function with level parameters, and refused with both readings named where it might also be an index (`fs[1](3)` of a list, wiki/lambda.md) | core +45 (level binders found +20, a written level argument +15, levels shown +10), kernel 0 | 0 | universe.md | test_theory.wap's 13 universe lines: `type of (A: Type) -> A` is `Type(1)`, `bad: Type := Type` refused, `box(int)` refused where box takes a `Type(1)` |
-| T6a1b `by` read as a term | `by f, g` (and a chain step's `x by f`) wherever a proof stands, in a match arm, a chain step or a let, not only after a law's `:=`: typed as the statement expected there (refused where none is), read by term_of as a hole whose context is the locals in scope (parameters, hypotheses, a case's premise), the named laws kept with it; verify's provers answer each hole, a plain build answers none; `refl` a term the same way; chain sugar over the one `by` | core +12 (calls.wap +3, terms.wap +6, refl +3), kernel 0 | verify −30 (proof_apart, Split.proofs, proof_term, by_named and reflexive_under go: a second reading of proofs) | proof.md, law.md | Q1's sign_product and square_positive arms; test_proof_wanted's by lines |
+| T6a1b `by` read as a term | `by f, g` (and a chain step's `x by f`) wherever a proof stands, in a match arm, a chain step or a let, not only after a law's `:=`: typed as the statement expected there (refused where none is), read by term_of as a hole whose context is the locals in scope (parameters, hypotheses, a case's premise), the named laws kept with it; verify's provers answer each hole, a plain build answers none; `refl` a term the same way; chain sugar over the one `by` | core +12 (calls.wap +3, terms.wap +6, refl +3), kernel 0 | verify −30 (proof_apart, Split.proofs, proof_term, by_named and reflexive_under go: a second reading of proofs) | proof.md, law.md | Q1's sign_product and square_positive arms; test_proof_wanted's by lines Left open: a `by` finds its laws by their text (the provers' `function(text)`), so an overloaded law name takes its first definition; reading the bound name's DEFINED_AT needs that interface to take the node |
 | V1 one verdict per law | A plain compile computes each law. Without binders, it is Proved by computing or reported as FAILED, and it never stops the program. With binders, the run tries it and it is Tested. `wap verify` adds the provers and prints proof.md's six verdicts: Proved (with "rests on" its axioms, from the kernel's `axioms_of`), Tested, FAILED with the counterexample, Untested, Assumed (an `assume` it uses) and Axiom | core +25 (analyze/laws.wap: the statement computed to yes or no, its notice), kernel 0 | verify +30 (Tested, Assumed and Axiom beside today's three) | proof.md "Checking proofs", law.md "Checking a law" | `law double(3) == 6` Proved on a plain compile; `hard: Assumed`; `uses_choice: Proved, rests on choice`; an `axiom` line `Axiom`; a program's own `runs(…)` refused by `wap verify` too (test_theory_layouts: only the types module says how the host runs a declaration) |
 | V2 `wap check` | `wap check` lists the obligations left to the run, `--strict` refuses each one not proved, and the laws' verdicts are printed as `wap verify` prints them. Both commands load the proof extension through one door; a plain compile never loads it. dispatch.wap's global `obligations` list becomes a fact the door reads | core −5 (the global list goes), kernel 0 | check +40 (a door beside verify.wap, sharing door_arguments and the verdicts) | type.md "Proved or checked", effects.md (`wap check --strict` refuses an impure function), cli.md | `wap check` on `xs#i` with nothing proving `i` in range lists "is checked when the program runs"; `--strict` exits 1 naming it; a program with every obligation proved lists none |
 | V3 proved laws are facts | A law proved earlier is a fact for the laws after it (law.md's `fact(n) > 0` with its helper law first) and for obligations (3.9 step 2: an obligation matched against the conclusions of proved laws by unification, with no search, so a plain compile needs no provers). An obligation the provers prove under `wap check` loses its run check and its Fail | core +30 (an obligation instantiated from a proved law's conclusion), kernel 0 | prove +15 (an obligation as a Goal) | law.md (the helper-law example), type.md "Proved or checked" | law.md's pair both Proved; `#xs > 0` discharged by a proved law, so `effects of` the function has no Fail |
@@ -1320,12 +1320,11 @@ Steps 2-3 need nothing. Step 4 is normal path. Step 5 is careful. Totals: kernel
   kernel proves. core +1 (row_term).
 - The wrapping meanings and the division identity need the kernel's numbers past LARGEST and an int ÷ and %: they are
   T8b-k, below. What they are:
-  - Int's division identity, `a == (a ÷ m) * m + a % m`, one kernel theorem: with Q1's distribute and times_negated it
-    gives same_wrapped's symmetric and transitive, the congruences lift asks for and the wrap law; reflexive comes
-    from ADD_MINUS.
-  - The wrapping meanings: WRAPPED_SUM(a, b) := wrap(SUM(a, b)) with wrap(x) := (x - WORD_SMALLEST) % 2^64 +
-    WORD_SMALLEST, the same for subtract and multiply; ==, <, <= keep int's; ÷ and % keep int's but at MIN ÷ -1, which
-    raises. kernel about +8. Then `(quotient.of((a + b) as int) as wrapped) == quotient.of((a as int) + (b as int))` is
+  - Int's division identity, `a == (a ÷ m) * m + a % m`, a law of the provers' (extensions/prove), with Q1's
+    distribute and times_negated.
+  - The wrapping meanings: WRAPPED_SUM(a, b) := word.wrapped(SUM(a, b)), the wrap floored at the count (T8b-k step
+    4), the same for subtract and multiply; ==, <, <= keep int's; ÷ and % keep int's, and i64's divisor excludes
+    the smallest word ÷ -1. kernel about +8. Then `(quotient.of((a + b) as int) as wrapped) == quotient.of((a as int) + (b as int))` is
     same_wrapped(wrap(s), s) through quotient_sound, and a prim's result needs no range check because wrap lands in
     the range.
 - Gap lines: `x: i64 = WORD_LARGEST` then `x + 1 == WORD_SMALLEST` (green with the row meaning); `law up(a: i64): a +
@@ -1334,23 +1333,70 @@ Steps 2-3 need nothing. Step 4 is normal path. Step 5 is careful. Totals: kernel
 
 #### T8b-k: the kernel's division and the wrapping meanings
 
-After exact-big-literals (counts past LARGEST as Large, computed natively by the shortcuts) and int-takes (int's two
-cases), careful path, one builder. In order:
-1. The count's divide and remainder: two count functions by recursion, bound to Shortcut.Divide and Shortcut.Remainder
-   by `shortcut_fixed` beside Add … AtMost (kernel/counting.wap), fixed by the shortcut's statements
-   (kernel/numbers.wap shortcut_statements' Divide: f(m, k)·k + rest(m, k) == m, f(m, 0) == 0, rest(m, k + 1) <= k).
-   The count's division identity is then a theorem. kernel about +6.
-2. Int's ÷ and %, truncated as i64.div_s and i64.rem_s divide: by both ints' cases over the count's pair, the
-   quotient's sign by the cases and the remainder's the dividend's; INT_MEANINGS gains "i64.div_s" and "i64.rem_s".
-   The int division identity, `a == (a ÷ m) * m + a % m` for m != 0, by the cases from step 1 with Q1's
-   times_negated, one theorem. kernel about +8.
-3. M = 2^64 from a magnitude: an int numeral of a Magnitude beside int_numeral (natural(count_literal(m)), negative
-   of the one before), and M as magnitude.wap's product of 2^32 by itself or magnitude_of_digits. The compiler's own
-   ints wrap, so a whole number past i64 never passes through one. kernel about +2.
-4. The wrapping meanings: WRAPPED_SUM(a, b) := wrap(SUM(a, b)), wrap(x) := (x - WORD_SMALLEST) % M + WORD_SMALLEST,
-   the same for subtract and multiply, the i64 rows' meanings by row_term's written types. kernel about +8.
-5. Green: `wap verify` of word_sum_wraps and word_product_wraps Proved by their proofs (same_wrapped(wrap(s), s)
-   through quotient_sound, same_wrapped's symmetric and transitive from the division identity), not by refl.
+Read on int's two cases, `natural(n) | negative(n)` over the count, with negative(n) being -(n + 1), as Lean's Int
+is. origin/t8b-kernel 8dd2847b holds the code of all five steps, unbuilt, on that shape. It adds about kernel +147
+code lines, and the kernel's part below brings that to about +18. One builder, careful path, after int-takes and
+kernel-length (which moves integer_laws.wap to extensions/prove).
+
+The rule for the split: the kernel holds definitions and the statements a shortcut is fixed by. Every theorem about
+them is a law in extensions/prove/integer_laws.wap, declared when a prover loads.
+
+1. **The count's divide and remainder, fixed by their recursion equations.**
+   - `·remainder(m, k)` goes by the count's recursor on m: zero at zero, and at m's successor zero where the
+     remainder before plus one equals k, else that successor.
+   - `·divide(m, k)` counts those returns.
+   - A divisor of zero gives the quotient 0 and the remainder m, as numbers.wap's shortcut_value computes.
+   - numbers.wap's Divide statements are these four equations, like Add's and Multiply's. Each is proved by
+     computing (computed_proof), so the native ÷ and % on two numerals agree with them as native + agrees with
+     add's equations.
+   - shortcut_fixed binds a kind's functions: Divide takes both (bound_kinds).
+   - The characterization, `(m ÷ k)·k + m % k == m` and `m % (k + 1) <= k`, is a theorem in prove, by m with the
+     count's product laws.
+   - The count laws therefore stay lazy, not declared by every compile.
+   - kernel +4 (two definitions, the binding; the statements' arm keeps its size).
+2. **Int's ÷ and %, truncated as i64.div_s and i64.rem_s divide: Lean's Int.tdiv and Int.tmod, by both ints'
+   cases.**
+   - The quotient is the count quotient of the two sizes (a natural's count, a negative's count plus one). It is a
+     natural where the two cases agree, else made negative through from_zero: TIMES' own sign rule. One helper over
+     the sizes serves TIMES and the quotient.
+   - The remainder is the count remainder of the dividend's size by the divisor's, with the dividend's sign.
+   - INT_MEANINGS gains "i64.div_s" and "i64.rem_s", the rows of types/floats.wap's truncated_quotient and
+     truncated_remainder. The prelude's Euclidean ÷ and % are written over these.
+   - The divisor's condition (int's `!= 0`, and i64's divisor, which also excludes the smallest word ÷ -1) keeps
+     the value at zero from being read.
+   - The division identity `a == (a ÷ c)·c + a % c` for c != 0 is a theorem in prove, by both cases from step 1's
+     characterization and times_negated.
+   - kernel +4.
+3. **2^64 from a magnitude.**
+   - An int numeral of any size is natural(count numeral), with a negative one being the negative of the count
+     before it.
+   - WORD_LARGEST is 2^64 - 1, a magnitude (numbers.wap), and the modulus is its successor, written as one so the
+     count laws meet it syntactically.
+   - The compiler's own ints wrap, so a whole number past i64 never passes through one.
+   - kernel +2.
+4. **The wrapping meanings.**
+   - The wrap is floored at the count, with no int %:
+     - a natural(c) gives c's remainder by 2^64;
+     - a negative(c) gives 2^64 - 1 - (c's remainder by 2^64);
+     - put_back moves it back past the smallest word.
+   - word.wrapped is that function, the constant types/words.wap's wrapped_word names by @kernel.
+   - WORD_MEANINGS gives i64's rows int's SUM, SUBTRACTED and TIMES wrapped. row_term reads the meanings by the
+     definition's written parameter types: int's rows INT_MEANINGS, i64's WORD_MEANINGS.
+   - ==, < and <= keep int's meanings.
+   - In the kernel, i64 is a word whose rows have meanings and no block. A `type X < int` record has no fields of
+     its own, so it is never a one-case block: a block with no fields would make every i64 one value.
+   - kernel +8.
+5. **The wrap laws are proved, not computed.**
+   - In prove: ·remainder_small, `at_most(r, k) -> r % (k + 1) == r`, by r. Then word.wrapped_twice,
+     `wrapped(wrapped(x)) == wrapped(x)`: the floor remainder put back and taken off again is itself, by
+     regrouped, and it is its own remainder by remainder_small.
+   - In types/words.wap (T8b): same_wrapped(a, b) is `wrapped_word(a) == wrapped_word(b)`. Its reflexive,
+     symmetric and transitive are =='s own. word_sum_wraps and word_product_wraps are Proved through wrapped_twice
+     and quotient_sound, not by refl.
+   - prove about +110: the proofs t8b-kernel already writes, moved out of the kernel.
+
+Green: `wap verify` of word_sum_wraps and word_product_wraps Proved. The gap lines of T8b above:
+`x: i64 = WORD_LARGEST` then `x + 1 == WORD_SMALLEST`, and `law up(a: i64): a + 1 > a` not Proved.
 
 #### V1: every law gets its line
 
@@ -1383,9 +1429,10 @@ The plan, one mechanism twice: a hypothesis is a parameter of statement type, an
    Given, Split.given, LAW_GIVEN, is_hypothesis, premises, TypedLaw.given and lemma_proved's given all go;
    proof_apart stays. verify about −35.
 2. **`implies` in a law's statement is a hypothesis.** One rule in verify's front (extensions/law_statements.wap):
-   `law $name($parameters...): $a implies $b` is `law $name($parameters..., ·implied: $a): $b`, its binder a name no
-   program writes (like `_holds`). It fires after the short form has made the free names parameters, and before
-   lazy-implies' rule for `implies` reads the statement as a bool. The run keeps `implies` as the bool it is. Then
+   `law $name($parameters...): If($a, $b, True())` is `law $name($parameters..., ·implied: $a): $b`, its binder a name
+   no program writes (like `_holds`). `a implies b` reaches it as `If(a, b, yes)` (sugar/conditions.wap's implies
+   rule), so every spelling of that meaning, `if a then b else yes` among them, is a hypothesis too. It fires after the
+   short form has made the free names parameters. The run keeps the If as the bool it is. Then
    `law used(a, h: a < 3): a < 4` and `law smaller(a): a < 3 implies a < 4` state one Π, and the provers meet either
    as a fact. extension +2, kernel 0: no implies_decided over ·bool_cases, no library word in the kernel.
    `spec: wiki/law.md` on its commit.
@@ -1410,7 +1457,48 @@ hypothesis):
 Red lines it turns green: test_theory_connectives:18 (implies applied to a goal it implies); with T5c4's fact and the
 induction along fact's recursion, test_theory_connectives_wanted:9 (law.md's pair, V3's).
 
-Builds on origin/typed-by-result (the batch, T6a1b); step 2's order on lazy-implies, which is not on main yet.
+Builds on origin/typed-by-result (the batch, T6a1b).
+
+#### T6a3: indexed families on the batch
+
+The wiki: proposition.md:74-86 (`enum Even: nat -> Prop { zero: Even(0), step(e: Even(n)): Even(n + 2) }`, `n` a
+letter the compiler finds, `Even(4)` by `Even.step(Even.step(Even.zero))`, `Even(3)` without proof, Even with Odd),
+enum.md:87-98 (each case says its own result type; `Equal(a: T): T -> Prop { refl: Equal(a, a) }`).
+
+What the batch (typed-by-result) holds: an enum's header with parameters and a plain sort (`enum And(a: Prop, b: Prop):
+Prop`), mutual enums as one block (inductives.wap groups_of), and a kernel whose blocks take indices. An enum whose
+sort has indices stays an assumption (inductives.wap block_entered), counted open.
+
+The plan:
+1. **The index sort.** `enum Even: nat -> Prop` declares Even a family: its word a function of the index types into
+   the sort, its block's sort `Π indices, Prop`. origin/t6a3-indices 94954383 drafts this (+18); it is copied onto the
+   batch, not merged (it sits far behind).
+2. **A case's own result.** `zero: Even(0)`, `step(e: Even(n)): Even(n + 2)`: the case's type is `Π parameters,
+   Π found letters, Π fields, the result written`. A letter the case uses that nothing binds (`n`) is a field in front,
+   implicit, found as T6a7's letters_bound finds a letter; its type is read from where it stands (Even's index: nat).
+   A result that is not the family at the enum's parameters is refused, naming the case.
+3. **A constructor call typed from its fields.** The found letters are solved from the arguments' types, first order:
+   `Even.step(Even.zero)` takes n from `Even.zero: Even(0)` and gives `Even(0 + 2)`. The expected type is then checked
+   by the kernel's conversion, `Even(0 + 2 + 2)` against `Even(4)`. Unifying the result first would need `?n + 2 = 4`
+   solved, which no first-order unify does, `+` being int's function and not a constructor.
+4. **Equal.** enum.md:95's Equal is bound to the core's block after equality_checked confirms its shape, as bool's word
+   is filled (type_notation.wap truths_declared); the core keeps declaring Equal, which its own laws need first. Its
+   line enters wap/types only after a seed refresh carries indexed families (the seed rule); until then only test lines
+   write it.
+
+The kernel reads nat as its parent, so Even is over int: `Even(-2)` is a proposition without proof. An index `n + 2`
+of a nat place is an int, held there by the subtype's narrowing at the index or left as an obligation in the type.
+Matching on a proof of a family (`match e { zero => …; step(d) => … }`) needs the dependent motive: T6a4's.
+
+Estimates: core about +70 (the index sort +18, case results and found letters +30, typing from the fields with the
+conversion check +20, Equal's binding +4), kernel 0, sugar 0, types 0 until the seed refresh.
+
+Tests that pin it, all red now: test_proposition_wanted "an enum of proofs proves its cases" and four_is_even;
+wap/test_proposition_wanted "Even(3) has no proof" and "two propositions defined together"; wap/test_theory "enums
+that name each other are one block" (proposition.md's Even and Odd). No gap: enum.md:95 shows Equal's declaration
+only, which every `refl` line already exercises once the types module states it.
+
+Builds on typed-by-result once T6a1b is in it; one builder, careful path (inductives.wap and typing).
 
 #### Each step's wiki lines and the tests that pin them
 
@@ -1490,7 +1578,7 @@ example stays red. C2 needs T5's classes with type arguments (the trait's struct
 
 **Beside the dedup and the exact-big-literals landing.**
 - The dedup (unify-dedup: the equation toolkit and the regrouper shared by kernel/counting.wap,
-  kernel/integer_laws.wap and extensions/prove/linear.wap) touches none of T6a7, V1, V2, C1, C2, C4 or Q1's
+  extensions/prove/integer_laws.wap and extensions/prove/linear.wap) touches none of T6a7, V1, V2, C1, C2, C4 or Q1's
   files, so these run in parallel with it. V3 touches extensions/prove (goals.wap, facts.wap), so it starts after the dedup lands. Of
   T6a, T6a4 starts after it (a nat subject goes through int's case split in counting.wap); T6a3, T6a5 and T6a6 run
   beside it.

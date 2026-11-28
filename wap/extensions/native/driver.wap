@@ -33,12 +33,19 @@ BUILD_RUN := "wap/extensions/native/build.sh"
 # `wap verify <program.wap>`: the verify tool in the seed folder, run by this wap on the program, told the seed folder,
 # whose wap folder it reads (wap/extensions/verify/options.wap)
 VERIFY_PART := "verify.wasm"
+# `wap check [--strict] <program.wap>`: the check tool beside it, run the same way, its lines and exit status the run's
+CHECK_PART := "check.wasm"
 SEED_OPTION := "--seed"
 # the compiler's command that compiles a program's laws into functions (wap/compiler.wap), the verdicts of the kernel
 # and of the run each written to a temporary file of this template, and how a verdict line reads
 LAWS_COMMAND := "laws"
 VERDICTS_TEMPLATE := "/wap-verdicts-XXXXXX.txt"
 VERDICTS_SUFFIX := ".txt"
+# the verify program's option naming where it writes the rules of the laws with hypotheses, wap source the compiler
+# reads, each run's in a temporary file of this template
+RUN_RULES_OPTION := "--run-rules"
+RULES_TEMPLATE := "/wap-hypotheses-XXXXXX.wap"
+RULES_SUFFIX := ".wap"
 VERDICT_SEPARATOR := ": "
 # what an option word of `wap build` starts with, the program's file the word without it
 OPTION_START := "--"
@@ -78,6 +85,8 @@ code_of(argument: text): text := if argument == STANDARD_INPUT_PATH then input_r
 
 # the tests of the areas named after `test`, run by test/wap/run.sh; its exit status is this run's
 tested(words: list<text>) := script_ran(followed(TESTS_RUN, words, 2))
+# the program's obligations left to the run, listed by the check tool (wap/extensions/verify/check.wap)
+check_ran(words: list<text>) := exit(if system("'${executable_path}' '${seed_part(CHECK_PART)}' ${SEED_OPTION} '${seed_part("")}' ${words.drop(1).map(word => "'${word}'").join(" ")}") == 0 then 0 else 1)
 # the program's laws verified (laws_checked), each verdict a line, what was said beside them on standard error; the run
 # exits 1 when a law fails
 verified(words: list<text>) := {
@@ -97,8 +106,10 @@ laws_checked(program: text): LawsChecked := {
 	ran = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
 	module = temporary_made(MODULE_TEMPLATE, MODULE_SUFFIX)
 	compiling = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
-	refused = system("'${executable_path}' '${seed_part(VERIFY_PART)}' ${SEED_OPTION} '${seed_part("")}' '${program}' >'${proved}'") != 0
-	compiled = system("'${executable_path}' '${compiler_path}' ${LAWS_COMMAND} '${program}' '${module}' 2>'${compiling}'") == 0
+	# the rules the run reads the laws with hypotheses by, written by the verify program from its typing
+	hypotheses = temporary_made(RULES_TEMPLATE, RULES_SUFFIX)
+	refused = system("'${executable_path}' '${seed_part(VERIFY_PART)}' ${SEED_OPTION} '${seed_part("")}' ${RUN_RULES_OPTION} '${hypotheses}' '${program}' >'${proved}'") != 0
+	compiled = system("'${executable_path}' '${compiler_path}' ${LAWS_COMMAND} '${program}' '${module}' '${hypotheses}' 2>'${compiling}'") == 0
 	laws = if compiled then module_compiled(module) else 0
 	if laws != 0 { laws_ran(laws, program, ran) }
 	kernel = lines_of(file_text(proved))
@@ -107,7 +118,7 @@ laws_checked(program: text): LawsChecked := {
 	said = kernel.filter(line => verdict_read(line) == ø) + (if unran then [file_text(compiling)] else [])
 	used = if laws == 0 then [] else imported_modules(laws).map(name => module_path(name, program))
 	stamped = used.filter(path => path != "" and not path.starts_with(seed_part(""))).flat_map(stamps_of)
-	for path in [proved, ran, module, compiling] { unlink(path) }
+	for path in [proved, ran, module, compiling, hypotheses] { unlink(path) }
 	LawsChecked(shown + stamped, said, refused)
 }
 # the laws of a module the program uses, one of its own and not wap's (the library in the seed folder), by their
@@ -137,11 +148,10 @@ verdicts_joined(kernel: list<text>, run: list<text>): list<text> := {
 verdict_beside(proved: Verdict?, tried: Verdict): text := if proved is ø or tried.said.starts_with(BROKEN) or proved!.said in [UNTESTED, TESTED] then tried.said else proved!.said
 # the lines of a text, its empty ones left out
 lines_of(t: text): list<text> := t.split("\n").filter(line => not line is empty)
-# `wap format <program.wap>`, the program in canonical spelling, and `wap check <program.wap>`, the obligations left to
-# the run: the compiler's own command of that name
+# `wap format <program.wap>`, the program in canonical spelling, the compiler's own command of that name
 FORMAT_COMMAND := "format"
 CHECK_COMMAND := "check"
-compiler_ran(command: text, words: list<text>) := module_file_ran([words#1, compiler_path, command, words#2])
+compiler_ran(command: text, words: list<text>) := module_file_ran([words#1, compiler_path, command] + words.drop(1))
 # `wap format check <file.wap>` lists the lines the format would change, the file formatted into a temporary file of
 # this template
 FORMATTED_TEMPLATE := "/wap-formatted-XXXXXX.wap"
@@ -238,7 +248,7 @@ ran(action: Action, words: list<text>) := match action {
 	Action.Test => tested(words)
 	Action.Verify => verified(words)
 	Action.Format => formatted(words)
-	Action.Check => compiler_ran(CHECK_COMMAND, words)
+	Action.Check => check_ran(words)
 	Action.Module => module_file_ran(words)
 	Action.Program => program_ran(words)
 }

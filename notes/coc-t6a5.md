@@ -93,3 +93,12 @@ reads them and adds nothing there.
   it"). Its value is the proof, which a plain compile never runs.
 - Every claim refusal gets the effect rule's prefix, a proof's and a plain function's alike: one rule, no special
   case. Its words stay plain English, printed as a sentence.
+
+## Checks in the build round
+
+- The `@proof` mark reaches the Define: the rule's template puts it on the phrase (templates.wap:30-32), and no core
+  reader has read an annotation on a Define before. If the phrase-to-Call-to-Define path loses it, generic proofs go
+  unchecked and nothing turns red. Check that `theorem oops(T: Sort(u), a: T): False := loop()` is refused by effect,
+  then add its twin to test/wap/test_effects.wap beside `smaller`, a green file where a regression shows.
+- wap/test_proof_wanted 15-16 (loop, raise) and the generic line go green; test_proposition_wanted:8 stays red
+  (Exists, T6a3).
