@@ -11,10 +11,9 @@ written. What it builds on, read on main ccf63462:
   its own (REBOUND) and joins unlike bindings where paths meet; core/analyze/terms.wap already reads REBOUND for a
   name. A block's lets are terms since T5a (`lets_term`); T5d adds the assignment as a new let, the join of a choice,
   and the loops.
-- **The theory's twin:** extensions/theory/elaborate/statements.wap (165): a choice before the rest of a block joins
-  again (the rest read once as a function of the names the parts give), a counted loop is a walk down its count, with
-  `break` and `continue` as calls of the join and of the next round, and `return` giving the block's value at once. It
-  moves into core as below.wap and recursion.wap do in T5c (decided, coc-t5c.md).
+- **What T5d builds in core:** a choice before the rest of a block joins again (the rest read once as a function of
+  the names the parts give), a counted loop is a walk down its count, with `break` and `continue` as calls of the join
+  and of the next round, and `return` giving the block's value at once.
 - **Loops:** `For(at, n, body)` (kernel/forms.wap) always ends and is a recursion over the count. `While` is a
   recursion over its state: the T5c1 ending test applied to it would make a `while i < n { …; i += 1 }` no Div, but
   wiki/effects.md says "a `while` that may run" is Div. That is a spec question for wap-interviewer: the general rule
