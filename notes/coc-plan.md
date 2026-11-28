@@ -1250,7 +1250,7 @@ theorems, each by refl on the two-case definitions (integer_laws.wap, kernel +8)
 - predecessor(natural(·zero)) == negative(·zero).
 The provers then rewrite at the case level without unfolding sum. types +4.
 
-**Step 5: Lean's Int theorems bind with no bridge. This is the step that conflicts with today's shape.**
+**Step 5: Lean's Int theorems bind with no bridge.**
 - Binding is by shape, as Nat binds today (extensions/theory/second/bindings.wap:65-75, `enum nat { zero;
   successor(n: nat) }`). The two cases bind Int.ofNat and Int.negSucc to natural and negative, by position, not by
   name: extensions +6, an `int_bound` beside the number binding.
@@ -1259,14 +1259,12 @@ The provers then rewrite at the case level without unfolding sum. types +4.
   by crossed counts (`difference(ups(a) + ups(b), downs(a) + downs(b))`). The two agree on natural+natural and
   negative+negative by computing, but on a mixed pair only up to a proof (·add recurses on its second count, so
   `add(zero, successor(n))` is stuck for a variable n).
-- (A) Lean's definitions in the kernel: SUM, TIMES and NOT_ABOVE by cases, with DIFFERENCE as subNatNat (37ffb139
-  already gives it Lean's argument order). Then Lean's constants bind to wap's by checked shape, with no bridge.
-  kernel about +10 there. int_bridge_declared and integer_laws.wap's proofs are re-read on the new definitions; the
-  product laws (cb5b24ae, on q1) are written over the crossed form, so their churn is the cost to measure, about +30.
-- (B) Keep the crossed definitions and add one theorem per operation stating Lean's equation. That is a bridge, which
-  the card rules out.
-- Recommendation: A, as a step of its own after steps 1-4. It goes to warp-interviewer with both costs before it is
-  built, because the card says "no bridge" and A rewrites what the kernel's int laws rest on.
+- Decided (user 2026-11-27, Lean's exact shape so that imported Int theorems bind with no bridge): Lean's definitions in
+  the kernel. SUM, TIMES and NOT_ABOVE by cases, with DIFFERENCE as subNatNat (37ffb139 already gives it Lean's
+  argument order). Lean's constants then bind to wap's by checked shape. int_bridge_declared and integer_laws.wap's
+  proofs are re-read on the new definitions; the product laws (cb5b24ae, on q1) are written over the crossed form.
+  Measure to report: kernel about +10 for the definitions, about +30 of product-law churn (theory steps have no size
+  limit). A step of its own after steps 1-4.
 - The count's own functions bind already: ·add and ·multiply recurse on the second count as Lean's Nat.add and
   Nat.mul do, and ·subtract is Lean's Nat.sub (the predecessor of `m - n` at `successor(n)`, counting.wap:87).
 
@@ -1281,8 +1279,8 @@ The provers then rewrite at the case level without unfolding sum. types +4.
   number.md's successor, if the page names it; if not, the words wait for a page line).
 
 **Order and cost.** Step 1 after typed-by-result lands (careful path: the kernel's int, which every compile declares).
-Steps 2-3 need nothing. Step 4 is normal path. Step 5 (A) is careful, after the interviewer. Totals: kernel −2 (1),
-+8 (4), about +40 (5A); types +4; extensions +6.
+Steps 2-3 need nothing. Step 4 is normal path. Step 5 is careful. Totals: kernel −2 (1),
++8 (4), about +40 (5); types +4; extensions +6.
 
 **What conflicts with unify-typers' current shape.**
 - main is three cases. q1 9e41e3d7 and typed-by-result b3daebfd mixed two-case names with three-case code; the
