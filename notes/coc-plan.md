@@ -1051,7 +1051,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | C1 traits (C1a) | coc-c1.md | +13 | | +19 | |
 | C2 trait values (A, instances written by the trait's class rule) | coc-c2.md | +19 | | sugar +7 | emit 0 |
 | C1b structures | coc-c2.md | +22, with V3 or Q1 | | | |
-| C4 generic dispatch | coc-c4.md | −18 (the rounds stay; their whole-program retype goes) | | | |
+| C4 generic dispatch | coc-c4.md | −12 (the rounds stay; their whole-program retype goes) | | | |
 | Q1 quotients | coc-q1.md | +37 | | +27 | prove +5 |
 | T7 the extension retires | coc-t7.md | 0 (moves) | | | native +12 |
 | T8a the reader | coc-t8.md | +12 | +2 | | |

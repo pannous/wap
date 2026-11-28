@@ -77,7 +77,7 @@ What goes:
 dispatch_results keeps the plain definitions' results and adds, for each generic definition, its written result with
 letters as any (+2).
 
-Net: **core about −18**, and a speedup: a program that boxes collections is typed once, not once per round that changes a
+Net: **core −12, measured**, and a speedup: a program that boxes collections is typed once, not once per round that changes a
 result. That counts as "standing OK speed" only once measured, and the lines go either way.
 
 ## What a generic call on a boxed value compiles to
@@ -119,6 +119,6 @@ Unjoined results are a precision loss programs can see: `keys(any_map)` was list
 
 ## Estimate and order
 
-core about −18, kernel 0, emit 0. After C2's A, which makes trait values static. Careful path: a dispatcher's result
+core −12 (measured), kernel 0, emit 0. After C2's A, which makes trait values static. Careful path: a dispatcher's result
 type changes for every program with an any-held collection. The census and test_self are the check. The row in
-coc-plan.md says −90 at T5g; it becomes "−18, the rounds' reach; the rounds themselves are monomorphisation and stay".
+coc-plan.md says −90 at T5g; it becomes "−12, the rounds' reach; the rounds themselves are monomorphisation and stay".
