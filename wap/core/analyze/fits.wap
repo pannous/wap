@@ -72,6 +72,11 @@ copied_refinement(given: Term, wanted: Term, s: TypingState) as bool := {
 	if type_word(given) != LIST_TYPE or type_word(wanted) != LIST_TYPE or unrefined(given) == given { return no }
 	conversion(item_type(given), item_type(wanted), s) == Conversion.Same
 }
+# a list of a parent where its refinement's list is wanted: a copy of it whose items are all checked
+checked_refinement(given: Term, wanted: Term, s: TypingState) as bool := {
+	if type_word(given) != LIST_TYPE or type_word(wanted) != LIST_TYPE or unrefined(wanted) == wanted { return no }
+	conversion(item_type(given), item_type(wanted), s) == Conversion.Narrowed
+}
 # the type of two where one fits the other: the wider, else their union; any while a type is still unknown
 wider(a: Term, b: Term, s: TypingState) as Term := if conversion(b, a, s) in STATIC_CONVERSIONS then a else if conversion(a, b, s) in STATIC_CONVERSIONS then b else if has_unknowns(a) or has_unknowns(b) then ANY_TERM else union_type([a, b])
 # the type a shape narrows, `Node` of `Define` or of `Fn?`; ø for any other type
@@ -125,7 +130,7 @@ field_checked(given: Node, field: Node, holder: Term, record: Node, value: Node,
 # list<int> is; checked, an any's value where another type is, raising there when it holds another; ø when it cannot.
 # The conversions a choice of overloads asks for, the static ones, never check: an any argument, or a Node where a
 # shape is wanted, is chosen for at run time (core/analyze/dispatch.wap).
-enum Conversion { Same, Boxed, Widened, Read, Wrapped, Subtyped, Narrowed, Settled, Checked, Adapted }
+enum Conversion { Same, Boxed, Widened, Read, Wrapped, Subtyped, Narrowed, Settled, Checked, Adapted, Copied }
 STATIC_CONVERSIONS = [Conversion.Same, Conversion.Boxed, Conversion.Widened, Conversion.Read, Conversion.Wrapped]
 # the library function copying a list
 COPY_WORD = "copy"
@@ -148,6 +153,7 @@ conversion(given: Term?, wanted: Term?, s: TypingState) as Conversion? := {
 	wanted_item = item_type(wanted)
 	if parts_as_they_are(given, wanted, s) { return Conversion.Same }
 	if copied_refinement(given, wanted, s) { return Conversion.Read }
+	if checked_refinement(given, wanted, s) { return Conversion.Copied }
 	# a union's value is held as an any's is, so it is as it is where an any is, a wider union, or where each of its
 # parts is
 	if is_union(given) and (wanted == ANY_TERM or is_union(wanted) and boxed_fit(given, wanted) or union_parts(given).all(part => conversion(part, wanted, s) == Conversion.Same)) { return Conversion.Same }
@@ -183,6 +189,7 @@ converted(n: Node, wanted: Term, s: TypingState, at: Node, place: text) as Node 
 	way = conversion(given, wanted, s) ?? refused(at, "this gives ${type_text(given)}, ${place} ${type_text(wanted)}" + (if counted(given, wanted) then ": a bool counts as 1 or 0 only in a call, write it `as int`" else ""))
 	if way == Conversion.Settled { settles(given, wanted, s) }
 	if way == Conversion.Read and copied_refinement(given, wanted, s) { return copied(n, wanted, at, s) }
+	if way == Conversion.Copied { return copy_checked(n, wanted, at, s) }
 	if way == Conversion.Narrowed and word_by_row(n, wanted) { return with_type_of(n, wanted) }
 	if way == Conversion.Narrowed { return if narrowed_part(given, wanted, s) == ø then narrowed_call(n, wanted, at, s) else converted(narrowed_call(n, narrowed_part(given, wanted, s)!, at, s), wanted, s, at, place) }
 	if way == Conversion.Checked and error_part(given) != ø and error_part(wanted) == ø { return unfailed_call(n, given, wanted, s) }
@@ -191,9 +198,17 @@ converted(n: Node, wanted: Term, s: TypingState, at: Node, place: text) as Node 
 # a list given where its refinement's parent list is wanted: a copy of a new list, the list a named place holds is
 # copied only where written (`xs as list<int>`), as a callee changing the copy would leave it unchanged
 copied(n: Node, wanted: Term, at: Node, s: TypingState) as Node := {
-	fresh = match n { Call(head, items) => yes; List(items, bracket, separator) => yes; Prim(operation, arguments) => yes; _ => no }
+	fresh = match n { Call(head, items) => yes; List(items, bracket, separator) => yes; Prim(operation, arguments) => yes; Block(statements) => yes; _ => no }
 	if not fresh { refused(at, "${n} is a list of its own: write `${n} as ${type_text(wanted)}` where a copy of it is wanted") }
 	with_type_of(word_called(n, COPY_WORD, [n], ø, s), wanted)
+}
+# a list of items given where a list of a refinement is wanted: the items all checked by its condition, else a raise
+# naming the place, then the copy; one function for each type
+copy_checked(n: Node, wanted: Term, at: Node, s: TypingState) as Node := {
+	name = name_once("${COPY_WORD}(${type_text(wanted, yes)})", n, s)
+	condition = subset_condition(item_type(wanted)!)!
+	written_once(name, [unrefined(wanted), TEXT_TERM], reads => If(Call(symbol("all"), [reads#1, written_bound(condition, s)]), Call(symbol(COPY_WORD), [reads#1]), raising(reads#2, name, s)), wanted, s)
+	word_called(n, text(name), [n, message_given(other_shape(wanted, at, s), at)], wanted, s)
 }
 # whether a wasm row on whole numbers is the code, its result a word wherever the word is wanted
 word_by_row(n: Node, wanted: Term) as bool := match n { Prim(operation, arguments) => WORD_ROWS.contains(text(operation)) and type_text(wanted) == ROW_WORD; _ => no }
@@ -213,6 +228,8 @@ repacked(n: Node, way: Conversion, wanted: Term, s: TypingState) as Node := matc
 # a list or a map put into an any or a union, its type kept for the dispatches that choose among generic definitions by it
 boxing_noted(n: Node, wanted: Term, s: TypingState) as Node := {
 	given = value_type(n) ?? return n
+	# a list of a refinement is boxed as a copy of its parent's list: the box holds no list the program changes under its condition
+	if (wanted == ANY_TERM or is_union(wanted)) and type_word(given) == LIST_TYPE and unrefined(given) != given { return with_type_of(word_called(n, COPY_WORD, [n], ø, s), unrefined(given)) }
 	if wanted == ANY_TERM or is_union(wanted) { for part in union_parts(given) { if type_word(part) in COLLECTION_WORDS and not s.boxed.any(type => type == part) { s.boxed.add(part) } } }
 	n
 }
