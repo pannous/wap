@@ -1153,6 +1153,28 @@ are counted apart, since a plain compile does not load them.
 The kernel's laws (kernel/integer_laws.wap, Q1's product laws among them) are declared on every compile, so one term
 the kernel refuses there breaks every program: test_hello is the first check of any change to them.
 
+#### T6a1b: a law is its proof's function
+
+There is one law form. `law name(params): statement := proof` and its theorem twin are the function
+`@proof name(params): statement := proof ! Pure` (extensions/laws.wap), in the plain build and in verify alike. Verify
+reads a law from that Define:
+1. **The laws** are the Defines annotated @proof. A law without a proof keeps law_statements' bool function
+   `law_name(params): bool`, which V1's verdicts and the law runs test.
+2. **The statement** is the Define's written result, read by kernel_result under the function's reading: a bool
+   expression in a result place is its truth. The law's statement is the declared function's type, `pis(locals,
+   result)`. A subtype parameter's condition is a hypothesis of its local (parameters_reading).
+3. **The proof** is the function's value. `TYPES.prove`, a function from a ByHole to a proof, is set by verify before
+   typing to the provers' answer. by_term calls it and gives the proof term itself, so definition_of enters the
+   function as an ordinary Defined declaration. In a plain build `TYPES.prove` is ø: by_term gives the hole, and a
+   function still holding one is no definition.
+4. **The verdict:** a @proof function the kernel holds as Defined is declared the theorem of its name, its type the
+   statement (Holds). One typing refused gives its refusal by key (TYPES.refused). `assume` and `axiom` are typed at
+   the statement and give no value, so the law is declared an axiom.
+
+None of the second reading remains: no PROOF_MARK and no stated_proof_typed or stated_term, no TYPES.proofs, ReadProof
+or hole fold, no reading key in the state or the Entering, no written_proof, and law_proved only for laws without a
+proof. Core about −20 against T6a1b's first form; one field, `TYPES.prove`.
+
 #### Each step's wiki lines and the tests that pin them
 
 A builder starts from these lines red. "red" is the last recorded full run (test/reds.txt); `_wanted` files are
