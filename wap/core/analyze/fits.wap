@@ -93,10 +93,8 @@ field_checked(given: Node, field: Node, value: Node, s: TypingState) as Node := 
 # list<int> is; checked, an any's value where another type is, raising there when it holds another; ø when it cannot.
 # The conversions a choice of overloads asks for, the static ones, never check: an any argument, or a Node where a
 # shape is wanted, is chosen for at run time (core/analyze/dispatch.wap).
-enum Conversion { Same, Boxed, Widened, Read, Wrapped, Subtyped, Narrowed, Settled, Checked, Adapted }
-STATIC_CONVERSIONS = [Conversion.Same, Conversion.Boxed, Conversion.Widened, Conversion.Read, Conversion.Wrapped]
-# the primitive that widens an int to a float
-WIDENING = "f64.convert_i64_s"
+enum Conversion { Same, Boxed, Read, Wrapped, Subtyped, Narrowed, Settled, Checked, Adapted }
+STATIC_CONVERSIONS = [Conversion.Same, Conversion.Boxed, Conversion.Read, Conversion.Wrapped]
 # a bool counted as 1 or 0 where a call's argument is an int, `true + true` 2, never where an int is declared
 # (wiki/Footguns.md "Booleans count as 1/0"), and the primitive that counts it
 COUNTING = "i64.extend_i32_u"
@@ -122,11 +120,11 @@ conversion(given: Term?, wanted: Term?, s: TypingState) as Conversion? := {
 	if boxed_fit(given, wanted, s.records.reads) { return Conversion.Boxed }
 	if subtype_base(wanted, s.records) == given { return Conversion.Subtyped }
 	if narrowed_part(given, wanted, s) != ø { return Conversion.Narrowed }
-	if given == INT_TERM and wanted == FLOAT_TERM { return Conversion.Widened }
 	optional = base_of_optional(wanted)
 	if reads_as(optional ?? wanted, given, s.records) { return Conversion.Read }
-	# a list whose items read as the wanted items, `["x", "n"]` of chars where a list<text> is
-	if given_item != ø and wanted_item != ø and reads_as(wanted_item!, given_item!, s.records) { return Conversion.Read }
+	# a list whose items read as the wanted items, `["x", "n"]` of chars where a list<text> is, by a read that keeps the
+	# value (stage.wap declared_below): a list of ints is no list of floats, it is made one with `as`
+	if given_item != ø and wanted_item != ø and reads_as(wanted_item!, given_item!, s.records) and read_keeps(given_item!, wanted_item!, s) { return Conversion.Read }
 	# an optional where one is wanted whose value is as it is: a list<int>? where a list? is
 	if optional != ø and base_of_optional(given) != ø and conversion(base_of_optional(given), optional, s) == Conversion.Same { return Conversion.Same }
 	if optional != ø and (given == EMPTY_TERM or conversion(given, optional, s) == Conversion.Same) { return Conversion.Wrapped }
@@ -134,6 +132,9 @@ conversion(given: Term?, wanted: Term?, s: TypingState) as Conversion? := {
 	# out of an any, or of a union to a part of it, the way is a check when the program runs
 	if given == ANY_TERM or is_union(given) and union_parts(given).any(part => part in passing_types(wanted, s.records.reads)) then Conversion.Checked else ø
 }
+# whether a read keeps the value, an atom read as its Node, a char as its text; a declared read that makes a new value,
+# an int's as a float, does not
+read_keeps(given: Term, wanted: Term, s: TypingState) as bool := (read_found(given, wanted, s.records.reads) ?? return yes).passes
 # typed code as the wanted type has its value, its conversion written: an unknown settled, a character read as its
 # text, an any's value checked by `prim cast`, typed the wanted type, at the code's place; refused at `at` when it
 # cannot get there, naming the place that wants it, `the field holds a`
@@ -160,7 +161,6 @@ repacked(n: Node, way: Conversion, wanted: Term, s: TypingState) as Node := matc
 	Conversion.Read => as_read(n, base_of(wanted), s)
 	Conversion.Boxed => boxed(boxing_noted(n, wanted, s), wanted)
 	Conversion.Wrapped => if value_type(n) == EMPTY_TERM then with_type_of(n, wanted) else boxed(n, wanted)
-	Conversion.Widened => with_type_of(placed_like(Prim(symbol(WIDENING), [n]), n), wanted)
 	Conversion.Adapted => function_converted(n, wanted, s)
 	_ => n
 }
