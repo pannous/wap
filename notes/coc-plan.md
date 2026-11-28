@@ -1074,7 +1074,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | generic records with T6a3's parameters, one landing: `enum Boxed<T>`, `class Pair<A, B>` read, a letter field filled at each use by T6a7's letters_bound, and the kernel block taking the letters as its parameters (notes/coc-generic-records.md) | planned; card generic-records, wap-theory-reads-types | | T6a3's sort-only part, T6a7 |
 | T6a4 proofs by cases and induction | planned (notes/coc-t6a4.md) | | T5c3, T5c4, unify-dedup landed |
 | T6a5 False, Exists, undecidable | waits | | T5b1; Exists also generic records with T6a3's parameters |
-| T6a6 the logic in wap/types | waits | | T6a1 to T6a5 |
+| T6a6 the logic in wap/types | planned (notes/coc-t6a6.md) | | generic records with T6a3's parameters, unify-axioms, lazy-implies; Exists lines T6a5 |
 | T6a7 universes | planned (notes/coc-t6a7.md) | | T6a6 |
 | V1 one verdict per law | planned (notes/coc-v1.md; the plain-compile report cut, no wiki passage); builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
 | V2 `wap check`, V3 proved laws as facts | planned (notes/coc-v2.md, notes/coc-v3.md) | | V1 (V3 also T6a2 and unify-dedup) |
@@ -1112,7 +1112,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | generic records with T6a3's parameters | coc-generic-records.md | its plan's | | | |
 | T6a4 cases and induction | coc-t6a4.md | +92 | 0 (apart's builder moved, net 0) | | |
 | T6a5 False, Exists | coc-t6a.md | +29 | | +2 | |
-| T6a6 the logic in wap/types | coc-t6a.md | +30 | | +38 | |
+| T6a6 the logic in wap/types | coc-t6a6.md | +3 to +7 | +8 | +26 | sugar −2 |
 | T6a7 universes | coc-t6a7.md | +61 | | | |
 | V1 verdicts | coc-v1.md | +7 | | +2 | verify +23, extension +1 |
 | V2 `wap check` | coc-v2.md | +4 | | | native +2 |
