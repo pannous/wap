@@ -86,7 +86,7 @@ split_read(variable: Term, result: Term, x: Entering, read: (Entering) -> Term?)
 		Without(reason) => ø
 	}
 }
-plain_split(variable: Term, domain: Term, result: Term, x: Entering, read: (Entering) -> Term?) as Term? := taken_apart_into(domain, result, (id, r) => minor_of(id, ø, r, value => ø, x, (inside, value) => read(valued(inside, variable, value))), variable, x)
+plain_split(variable: Term, domain: Term, result: Term, x: Entering, read: (Entering) -> Term?) as Term? := taken_apart_into(domain, lambda("_", domain, result), (id, r) => minor_of(id, ø, r, value => ø, x, (inside, value) => read(valued(inside, variable, value))), variable, x)
 # whether a type is one enum of one type that may be taken apart into any universe, and whether a case holds itself
 taken_apart(domain: Term) as bool := match (declaration(TYPES.environment, constant_name(domain)) ?? return no).kind {
 	Inductive(facts) => facts.any_motive and #facts.plain.types == 1
@@ -155,8 +155,9 @@ recursive_called(called: Node, arguments: list, x: Entering) as Term? := {
 # zero no measure is below the bound; at a successor the body is read with each call of itself the recursion one
 # below, given that the call's measure is below the bound, from the provers' proof that it is below the function's.
 # Inside it is the measure as a function of the parameters, the parameters, the recursion below, the bound and the
-# premise that the function's measure is below the bound's successor; ø where a call's proof is not found
-class Measured { measure: Term; parameters: list<Term>; below: Term; bound: Term; premise: Term }
+# premise that the function's measure is below the bound's successor, and the result as a function of the parameters;
+# ø where a call's proof is not found
+class Measured { measure: Term; parameters: list<Term>; below: Term; bound: Term; premise: Term; result: Term }
 measured_defined(typed: TypedFunction, body: Node, x: Entering) as Term? := {
 	if x.recursion != ø or not calls_itself(body, instance_key(typed)) { return ø }
 	result = kernel_result(typed, x.by_key, x.s) ?? return ø
@@ -174,11 +175,31 @@ measured_defined(typed: TypedFunction, body: Node, x: Entering) as Term? := {
 	bound = entered(x.c, "k", count)
 	below = entered(x.c, "below", bounded(bound.variable))
 	premise = entered(x.c, MEASURE_PREMISE, at_most_yes(start, successor_of(TYPES.environment, bound.variable)))
-	inside = reread(x, x.binders, x.variables, Recursion(instance_key(typed), 0, equating: equations_checker(x), measured: Measured(measure, variables(locals), below.variable, bound.variable, premise.variable)))
+	inside = reread(x, x.binders, x.variables, Recursion(instance_key(typed), 0, equating: equations_checker(x), measured: Measured(measure, variables(locals), below.variable, bound.variable, premise.variable, lambdas(locals, result))))
 	at_step = lambdas([bound, below] + locals + [premise], term_of(body, inside) ?? return ø)
 	# the levels the result and the recursion's motive live at, so a proof or a function of types is read too
 	recursion = apply_all(named_constant(recursor_name(COUNT), [level_of(x.c, bounded(k.variable))]), [lambdas([k], bounded(k.variable)), at_zero, at_step, start])
 	apply_all(recursion, variables(locals) + [apply(named_constant(AT_MOST_SAME), start)])
+}
+# A match inside a measured recursion on a variable the parameters' values hold (a parameter, or a field of one taken
+# apart before): taken apart with the premise along (the motive a function of the value, of the premise at it), so
+# each arm reads the variable, the measure and the result at the case's value, `μ(node(cs))` computing to the sizes
+# of cs; ø for a match on any other value
+measured_match(subject: Node, arms: list, domain: Term, m: Measured, x: Entering) as Term? := {
+	variable = term_of(subject, x) ?? return ø
+	if variable_id(variable) == 0 or not m.parameters.any(parameter => holds_variable(parameter, variable)) { return ø }
+	at = (value: Term) => m.parameters.map(parameter => replaced_by(parameter, variable_id(variable), value))
+	premised = (value: Term) => at_most_yes(successor_of(TYPES.environment, beta(m.measure, at(value))), successor_of(TYPES.environment, m.bound))
+	v = entered(x.c, "v", domain)
+	motive = lambdas([v], pis([entered(x.c, MEASURE_PREMISE, premised(v.variable))], beta(m.result, at(v.variable))))
+	within = (inside: Entering, value: Term, read: (Entering) -> Term?) => {
+		h = entered(inside.c, MEASURE_PREMISE, premised(value))
+		taken = valued(inside, variable, value)
+		measured = Recursion(inside.recursion!.key, 0, equating: inside.recursion!.equating, measured: Measured(m.measure, at(value), m.below, m.bound, h.variable, m.result))
+		body = read(reread(taken, taken.binders, taken.variables, measured))
+		if body == ø then ø else lambdas([h], body!)
+	}
+	apply(taken_apart_into(domain, motive, (id, r) => arm_minor(id, arms, r, value => ø, x, within), variable, x) ?? return ø, m.premise)
 }
 # the binder of the premise that a measure is below a bound
 MEASURE_PREMISE = "·measured"
