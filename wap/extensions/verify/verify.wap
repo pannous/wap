@@ -1,34 +1,35 @@
 # `wap verify program.wap` (wiki/law.md "Checking a law", wiki/proof.md "Checking proofs"), run as `verify.wasm
 # --seed <seed folder> program.wap` by the native wap or with `--tree <root>` (options.wap): one verdict per law the
-# program states, in their order, the kernel's (laws.wap). Proved: its function computes to yes, or the provers proved
-# it for every value of its binders and the kernel checked the proof. FAILED: it computes to no. Untested: the kernel
-# leaves it open, and the run's verdict stands in its place (native/driver.wap). A refusal is printed in its law's
-# place; the first refusal of the program ends the run. The run fails when a law does.
+# program states, in their order, the kernel's (laws.wap), after the answers to the questions it asks at its top.
+# Proved: its function computes to yes, or the provers proved it for every value of its binders and the kernel checked
+# the proof. FAILED: it computes to no. Untested: the kernel leaves it open, and the run's verdict stands in its place
+# (native/driver.wap). A refusal is printed in its law's place; the first refusal of the program ends the run. The run
+# fails when a law does.
 use "laws.wap"
 use "options.wap"
+use "verdicts.wap"
 use "../../kernel/environment.wap"
 
-PROVED := "Proved"
-UNTESTED := "Untested"
-ASSUMED := "Assumed"
-AXIOM := "Axiom"
-BROKEN := "FAILED"
 FAILED_EXIT := 1
 
 RESTS_ON := ", rests on "
 
-# a law's verdict as printed, or the refusal that leaves it none; a proved law resting on an assume is Assumed, one
-# resting on axioms names them (wiki/proof.md "What a proof rests on")
-verdict(law: TypedLaw, assumed: list<text>, names: map<text, text>): text := {
+# a law's verdict as printed, or the refusal that leaves it none, and whether it fails the run: a broken law does, and
+# one whose typing is refused; a proved law resting on an assume is Assumed, one resting on axioms names them
+# (wiki/proof.md "What a proof rests on")
+class Shown { said: text; fails: bool = no }
+verdict(law: TypedLaw, assumed: list<text>, names: map<text, text>): Shown := {
+	if law.refused != ø { return Shown("${law.name}: ${law.refused!}", yes) }
 	typed = try typed_verdict(law) catch refusal {
 		refusal_only(refusal)
-		return refusal.message
+		return Shown(refusal.message)
 	}
-	"${law.name}: ${match typed { Holds => proved_said(law, assumed, names); Breaks => BROKEN; Open => UNTESTED; Assumed => ASSUMED; Axiom => AXIOM }}"
+	Shown("${law.name}: ${match typed { Holds => proved_said(law, assumed, names); Breaks => FAILED; Open => UNTESTED; Assumed => ASSUMED; Axiom => AXIOM }}", typed == TypedVerdict.Breaks)
 }
-# (the axioms by their laws' names, a proof's theorem going by its function's key in the kernel)
+# the axioms a theorem of the kernel rests on, by their laws' names (a proof's theorem goes by its function's key)
+resting_named(kernel: text, names: map<text, text>): list<text> := resting_on(kernel).map(name => names.get(name) ?? name)
 proved_said(law: TypedLaw, assumed: list<text>, names: map<text, text>): text := {
-	resting = resting_on(kernel_name(law)).map(name => names.get(name) ?? name)
+	resting = resting_named(kernel_name(law), names)
 	if resting.any(axiom => assumed.contains(axiom)) then ASSUMED else if resting is empty then PROVED else PROVED + RESTS_ON + resting.join(", ")
 }
 
@@ -43,14 +44,23 @@ run_rule(law: TypedLaw): text := {
 	"rule law(${law.name}: ((${holes.join(", ")}) -> $statement)) => law(${law.name}: ((${kept.join(", ")}) -> ${held}))"
 }
 
+# the answer to `axioms of name`, the axioms it rests on, a law computed to yes resting on none
+axioms_said(name: text, laws: list<TypedLaw>, names: map<text, text>): text := {
+	law = laws.find(law => law.name == name)
+	if law == ø and declared_constant(name) == ø { return "axioms of ${name}: ${name} names no law, axiom or definition" }
+	"[${resting_named(if law == ø then name else kernel_name(law!), names).join(", ")}]"
+}
+
 try {
 	arguments = door_arguments(args)
-	laws = laws_typed(arguments.wap_folder, door_program(arguments))
+	typed = laws_typed(arguments.wap_folder, door_program(arguments))
+	laws = typed.laws
 	if arguments.run_rules != "" { write(arguments.run_rules, laws.filter(law => law.given is not empty).map(run_rule).map(rule => rule + "\n").join("")) }
 	assumed = laws.filter(law => is_assume(law.proof)).map(law => law.name)
 	names: map<text, text> = {}
 	for law in laws { names[kernel_name(law)] = law.name }
 	verdicts = laws.map(law => verdict(law, assumed, names))
-	for line in verdicts { print line }
-	if verdicts.any(line => line.ends_with(": " + BROKEN)) { exit(FAILED_EXIT) }
+	for answer in typed.answers + typed.asked.map(name => axioms_said(name, laws, names)) { print answer }
+	for shown in verdicts { print shown.said }
+	if verdicts.any(shown => shown.fails) { exit(FAILED_EXIT) }
 } catch refusal { stopped_by(refusal) }

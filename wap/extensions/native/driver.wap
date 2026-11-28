@@ -15,6 +15,7 @@ use "console.wap"
 use "programs.wap"
 use "host_words.wap"
 use "commands.wap"
+use "../verify/verdicts.wap"
 
 # a C function a module the command runs imports, called through wasmtime (host_words.wap); exported here, as only
 # the program's own functions are exports
@@ -46,10 +47,6 @@ RUN_RULES_OPTION := "--run-rules"
 RULES_TEMPLATE := "/wap-hypotheses-XXXXXX.wap"
 RULES_SUFFIX := ".wap"
 VERDICT_SEPARATOR := ": "
-TESTED_VERDICT := "Tested"
-UNTESTED_VERDICT := "Untested"
-FAILED_VERDICT := "FAILED"
-VERDICT_WORDS := ["Proved", TESTED_VERDICT, FAILED_VERDICT, UNTESTED_VERDICT, "Assumed", "Axiom"]
 # what an option word of `wap build` starts with, the program's file the word without it
 OPTION_START := "--"
 WAP_SUFFIX := ".wap"
@@ -96,13 +93,14 @@ verified(words: list<text>) := {
 	checked = laws_checked(words#2)
 	for line in checked.said { eprint(line) }
 	for line in checked.verdicts { print line }
-	exit(if checked.verdicts.any(line => line.contains(VERDICT_SEPARATOR + FAILED_VERDICT)) then 1 else 0)
+	exit(if checked.refused or checked.verdicts.map(verdict_read).compact().any(verdict => verdict.said.starts_with(FAILED)) then 1 else 0)
 }
 # What checking a program's laws found: the verify program's verdicts, the kernel's, joined with those of the laws run
 # (the program compiled by the compiler's laws command and its laws called, run.wap laws_ran, never its main), then the
 # laws of each module it uses by their stamps (wap build --wasm writes them); and what was said beside: the theory's
 # refusal, and why the laws did not run where a law needed the run, one left Untested or none given a verdict
-class LawsChecked { verdicts: list<text>; said: list<text> }
+# and whether the verify program itself exited failing (verify.wap FAILED_EXIT)
+class LawsChecked { verdicts: list<text>; said: list<text>; refused: bool }
 laws_checked(program: text): LawsChecked := {
 	proved = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
 	ran = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
@@ -110,24 +108,24 @@ laws_checked(program: text): LawsChecked := {
 	compiling = temporary_made(VERDICTS_TEMPLATE, VERDICTS_SUFFIX)
 	# the rules the run reads the laws with hypotheses by, written by the verify program from its typing
 	hypotheses = temporary_made(RULES_TEMPLATE, RULES_SUFFIX)
-	system("'${executable_path}' '${seed_part(VERIFY_PART)}' ${SEED_OPTION} '${seed_part("")}' ${RUN_RULES_OPTION} '${hypotheses}' '${program}' >'${proved}'")
+	refused = system("'${executable_path}' '${seed_part(VERIFY_PART)}' ${SEED_OPTION} '${seed_part("")}' ${RUN_RULES_OPTION} '${hypotheses}' '${program}' >'${proved}'") != 0
 	compiled = system("'${executable_path}' '${compiler_path}' ${LAWS_COMMAND} '${program}' '${module}' '${hypotheses}' 2>'${compiling}'") == 0
 	laws = if compiled then module_compiled(module) else 0
 	if laws != 0 { laws_ran(laws, program, ran) }
 	kernel = lines_of(file_text(proved))
 	shown = verdicts_joined(kernel, lines_of(file_text(ran)))
-	unran = not compiled and (shown is empty or shown.any(line => line.ends_with(VERDICT_SEPARATOR + UNTESTED_VERDICT)))
+	unran = not compiled and (shown is empty or shown.any(line => line.ends_with(VERDICT_SEPARATOR + UNTESTED)))
 	said = kernel.filter(line => verdict_read(line) == ø) + (if unran then [file_text(compiling)] else [])
 	used = if laws == 0 then [] else imported_modules(laws).map(name => module_path(name, program))
 	stamped = used.filter(path => path != "" and not path.starts_with(seed_part(""))).flat_map(stamps_of)
 	for path in [proved, ran, module, compiling, hypotheses] { unlink(path) }
-	LawsChecked(shown + stamped, said)
+	LawsChecked(shown + stamped, said, refused)
 }
 # the laws of a module the program uses, one of its own and not wap's (the library in the seed folder), by their
 # stamps, its section's lines; a module without the section was never checked, so its laws are Untested
 stamps_of(path: text): list<text> := {
 	stamps = section_text(path, LAWS_SECTION)
-	if stamps is empty then [path.split("/").last + VERDICT_SEPARATOR + UNTESTED_VERDICT] else lines_of(stamps)
+	if stamps is empty then [path.split("/").last + VERDICT_SEPARATOR + UNTESTED] else lines_of(stamps)
 }
 # a law's verdict as `wap verify` prints it, `positive: Tested`
 class Verdict { law: text; said: text }
@@ -147,7 +145,7 @@ verdicts_joined(kernel: list<text>, run: list<text>): list<text> := {
 	shown = tried.map(trial => Verdict(trial.law, verdict_beside(proved.find(verdict => verdict.law == trial.law), trial)))
 	(shown + proved.filter(verdict => not tried.any(trial => trial.law == verdict.law))).map(verdict => verdict.law + VERDICT_SEPARATOR + verdict.said)
 }
-verdict_beside(proved: Verdict?, tried: Verdict): text := if proved is ø or tried.said.starts_with(FAILED_VERDICT) or proved!.said in [UNTESTED_VERDICT, TESTED_VERDICT] then tried.said else proved!.said
+verdict_beside(proved: Verdict?, tried: Verdict): text := if proved is ø or tried.said.starts_with(FAILED) or proved!.said in [UNTESTED, TESTED] then tried.said else proved!.said
 # the lines of a text, its empty ones left out
 lines_of(t: text): list<text> := t.split("\n").filter(line => not line is empty)
 # `wap format <program.wap>`, the program in canonical spelling, the compiler's own command of that name
