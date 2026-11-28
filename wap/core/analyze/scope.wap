@@ -49,7 +49,7 @@ types_scope(types: list<Signature>) as list<Definition> := types.flat_map(signat
 # class or an enum it declares, its cases and its fields for methods, as the program's own
 library_words(signature: Signature, depth: int) as list<Definition> := match signature.kind {
 	DefinitionKind.Record => definitions_made_by(signature.record!, Scope(), depth)
-	DefinitionKind.Function => [Definition(signature.name, DefinitionKind.Library, signature.definer, depth)]
+	DefinitionKind.Function => [Definition(signature.name, DefinitionKind.Library, signature.definer, depth, types: universe_level(signature.result) != ø)]
 	_ => [Definition(signature.name, signature.kind, signature.definer, depth)]
 }
 
@@ -59,11 +59,11 @@ bound(n: Node, scope: Scope, depth: int) as Node := if fact_of(n, TYPED_HOLE) !=
 form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	Symbol(name) => resolved(n, scope, depth)
 	Block(statements) => refitted(Block(all_bound(statements, block_scope(n, statements, scope, depth), depth)), n)
-	Define(name, parameters, body) => with_captures(refitted(Define(bound(name, scope, depth), parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
+	Define(name, parameters, body) => with_captures(refitted(Define(defined_bound(name, parameters, scope, depth), parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
 	Fn(parameters, body) => with_captures(refitted(Fn(parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
 	Set(place, value) => refitted(Set(bound(place, if declares_global(n) then program_scope(scope) else scope, depth), bound(value, declaring(scope, declared_name(place)), depth)), n)
 	# a function type where a value stands, `(a, b) -> a + b`, is no value: types are written after a colon
-	Call(called, arguments) => if text(called) == FUNCTION_ARROW then refused(n, "-> writes a function type; a function value is written with =>: `(a, b) => a + b`") else module_call(n, called, arguments, scope, depth) ?? if core_word(called, BY_WORD, scope) then n else if core_word(called, TYPE_TEST_WORD, scope) then type_test_bound(n, called, arguments, scope, depth) else if QUESTION_WORDS.any(word => core_word(called, word, scope)) then refitted(Call(called, arguments.map(of => if names_value(of, scope) then bound(of, scope, depth) else of)), n) else if claims_effects(called, arguments) then refitted(Call(called, all_bound(arguments.take(1), scope, depth) + arguments.drop(1)), n) else if rest_named(n) != ø then refitted(Call(called, all_bound(arguments, scope, depth)), n) else field_called(n, called, arguments, scope, depth) ?? refitted(Call(called_bound(with_receiver(called, scope, depth), #arguments, scope, depth), arguments_bound(arguments, scope, depth)), n)
+	Call(called, arguments) => if text(called) == FUNCTION_ARROW then refused(n, "-> writes a function type; a function value is written with =>: `(a, b) => a + b`") else module_call(n, called, arguments, scope, depth) ?? if core_word(called, TYPE_TEST_WORD, scope) then type_test_bound(n, called, arguments, scope, depth) else if NAMING_WORDS.any(word => core_word(called, word, scope)) then refitted(Call(called, arguments.map(of => if names_value(of, scope) then bound(of, scope, depth) else of)), n) else if claims_effects(called, arguments) then refitted(Call(called, all_bound(arguments.take(1), scope, depth) + arguments.drop(1)), n) else if rest_named(n) != ø then refitted(Call(called, all_bound(arguments, scope, depth)), n) else field_called(n, called, arguments, scope, depth) ?? refitted(Call(called_bound(with_receiver(called, scope, depth), #arguments, scope, depth), arguments_bound(arguments, scope, depth)), n)
 	Prim(operation, arguments) => refitted(Prim(operation, all_bound(arguments, scope, depth)), n)
 	If(condition, then_part, else_part) => refitted(If(bound(condition, scope, depth), bound(then_part, scope, depth), bound(else_part, scope, depth)), n)
 	While(condition, body) => refitted(While(bound(condition, scope, depth), bound(body, looped_scope(scope, depth), depth)), n)
@@ -76,9 +76,9 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	Get(subject, key) => qualified_case(n, subject, key, scope) ?? refitted(Get(bound(subject, scope, depth), bound(key, scope, depth)), n)
 	Item(subject, key) => refitted(Item(bound(subject, scope, depth), bound(key, scope, depth)), n)
 	List(items, Bracket.Square, separator) => refitted(List(all_bound(items, scope, depth), Bracket.Square, separator), n)
-	Key(name, Op.Colon, type) => refitted(Key(bound(name, scope, depth), Op.Colon, type_bound(type, scope)), n)
+	Key(name, Op.Colon, type) => refitted(Key(bound(name, scope, depth), Op.Colon, type_bound(type, scope, depth)), n)
 	# a function's name glued to a map calls it with the map, `style{a: 1}` style({a: 1}) (wiki/significant-whitespace.md)
-	Key(head, Op.None, List(items, Bracket.Curly, separator)) => if names_function_in(head, scope) then bound(refitted(Call(head, [refitted(List(items, Bracket.Curly, separator), n)]), n), scope, depth) else refitted(Key(type_bound(head, scope), Op.None, List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator)), n)
+	Key(head, Op.None, List(items, Bracket.Curly, separator)) => if names_function_in(head, scope) then bound(refitted(Call(head, [refitted(List(items, Bracket.Curly, separator), n)]), n), scope, depth) else refitted(Key(type_named_bound(head, scope), Op.None, List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator)), n)
 	List(items, Bracket.Curly, separator) => refitted(List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator), n)
 	Record(name, fields, variants) => refitted(Record(name, with_items(fields, items_of(fields).map(field => field_bound(field, scope))), with_items(variants, items_of(variants).map(variant => field_bound(variant, scope)))), n)
 	Number(value) => n
@@ -107,23 +107,36 @@ case_owner(scope: Scope, name: text) as Definition? := {
 }
 # a record's field, or a case with fields, its written types bound as a parameter's are
 field_bound(field: Node, scope: Scope) as Node := match field {
-	Key(name, Op.Colon, type) => refitted(Key(name, Op.Colon, type_bound(type, scope)), field)
+	Key(name, Op.Colon, type) => refitted(Key(name, Op.Colon, type_named_bound(type, scope)), field)
 	Set(place, value) => refitted(Set(field_bound(place, scope), value), field)
 	Call(called, fields) => refitted(Call(called, fields.map(each => field_bound(each, scope))), field)
 	_ => field
 }
-type_bound(type: Node, scope: Scope) as Node := match type {
+# a written type in its place: a call of code there, a statement or a value a type names, bound as code (is_code_call);
+# any other its record names bound
+type_bound(type: Node, scope: Scope, depth: int) as Node := {
+	code = fact_of(type, AS_CODE)
+	if code != ø and is_code_call(code!, scope) then bound(code!, scope, depth) else type_named_bound(type, scope)
+}
+type_named_bound(type: Node, scope: Scope) as Node := match type {
 	Symbol(name) => {
 		record = record_meant(scope, name)
 		# a case word narrows the enum its scope sees, whatever other enums hold a case so named
-		if record == ø { return with_fact(type, NARROWS, type_bound(symbol((case_owner(scope, name) ?? return type).name), scope)) }
+		if record == ø { return with_fact(type, NARROWS, type_named_bound(symbol((case_owner(scope, name) ?? return type).name), scope)) }
 		with_fact(type, DECLARED_BY, record_declared(record!.definer))
 	}
-	List(items, bracket, separator) => refitted(List(items.map(item => type_bound(item, scope)), bracket, separator), type)
-	Call(called, arguments) => refitted(Call(called, arguments.map(argument => type_bound(argument, scope))), type)
-	Key(name, op, parts) => refitted(Key(type_bound(name, scope), op, type_bound(parts, scope)), type)
+	List(items, bracket, separator) => refitted(List(items.map(item => type_named_bound(item, scope)), bracket, separator), type)
+	Call(called, arguments) => refitted(Call(called, arguments.map(argument => type_named_bound(argument, scope))), type)
+	Key(name, op, parts) => refitted(Key(type_named_bound(name, scope), op, type_named_bound(parts, scope)), type)
 	_ => type
 }
+# A call in a type's place is a type where a type's notation writes it, `int | text`, `3 * int`, `int where it > 0`,
+# or its head makes types, a record or a function giving a universe, `Even(n)`, `vector(int, 3)`, or the kernel's
+# family, `Equal(…)`; a call of any other function in scope is code, a statement or a value a type names, `a + 0 == a`,
+# `P(f)`, bound as code is
+is_code_call(type: Node, scope: Scope) as bool := match type { Call(called, arguments) => not is_type_written(type) and text(called) != ARRAY_TIMES and names_function_in(called, scope) and not makes_type(called, scope); _ => no }
+# whether a head makes types, a definition it means a record, a family or a function giving a universe
+makes_type(called: Node, scope: Scope) as bool := definitions_meant(text(called), scope).any(definition => definition.types)
 # An arm: the name its pattern holds a new variable of the arm, which its result sees; `_` and literals name none
 arm_bound(arm: Arm, scope: Scope, depth: int) as Node := match arm {
 	Arm(pattern, result) => {
@@ -133,8 +146,8 @@ arm_bound(arm: Arm, scope: Scope, depth: int) as Node := match arm {
 }
 # a pattern's names bound: a case, `Dot`, or a case with the variables its fields fill, `Circle(r)`; `_` names none
 pattern_bound(pattern: Node, scope: Scope, depth: int) as Node := match named_pattern(pattern, scope) {
-	Symbol(name) => if name == WILDCARD then pattern else pattern_name_bound(pattern, scope, depth)
-	Call(called, fields) => if shape_called(called, scope) then with_fact(pattern_bound(pattern_shape(called, fields, scope), scope, depth), SHAPE_OF, called) else refitted(Call(if rest_named(pattern) == ø then pattern_name_bound(called, scope, depth) else called, fields.map(field => pattern_bound(field, scope, depth))), pattern)
+	Symbol(name) => if name == WILDCARD then pattern else if names_constant(pattern, scope) then with_fact(resolved(pattern, scope, depth), VALUED, True) else pattern_name_bound(pattern, scope, depth)
+	Call(called, fields) => if shape_called(called, scope) then with_fact(pattern_bound(pattern_shape(called, fields, scope), scope, depth), SHAPE_OF, called) else inverse_bound(refitted(Call(if rest_named(pattern) == ø then pattern_name_bound(called, scope, depth) else called, fields.map(field => pattern_bound(field, scope, depth))), pattern), called, scope, depth)
 	List(items, Bracket.Square, separator) => refitted(List(items.map(item => pattern_bound(item, scope, depth)), Bracket.Square, separator), pattern)
 	Get(subject, key) => bound(pattern, scope, depth)
 	_ => pattern
@@ -150,6 +163,7 @@ pattern_shape(called: Node, fields: list, scope: Scope) as Node := pattern_taken
 # a declared pattern's bare name, `Tagged`, is its call naming each hole by the hole's own name, `Tagged(label)`, each
 # name's id the bare name's and the hole's
 named_pattern(pattern: Node, scope: Scope) as Node := {
+	if pattern is symbol and inverse_meant(pattern, scope) != ø { return placed_like(Call(pattern, []), pattern) }
 	builder = (if pattern is symbol then pattern_builder_meant(pattern, scope) else ø) ?? return pattern
 	placed_like(Call(pattern, fact_items(builder, PATTERN_HOLES).map(hole => with_fact(placed_like(symbol(text(hole)), pattern), DEFINER, Text("${definer_id(pattern)} ${hole}")))), pattern)
 }
@@ -162,11 +176,18 @@ pattern_builder_meant(called: Node, scope: Scope) as Node? := {
 	if meant is empty or fact_of(meant#1.definer, PATTERN_TAKEN) == ø { return ø }
 	meant#1.definer
 }
+# A pattern by inverse, `successor(k)` or a bare `zero`: the name of its function's inverse, `successor⁻¹`, bound on it
+# (wiki/enum.md "Patterns by inverse"); a case's name is the case
+inverse_bound(pattern: Node, called: Node, scope: Scope, depth: int) as Node := with_fact(pattern, INVERSE, resolved(inverse_meant(called, scope) ?? return pattern, scope, depth))
+inverse_meant(called: Node, scope: Scope) as Node? := if not called is symbol or names_case(called, scope) or definitions_meant(text(called) + INVERSE_MARK, scope) is empty then ø else placed_like(symbol(text(called) + INVERSE_MARK), called)
+# whether a name means a constant of the program where it stands, `limit := 5`, which a bare pattern of it matches; a
+# variable never is one, so a pattern's name like it is a new name
+names_constant(name: Node, scope: Scope) as bool := definitions_meant(text(name), scope).take(1).any(meant => meant.kind == DefinitionKind.Function and meant.fields == 0)
 # whether a name means a case of an enum where it stands
 names_case(name: Node, scope: Scope) as bool := definitions_meant(text(name), scope).take(1).any(meant => meant.kind == DefinitionKind.Case)
 arm_result(arm: Arm) as Node := match arm { Arm(pattern, result) => result }
 pattern_variables(pattern: Node, scope: Scope, depth: int) as list<Definition> := match named_pattern(pattern, scope) {
-	Symbol(name) => if name == WILDCARD or names_case(pattern, scope) then [] else [Definition(name, local_kind(depth), pattern, depth)]
+	Symbol(name) => if name == WILDCARD or names_case(pattern, scope) or names_constant(pattern, scope) then [] else [Definition(name, local_kind(depth), pattern, depth)]
 	Call(called, fields) => if shape_called(called, scope) then pattern_variables(pattern_shape(called, fields, scope), scope, depth) else fields.flat_map(field => pattern_variables(field, scope, depth))
 	List(items, Bracket.Square, separator) => items.flat_map(item => pattern_variables(item, scope, depth))
 	Get(subject, key) => []
@@ -215,7 +236,11 @@ declaring(scope: Scope, place: Node) as Scope := Scope(scope.layers, scope.loope
 
 
 # A function's parameters and body, one depth further in than the function's definition, the body seeing the
-# parameters before the names around it
+# parameters before the names around it, and so does its written result, `k(n: int): n + 0 == n`
+defined_bound(name: Node, parameters: List, scope: Scope, depth: int) as Node := match name {
+	Key(head, Op.Colon, type) => refitted(Key(bound(head, scope, depth), Op.Colon, type_bound(type, within(scope, parameter_definitions(parameters, depth + 1)), depth + 1)), name)
+	_ => bound(name, scope, depth)
+}
 parameters_bound(parameters: List, scope: Scope, depth: int) as Node := match parameters {
 	List(items, bracket, separator) => with_items(parameters, items.map(p => default_bound(bound(p, within(scope, parameter_definitions(parameters, depth + 1)), depth + 1), scope, depth)))
 }

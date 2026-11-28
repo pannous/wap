@@ -20,17 +20,16 @@ in either order of the crossed counts.
 | integer_laws.wap:304-305 `complete`, `sound`; linear.wap:380-381 | The same two functions, over a Building and over Sums. One pair reads `e.integers`' equals_sound and equals_complete | −2 |
 | integer_laws.wap:302 `zero_of(b)`; linear.wap:384 `zero_of(s)` | Both are `e.integers.zero`, which int_declared sets (counting.wap:179) | −2 |
 | integer_laws.wap:134-137 `count_sums`; linear.wap:370 `int_sums` | Two Monoids built the same way from three law names. They become one `monoid_of(c, type, zero, addition, zero_law, grouping_law, order_law)` with `instance_of` | −1 |
-| linear.wap:386 `sum_term` | Identical to `summed` (:385) | −1 |
 | linear.wap:325 | Restates int_sums' zero law (:370); `int_sums(s).zero_law(atom)` instead | −1 |
-| counting.wap:116, :126-138 | `fixing_proof` picks a proof by comparing names, and its two recursor proofs have one shape: `counted(b, Zero, stated, refl, (k, h) => before_both(b, left(k), right(k), h), n)`. One `by_predecessors(b, sides, base)`, and a list of (statement, proof) per shortcut in place of the name test | −4 |
 | equality.wap:79-83, :91-95 | symmetric and transitive open with the same five lines: the level, the checker, T, a, b. One `equal_binders(e)` | −3 |
+| counting.wap `zero_subtract_proof`, `successors_subtract_proof` | The two recursor proofs have one shape, now `by_predecessors(b, left, right, base, n)`; `fixing_proof` keeps its name test, a list of (statement, proof) would not be shorter | -2 |
 
 ## A helper used once, or nothing using it
 
 | where | what | lines |
 |---|---|---|
 | integer_laws.wap:23, :347 `·add_swapped` | No caller (the card's note). linear.wap's regrouper does without it | −2 |
-| logic.wap:18, :29, :54-61 `·yes_is_not_no`; :19, :30, :62-75 `·bool_cases` | No caller on int-takes, t6a3a or unify-linear. unify-provers.md:80-81 and :100 plan them only for the divide laws, which are not built. Both go and come back with divide | −16 |
+| logic.wap:18, :29, :54-61 `·yes_is_not_no`; :19, :30, :62-75 `·bool_cases` | No caller on int-takes, t6a3a or unify-linear. unify-provers.md:80-81 and :100 plan them only for the divide laws, which are not built. Both go. `·bool_cases` comes back in the commit of its first caller, a proof by cases over a comparison (Q1's sign_product or T6a4's case proofs); `·yes_is_not_no` with divide | −16 |
 | integer_laws.wap:232 `parts_zero` | An induction inside paired's zero arm. paired's at_zero takes a step (the card's note) | −2 |
 
 ## Parameters always passed the same
@@ -50,7 +49,7 @@ saves the rebuild in every regrouping. This counts toward a "standing OK speed" 
 
 wap-tree-wap scanned origin/int-takes for names with no caller; the scan is a todo note on card kernel-length. 12
 names, about 37 lines, are dead and go in the same card: seen_ids, declared_named, REFUSED_DECLARATION,
-RUNNING, shown_for, is_sort, shortcut_kind with DECLARED_SHORTCUTS, written_parts_of, language_loaded, library_path,
+RUNNING, is_sort, written_parts_of, language_loaded, library_path,
 instantiate_all.
 
 These stay:
