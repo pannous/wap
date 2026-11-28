@@ -45,9 +45,7 @@ type_definition(statement: Node) as bool := match statement { Define(name, param
 # a definition giving a type, a name or one with parameters, `vector(T, n: nat): Type := list<T> where #it == n`: nothing
 # to compute, its uses are the type
 defines_type(statement: Node) as bool := match statement { Define(name, parameters, body) => gives_type(name); _ => no }
-gives_type(name: Node) as bool := match name { Key(head, Op.Colon, result) => is_universe_result(result); _ => no }
-# a written result that is a universe (`Type`, `Prop`): its definition gives a type
-is_universe_result(result: Node) as bool := universe_written(result) != ø
+gives_type(name: Node) as bool := match name { Key(head, Op.Colon, result) => universe_written(result) != ø; _ => no }
 # the words around a program: the modules it uses, then the types module's, outermost, and the standard library's
 # beyond them
 scope_around(types: list<Signature>, modules: list<Module>, standard: map<text, list<text>> = {}) as Scope := Scope([Layer(modules_scope(modules) + types_scope(types))], no, standard)
@@ -66,7 +64,10 @@ library_words(signature: Signature, depth: int) as list<Definition> := match sig
 bound(n: Node, scope: Scope, depth: int) as Node := if fact_of(n, TYPED_HOLE) != ø then n else form_bound(n, scope, depth)
 form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	# a type's name as a value is the type it names, at the place it is written
-	Symbol(name) => moved_to(named_type(named_in(scope, name), name, scope) ?? return resolved(n, scope, depth), n)
+	Symbol(name) => {
+		named = named_in(scope, name)
+		moved_to(named_type(named, name, scope) ?? return resolved(n, named, scope, depth), n)
+	}
 	Block(statements) => refitted(Block(all_bound(statements, block_scope(n, statements, scope, depth), depth)), n)
 	Define(name, parameters, body) => with_captures(refitted(Define(bound(name, scope, depth), parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
 	Fn(parameters, body) => with_captures(refitted(Fn(parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
@@ -156,7 +157,7 @@ pattern_bound(pattern: Node, scope: Scope, depth: int) as Node := match named_pa
 # A name in a pattern: a case binds as one even when two enums have a case of that name, as the subject's enum picks
 # among them (core/analyze/types.wap pattern_typed); any other name as anywhere
 pattern_name_bound(name: Node, scope: Scope, depth: int) as Node := {
-	if not names_case(name, scope) { return resolved(name, scope, depth) }
+	if not names_case(name, scope) { return resolved(name, named_in(scope, text(name)), scope, depth) }
 	with_fact(with_binding(name, DefinitionKind.Case), DEFINED_AT, definitions_meant(text(name), scope)#1.definer)
 }
 # the shape a declared pattern's call stands for, `Pair(a, b)` as its builder takes it apart
@@ -200,7 +201,7 @@ core_word(called: Node, word: text, scope: Scope) as bool := called is symbol an
 type_test_bound(n: Node, called: Node, arguments: list, scope: Scope, depth: int) as Node := {
 	tested = arguments#2
 	if names_value(tested, scope) { return bound(refitted(Call(symbol(EQUALITY_WORD), arguments), n), scope, depth) }
-	type = if tested is symbol and names_case(tested, scope) then resolved(tested, scope, depth) else type_bound(tested, scope)
+	type = if tested is symbol and names_case(tested, scope) then resolved(tested, named_in(scope, text(tested)), scope, depth) else type_bound(tested, scope)
 	refitted(Call(called, [bound(arguments#1, scope, depth), type]), n)
 }
 # a call's argument: a named one, `by: f`, its value bound and its name the parameter's word
@@ -297,24 +298,26 @@ parameter_name(parameter: Node) as Node := if declared_name(parameter) is symbol
 # A name with what it refers to, as seen from depth: its own function's names as they were defined, the program's
 # globals and functions and the library's words as such, an enclosing function's names as captures; a name nothing
 # defines is refused
-resolved(name: Node, scope: Scope, depth: int) as Node := resolved_taking(name, ø, scope, depth)
+resolved(name: Node, named: list<Definition>, scope: Scope, depth: int) as Node := resolved_taking(name, ø, named, scope, depth)
 # a called name resolved by how many values the call gives, which picks among cases of one name
-called_bound(called: Node, given: int, scope: Scope, depth: int) as Node := if called is symbol then word_named_call(called, given, scope, depth) ?? resolved_taking(called, given, scope, depth) else bound(called, scope, depth)
+called_bound(called: Node, given: int, scope: Scope, depth: int) as Node := if called is symbol then name_called(called, given, named_in(scope, text(called)), scope, depth) else bound(called, scope, depth)
+# a called name, the call of the type it names or the definition it means, from the definitions the scope names it by
+name_called(called: Node, given: int, named: list<Definition>, scope: Scope, depth: int) as Node := word_named_call(called, given, named, scope, depth) ?? resolved_taking(called, given, named, scope, depth)
 # a call of a type's name is a call of the type it names: a word's, `int32(1)` i32(1), or a subtype made of its
 # value, `nat(5)` (wiki/conversion.md "Making"); ø for a name of no type
-word_named_call(called: Node, given: int, scope: Scope, depth: int) as Node? := {
-	named = named_type(named_in(scope, text(called)), text(called), scope) ?? return ø
-	if named is symbol then called_bound(named, given, scope, depth) else named
+word_named_call(called: Node, given: int, named: list<Definition>, scope: Scope, depth: int) as Node? := {
+	type = named_type(named, text(called), scope) ?? return ø
+	if type is symbol then called_bound(type, given, scope, depth) else type
 }
-resolved_taking(name: Node, given: int?, scope: Scope, depth: int) as Node := {
-	meant = if has_fact(name, DERIVED) then rule_word_meant(text(name), scope) else definitions_meant(text(name), scope)
+resolved_taking(name: Node, given: int?, named: list<Definition>, scope: Scope, depth: int) as Node := {
+	meant = if has_fact(name, DERIVED) then rule_word_meant(text(name), scope) else definitions_among(named)
 	# a name nothing defines is read as the word its alias gives, `length` count (types/operators.wap word_aliases),
 	# else as a standard module's word
 	if meant is empty {
 		# a universe, `Prop`, is the language's own: typing reads it (types.wap names_type_value)
 		if universe_written(name) != ø { return name }
 		alias = word_aliased(text(name))
-		if alias != text(name) and (not definitions_meant(alias, scope) is empty or scope.standard.has(alias)) { return resolved_taking(refitted(symbol(alias), name), given, scope, depth) }
+		if alias != text(name) and (not definitions_meant(alias, scope) is empty or scope.standard.has(alias)) { return resolved_taking(refitted(symbol(alias), name), given, named_in(scope, alias), scope, depth) }
 		return standard_word_bound(name, scope)
 	}
 	innermost = if meant#1.kind == DefinitionKind.Case then unambiguous_case(name, meant#1, given, scope) else meant#1
@@ -346,7 +349,7 @@ type_word(called: Node, subject: Node, scope: Scope, given: int, depth: int) as 
 	if not subject is symbol { return ø }
 	meant = definitions_meant(text(subject), scope)
 	if meant is empty or not meant.all(definition => definition.kind == DefinitionKind.Record) { return ø }
-	with_fact(resolved_taking(called, given, scope, depth), OWNER, Text(text(subject)))
+	with_fact(resolved_taking(called, given, named_in(scope, text(called)), scope, depth), OWNER, Text(text(subject)))
 }
 # A case name enums share: of the cases taking as many values as a call gives the innermost, `Key(k, op, v)` the types
 # module's Node.Key beside a used module's fieldless LexemeKind.Key; with none taking them the innermost of the name;
