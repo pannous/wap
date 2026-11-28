@@ -429,4 +429,6 @@ check "a seed folder holding no wap source compiles hello and a program using a 
 6"
 # and builds a native executable: the types module's files as a native build reads them come from its warm state too
 check "a seed folder holding no wap source builds a native executable" "$(cd "$tree" && "$stage/sourceless/wap" build "$stage/sourceless_hello.wap" >/dev/null 2>&1 && "$stage/sourceless_hello" 2>&1)" "Hello"
+# from any folder, a relative program too: wap's own build script is the seed folder's, the tree is no part of it
+check "wap build works from a folder outside the tree" "$(rm -f "$stage/sourceless_hello" && cd "$stage" && "$stage/sourceless/wap" build sourceless_hello.wap >/dev/null 2>&1 && "$stage/sourceless_hello" 2>&1)" "Hello"
 exit $((failures > 0))
