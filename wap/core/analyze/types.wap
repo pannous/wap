@@ -37,6 +37,8 @@ use "../type_notation.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/surface.wap"
 use "../../kernel/primitives.wap"
+use "../../kernel/terms.wap"
+use "../../kernel/levels.wap"
 use "../rules/typed.wap"
 use "flow.wap"
 
@@ -67,6 +69,8 @@ class TypingState {
 	# refusal keeps them only when it is that one
 	lacked: Lacked = Lacked()
 	functions: list<TypedFunction> = []
+	# the key of the function whose body is being typed, ø at the top level: where an obligation sits (dispatch.wap)
+	within: text? = ø
 	# the same typed functions by their function's key, where a call finds the instance it reuses
 	instances: map<text, list<TypedFunction>> = {}
 	globals: list<Binding> = []
@@ -78,6 +82,8 @@ class TypingState {
 	lambdas: map<text, Node> = {}
 	# the functions dynamic calls dispatch through (core/analyze/dispatch.wap)
 	dispatchers: list<Node> = []
+	# the typed functions' effects as last joined (core/analyze/effects.wap)
+	joined: Joining? = ø
 	captured: list<text> = []
 	# what the conditions around a function value find of the variables it captures, by its function's key: the
 	# captures are copied when the value is made, so its body reads them as found there (core/analyze/function_values.wap)
@@ -87,6 +93,10 @@ class TypingState {
 	el: Elaboration = elaboration(TYPES.environment, [])
 	# the holes each definition's letters stand for in its calls, by the definition's key (letters.wap letter_holes)
 	letter_holes: map<text, list<Binding>> = {}
+	# the levels a call writes in brackets glued to the name it calls, by that name (calls.wap level_written_call)
+	levels_written: map<text, list<Level>> = {}
+	# the types a call at a written level gives its definition's letters, by the name it calls (calls.wap implicit_typed)
+	letters_given: map<text, list<Binding>> = {}
 	# the calls of functions typed only once their unknowns settle
 	deferred: list<Deferred> = []
 	# the instance each deferred call got once its unknowns settled, by the key of the one it was given till then: the
@@ -155,6 +165,14 @@ class TypedFunction {
 	# the result its other arms give (calls.wap shaped_typed); and what to write where a value is wanted of such a call
 	called_unknown: bool = no
 	unknown_result: text = ""
+	# its parameters entered once as Locals on one checker (terms.wap parameters_locals): its result, body, arms and course
+	# all name these Free variables (notes/coc-t6a4.md "The substitutions")
+	# its result as written, read again as values under its parameters where a type of a family names them (terms.wap kernel_result)
+	written: Node? = ø
+	checker: Checker? = ø
+	locals: list<Local> = []
+	# while its locals are being entered, a hypothesis read under the parameters before it
+	entering_locals: bool = no
 }
 # the type a typed function gives: ø's own when it gives nothing, `T` of `-> T` bound to ø; none while its result is not
 # known yet
@@ -178,6 +196,8 @@ class TypeFrame {
 	held: list<HeldCondition> = []
 	# the name of the function typed, ø for the program
 	function: Node? = ø
+	# the typed function itself, whose parameters' Locals an arm's expected type is read under (matching.wap arm_expected)
+	typed_function: TypedFunction? = ø
 	# the globals it reads before the statements that give them their values (TypedFunction late)
 	late: list<Node> = []
 	# whether what is typed is a typed rule's output, on which the typed rules do not fire (core/rules/typed.wap)
@@ -226,7 +246,10 @@ typed_among(program: Block, library: list, rules: KindRules, library_scopes: map
 	s.instances = {}
 	for instance in s.functions { instance_indexed(instance, s) }
 	enums_entered(s.records.items)
-	conditions_entered(conditions, instances_entered(s.functions, s), s)
+	entered = instances_entered(s.functions, s)
+	conditions_entered(conditions, entered, s)
+	obligations_entered(entered, s)
+	effects_written(s)
 	written = defines + s.lambdas.values() + s.dispatchers
 	# the records stand first, shaped: the program's own leave the statements
 	placed = statements_in(instances_placed(refitted(Block(statements), typed), s)).filter(statement => not statement is Record)
@@ -251,8 +274,6 @@ gives_value(n: Node) as bool := fact_of(n, TYPE) != ø and not jumps(n) and valu
 # a typed form's value type, refused where it gives none, saying where the value is wanted: "to pass", "to test" …; a
 # call of a function whose result is not known yet says what to write
 value_of(n: Node, wanted: text) as Term := value_type(n) ?? refused(n, text_of(fact_of(n, RESULT_UNKNOWN)) ?? "this gives no value ${wanted}")
-# a fact's text, ø for none
-text_of(fact: Node?) as text? := match fact { Text(value) => value; _ => ø }
 valued(type: Term?) as bool := value_bearing(type) != ø
 # a type that holds a value, ø for none or ø's own
 value_bearing(type: Term?) as Term? := if type == EMPTY_TERM then ø else type
@@ -287,7 +308,7 @@ form_typed(n: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := ma
 	List(items, Bracket.Curly, separator) => map_typed(n, items, separator, s, f, expected)
 	Item(subject, key) => item_typed(n, subject, key, s, f)
 	Fn(parameters, body) => function_value_typed(n, parameters, body, s, f)
-	Symbol(name) => name_typed(n, s, f, expected)
+	Symbol(name) => if PROOF_WORDS.contains(name) and question_word(n, name) then proof_typed(n, name, expected) else name_typed(n, s, f, expected)
 	Char(value) => if expected == TEXT_TERM then char_text(n) else with_type(n, CHAR_TYPE)
 	Number(value) => with_type(n, if value is int then whole_type(n, value, expected) else FLOAT_TYPE)
 	Text(value) => with_type(n, TEXT_TYPE)
@@ -306,6 +327,11 @@ whole_type(n: Node, value: int, expected: Term?) as text := {
 # the type of a typed form's value, ø when it gives none
 value_type(n: Node) as Term? := if n is Empty then EMPTY_TERM else fact_type(fact_of(n, TYPE))
 with_type_of(n: Node, type: Term?) as Node := if type == ø then n else with_fact(n, TYPE, type_fact(type!))
+# a type as a value (wiki/universe.md): of its universe, held as the text that shows it
+type_value(type: Term, at: Node) as Node := with_fact(with_type_of(placed_like(Text(type_text(type)), at), universe_of(type)), DENOTES, type_fact(type))
+# whether a name in value position is the type it names: a universe, or a type word where no function type is wanted
+# (a function of its name is then meant) and no case of the enum wanted
+names_type_value(n: Node, expected: Term?, s: TypingState) as bool := universe_written(n) != ø or function_parts(expected) == ø and (fact_of(n, BINDING) == ø or names_function(n) and not names_constant(n, expected, s)) and names_type(n, s) and expected_case(n, expected, s) == ø
 
 # Statements typed in order, the last one expected the block's type. A function it defines stays as written until the
 # whole program is typed (instances_placed); one whose parameters all have their types is typed even when nothing
@@ -326,14 +352,25 @@ block_typed(n: Node, written: list, s: TypingState, f: TypeFrame, expected: Term
 	block = refitted(Block(typed), n)
 	if typed is empty then block else typed_like(block, typed.last)
 }
-# each definition whose parameters all have their types typed, even when nothing calls it, unless TYPED_WHEN_CALLED;
-# one wap refuses ends alone. The catch is empty because function_typed has already kept its refusal for the end:
-# only what function_typed raises may reach it, never a raise that skips that record
+# each definition whose parameters all have their types typed, even when nothing calls it, unless TYPED_WHEN_CALLED; a
+# proof at its letters too, so its claim to do nothing but compute is checked (other code at letters is typed where it
+# is called); one wap refuses ends alone. The catch is empty because function_typed has already kept its refusal for the
+# end: only what function_typed raises may reach it, never a raise that skips that record
 typed_alone(statements: list, s: TypingState) := for statement in statements {
 	if statement is Define and fact_of(statement, TYPED_WHEN_CALLED) == ø {
 		held = held_function(statement, s)
-		if all_typed(held, s.records) { try function_typed(held, held.parameters, s, statement) catch e { } }
+		types = if all_typed(held, s.records) then held.parameters else if annotation(statement, PROOF_ANNOTATION) != ø then letters_fixed(held) else ø
+		if types != ø { try function_typed(held, types!, s, statement) catch e { } }
 	}
+}
+# A definition's parameter types for every letter at once: each level letter at Type, each type letter a type of its
+# own that nothing else is, so what holds of it holds for each (a proof's binders, wiki/proof.md); ø where a parameter
+# has no type
+letters_fixed(definition: Signature) as list<Term?>? := {
+	if definition.parameters.any(type => type == ø) { return ø }
+	levels = level_names(definition)
+	fixed = levels_bound(levels, levels.map(name => level_above(Zero, 1))) + letters_written(definition).map(letter => Binding(letter, word_keyed(letter, "${definition.key} ${letter}")))
+	definition.parameters.map(type => if type == ø then ø else type_substituted(type!, fixed))
 }
 # a definition as the typing stage holds it
 held_function(definition: Node, s: TypingState) as Signature := definition_keyed(function_key(definition), s) ?? function_of(definition)
@@ -501,6 +538,7 @@ name_typed(n: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
 		return case_call_typed(case, case, [], s, f)
 	}
 	if is_bound(n, DefinitionKind.Field) { return typed_form(receiver_field(n), s, f, ø) }
+	if names_type_value(n, expected, s) { return type_value(type_term(n), n) }
 	if names_function(n) {
 		case = expected_case(n, expected, s)
 		if case != ø { return case_call_typed(case, case, [], s, f) }

@@ -15,7 +15,7 @@ WAP_BESIDE=($(cd "$(dirname "${BASH_SOURCE[0]}")/../../wap" && ls | grep -vxF "$
 WAP_LIBRARY=lib
 # the tools the native wap runs beside its compiler, each a program of wap/ compiled once wherever a seed folder is made:
 # its module's name there, then its source (`wap verify`, wap/extensions/native/driver.wap)
-WAP_TOOLS=(verify.wasm:wap/extensions/verify/verify.wap)
+WAP_TOOLS=(verify.wasm:wap/extensions/verify/verify.wap check.wasm:wap/extensions/verify/check.wap)
 # the library module a compiler writes beside itself, named by its hash, which the tools link (extensions/wasm/library.wap)
 WAP_LIBRARY_LINKED='types-*.wasm'
 # a seed folder's parts, by name: the compiler, what it reads beside itself, the tools (its machine code *.cwasm is none)
