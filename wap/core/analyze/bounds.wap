@@ -1,0 +1,70 @@
+# The bounds of an int's value that compiling knows (kernel/scalars.wap), so a row on ints that stays within the scalars
+# runs as its instruction (dispatch.wap row_fitted, terms.wap obligation_entered). Known are: a literal's; a count a
+# row of the machine gives, below 2^32 (`#xs`, a text's bytes); a sum, difference or product of known ones; a For
+# counter's, from 1 up to its count's; a local's given one value only, that value's. Bounds are facts beside the type,
+# never the type: `type of` an int is int (wiki/type.md).
+use folder
+use "../errors.wap"
+use "../stage.wap"
+use "../bindings.wap"
+use "../type_notation.wap"
+use "../../kernel/forms.wap"
+use "../../kernel/scalars.wap"
+
+BOUNDS = "bounds"
+class Bounds { lo: int; hi: int }
+
+# the machine row a definition is, its body a single primitive; ø for any other
+row_of(definition: Signature, s: TypingState) as text? := {
+	body = match s.defines.get(definition.key) { Define(name, parameters, body) => body; _ => return ø }
+	match body { Prim(operation, arguments) => text(operation); _ => ø }
+}
+# a call of an int function that is a row giving a word of known bounds, those bounds noted
+counted_noted(typed: Node, meant: Signature, s: TypingState) as Node := {
+	if meant.result != INT_TERM { return typed }
+	known = ROW_BOUNDS.get(row_of(meant, s) ?? return typed) ?? return typed
+	with_fact(typed, BOUNDS, data_list(known.map(end => Number(end))))
+}
+# a local given a value, counted, so one given a value once has that value's bounds; a For counter's count
+assignment_counted(key: text, value: Node, s: TypingState) := {
+	s.assignments[key] = (s.assignments.get(key) ?? 0) + 1
+	s.assigned_values[key] = value
+}
+# the bounds of a typed int's value, ø where compiling knows none; read once typing is done, when every local's
+# assignments are counted
+bounds_of(n: Node, s: TypingState) as Bounds? := match n {
+	Number(value) => if value is int then Bounds(value, value) else ø
+	Symbol(name) => variable_bounds(place_key(fact_of(n, DEFINED_AT) ?? return ø), s)
+	Call(called, arguments) => noted_bounds(n) ?? row_bounds(n, arguments, s)
+	_ => ø
+}
+noted_bounds(n: Node) as Bounds? := {
+	ends = fact_items(n, BOUNDS).map(end => match end { Number(value) => value; _ => 0 })
+	if #ends == 2 then Bounds(ends#1, ends#2) else ø
+}
+# a local's: its one value's, a For counter's from 1 up to its count's; each found once
+variable_bounds(key: text, s: TypingState) as Bounds? := {
+	if s.bounds_found.has(key) { return s.bounds_found[key] }
+	s.bounds_found[key] = ø
+	count = s.counters.get(key)
+	found = if count != ø then counter_bounds(bounds_of(count!, s)) else if s.assignments.get(key) == 1 then bounds_of(s.assigned_values[key], s) else ø
+	s.bounds_found[key] = found
+	found
+}
+counter_bounds(count: Bounds?) as Bounds? := if count == ø then ø else Bounds(1, max(1, count!.hi))
+# a row on ints' bounds from its operands'
+row_bounds(n: Node, arguments: list, s: TypingState) as Bounds? := {
+	row = obligation_places(n).map(at => s.obligations#at).find(obligation => obligation.row != ø) ?? return ø
+	if #arguments != 2 { return ø }
+	a = bounds_of(arguments#1, s) ?? return ø
+	b = bounds_of(arguments#2, s) ?? return ø
+	match row.row! {
+		"i64.add" => Bounds(a.lo + b.lo, a.hi + b.hi)
+		"i64.sub" => Bounds(a.lo - b.hi, a.hi - b.lo)
+		"i64.mul" => {
+			ends = [a.lo * b.lo, a.lo * b.hi, a.hi * b.lo, a.hi * b.hi]
+			Bounds(min(ends), max(ends))
+		}
+		_ => ø
+	}
+}
