@@ -302,6 +302,8 @@ binder_term(n: Node, x: Entering) as Term? := {
 called_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
 	# a proof the call leaves to the provers, where they give none, leaves the call no term: the obligation decides it
 	wanted = kernel_value(n) ?? return ø
+	row = text_row(called_typed(called, arguments, x) ?? return ø)
+	if row != ø { return row_term(n, row!, arguments, x) }
 	read = call_read(called, arguments, x, wanted, (at, laws, goal) => proof_tried(laws, goal, x)) ?? return ø
 	if equal(x.c, wanted, type_of(x.c, read)) then read else ø
 }
@@ -320,6 +322,11 @@ called_typed(called: Node, arguments: list, x: Entering) as TypedFunction? := {
 	definer = fact_of(called, DEFINED_AT) ?? return ø
 	typed = x.by_key.get(place_key(definer)) ?? return ø
 	if #arguments == #typed.arguments then typed else ø
+}
+# the row a call of a library text function is computed by (kernel/primitives.wap TEXT_ROWS), ø for any other
+text_row(typed: TypedFunction) as text? := match typed.define {
+	Define(name, parameters, body) => TEXT_ROWS.get("${text(name)}(${typed.arguments.map(type => type_text(type)).join(", ")})")
+	_ => ø
 }
 # A word of the library that is a kernel constant, `@kernel(quotient.lift) lift(q, f, respected)`: its calls are that
 # constant, the function's body the run's only. A function cannot say it: the constant's binders it takes no parameter
@@ -582,17 +589,30 @@ condition_entered(condition: Condition, by_key: map<text, TypedFunction>, s: Typ
 }
 # an obligation's statement, a law of its function: its condition (a subtype's, entered above) at the argument's term, read
 # under the function's parameters, `it` replaced by beta; none for a shape's narrowing or an argument of no term, which stay
-# listed for the run (extensions/verify/check.wap proves the rest)
+# listed for the run (extensions/verify/check.wap proves the rest). Its verdict is that condition computed: a no is
+# refused at its place where no other choice of a dispatcher may take the value, a yes needs no check (wiki/type.md
+# "Proved or checked": the first step)
 obligations_entered(by_key: map<text, TypedFunction>, s: TypingState) := for obligation in s.obligations { obligation_entered(obligation, by_key, s) }
 obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) := {
 	if obligation.call != ø { return hole_entered(obligation, by_key, s) }
-	if subset_condition(obligation.type) == ø { return }
-	typed = by_key.get(obligation.within ?? return) ?? return
+	shown = subset_condition(obligation.type) ?? return
+	typed = by_key.get(obligation.within ?? "")
 	condition = named_id(TYPES.environment, condition_name(TYPES.environment, obligation.type)!) ?? return
 	held = match declared_at(TYPES.environment, condition)!.kind { Defined(value) => value; _ => return }
-	argument = term_of(obligation.argument!, parameters_reading(typed, by_key, s)) ?? return
-	obligation.function_type = pis(typed.locals, BOOL_TERM)
-	obligation.value = lambdas(typed.locals, beta(held, [argument]))
+	argument = term_of(obligation.argument!, within_reading(typed, by_key, s)) ?? return
+	obligation.function_type = pis(within_locals(typed), BOOL_TERM)
+	obligation.value = lambdas(within_locals(typed), beta(held, [argument]))
+	obligation.verdict = truth_computed(beta(held, [argument]))
+	if obligation.verdict == no and obligation.choice == 0 { refused(obligation.argument!, "${REFUSED_BY_CONDITION} ${condition_shown(shown)}") }
+}
+# what an obligation's code is read under: the parameters of the function it sits in, none at the top level
+within_reading(typed: TypedFunction?, by_key: map<text, TypedFunction>, s: TypingState) as Entering := if typed == ø then fresh_reading(checker(TYPES.environment, []), by_key, s) else parameters_reading(typed!, by_key, s)
+within_locals(typed: TypedFunction?) as list<Local> := if typed == ø then [] else typed!.locals
+# a truth as it computes, yes or no; ø where it waits on a value not known while compiling
+truth_computed(t: Term) as bool? := {
+	truths = TYPES.environment.literals!
+	value = computed(checker(TYPES.environment, []), t)
+	if same(value, truths.yes_case) then yes else if same(value, truths.no_case) then no else ø
 }
 # A proof a call leaves to the provers, as a law of the function the call sits in (of none at the top level): the goal at
 # its place, the callee's domain after the arguments before it, for every value of that function's parameters. One the
@@ -600,7 +620,7 @@ obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: 
 hole_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) := match obligation.call! {
 	Call(called, arguments) => {
 		typed = by_key.get(obligation.within ?? "")
-		x = if typed == ø then fresh_reading(checker(TYPES.environment, []), by_key, s) else parameters_reading(typed!, by_key, s)
+		x = within_reading(typed, by_key, s)
 		# each proof the provers give, or a hypothesis standing for it, so the goals after it are stated; a goal the run
 		# checks stays a warning where they find none, one only a proof decides is refused
 		goals: list<Term> = []
@@ -611,7 +631,7 @@ hole_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: Typing
 		}) ?? refused(obligation.call!, "a call's proof is stated by the arguments before it, which the kernel reads only as values computed without acting: name them first")
 		if goals is empty { refused(obligation.call!, "the kernel reads no proof at argument ${obligation.place} of this call") }
 		goal = goals#1
-		obligation.statement = pis(if typed == ø then [] else typed!.locals, goal)
+		obligation.statement = pis(within_locals(typed), goal)
 		if TYPES.prove == ø and obligation.check == ø { refused(obligation.call!, "this call leaves the proof of ${shown(goal)} to the provers (by), and this compile loads none: the verify extension proves it") }
 	}
 	_ => ø
