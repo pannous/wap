@@ -175,12 +175,37 @@ effect_added(effect: Effect?, caught: bool, own: Own) := if effect != ø and not
 	own.effects += [effect!]
 	if effect == Effect.Fail { own.divisors = ø }
 }
+# what nodes do themselves and the typed functions they name
+own_in(nodes: list, x: Joining) as Own := {
+	own = Own()
+	for n in nodes { effects_in(n, no, own, x) }
+	own
+}
 # whether a typed value only computes: neither it nor a function it calls acts, fails or may run forever
 computes_only(value: Node, s: TypingState) as bool := {
 	x = effects_joined(s)
-	own = Own()
-	effects_in(value, no, own, x)
+	own = own_in([value], x)
 	own.effects is empty and own.calls.all(call => (x.found.get(call.key) ?? []) is empty)
+}
+# the typed functions these nodes and functions name, and those they name in turn, by key
+reachable(nodes: list, keys: list<text>, x: Joining) as map<text, bool> := {
+	waiting = keys + own_in(nodes, x).calls.map(call => call.key)
+	seen: map<text, bool> = {}
+	while waiting is not empty {
+		key = waiting.pop()
+		if not seen.has(key) {
+			seen[key] = yes
+			waiting += own_of(key, x).calls.map(call => call.key)
+		}
+	}
+	seen
+}
+# the typed functions the program needs: those the statements reach, and those a function typed for itself reaches,
+# one of no used module's or of the emitter's own words; a function value's is reached where it is made
+needed(statements: list, s: TypingState) as list<TypedFunction> := {
+	x = effects_joined(s)
+	kept = reachable(statements, x.by_key.keys.filter(key => fact_of(s.defines.get(x.by_key[key].function.key) ?? Empty, TYPED_WHEN_CALLED) == ø and not s.lambdas.has(x.by_key[key].function.key)), x)
+	s.functions.filter(typed => typed.define == ø or kept.has(instance_key(typed)))
 }
 # the typed functions a name means: the one a call chose, or every one of a function named as a value
 instances_named(key: text, x: Joining) as list<text> := if x.by_key.has(key) then [key] else instances_of(key, x.s).filter(typed => typed.define != ø).map(typed => instance_key(typed))
