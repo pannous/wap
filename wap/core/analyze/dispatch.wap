@@ -126,16 +126,13 @@ generic_choices(definition: Signature, dispatch: Dispatch, s: TypingState) as li
 }
 # what each choice gives: a definition's written result, ø where its letters are open. Where the dispatch has a generic
 # choice, every result is written with its letters as any, `list<any>` of keys(m: map<K, V>): it never changes with the
-# types boxed later, so no caller is typed again for a round (GUESS, C4: a precision loss, `keys(any_map)` was a
-# list<text>); a choice that writes no result is refused there
+# types boxed later, so no caller is typed again for a round (notes/coc-c4.md: `keys(any_map)` is a list<any>); a choice
+# that gives nothing gives ø
 dispatch_results(dispatch: Dispatch, s: TypingState) as list<Term?> := {
 	generic = dispatch.order.filter(definition => generic_place(definition, dispatch.types, s) != ø)
 	plain = taking_of(dispatch, s).filter(definition => generic_place(definition, dispatch.types, s) == ø)
 	if generic is empty { return plain.map(definition => if has_letters(definition.result) then ø else definition.result) }
-	(plain + generic).map(definition => {
-		if definition.result == ø { refused(dispatch.name, "write the result of ${described(definition)}: it is chosen when the program runs") }
-		substituted(definition.result, letters_in(definition.result).map(letter => Binding(letter, ANY_TERM)))
-	})
+	(plain + generic).map(definition => if definition.result == ø then ø else substituted(definition.result, letters_in(definition.result).map(letter => Binding(letter, ANY_TERM))))
 }
 # the boxed types a definition's generic parameter takes
 taken(definition: Signature, at: int, boxed: list<Term>, s: TypingState) as list<Term> := {
@@ -145,13 +142,15 @@ taken(definition: Signature, at: int, boxed: list<Term>, s: TypingState) as list
 # Each generic dispatch given the choices of the types boxed after it was written, round by round, until no new type
 # is boxed: a later statement may box a type an earlier dispatch meets. A round looks only at the types boxed since
 # the one before, and types a dispatcher again only when one of them fits a generic definition of its word; a round
-# that boxes a type holding one the round before boxed nests without end, and is refused
+# that boxes a type holding one the round before boxed nests without end, and is refused. The unknowns are settled
+# before the first round and after each, whose deferred functions may box more
 # DEBT: A dispatcher compiled once into a module (types.wasm, a library compiled once) knows only the types boxed when
 #   it was compiled: a program's list<Foo> in an any, handed to such a module's function that calls text(x), raises
 #   "no definition takes these values' types" when it runs. Paid off when a program's boxed types reach the dispatchers
 #   of the modules it uses, or such a call is refused at compile time naming the module's function.
 dispatches_completed(s: TypingState) := {
 	before: list<Term> = []
+	all_settled(s)
 	while s.dispatches.any(dispatch => dispatch.covered < #boxed_known(s)) {
 		known = boxed_known(s)
 		retyped = s.dispatches.filter(dispatch => dispatch.covered < #known and known[dispatch.covered ..].any(type => fits_generic(dispatch, type, s)))
@@ -161,6 +160,7 @@ dispatches_completed(s: TypingState) := {
 		deeper = deeper_type(fresh, before)
 		if deeper != ø { refused(retyped#1.name, "${retyped#1.called} with an any boxes ever deeper types, ${type_text(deeper!)}: say the type the any holds where it is used") }
 		before = fresh
+		all_settled(s)
 	}
 }
 # a type of these that holds one of those, ø for none
