@@ -76,3 +76,23 @@ type of the arguments and compares nothing against `value_type(n)`.
 - F2: the argument loop steps with `instantiated(body, term)`. F4: a letter found with two domains is refused naming the case.
 - F3 open: reading an index through `term_of` needs typed forms (`typed_form`, a TypingState), which `enum_cases` does not
   have; `index_read`/`constructed` stay until the block is read with typing's state.
+
+## Language question: a lowercase one-letter name as a found letter (P3)
+`is_found_name` takes any one-letter name no definition or field holds (`n` of `Even(n)`); `letters_in` knows uppercase
+letters only (`is_letter`). Whether a lowercase one-letter name is a letter of the language is the user's to say; until
+then the one-letter rule stands.
+
+## Plan: indices read by term_of (F3), not coded yet
+`types.wap` has the TypingState at the call (`enums_entered(s.records.items)`), so `s` is threaded
+`enums_entered → enum_read → enum_cases → case_read`: about +6 lines. Then an index is read as `family_read` reads a
+function's result (terms.wap): `term_of(typed_form(item, s, frame, ø), reading)`:
+1. Each found letter gets a definer: its first occurrence in the case, set as DEFINED_AT on every occurrence of the name
+   (`found_written` already walks them): about +5.
+2. The frame is `TypeFrame` with a `Binding(place_key(definer), typing domain)` per found letter, and the reading is
+   `fresh_reading(checker, {}, s).under(locals, keys)` with the locals entered at the kernel domain: about +6.
+3. `case_read` reads each index through `term_of` under it; the found letter is then the reading's variable, and
+   `block_named`'s constants-by-id replacement is replaced by the abstraction over the locals: about +4, and
+   `index_read`/`constructed` go: about −12. Net about +9..+15, and `Even(2 * n)` and `Even(double(n))` come with it.
+Risks (unbuilt): typed_form on an index whose letter's DEFINED_AT is a node no typing pass met may refuse the symbol as
+unknown; `by_key` is empty at this point (functions are given, `distinct_instances` ran), so a user function in an index
+needs `s.functions` as `by_key`.
