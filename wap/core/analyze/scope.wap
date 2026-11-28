@@ -59,7 +59,7 @@ bound(n: Node, scope: Scope, depth: int) as Node := if fact_of(n, TYPED_HOLE) !=
 form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	Symbol(name) => resolved(n, scope, depth)
 	Block(statements) => refitted(Block(all_bound(statements, block_scope(n, statements, scope, depth), depth)), n)
-	Define(name, parameters, body) => with_captures(refitted(Define(bound(name, scope, depth), parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
+	Define(name, parameters, body) => with_captures(refitted(Define(defined_bound(name, parameters, scope, depth), parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
 	Fn(parameters, body) => with_captures(refitted(Fn(parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
 	Set(place, value) => refitted(Set(bound(place, if declares_global(n) then program_scope(scope) else scope, depth), bound(value, declaring(scope, declared_name(place)), depth)), n)
 	# a function type where a value stands, `(a, b) -> a + b`, is no value: types are written after a colon
@@ -76,7 +76,7 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	Get(subject, key) => qualified_case(n, subject, key, scope) ?? refitted(Get(bound(subject, scope, depth), bound(key, scope, depth)), n)
 	Item(subject, key) => refitted(Item(bound(subject, scope, depth), bound(key, scope, depth)), n)
 	List(items, Bracket.Square, separator) => refitted(List(all_bound(items, scope, depth), Bracket.Square, separator), n)
-	Key(name, Op.Colon, type) => refitted(Key(bound(name, scope, depth), Op.Colon, type_bound(type, scope)), n)
+	Key(name, Op.Colon, type) => refitted(Key(bound(name, scope, depth), Op.Colon, type_bound(type, scope, depth)), n)
 	# a function's name glued to a map calls it with the map, `style{a: 1}` style({a: 1}) (wiki/significant-whitespace.md)
 	Key(head, Op.None, List(items, Bracket.Curly, separator)) => if names_function_in(head, scope) then bound(refitted(Call(head, [refitted(List(items, Bracket.Curly, separator), n)]), n), scope, depth) else refitted(Key(type_bound(head, scope), Op.None, List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator)), n)
 	List(items, Bracket.Curly, separator) => refitted(List(items.map(field => field_bound(field, scope, depth)), Bracket.Curly, separator), n)
@@ -112,16 +112,17 @@ field_bound(field: Node, scope: Scope) as Node := match field {
 	Call(called, fields) => refitted(Call(called, fields.map(each => field_bound(each, scope))), field)
 	_ => field
 }
-type_bound(type: Node, scope: Scope) as Node := match type {
+type_bound(type: Node, scope: Scope, depth: int = 0) as Node := match type {
+	# a call of a function in a type's place is code, a statement or a value a type names, `a + 0 == a`, `P(f)`
+	Call(called, arguments) => if names_function_in(called, scope) then bound(type, scope, depth) else refitted(Call(called, arguments.map(argument => type_bound(argument, scope, depth))), type)
 	Symbol(name) => {
 		record = record_meant(scope, name)
 		# a case word narrows the enum its scope sees, whatever other enums hold a case so named
-		if record == ø { return with_fact(type, NARROWS, type_bound(symbol((case_owner(scope, name) ?? return type).name), scope)) }
+		if record == ø { return with_fact(type, NARROWS, type_bound(symbol((case_owner(scope, name) ?? return type).name), scope, depth)) }
 		with_fact(type, DECLARED_BY, record_declared(record!.definer))
 	}
-	List(items, bracket, separator) => refitted(List(items.map(item => type_bound(item, scope)), bracket, separator), type)
-	Call(called, arguments) => refitted(Call(called, arguments.map(argument => type_bound(argument, scope))), type)
-	Key(name, op, parts) => refitted(Key(name, op, type_bound(parts, scope)), type)
+	List(items, bracket, separator) => refitted(List(items.map(item => type_bound(item, scope, depth)), bracket, separator), type)
+	Key(name, op, parts) => refitted(Key(name, op, type_bound(parts, scope, depth)), type)
 	_ => type
 }
 # An arm: the name its pattern holds a new variable of the arm, which its result sees; `_` and literals name none
@@ -215,7 +216,11 @@ declaring(scope: Scope, place: Node) as Scope := Scope(scope.layers, scope.loope
 
 
 # A function's parameters and body, one depth further in than the function's definition, the body seeing the
-# parameters before the names around it
+# parameters before the names around it, and so does its written result, `k(n: int): n + 0 == n`
+defined_bound(name: Node, parameters: List, scope: Scope, depth: int) as Node := match name {
+	Key(head, Op.Colon, type) => refitted(Key(bound(head, scope, depth), Op.Colon, type_bound(type, within(scope, parameter_definitions(parameters, depth + 1)), depth + 1)), name)
+	_ => bound(name, scope, depth)
+}
 parameters_bound(parameters: List, scope: Scope, depth: int) as Node := match parameters {
 	List(items, bracket, separator) => with_items(parameters, items.map(p => default_bound(bound(p, within(scope, parameter_definitions(parameters, depth + 1)), depth + 1), scope, depth)))
 }
