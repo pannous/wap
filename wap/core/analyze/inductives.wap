@@ -55,14 +55,18 @@ FOUND_MARK = "·"
 # a letter a case finds: its word, standing for it in the types until the binders name it, and the type it has
 class Found { word: Term; domain: Term }
 enum_cases(enum: Node, letters: list<Term>) as list<CaseTyped> := cases_of(enum).map(case => {
-	found = found_distinct(found_written(case, letters))
+	found = found_distinct(found_written(case, letters), text(case_name(case)))
 	allowed = letters + found.map(each => each.word)
 	written = case_result(case)
 	result = if written == ø then ø else closed_type(case_read(written), allowed)
 	CaseTyped(text(case_name(case)), place_key(case_name(case)), case_fields(case).map(field => text(declared_name(field))), case_fields(case).map(field => closed_type(case_read(declared_type(field)), allowed)), found, result, written != ø and result == ø)
 })
 # the letters a case's field types and result write, in the order written
-found_written(case: Node, own: list<Term>) as list<Found> := (case_fields(case).map(field => declared_type(field)) + [case_result(case)]).flat_map(written => if written == ø then [] else found_in(written!, own))
+# (a case's own field names are no letters it finds: `m` of `pair(m: nat, e: Even(m))` is a field)
+found_written(case: Node, own: list<Term>) as list<Found> := {
+	named = own + case_fields(case).map(field => word_term(text(declared_name(field))))
+	(case_fields(case).map(field => declared_type(field)) + [case_result(case)]).flat_map(written => if written == ø then [] else found_in(written!, named))
+}
 # a one-letter name the program defines nowhere and the enum does not take
 is_found_name(n: Node, own: list<Term>) as bool := n is symbol and #text(n) == 1 and fact_of(n, DEFINED_AT) == ø and not own.any(letter => type_text(letter) == text(n))
 # the letters found in a written type: an argument of a family takes the family's header's type at its place, any
@@ -74,7 +78,11 @@ found_in(n: Node, own: list<Term>) as list<Found> := match n {
 	}
 	_ => if is_found_name(n, own) then [Found(word_term(text(n)), DATA_TERM)] else []
 }
-found_distinct(all: list<Found>) as list<Found> := all.fold([], (kept, each) => if kept.any(other => other.word == each.word) then kept else kept + [each])
+found_distinct(all: list<Found>, case: text) as list<Found> := all.fold([], (kept, each) => {
+	same = kept.find(other => other.word == each.word)
+	if same != ø and same!.domain != each.domain { raise("${case} writes ${type_text(each.word)} as a ${shown(same!.domain)} and as a ${shown(each.domain)}") }
+	if same != ø then kept else kept + [each]
+})
 # a type a case writes as the kernel holds it: a family applied to values reads each value, a number as its numeral,
 # a constructor applied as itself, `n + 2` as the sum; any other type as written
 case_read(written: Node?) as Term? := {
@@ -180,7 +188,7 @@ found_applied(id: int, constructor: Declaration, parameters: list<Term>, opened:
 		match type.shape {
 			Pi(binder, domain, body) => {
 				if not unified(el, domain, type_of(el.c, term!)) { return ø }
-				type = body
+				type = instantiated(body, term!)
 			}
 			_ => return ø
 		}
@@ -193,6 +201,11 @@ found_applied(id: int, constructor: Declaration, parameters: list<Term>, opened:
 	if open is not empty { raise("${constructor.name} cannot tell which ${open.join(", ")} it means: write the type wanted, or an argument that has it") }
 	apply_all(apply_all(constant(id, constructor.name, []), parameters + solved), given.map(term => term!))
 })
+# whether a case finds letters, a marked binder anywhere in its type
+finds_letters(type: Term) as bool := match type.shape {
+	Pi(binder, domain, body) => binder.starts_with(FOUND_MARK) or finds_letters(body)
+	_ => no
+}
 # the type a constructor gives for these values, each of its field's own type; ø where they are other values
 fields_given(type: Term, arguments: list) as Term? := match type.shape {
 	Pi(binder, domain, body) => if arguments is not empty and value_type(arguments#1) == domain then fields_given(body, arguments.drop(1)) else ø

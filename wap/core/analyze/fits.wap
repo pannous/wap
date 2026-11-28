@@ -97,10 +97,14 @@ holder_of(record: Node, given: list<Binding>, s: TypingState) as Term := {
 }
 # the type of a record its values make, its letters bound by them as a call binds a definition's (letters.wap
 # letters_bound), each made under a key of its own
-holder_made(record: Node, fields: list<Node>, typed: list<Node>, key: text, called: Node, s: TypingState) as Term := {
-	if record_letters(record_declared(record)) is empty { return record_term(record) }
-	made = Signature(text(called), key, DefinitionKind.Case, called, fields.map(field => written_type(declared_type(field))), record_term(record), "", record)
-	holder_of(record, (letters_bound(made, typed.map(value_type), s) ?? refused(called, "${called}'s values give one letter two types")).letters, s)
+# A case of a family gives the member it writes, its found letters bound as the record's are (T6a3): `Even.step(Even.zero)` the
+# `Even(n)` its case writes with the n its argument's `Even(n)` gives
+holder_made(record: Node, case: Node?, fields: list<Node>, typed: list<Node>, key: text, called: Node, s: TypingState) as Term := {
+	written = if case == ø then ø else case_result(case!)
+	if record_letters(record_declared(record)) is empty and written == ø { return record_term(record) }
+	made = Signature(text(called), key, DefinitionKind.Case, called, fields.map(field => written_type(declared_type(field))), written_type(written) ?? record_term(record), "", record, no, case)
+	bound = (letters_bound(made, typed.map(value_type), s) ?? refused(called, "${called}'s values give one letter two types")).letters
+	if written == ø then holder_of(record, bound, s) else substituted(made.result, bound)!
 }
 # the type a field's value is typed for before its holder is known: its own, ø where it names a parameter
 field_wanted(field: Node, record: Node) as Term? := { type = written_type(declared_type(field)); if names_parameter(type, record) then ø else type }
@@ -175,12 +179,20 @@ converted(n: Node, wanted: Term, s: TypingState, at: Node, place: text) as Node 
 	if wanted == EMPTY_TERM { return if valued(value_type(n)) then placed_like(Block([n, Block([])]), n) else n }
 	if value_type(n) == ø and not has_fact(n, RESULT_UNKNOWN) { return converted(empty_given(n), wanted, s, at, place) }
 	given = value_type(n) ?? refused(at, "this gives no value, ${place} ${type_text(wanted)}")
+	# two members of one family are as they are where the kernel finds their indices equal (T6a3: `Even(0 + 2 + 2)` for `Even(4)`)
+	if same_family_member(given, wanted, s) { return with_type_of(n, wanted) }
 	# a function value converts by its function, typed for the wanted function type
 	way = conversion(given, wanted, s) ?? refused(at, "this gives ${type_text(given)}, ${place} ${type_text(wanted)}" + (if counted(given, wanted) then ": a bool counts as 1 or 0 only in a call, write it `as int`" else ""))
 	if way == Conversion.Settled { settles(given, wanted, s) }
 	if way == Conversion.Narrowed { return if narrowed_part(given, wanted, s) == ø then narrowed_call(n, wanted, at, s) else converted(narrowed_call(n, narrowed_part(given, wanted, s)!, at, s), wanted, s, at, place) }
 	if way == Conversion.Checked and error_part(given) != ø and error_part(wanted) == ø { return unfailed_call(n, given, wanted, s) }
 	if way == Conversion.Checked then with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [n]), n), wanted) else repacked(n, way, wanted, s)
+}
+# whether two types are one family applied to indices the kernel's conversion finds equal
+same_family_member(given: Term, wanted: Term, s: TypingState) as bool := {
+	if given == wanted or head_of(given) != head_of(wanted) or #parts_of(given) != #parts_of(wanted) or #parts_of(given) == 0 { return no }
+	if not is_type_former((declared_at(TYPES.environment, constant_id(head_of(given))) ?? return no).type) { return no }
+	equal(checker(TYPES.environment, []), kernel_settled(given, s) ?? return no, kernel_settled(wanted, s) ?? return no)
 }
 # code giving no value gives ø wherever a value is wanted, `answer(f())` and `y: int? = f()` of an f giving nothing;
 # a call whose result is not known yet waits

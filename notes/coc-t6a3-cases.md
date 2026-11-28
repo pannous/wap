@@ -64,3 +64,15 @@ unified with the field types, the type wanted where a letter is left, the use re
 `case_fields(item)` gives a constructor call's arguments; `n` and `T` as a case's letters arrive as bare symbols with
 no DEFINED_AT; typing's own type for a family case's call stays the bare enum, so `found_applied` reads the kernel's
 type of the arguments and compares nothing against `value_type(n)`.
+
+## Review rulings folded in (wap-theory-plan)
+- P2: step 3 reuses `holder_made` (fits.wap), widened by the case's Signature `member`, so `letters_bound` binds the found
+  letters (`letter_holes` adds `found_names`); `found_applied` stays only for the kernel term, whose found values typing's
+  text-keyed indices cannot give.
+- P1: `converted` accepts two members of one family whose indices the kernel finds equal (`same_family_member`, +6).
+- P3: `is_found_name` stays a one-letter rule: `letters_in` takes uppercase letters only (`is_letter`), `n` is lowercase.
+- P4: a match on an indexed family gives no term until T6a4/T5c4 (`case_minor` returns ø for a case that finds letters).
+- F1: a case's own field names are no found letters (`pair(m: nat, e: Even(m))`); outcome line `paired_wrong`.
+- F2: the argument loop steps with `instantiated(body, term)`. F4: a letter found with two domains is refused naming the case.
+- F3 open: reading an index through `term_of` needs typed forms (`typed_form`, a TypingState), which `enum_cases` does not
+  have; `index_read`/`constructed` stay until the block is read with typing's state.
