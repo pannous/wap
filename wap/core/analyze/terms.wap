@@ -176,14 +176,25 @@ value_signature(key: text, s: TypingState) as FunctionType? := {
 # closure left out. A lambda reading a capture has no term (its value lives in the closure), so no term ever drops
 # what it reads
 lambda_term(n: Node, x: Entering) as Term? := {
-	if captures_of(n) is not empty { return ø }
-	key = function_value_key(fact_type(fact_of(n, FUNCTION_VALUE)) ?? value_type(n)) ?? return ø
-	instances = instances_of(key, x.s)
-	if #instances != 1 { return ø }
-	typed = instances#1
+	typed = lambda_instance(n, x) ?? return ø
 	names = parameter_nodes(typed).drop(1)
 	locals = (1 to #names).list().map(at => entered(x.c, text(names#at), kernel_settled(typed.arguments#(at + 1), x.s, x.c)))
-	lambdas(locals, term_of(body_of(typed), x.under(locals, names.map(place_key))) ?? return ø)
+	lambdas(locals, lambda_at(n, variables(locals), x) ?? return ø)
+}
+# a lambda's function, its one instance; ø for one reading a capture
+lambda_instance(n: Node, x: Entering) as TypedFunction? := {
+	if not n is Fn or captures_of(n) is not empty { return ø }
+	key = function_value_key(fact_type(fact_of(n, FUNCTION_VALUE)) ?? value_type(n)) ?? return ø
+	instances = instances_of(key, x.s)
+	if #instances == 1 then instances#1 else ø
+}
+# a lambda's body at these arguments, its parameters standing for them, any further ones applied to it
+lambda_at(n: Node, given: list<Term>, x: Entering) as Term? := {
+	typed = lambda_instance(n, x) ?? return ø
+	names = parameter_nodes(typed).drop(1)
+	if #given < #names { return ø }
+	read = term_of(body_of(typed), reread(x, x.binders + names.map(place_key), x.variables + given.take(#names), x.recursion)) ?? return ø
+	apply_all(read, given.drop(#names))
 }
 # a function's name as a value: its one instance as the kernel holds it, or inside a measured recursion the recursion
 # itself (measured_value); ø for any other name
@@ -399,7 +410,7 @@ called_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
 call_read(called: Node, arguments: list, x: Entering, wanted: Term?, proved: (int, list<Node>, Term) -> Term?) as Term? := {
 	typed = called_typed(called, arguments, x) ?? return ø
 	kernel = kernel_declaration(typed)
-	if kernel != ø { return kernel_called(kernel!, typed, arguments, x, wanted, proved) }
+	if kernel != ø { return read_through(kernel!, typed, arguments, x, wanted, proved) ?? kernel_called(kernel!, typed, arguments, x, wanted, proved) }
 	function = instance_entered(typed, x.by_key, x.s) ?? return ø
 	if computes_unknown(function) { return ø }
 	apply_all(function, arguments_read(function, arguments, x, proved) ?? return ø)
@@ -422,13 +433,14 @@ kernel_declaration(typed: TypedFunction) as Declaration? := {
 }
 # a call of a word that is a kernel constant: the constant at its arguments by binder name, the binders it gives none
 # found from them, a proof it leaves to the provers proved at its goal
-kernel_called(d: Declaration, typed: TypedFunction, arguments: list, x: Entering, wanted: Term?, proved: (int, list<Node>, Term) -> Term?) as Term? := {
+# (`given` the terms of arguments read otherwise, by their places)
+kernel_called(d: Declaration, typed: TypedFunction, arguments: list, x: Entering, wanted: Term?, proved: (int, list<Node>, Term) -> Term?, given: map<int, Term> = {}) as Term? := {
 	names = parameter_names(typed)
 	binders = binder_names(d.type)
 	extra = names.find(name => not binders.contains(name))
 	if extra != ø { refused(typed.define, "${defined_name(typed.define)} is the kernel's ${d.name}, which takes no ${extra!}: its binders are ${binders.join(", ")}") }
 	laws = arguments.map(argument => by_laws(fact_of(argument, PROOF_HOLE) ?? argument))
-	terms = (1 to #arguments).map(at => if laws#at != ø then ø else term_of(arguments#at, x))
+	terms = (1 to #arguments).map(at => if laws#at != ø then ø else given.get(at) ?? term_of(arguments#at, x))
 	if (1 to #arguments).any(at => laws#at == ø and terms#at == ø) { return ø }
 	declared_applied(d, (at, binder) => {
 		place = names.index_of(binder)
@@ -553,10 +565,30 @@ one_motive(type: Term) as bool := match (declaration(TYPES.environment, recursor
 # a type's recursor into a motive, applied to its minor premises and then the major premise
 # (kernel/recursors.wap: its motive level where it may be taken apart into any universe, then the type's own levels;
 # its parameters, then the motives)
-recursor_applied(type: Term, motive: Term, arguments: list<Term>) as Term := {
+# (into the motive's level, a Type's unless given)
+recursor_applied(type: Term, motive: Term, arguments: list<Term>, level: Level = TYPE_LEVEL) as Term := {
 	name = recursor_name(word_key(word_id(type)))
-	recursor = named_constant(name, (if block_of(TYPES.environment, type, "match").any_motive then [TYPE_LEVEL] else []) + constant_levels(head(type)))
+	recursor = named_constant(name, (if block_of(TYPES.environment, type, "match").any_motive then [level] else []) + constant_levels(head(type)))
 	apply_all(apply(apply_all(recursor, parameters_given(type)), motive), arguments)
+}
+# the level a motive's values live at, a proof's or a function's of types too
+motive_level(motive: Term, c: Checker) as Level? := level_of(c, (lambdas_opened(c, motive, 1) ?? return ø).body)
+# a function's first binders entered as locals, and its body under them; ø where it has fewer
+class Opening { locals: list<Local>; body: Term }
+lambdas_opened(c: Checker, t: Term, count: int) as Opening? := {
+	locals: list<Local> = []
+	body = t
+	while #locals < count {
+		match body.shape {
+			Lambda(binder, domain, inner) => {
+				local = entered(c, binder, domain)
+				locals += [local]
+				body = instantiated(inner, local.variable)
+			}
+			_ => return ø
+		}
+	}
+	Opening(locals, body)
 }
 # the arguments a type applies its block's parameters to, its indices left out
 parameters_given(type: Term) as list<Term> := arguments(type).take(block_of(TYPES.environment, type, "match").block.parameters)
@@ -588,7 +620,7 @@ taken_apart_into(domain: Term, motive: Term, minor_for: (int, Recursed) -> Term?
 	r = Recursed([domain] + facts.nested, [motive] + facts.nested.map(container => lambda("_", container, container)))
 	again = (1 to #facts.nested).list().flat_map(place => block_of(TYPES.environment, r.types#(place + 1), "match").cases#1.map(id => minor_of(id, ø, r, value => ø, x, (inside, value) => value, place + 1)))
 	minors = facts.block.types#1.cases.map(case => minor_for(named_id(TYPES.environment, case.name)!, r)) + again
-	if minors.any(minor => minor == ø) then ø else recursor_applied(domain, r.motives#1, r.motives.drop(1) + minors.map(minor => minor!) + [major])
+	if minors.any(minor => minor == ø) then ø else recursor_applied(domain, r.motives#1, r.motives.drop(1) + minors.map(minor => minor!) + [major], motive_level(motive, x.c) ?? return ø)
 }
 arm_pattern(arm: Arm) as Node := match arm { Arm(pattern, result) => pattern }
 # the constructor a pattern names, ø for a name or `_`

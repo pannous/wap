@@ -232,3 +232,93 @@ calls_itself(body: Node, key: text) as bool := nodes_in(body).any(n => match n {
 	Call(called, arguments) => fact_of(called, DEFINED_AT) != ø and place_key(fact_of(called, DEFINED_AT)!) == key
 	_ => no
 })
+
+# A call inside a measured recursion of a kernel definition given a function that calls the recursion, `map(cs, c =>
+# count(c))` (notes/coc-t5c-measures.md part 7): read through the definition, a recursor on a value the parameters
+# hold, the motive taking along that the value's size is at most the whole's, so each case reads the function at its
+# fields with what the provers need to see each call's measure smaller. The size of the value is what the measure
+# computes to there, the nested recursion of Tree·size at a list of trees (theory-plan: found by computing, so its
+# equality with list·size is never needed), else the value's own size; ø for any other call
+read_through(d: Declaration, typed: TypedFunction, arguments: list, x: Entering, wanted: Term?, proved: (int, list<Node>, Term) -> Term?) as Term? := {
+	r = x.recursion ?? return ø
+	m = r.measured ?? return ø
+	if not (d.kind is Defined) { return ø }
+	at = (1 to #arguments).list().find(place => calls_recursion(arguments#place, r.key, x)) ?? return ø
+	through = entered(x.c, "·through", kernel_headed(kernel_value(arguments#at) ?? return ø, x.c, x.s))
+	unfolded = computed(x.c, kernel_called(d, typed, arguments, x, wanted, proved, {at: through.variable}) ?? return ø)
+	facts = match (declared_at(TYPES.environment, constant_id(head(unfolded))) ?? return ø).kind {
+		Recursor(facts) => facts
+		_ => return ø
+	}
+	given = arguments(unfolded)
+	if #given <= before_major(facts) or facts.motives != 1 or facts.indices != 0 { return ø }
+	major = given#(before_major(facts) + 1)
+	size = size_within(computed(x.c, beta(m.measure, m.parameters)), major, x.c) ?? sized_function(major, x) ?? return ø
+	bounded = (value: Term) => at_most_yes(beta(size, [value]), beta(size, [major]))
+	motive = given#(facts.parameters + 1)
+	value = entered(x.c, "l", type_of(x.c, major))
+	premised = lambdas([value], pis([entered(x.c, MEASURE_PREMISE, bounded(value.variable))], beta(motive, [value.variable])))
+	parameters = given.take(facts.parameters)
+	minors = (1 to facts.minors).list().map(place => minor_through(given#(facts.parameters + 1 + place), apply_all(facts.cases#place, parameters), facts.fields#place, head(type_of(x.c, major)), Through(motive, bounded, variable_id(through.variable), arguments#at), x))
+	if minors.any(minor => minor == ø) { return ø }
+	recursion = apply_all(head(unfolded), parameters + [premised] + minors.map(minor => minor!) + [major])
+	apply_all(recursion, [apply(named_constant(AT_MOST_SAME), beta(size, [major]))] + given.drop(before_major(facts) + 1))
+}
+# what each case read through needs: the motive, the premise at a value, the function's stand-in and what it is
+class Through { motive: Term; bounded: (Term) -> Term; stand_in: int; function: Node }
+# A case's minor premise read through: its fields, a hypothesis taking the premise for each recursive field, and the
+# premise at the case's value; the old minor's body with each hypothesis given its premise and the function read at
+# each call of its stand-in, all proved by the provers under the fields and the premise
+minor_through(minor: Term, case: Term, field_count: int, type: Term, t: Through, x: Entering) as Term? := {
+	fields = lambdas_opened(x.c, minor, field_count) ?? return ø
+	recursive = fields.locals.filter(field => is_constant(head(field.domain), type))
+	old = lambdas_opened(x.c, fields.body, #recursive) ?? return ø
+	hypotheses = recursive.map(field => entered(x.c, INDUCTION, pis([entered(x.c, MEASURE_PREMISE, t.bounded(field.variable))], beta(t.motive, [field.variable]))))
+	premise = entered(x.c, MEASURE_PREMISE, t.bounded(apply_all(case, variables(fields.locals))))
+	binders = fields.locals + hypotheses + [premise]
+	inside = x.under(binders, binders.map(binder => NO_BINDER))
+	body = old.body
+	for place in 1 to #recursive {
+		proof = hole_term([], t.bounded(recursive#place.variable), inside, yes) ?? return ø
+		body = replaced_by(body, variable_id(old.locals#place.variable), apply(hypotheses#place.variable, proof))
+	}
+	lambdas(binders, calls_replaced(body, t.stand_in, given => through_call(t.function, given, inside), x.c) ?? return ø)
+}
+# a function argument read at a call's arguments: the recursion itself named as a value, or a lambda's body there
+through_call(function: Node, given: list<Term>, x: Entering) as Term? := {
+	m = x.recursion!.measured!
+	if function_value_key(value_type(function)) == x.recursion!.key then measured_applied(given, m, x) else lambda_at(function, given, x)
+}
+# whether a function argument calls the recursion being read: its name, or a lambda whose body calls it
+calls_recursion(n: Node, key: text, x: Entering) as bool := function_value_key(value_type(n)) == key or calls_itself(n, key) or (lambda_instance(n, x) != ø and calls_itself(body_of(lambda_instance(n, x)!), key))
+# The function a measure computes to at a value it holds, `N(cs)` in `succ(N(cs))`: the first application ending in
+# the value, the value made its binder; ø where the measure ends in it nowhere
+size_within(t: Term, value: Term, c: Checker) as Term? := {
+	if variable_id(value) == 0 or not holds_variable(t, value) { return ø }
+	if arguments(t) is not empty and same(arguments(t).last, value) { return lambda("l", type_of(c, value), abstracted(t, variable_id(value))) }
+	match t.shape {
+		Apply(function, argument) => size_within(argument, value, c) ?? size_within(function, value, c)
+		_ => ø
+	}
+}
+# a value's own size as a function of values of its type
+sized_function(value: Term, x: Entering) as Term? := {
+	l = entered(x.c, "l", type_of(x.c, value))
+	lambdas([l], value_size(TYPES.environment, l.domain, l.variable) ?? return ø)
+}
+# a term with each application of a variable replaced by what `at` makes of its arguments
+calls_replaced(t: Term, id: int, at: (list<Term>) -> Term?, c: Checker) as Term? := {
+	if not free_variables(t).contains(id) { return t }
+	if variable_id(head(t)) == id {
+		given = arguments(t).map(argument => calls_replaced(argument, id, at, c))
+		return if given.any(argument => argument == ø) then ø else at(given.map(argument => argument!))
+	}
+	match t.shape {
+		Apply(function, argument) => apply(calls_replaced(function, id, at, c) ?? return ø, calls_replaced(argument, id, at, c) ?? return ø)
+		Lambda(binder, domain, body) => {
+			inside = entered(c, binder, domain)
+			lambda(binder, domain, abstracted(calls_replaced(instantiated(body, inside.variable), id, at, c) ?? return ø, variable_id(inside.variable)))
+		}
+		_ => ø
+	}
+}
