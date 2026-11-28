@@ -9,10 +9,18 @@ use folder
 use "../../kernel/opcodes.wap"
 use "../../kernel/forms.wap"
 use "../../kernel/primitives.wap"
+use "../../kernel/scalars.wap"
 use "../errors.wap"
 use "../stage.wap"
 use "../type_notation.wap"
 
+# operands within ±2^31 multiply within 64 bits: an operand plus FACTOR_OFFSET, read unsigned, below FACTOR_RANGE
+FACTOR_OFFSET := 2147483648
+FACTOR_RANGE := 4294967296
+# a shift by at least the word's bits shifts out every bit
+WORD_BITS := 64
+# the row that takes an int where the machine takes 32 bits, which refuses one past the scalars
+NARROWED_ROW = "i32.wrap_i64"
 # a helper's early end: unless the test on the stack is yes, the helper gives no
 NO_UNLESS_YES = I32_EQZ + if_block(i32_const(0) + RETURN)
 
@@ -79,6 +87,8 @@ primitive_code(form: Node, operation: Node, arguments: list<Code>, p: Emission) 
 	if name == LIST_COUNT { return ending(counted_items(p)) }
 	if MAP_FIELDS.has(name) { return ending(instruction(STRUCT_GET, [map_struct(first_operand_type(form), p), MAP_FIELDS[name]])) }
 	if TYPED_HELPERS.has(name) { return finished(ending(typed_helper_called(name, first_operand_type(form), p))) }
+	# a 32-bit word given where its definition writes an int is extended, as wasm_called extends it
+	if is_carried(form, name) { return finished(ending(helper_call(p, "carried ${name}", q => carried_function(name, q)) + (if name == NARROWED_ROW and typed_layout(form, p) == I64 then I64_EXTEND_I32_U else []))) }
 	if PRIMITIVES.has(name) { return wasm_called(form, arguments, host_performed(name, p), p) }
 	if name == ITEM_LOAD { return wasm_called(form, arguments, item_loaded(typed_layout(form, p)), p) }
 	if name == ITEM_STORE { return wasm_called(form, arguments, item_stored(arguments#2.type), p) }
@@ -87,6 +97,42 @@ primitive_code(form: Node, operation: Node, arguments: list<Code>, p: Emission) 
 	operations = text_operations(p)
 	if operations.has(name) { return wasm_called(form, arguments, operations[name], p) }
 	refused(form, "no primitive of this name")
+}
+# A row on ints (kernel/scalars.wap), never a row on words or one compiling showed gives a scalar
+# (core/analyze/types.wap row_placed): run by a helper of the module
+is_carried(form: Prim, name: text) as bool := (CARRIED_ROWS.has(name) or name in ORDER_ROWS or name == NARROWED_ROW) and type_text(first_operand_type(form)) == INT_TYPE and (fact_of(form, TYPE) == ø or type_text(type_of(form)) != SCALAR_WORD)
+# The helper running a row on ints: the row's instruction where its operands and its value are scalars, else the
+# types library's carried function, exact (types/whole.wap); an order compares the carried order with 0, and a row
+# taking 32 bits refuses an int past the scalars
+carried_function(name: text, p: Emission) as int := {
+	row = PRIMITIVES[name].code
+	if name == NARROWED_ROW { return added_function(p.m, [I64], [I32], [], beneath(local_get(0)) + if_block(local_get(0) + runtime_call(p, "${CARRIED_NARROWING}(int)") + DROP + UNREACHABLE) + local_get(0) + row) }
+	operands = local_get(0) + local_get(1)
+	away = beneath(local_get(0)) + beneath(local_get(1)) + I32_OR
+	if name in ORDER_ROWS { return added_function(p.m, [I64, I64], [I32], [], away + if_block(operands + runtime_call(p, "${CARRIED_ORDER}(int, int)") + i64_const(0) + row + RETURN) + operands + row) }
+	carried = if_block(operands + runtime_call(p, "${CARRIED_ROWS[name]}(int, int)") + RETURN)
+	value = local_get(2)
+	added_function(p.m, [I64, I64], [I64], [I64], away + operands_unfit(name) + I32_OR + carried + operands + row + local_set(2) + beneath(value) + value_unfit(name) + I32_OR + carried + value)
+}
+# whether a word is a handle, below the scalars
+beneath(word: list<int>) as list<int> := word + i64_const(SMALLEST_SCALAR) + PRIMITIVES["i64.lt_s"].code
+# whether a row may leave 64 bits before it runs: a product of an operand past 31 bits, a shift by the word's bits or more
+operands_unfit(name: text) as list<int> := match name {
+	"i64.mul" => past_factors(local_get(0)) + past_factors(local_get(1)) + I32_OR
+	"i64.shl" => local_get(1) + i64_const(WORD_BITS) + I64_LT_U + I32_EQZ
+	_ => i32_const(0)
+}
+past_factors(word: list<int>) as list<int> := word + i64_const(FACTOR_OFFSET) + I64_ADD + i64_const(FACTOR_RANGE) + I64_LT_U + I32_EQZ
+# whether the row's value, local 2, left 64 bits: a sum or a difference of a sign neither operand explains, a shift
+# that does not shift back
+value_unfit(name: text) as list<int> := {
+	signs = (left: list<int>, right: list<int>) => left + PRIMITIVES["i64.xor"].code + right + PRIMITIVES["i64.xor"].code + PRIMITIVES["i64.and"].code + i64_const(0) + PRIMITIVES["i64.lt_s"].code
+	match name {
+		"i64.add" => signs(local_get(0) + local_get(2), local_get(1) + local_get(2))
+		"i64.sub" => signs(local_get(0) + local_get(1), local_get(0) + local_get(2))
+		"i64.shl" => local_get(2) + local_get(1) + PRIMITIVES["i64.shr_s"].code + local_get(0) + PRIMITIVES["i64.ne"].code
+		_ => i32_const(0)
+	}
 }
 # a host operation's row, an imported function's with the call of its import
 host_performed(name: text, p: Emission) as WasmOperation := {

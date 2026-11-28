@@ -1,22 +1,24 @@
-# Whole numbers past 64 bits (wiki/number.md "Whole numbers"): an int is exact and never overflows, so where a sum,
-# difference or product leaves 64 bits the running program carries into a Whole, a sign and a Magnitude
-# (kernel/magnitude.wap). small(w) gives the int back where the number fits 64 bits again, so each number has one
-# spelling: the running program keeps a Whole only outside 64 bits. ÷ and % are the Euclidean pair ints have
-# (prelude.wap): the remainder is never negative.
+# Whole numbers past 64 bits (wiki/number.md "Whole numbers"): an int is exact and never overflows. The run holds an
+# int as one i64 (kernel/scalars.wap): a scalar is its own word, any other int a handle of its Whole, a sign and a
+# Magnitude (kernel/magnitude.wap), in the table below. The emitter runs a row on ints as its instruction while its
+# operands and its value are scalars, and else as one of the carried functions here, so each number has one spelling.
+# ÷ and % are the Euclidean pair ints have (prelude.wap): the remainder is never negative.
 
 # a whole number, its sign and its size; zero is never negative
 class Whole { negative: bool; size: Magnitude }
 
+# the ints the run holds as their own words
+type scalar = int where it >= SMALLEST_SCALAR and it <= LARGEST_SCALAR
+
 whole(n: int): Whole := Whole(n < 0, magnitude(n))
 signed(negative: bool, size: Magnitude): Whole := Whole(negative and not is_zero(size), size)
-# the int a whole number is where it fits 64 bits, ø past them
+# the int a whole number is where it is a scalar, ø past them
 small(w: Whole): int? := {
-	if compared(w.size, LARGEST_SIZE) <= 0 { return if w.negative then -whole(w.size) else whole(w.size) }
-	if w.negative and compared(w.size, SMALLEST_SIZE) == 0 then SMALLEST_INT else ø
+	if compared(w.size, if w.negative then SMALLEST_SIZE else LARGEST_SIZE) > 0 { return ø }
+	if w.negative then 0 - whole(w.size) else whole(w.size)
 }
-LARGEST_SIZE := magnitude(9223372036854775807)
-SMALLEST_INT := -9223372036854775807 - 1
-SMALLEST_SIZE := magnitude(SMALLEST_INT)
+LARGEST_SIZE := magnitude(LARGEST_SCALAR)
+SMALLEST_SIZE := magnitude(0 - SMALLEST_SCALAR)
 
 -(w: Whole): Whole := signed(not w.negative, w.size)
 +(a: Whole, b: Whole): Whole := {
@@ -35,6 +37,11 @@ SMALLEST_SIZE := magnitude(SMALLEST_INT)
 	rest = divided(a.size, b.size).rest
 	Whole(no, if a.negative and not is_zero(rest) then difference(b.size, rest) else rest)
 }
+# the quotient toward zero and its remainder, of the dividend's sign, as the machine's rows divide
+truncated_quotient(a: Whole, b: Whole): Whole := signed(a.negative != b.negative, divided(a.size, b.size).quotient)
+truncated_remainder(a: Whole, b: Whole): Whole := signed(a.negative, divided(a.size, b.size).rest)
+# 2 to a power
+power_of_two(n: int): Whole := (1 to n).fold(whole(1), (power, at) => power * whole(2))
 # -1, 0 or 1
 compared(a: Whole, b: Whole): int := {
 	if a.negative != b.negative { return if a.negative then -1 else 1 }
@@ -43,3 +50,53 @@ compared(a: Whole, b: Whole): int := {
 ==(a: Whole, b: Whole): bool := compared(a, b) == 0
 <(a: Whole, b: Whole): bool := compared(a, b) < 0
 text(w: Whole): text := (if w.negative then "-" else "") + digits(w.size)
+float(w: Whole): float := (if w.negative then -1.0 else 1.0) * w.size.limbs.reverse().fold(0.0, (value, limb) => value * float(LIMB) + float(limb))
+
+# The table of the whole numbers past the scalars the program made, a handle's place in it its word above the smallest
+# word, and each number's handle by its digits
+wholes: list<Whole> = []
+handles: map<text, int> = {}
+# an int's word as it is held, and a word held as an int, neither converted
+word_of(n: int): i64 := prim as_is(n)
+int_held(w: i64): int := prim as_is(w)
+# the smallest word, the first handle
+SMALLEST_WORD: i64 := word_of(SMALLEST_SCALAR) - word_of(HANDLES)
+is_handle(w: i64): bool := w < word_of(SMALLEST_SCALAR)
+# the whole number an int is: its handle's, or its own
+whole_of(n: int): Whole := if is_handle(word_of(n)) then wholes[int_held(word_of(n) - SMALLEST_WORD)] else whole(n)
+# the int a whole number is: itself where it is a scalar, else its handle, the one it was given before or a new one;
+# past HANDLES of them the program stops, naming the limit, never giving a wrong number
+int_of(w: Whole): int := small(w) ?? handle_of(w)
+handle_of(w: Whole): int := {
+	key = text(w)
+	known = handles.get(key)
+	if known != ø { return known! }
+	if #wholes == HANDLES { raise "a program makes at most ${HANDLES} whole numbers past ±9223372032559808512, and this one needs more" }
+	handle = int_held(SMALLEST_WORD + word_of(#wholes))
+	wholes.add(w)
+	handles[key] = handle
+	handle
+}
+# a word as the int it is, a handle where it is below the scalars, and an int's word, the number wrapped by 2^64
+# (core/analyze/fits.wap converted)
+widened(w: i64): int := if is_handle(w) then handle_of(Whole(yes, difference(BEYOND_WORDS, magnitude(int_held(w - SMALLEST_WORD))))) else int_held(w)
+wrapped(w: i64): i64 := if is_handle(w) then whole_word(wholes[int_held(w - SMALLEST_WORD)]) else w
+whole_word(w: Whole): i64 := {
+	size = w.size.limbs.reverse().fold(word_of(0), (value, limb) => value * word_of(LIMB) + word_of(limb))
+	if w.negative then word_of(0) - size else size
+}
+# 2^63, the size of the smallest word
+BEYOND_WORDS := sum(LARGEST_SIZE, ONE)
+
+# An int's rows where an operand or the value is past the scalars, each the row's value exact (kernel/scalars.wap
+# CARRIED_ROWS); a shift's count is a scalar
+carried_sum(a: int, b: int): int := int_of(whole_of(a) + whole_of(b))
+carried_difference(a: int, b: int): int := int_of(whole_of(a) - whole_of(b))
+carried_product(a: int, b: int): int := int_of(whole_of(a) * whole_of(b))
+carried_quotient(a: int, b: int): int := int_of(truncated_quotient(whole_of(a), whole_of(b)))
+carried_remainder(a: int, b: int): int := int_of(truncated_remainder(whole_of(a), whole_of(b)))
+carried_shifted(a: int, b: int): int := int_of(whole_of(a) * power_of_two(b))
+carried_halved(a: int, b: int): int := int_of(whole_of(a) ÷ power_of_two(b))
+carried_order(a: int, b: int): int := compared(whole_of(a), whole_of(b))
+# an int past the scalars where the machine takes a 32-bit word: a list's place, a character's code
+beyond_scalars(n: int): int := raise "${n} is past the whole numbers the machine takes here"
