@@ -77,6 +77,8 @@ class TypingState {
 	keyed: map<text, TypedFunction>? = ø
 	# the obligations this pass of typing leaves (dispatch.wap Obligation), the program's once the pass completes
 	obligations: list<Obligation> = []
+	# their places by their keys (dispatch.wap obligation_kept)
+	obligation_keys: map<text, int> = {}
 	globals: list<Binding> = []
 	# the keys of the globals functions read before the statements that give them their values, until those statements
 	unset: list<text> = []
@@ -122,6 +124,10 @@ class TypingState {
 	# by them (core/analyze/dispatch.wap)
 	boxed: list<Term> = []
 	dispatches: list<Dispatch> = []
+	# each dispatcher's choices tried by their tests, in turn, by its key (dispatch.wap choice_obliged)
+	choices: map<text, list<Signature>> = {}
+	# the obligations of the choices of the dispatcher a call last chose, by their places (calls.wap call_chosen)
+	dispatched: list<int> = []
 	# the own types of the function values that meet where one type holds them, by the unknown holding them until a
 	# call or a written type settles it to a signature (core/analyze/function_values.wap functions_joined)
 	members: map<int, list<Term>> = {}
@@ -439,10 +445,11 @@ instances_placed(n: Node, s: TypingState) as Node := match n {
 # skipped, the first decided yes called directly, the dispatcher kept at the first undecided; ø, the code as it is
 decided_code(n: Node, s: TypingState) as Node? := match n {
 	Call(called, arguments) => {
-		records = fact_items(n, OBLIGATIONS).map(at => s.obligations#(match at { Number(value) => value; _ => 0 }))
+		records = obligation_places(n).map(at => s.obligations#at)
 		if records is empty { return ø }
 		if records.all(record => record.choice == 0) { return if records.all(record => record.verdict == yes) then instances_placed(arguments#1, s) else ø }
-		dispatcher = typed_named(place_key(fact_of(called, DEFINED_AT) ?? return ø), s) ?? return ø
+		key = place_key(fact_of(called, DEFINED_AT) ?? refused(n, "a dispatcher's call names no dispatcher"))
+		dispatcher = typed_named(key, s) ?? refused(n, "no typed dispatcher has the key ${key}")
 		code = match dispatcher.define { Define(name, parameters, body) => chosen_code(n, arguments, body, 1, records); _ => ø }
 		if code == ø then ø else instances_placed(code!, s)
 	}
@@ -457,7 +464,7 @@ chosen_code(n: Node, arguments: list, choices: Node, at: int, records: list<Obli
 		if mine is empty or mine.any(record => record.verdict == ø) { return ø }
 		if mine.any(record => record.verdict == no) { return chosen_code(n, arguments, rest, at + 1, records) }
 		# the call keeps the dispatcher's call's type, never its obligations, which chose it
-		match code { Call(chosen, reads) => with_fact(refitted(Call(chosen, arguments), n), OBLIGATIONS, data_list([])); _ => ø }
+		match code { Call(chosen, reads) => obligations_noted(refitted(Call(chosen, arguments), n), []); _ => refused(code, "a dispatcher's choice ${at} is no call") }
 	}
 	Call(raise, [Text(message)]) => if text(raise) == RAISE_WORD then refused(n, message) else ø
 	_ => ø
