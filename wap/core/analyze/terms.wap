@@ -24,8 +24,14 @@ use "../../kernel/counting.wap"
 use "../../kernel/numbers.wap"
 use "../../kernel/recursors.wap"
 use "../../kernel/inductive.wap"
+use "../../kernel/equality.wap"
+use "../../kernel/logic.wap"
+use "../../kernel/levels.wap"
+use "holes.wap"
 
 ROW_MARK = "prim"
+# the binder of an arm's premise in a proof by a bool's cases, that the bool is the arm's case
+CASE_PREMISE = "·case"
 
 # the typed functions entered, callees before their callers: each by its key, once
 instances_entered(functions: list<TypedFunction>, s: TypingState) as map<text, TypedFunction> := {
@@ -101,7 +107,13 @@ definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 		inside = parameters_reading(typed, by_key, s)
 		# GUESS: the body's type and the result name the same Free variables, so `Even(n + n)` meets `Even(double(n))` by unfolding double
 		if not equal(inside.c, kernel_value(body) ?? return ø, kernel_result(typed, by_key, s) ?? return ø) { return ø }
-		lambdas(typed.locals, term_of(body, inside) ?? course_defined(typed, body, inside) ?? return ø)
+		outer = s.reading
+		s.reading = instance_key(typed)
+		read = term_of(body, inside) ?? course_defined(typed, body, inside)
+		s.reading = outer
+		value = lambdas(typed.locals, read ?? return ø)
+		# a proof still holding a `by`'s hole is no definition until verify answers it
+		if has_unknowns(value) then ø else value
 	}
 	_ => ø
 }
@@ -125,11 +137,11 @@ term_of(n: Node, x: Entering) as Term? := match n {
 	Text(value) => if universe_level(kernel_value(n)) == ø then quoted(value) else ø
 	True => TYPES.environment.literals!.yes_case
 	False => TYPES.environment.literals!.no_case
-	Symbol(name) => binder_term(n, x) ?? case_term(n, n, [], x)
-	Call(called, arguments) => recursive_called(called, arguments, x) ?? called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
+	Symbol(name) => binder_term(n, x) ?? refl_term(n) ?? case_term(n, n, [], x)
+	Call(called, arguments) => by_term(n, called, arguments, x) ?? stated_term(called, arguments, x) ?? recursive_called(called, arguments, x) ?? called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
 	Prim(operation, arguments) => row_term(n, text(operation), arguments, x)
-	If(condition, then_part, else_part) => choice_term(n, condition, then_part, else_part, x)
-	Case(subject, arms) => match_term(n, subject, arms, x)
+	If(condition, then_part, else_part) => cases_term(n, condition, then_part, else_part, x) ?? choice_term(n, condition, then_part, else_part, x)
+	Case(subject, arms) => cases_term(n, subject, truth_arm(arms, yes), truth_arm(arms, no), x) ?? match_term(n, subject, arms, x)
 	Block(statements) => lets_term(statements, x)
 	_ => ø
 }
@@ -193,12 +205,58 @@ arrow_parts(type: Term) as list<Term> := match type.shape {
 }
 # an `if` on a bool: bool's recursor into the type both arms give, the arm at no before the arm at yes
 choice_term(n: Node, condition: Node, then_part: Node, else_part: Node, x: Entering) as Term? := {
-	type = kernel_value(n) ?? return ø
+	type = bool_choice_type(n, condition) ?? return ø
 	guarded = if x.recursion == ø then ø else guard_read(n, condition, then_part, else_part, x)
 	if guarded != ø { return guarded }
-	if kernel_value(condition) != BOOL_TERM or kernel_value(then_part) != type or kernel_value(else_part) != type { return ø }
+	if kernel_value(then_part) != type or kernel_value(else_part) != type { return ø }
 	terms = [else_part, then_part, condition].map(part => term_of(part, x))
 	if terms.any(term => term == ø) then ø else recursor_applied(BOOL_TERM, lambda("_", BOOL_TERM, type), terms.map(term => term!))
+}
+# the type of a choice on a bool, ø where the condition is no bool
+bool_choice_type(n: Node, condition: Node) as Term? := if kernel_value(condition) == BOOL_TERM then kernel_value(n) else ø
+# whether a typed node is a proof: its type a proposition, lying in Prop
+is_proposition_typed(n: Node) as bool := levels_equal(universe_level(universe_of(value_type(n) ?? return no)) ?? Successor(Zero), Zero)
+# A choice on a bool whose type is a proposition, an `if` or a match of yes and no, is a proof by the bool's cases:
+# ·bool_cases(c, y => type, (e: c == no) => the no arm, (e: c == yes) => the yes arm)
+cases_term(n: Node, condition: Node, at_yes: Node?, at_no: Node?, x: Entering) as Term? := {
+	type = bool_choice_type(n, condition) ?? return ø
+	if not is_proposition_typed(n) { return ø }
+	c = term_of(condition, x) ?? return ø
+	truths = TYPES.environment.literals!
+	no_arm = premised_arm(at_no ?? return ø, c, truths.no_case, x) ?? return ø
+	yes_arm = premised_arm(at_yes ?? return ø, c, truths.yes_case, x) ?? return ø
+	apply_all(constant(named_id(TYPES.environment, BOOL_CASES)!, BOOL_CASES, []), [c, lambda("_", BOOL_TERM, type), no_arm, yes_arm])
+}
+# an arm of a proof by a bool's cases: a function of the premise that the bool is the arm's case, the arm read with
+# the premise among the binders, where its `by` finds it
+premised_arm(arm: Node, condition: Term, case: Term, x: Entering) as Term? := {
+	premise = entered(x.c, CASE_PREMISE, truths_equal(TYPES.environment, condition, case))
+	lambdas([premise], term_of(arm, x.under([premise], [CASE_PREMISE])) ?? return ø)
+}
+# the result of a match's arm whose pattern is that truth, ø where none is
+truth_arm(arms: list, held: bool) as Node? := arm_result(arms.find(arm => match arm { Arm(pattern, result) => if held then pattern is True else pattern is False }) ?? return ø)
+# `by f, g`: a hole of the statement typing wanted here, over every binder around it, kept for verify with the laws
+by_term(n: Node, called: Node, laws: list, x: Entering) as Term? := {
+	if not question_word(called, BY_WORD) { return ø }
+	type = kernel_value(n) ?? return ø
+	hole = hole_over(elaboration_over(x.c), BY_WORD, type, x.variables)
+	TYPES.by_holes += [ByHole(hole, x.c, x.variables, type, laws, n)]
+	hole
+}
+# a law's statement with its proof: the statement's value, the proof's term, closed over the binders, kept for verify
+# under the function being read
+stated_term(called: Node, given: list, x: Entering) as Term? := {
+	if not question_word(called, PROOF_MARK) { return ø }
+	statement = term_of(given#1, x) ?? return ø
+	proof = term_of(given#2, x)
+	if proof != ø { TYPES.proofs[x.s.reading] = closed_filled(elaboration_over(x.c), proof!, x.variables, yes) }
+	statement
+}
+# `refl`: the proof that the wanted equation's left side equals itself
+refl_term(n: Node) as Term? := {
+	if not question_word(n, REFL_WORD) { return ø }
+	sides = arguments(kernel_value(n) ?? return ø)
+	if #sides != 3 then ø else reflexive(TYPES.environment, TYPE_LEVEL, sides#1, sides#2)
 }
 # a type's recursor into a motive, applied to its minor premises and then the major premise
 recursor_applied(type: Term, motive: Term, arguments: list<Term>) as Term := {
