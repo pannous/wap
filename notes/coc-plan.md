@@ -1068,7 +1068,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T5f erasure, T5g compiled libraries | wait | | T5b to T5d |
 | kernel-length: the kernel's theory files shrunk, about −55 plus 38 dead (notes/kernel-length.md) | waits | | unify-typers, int-takes |
 | int-takes: int in Lean's shape, `natural(n) \| negative(n)` (notes/unify-provers.md) | waits; card int-takes, wap-theory-reads-types | | unify-typers |
-| T6a1 proofs of bool laws, T6a2 hypotheses | re-read on unify (notes/coc-t6a12.md: T6a1 in verify, core +10; T6a2's binders landed, its run skip and implies left) | | unify-typers (the deletion commit, the int enum) |
+| T6a1 proofs of bool laws, T6a2 hypotheses | re-read on unify (notes/coc-t6a12.md: T6a1 in verify, core +10; T6a2's binders and run skip landed; hypotheses from the law's own type and implies as a hypothesis left, coc-plan.md "T6a2") | | unify-typers (the deletion commit, the int enum) |
 | T6a3a propositions in wap spelling | in progress | t6a3a ad022f23; wap-native-no-layout-any | M2b step 1, T6a1 |
 | T6a3 indexed families, the sort-only part (a family over sorts, no parameters) | next | | T6a3a, T5b2 |
 | generic records with T6a3's parameters, one landing: `enum Boxed<T>`, `class Pair<A, B>` read, a letter field filled at each use by T6a7's letters_bound, and the kernel block taking the letters as its parameters (notes/coc-generic-records.md) | planned; card generic-records, wap-theory-reads-types | | T6a3's sort-only part, T6a7 |
@@ -1109,7 +1109,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | T5g compiled libraries | coc-t5.md | 0 | | | wasm +150 |
 | kernel-length | kernel-length.md | | −55, and about −37 dead | | |
 | T6a1 proofs | coc-t6a12.md | +10 | | | verify +35, extension +3 |
-| T6a2 hypotheses (what is left) | coc-t6a12.md | | +10 | (+3 with T6a6) | extension +4 |
+| T6a2 hypotheses (what is left) | coc-plan.md (below) | 0 | 0 | 0 | extension +2, prove +4, verify −35 |
 | T6a3 indexed families | coc-t6a.md | +100 | | | |
 | generic records with T6a3's parameters | coc-generic-records.md | its plan's | | | |
 | T6a4 cases and induction | coc-t6a4.md | +92 | 0 (apart's builder moved, net 0) | | |
@@ -1361,6 +1361,56 @@ cases), careful path, one builder. In order:
   once (verdict_read) and exits on the parsed verdicts, so an answer printed beside them (`type of`, `axioms of`) never
   reads as one.
 - A closed law's verdict computes through `decided(e, term)`, shared with T4d1.
+
+#### T6a2: a law names its hypotheses
+
+The wiki: proof.md:25-28 ("A parameter whose type is a statement is a hypothesis: `h: a <= b` is a proof of `a <= b`
+the law may use", `law widened(a: nat, b: nat, h: a <= b): a <= b + 1`), theory.md:3 (the same law read
+`a ≤ b ⊢ a ≤ b + 1`), law.md:36-45 (`law x > 0 and y > 0 implies x * y > 0` as a lemma of `law fact(n) > 0`, `⇒`
+the same word).
+
+What the batch (typed-by-result bf172282) already holds:
+- core enters a statement-typed parameter as its truth under the parameters before it (calls.wap statement_held,
+  terms.wap parameters_entered), so a law's own function type is already `Π a, Π b, Π h: (a <= b) == yes, …`;
+- law_statement puts each subtype binder's condition as a premise (`n_holds`, verify/laws.wap condition_held);
+- the run skips a trial where a hypothesis is no (law_runs.wap, test_law_runs:34, :36 green);
+- proved and assumed laws are the provers' facts (prove/goals.wap laws_of, proved_laws);
+- green: test_theory_verify:47 (an int hypothesis), :61 kept_bound (a nat hypothesis is its own proof).
+
+The plan, one mechanism twice: a hypothesis is a parameter of statement type, and nothing else is.
+1. **verify reads the law's function type.** law_statement takes the hypotheses from the law's own parameters, whose
+   domains core has already made truths, instead of from functions of their own. hypotheses_split's hypothesis half,
+   Given, Split.given, LAW_GIVEN, is_hypothesis, premises, TypedLaw.given and lemma_proved's given all go;
+   proof_apart stays. verify about −35.
+2. **`implies` in a law's statement is a hypothesis.** One rule in verify's front (extensions/law_statements.wap):
+   `law $name($parameters...): $a implies $b` is `law $name($parameters..., ·implied: $a): $b`, its binder a name no
+   program writes (like `_holds`). It fires after the short form has made the free names parameters, and before
+   lazy-implies' rule for `implies` reads the statement as a bool. The run keeps `implies` as the bool it is. Then
+   `law used(a, h: a < 3): a < 4` and `law smaller(a): a < 3 implies a < 4` state one Π, and the provers meet either
+   as a fact. extension +2, kernel 0: no implies_decided over ·bool_cases, no library word in the kernel.
+   `spec: wiki/law.md` on its commit.
+3. **A hypothesis `a and b` is two.** law.md's lemma has `x > 0 and y > 0` on the left; a backward step on it needs
+   each part as a subgoal. Where proposition_of already reads a bool `and` as And (T6a6), the facts prover splits an
+   And premise into its two parts. prove +4, if T6a6's And premises do not already split.
+
+Estimates: core 0, kernel 0, types 0, extension +2, prove +4, verify −35.
+
+Left beside it: the seven nat lines of test_theory_arithmetic are red with or without hypotheses (`regrouped` has
+none), so their cause is the provers over a nat binder and its `_holds` premise, not T6a2. The builder reads
+verify's line for `regrouped` once, on its first build, and cards the cause if it is not T6a2's.
+
+Gap lines for the builder, test/wap/test_theory_connectives.wap (wiki/law.md `implies` and `⇒`, wiki/proof.md the
+hypothesis):
+- `check("a law with a hypothesis applies to a goal stated with implies", verified("hypothesis_implied", "law
+  smaller(a: nat, h: a < 3): a < 4 := assume\nlaw used(a: nat): a < 3 implies a < 4"), "smaller: Assumed\nused:
+  Assumed")`
+- `check("a law stated with ⇒ is Proved like one with a hypothesis", verified("arrow_implied", "law
+  smaller(a: int): a < 3 ⇒ a < 4"), "smaller: Proved")`
+
+Red lines it turns green: test_theory_connectives:18 (implies applied to a goal it implies); with T5c4's fact and the
+induction along fact's recursion, test_theory_connectives_wanted:9 (law.md's pair, V3's).
+
+Builds on origin/typed-by-result (the batch, T6a1b); step 2's order on lazy-implies, which is not on main yet.
 
 #### Each step's wiki lines and the tests that pin them
 
