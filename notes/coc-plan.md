@@ -1027,7 +1027,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | K6 | landed | 4e49e80f, 438cf07e | |
 | K7 | landed | 0b72075e | |
 | L1 logic | landed; leaves with the theory prelude on unify-typers, back in wap/types at T6a6 | c9f1a8fd | |
-| L2 numbers | landed; on unify-typers int's laws live in the kernel (kernel/integer_laws.wap) | f1220084 | |
+| L2 numbers | landed; on unify-typers int's laws live in the kernel (extensions/prove/integer_laws.wap) | f1220084 | |
 | L3 data | landed; its tests go as unpinned (lists as an enum is parked, "Not in T6") | 67154fad | |
 | L4 effects | landed; the effect facts are T5b1, computation types cut | 62ce375f | |
 | L5 collections | folded: `rational` and `set` are Q1, `i64` is T8b | | Q1, T8b |
@@ -1490,7 +1490,7 @@ example stays red. C2 needs T5's classes with type arguments (the trait's struct
 
 **Beside the dedup and the exact-big-literals landing.**
 - The dedup (unify-dedup: the equation toolkit and the regrouper shared by kernel/counting.wap,
-  kernel/integer_laws.wap and extensions/prove/linear.wap) touches none of T6a7, V1, V2, C1, C2, C4 or Q1's
+  extensions/prove/integer_laws.wap and extensions/prove/linear.wap) touches none of T6a7, V1, V2, C1, C2, C4 or Q1's
   files, so these run in parallel with it. V3 touches extensions/prove (goals.wap, facts.wap), so it starts after the dedup lands. Of
   T6a, T6a4 starts after it (a nat subject goes through int's case split in counting.wap); T6a3, T6a5 and T6a6 run
   beside it.
