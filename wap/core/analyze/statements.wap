@@ -111,8 +111,10 @@ chosen(condition: Node, then_part: Node, else_part: Node, x: Entering, flow: Flo
 }
 
 # A for, For(at, n, body): the count's recursor walking down the rounds left from ups(n), the walk a function of the
-# names the body gives. With none left it ends as the block goes on; with l + 1 left its round is at = ups(n) - l,
-# known to lie between 1 and n, and ends by calling the walk of the l after it; a break ends as the loop does
+# names the body gives and of the premise that the rounds left are at most ups(n), at the start at_most_same. With
+# none left it ends as the block goes on; with l + 1 left its round is at = ups(n) - l, read with what the provers
+# show of its range from the premise, and ends by calling the walk of the l after it, its premise chained through
+# l <= l + 1; a break ends as the loop does
 walked(loop: Node, place: Node, count: Node, body: Node, x: Entering, flow: Flow, ending: ((Entering) -> Term?)?) as Term? := {
 	after = ending ?? return ø
 	given = given_of(loop, x) ?? return ø
@@ -120,25 +122,42 @@ walked(loop: Node, place: Node, count: Node, body: Node, x: Entering, flow: Flow
 	counted = term_of(count, x) ?? return ø
 	total = apply(named_constant(UPS), counted)
 	c = x.c
-	walk = pis(given_locals(given, c), flow.result)
-	at_none = given_locals(given, c)
+	walk = (k: Term) => pis(given_locals(given, c) + [entered(c, MEASURE_PREMISE, at_most_yes(k, total))], flow.result)
+	at_none = given_locals(given, c) + [entered(c, MEASURE_PREMISE, at_most_yes(named_constant(COUNT_ZERO), total))]
 	left = entered(c, ROUNDS_BINDER, named_constant(COUNT))
-	below = entered(c, WALK_BINDER, walk)
+	below = entered(c, WALK_BINDER, walk(left.variable))
 	round_named = given_locals(given, c)
-	round = x.under([left, below] + round_named, [ROUNDS_BINDER, WALK_BINDER] + given.keys)
-	next = (at: Entering) => given_to(below.variable, given, at)
+	premise = entered(c, MEASURE_PREMISE, at_most_yes(successor_of(TYPES.environment, left.variable), total))
+	round = x.under([left, below] + round_named + [premise], [ROUNDS_BINDER, WALK_BINDER] + given.keys + [MEASURE_PREMISE])
+	still = apply_all(named_constant(AT_MOST_TRANS), [left.variable, successor_of(TYPES.environment, left.variable), total, at_most_successor(left.variable, c), premise.variable])
+	next = (at: Entering) => apply(given_to(below.variable, given, at), still)
 	place_value = apply(TYPES.environment.integers!.natural, apply_all(named_constant(SUBTRACT), [total, left.variable]))
-	ran = let_read(round, place, place_type, place_value, at => block_term(statements_of(unwrapped(body)), ranged(at, place, counted), Flow(flow.result, flow.returns, after, next), next)) ?? return ø
-	none = lambdas(at_none, after(x.under(at_none, given.keys)) ?? return ø)
-	recursor = named_constant(recursor_name(COUNT), [level_of(c, walk)])
-	given_to(apply_all(recursor, [lambda("_", named_constant(COUNT), walk), none, lambdas([left, below] + round_named, ran), total]), given, x)
+	ran = let_read(round, place, place_type, place_value, at => ranged(at, place, counted, inside => block_term(statements_of(unwrapped(body)), inside, Flow(flow.result, flow.returns, after, next), next))) ?? return ø
+	none = lambdas(at_none, after(x.under(at_none.take(#given.keys), given.keys)) ?? return ø)
+	k = entered(c, ROUNDS_BINDER, named_constant(COUNT))
+	recursor = named_constant(recursor_name(COUNT), [level_of(c, walk(k.variable))])
+	apply(given_to(apply_all(recursor, [lambdas([k], walk(k.variable)), none, lambdas([left, below] + round_named + [premise], ran), total]), given, x), apply(named_constant(AT_MOST_SAME), total))
 }
-# a round's reading knowing its place lies between 1 and the count, a fact no term proves (the trusted reading:
-# obliged_term)
-ranged(x: Entering, place: Node, count: Term) as Entering := {
+# a round read with its place's range, 1 <= at <= n, as premises, each where the provers prove it from the rounds
+# left; one not proved is left out, so an obligation it would prove stays checked when the program runs
+ranged(x: Entering, place: Node, count: Term, read: (Entering) -> Term?) as Term? := {
 	e = TYPES.environment
 	at = x.variables#(binder_place(x, binding_key(place)))
-	knowing(x, [apply_all(named_constant(NOT_ABOVE), [int_numeral(e, 1), at]), apply_all(named_constant(NOT_ABOVE), [at, count])].map(fact => truth_stated(e, fact)))
+	facts = [apply_all(named_constant(NOT_ABOVE), [int_numeral(e, 1), at]), apply_all(named_constant(NOT_ABOVE), [at, count])].map(fact => truth_stated(e, fact))
+	proofs = facts.map(fact => hole_term([], fact, x, yes))
+	kept = (1 to #facts).list().filter(fact_at => proofs#fact_at != ø)
+	premises = kept.map(fact_at => entered(x.c, NO_BINDER, facts#fact_at))
+	body = read(x.under(premises, premises.map(premise => NO_BINDER))) ?? return ø
+	apply_all(lambdas(premises, body), kept.map(fact_at => proofs#fact_at!))
+}
+# the proof that a count is at most its successor, by the count's recursor: at zero at_most computes to yes, at a
+# successor to the count before's
+at_most_successor(n: Term, c: Checker) as Term := {
+	e = TYPES.environment
+	k = entered(c, ROUNDS_BINDER, named_constant(COUNT))
+	stated = (m: Term) => at_most_yes(m, successor_of(e, m))
+	before = entered(c, MEASURE_PREMISE, stated(k.variable))
+	recursor_applied(named_constant(COUNT), lambdas([k], stated(k.variable)), [reflexive(e, TYPE_LEVEL, BOOL_TERM, e.literals!.yes_case), lambdas([k, before], before.variable), n], level_of(c, stated(k.variable)))
 }
 
 # A while as measured_defined reads a recursion (coc-plan 9.3): the count's recursor on a bound k, the walk a function
@@ -213,9 +232,8 @@ predecessor_of(bound: Term) as Term := arguments(bound)#1
 # A value checked against a condition when the program runs, `narrowed(i, message, …)` (dispatch.wap narrowed_call),
 # read as the value itself where the provers show the condition here from what is known here (wiki/type.md "Proved or
 # checked"): the lets' values, a round's range, a while's condition, the parameters' conditions. Its obligations are
-# then proved, and the run checks nothing; else the call is read as it is. The trusted reading is how the facts no
-# term proves are made (ranged), each over the binders' variables where it holds, the way loops.wap's
-# round is read: true only where nothing changes in place, so a function that may (changes_in_place) and the
+# then proved, and the run checks nothing; else the call is read as it is. A let's fact holds only where nothing
+# changes in place, so a function that may (changes_in_place) and the
 # program's own statements prove nothing here, `n = #xs; xs.pop(); at(xs, n)` keeps its check
 obliged_term(n: Node, arguments: list, x: Entering) as Term? := {
 	places = obligation_places(n)
@@ -227,8 +245,7 @@ obliged_term(n: Node, arguments: list, x: Entering) as Term? := {
 	read = arguments.drop(2).map(argument => term_of(argument, x))
 	if read.any(term => term == ø) { return ø }
 	given = read.map(term => term!) + [value]
-	proving = x.under(x.known, x.known.map(fact => NO_BINDER))
-	if not records.all(record => condition_proved(record, given, proving)) { return ø }
+	if not records.all(record => condition_proved(record, given, x)) { return ø }
 	for record in records { record.verdict = yes }
 	value
 }
