@@ -69,8 +69,8 @@ form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
 	Define(name, parameters, body) => with_captures(refitted(Define(defined_bound(name, parameters, scope, depth), parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
 	Fn(parameters, body) => with_captures(refitted(Fn(parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
 	Set(place, value) => refitted(Set(bound(place, if declares_global(n) then program_scope(scope) else scope, depth), bound(value, declaring(scope, declared_name(place)), depth)), n)
-	# a function type where a value stands, `(a, b) -> a + b`, is no value: types are written after a colon
-	Call(called, arguments) => if text(called) == FUNCTION_ARROW then refused(n, "-> writes a function type; a function value is written with =>: `(a, b) => a + b`") else module_call(n, called, arguments, scope, depth) ?? if core_word(called, TYPE_TEST_WORD, scope) then type_test_bound(n, called, arguments, scope, depth) else if NAMING_WORDS.any(word => core_word(called, word, scope)) then refitted(Call(called, arguments.map(of => if names_value(of, scope) then bound(of, scope, depth) else of)), n) else if claims_effects(called, arguments) then refitted(Call(called, all_bound(arguments.take(1), scope, depth) + arguments.drop(1)), n) else if rest_named(n) != ø then refitted(Call(called, all_bound(arguments, scope, depth)), n) else field_called(n, called, arguments, scope, depth) ?? refitted(Call(called_bound(with_receiver(called, scope, depth), #arguments, scope, depth), arguments_bound(arguments, scope, depth)), n)
+	# a function type is a type wherever it stands (wiki/universe.md): its binders and result bound as types
+	Call(called, arguments) => if text(called) == FUNCTION_ARROW then arrow_bound(n, called, arguments, scope, depth) else module_call(n, called, arguments, scope, depth) ?? if core_word(called, TYPE_TEST_WORD, scope) then type_test_bound(n, called, arguments, scope, depth) else if NAMING_WORDS.any(word => core_word(called, word, scope)) then refitted(Call(called, arguments.map(of => if names_value(of, scope) then bound(of, scope, depth) else of)), n) else if claims_effects(called, arguments) then refitted(Call(called, all_bound(arguments.take(1), scope, depth) + arguments.drop(1)), n) else if rest_named(n) != ø then refitted(Call(called, all_bound(arguments, scope, depth)), n) else field_called(n, called, arguments, scope, depth) ?? refitted(Call(called_bound(with_receiver(called, scope, depth), #arguments, scope, depth), arguments_bound(arguments, scope, depth)), n)
 	Prim(operation, arguments) => refitted(Prim(operation, all_bound(arguments, scope, depth)), n)
 	If(condition, then_part, else_part) => refitted(If(bound(condition, scope, depth), bound(then_part, scope, depth), bound(else_part, scope, depth)), n)
 	While(condition, body) => refitted(While(bound(condition, scope, depth), bound(body, looped_scope(scope, depth), depth)), n)
@@ -121,6 +121,22 @@ field_bound(field: Node, scope: Scope) as Node := match field {
 }
 # a written type in its place: a call of code there, a statement or a value a type names, bound as code (is_code_call);
 # any other its record names bound
+# A function type over its parameters, `(n: nat) -> n + n == 2 * n`, `(int) -> text`: a named parameter is a binder its
+# result and later parameters read, an unnamed one binds nothing; each parameter names a type, else it is refused where
+# it stands, `(a, b) -> a + b` being a function value written with ->
+arrow_bound(n: Node, called: Node, arguments: list, scope: Scope, depth: int) as Node := {
+	parameters = items_or_one(arguments#1)
+	inner = within(scope, parameters.filter(parameter => declared_type(parameter) != ø).map(parameter => Definition(text(declared_name(parameter)), DefinitionKind.Parameter, declared_name(parameter), depth + 1)))
+	refitted(Call(called, [with_items(arguments#1, parameters.map(parameter => arrow_parameter(parameter, inner))), type_bound(arguments#2, inner, depth + 1)]), n)
+}
+arrow_parameter(parameter: Node, scope: Scope) as Node := {
+	written = declared_type(parameter)
+	if written != ø { return refitted(Key(declared_name(parameter), Op.Colon, type_named_bound(written!, scope)), parameter) }
+	if parameter is symbol and not names_a_type(text(parameter), scope) { refused(parameter, "-> writes a function type; a function value is written with =>: `(a, b) => a + b`") }
+	type_named_bound(parameter, scope)
+}
+# whether a name is a type word, a record or type name its scope sees, or a letter
+names_a_type(name: text, scope: Scope) as bool := TYPE_WORDS.contains(name) or is_letter_name(name) or named_in(scope, name).any(definition => definition.kind == DefinitionKind.Record or names_type(definition))
 type_bound(type: Node, scope: Scope, depth: int) as Node := {
 	code = fact_of(type, AS_CODE)
 	if code != ø and is_code_call(code!, scope) then bound(code!, scope, depth) else type_named_bound(type, scope)
