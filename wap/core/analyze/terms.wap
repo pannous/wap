@@ -84,19 +84,21 @@ kernel_signature(typed: TypedFunction, by_key: map<text, TypedFunction>, s: Typi
 	if typed.jumps { return ø }
 	# a parameter keeps its subtype, the parent by definition, so a law reads its binders' conditions
 	# (the result names the parameters, so only the whole signature, closed over them, is open or not)
-	signature = pis(parameters_locals(typed, s), kernel_result(typed, by_key, s) ?? return ø)
+	signature = pis(parameters_locals(typed, s, by_key), kernel_result(typed, by_key, s) ?? return ø)
 	if has_letters(signature) or has_unknowns(signature) then ø else signature
 }
 # a function's parameters as Locals, entered once on one checker: every term made of the function names the same Free variables
 # (a hypothesis, a parameter written as a statement, is entered as its truth under the parameters before it, and
 # typed as it, so its name's value proves it)
-parameters_locals(typed: TypedFunction, s: TypingState) as list<Local> := {
+parameters_locals(typed: TypedFunction, s: TypingState, by_key: map<text, TypedFunction> = {}) as list<Local> := {
 	if typed.checker == ø {
 		if typed.entering_locals { refused(typed.define, "a hypothesis reads its own law's parameters: a statement in a parameter's place reads only the parameters before it") }
 		typed.entering_locals = yes
 		c = checker(TYPES.environment, [])
+		# its variables numbered on typing's own list, after its holes, so a hole never reads as a parameter of its number
+		c.hypotheses = s.el.c.hypotheses
 		# GUESS: raise takes a text, so the error is raised again by its message
-		locals = try parameters_entered(typed, c, s) catch e { typed.entering_locals = no; raise e.message }
+		locals = try parameters_entered(typed, c, s, by_key) catch e { typed.entering_locals = no; raise e.message }
 		typed.entering_locals = no
 		typed.arguments = (1 to #typed.arguments).list().map(at => if is_statement_written(declared_type(parameters_of(typed)#at)) then locals#at.domain else typed.arguments#at)
 		typed.locals = locals
@@ -104,11 +106,11 @@ parameters_locals(typed: TypedFunction, s: TypingState) as list<Local> := {
 	}
 	typed.locals
 }
-parameters_entered(typed: TypedFunction, c: Checker, s: TypingState) as list<Local> := {
+parameters_entered(typed: TypedFunction, c: Checker, s: TypingState, by_key: map<text, TypedFunction>) as list<Local> := {
 	locals: list<Local> = []
 	names = parameter_nodes(typed)
 	for at in 1 to #typed.arguments {
-		before = fresh_reading(c, {}, s).under(locals, names.take(at - 1).map(place_key))
+		before = fresh_reading(c, by_key, s).under(locals, names.take(at - 1).map(place_key))
 		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c, s))]
 	}
 	locals
@@ -123,6 +125,7 @@ parameter_nodes(typed: TypedFunction) as list<Node> := parameters_of(typed).map(
 # GUESS (T6a3's value reader): the result as the kernel reads it: where a family is written applied to values, the head applied to its arguments
 # read as values under the parameters (`Even(double(n))`, each value through term_of and the checker's Locals); any other result as settled
 kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
+	if is_statement_written(typed.written) { return statement_held(typed.written, typed, parameters_reading(typed, by_key, s), s) }
 	if typed.written == ø or not is_family_call(typed.written!) { return kernel_settled(typed.result ?? return ø, s, parameters_checker(typed, s)) }
 	match typed.written! {
 		Call(head, items) => {
@@ -238,7 +241,7 @@ reading_frame(typed: TypedFunction) as TypeFrame := {
 # a body read under the function's own parameters
 # (its locals entered first, so the reading is on the checker they were entered with)
 parameters_reading(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Entering := {
-	locals = parameters_locals(typed, s)
+	locals = parameters_locals(typed, s, by_key)
 	fresh_reading(typed.checker!, by_key, s).under(locals, parameter_nodes(typed).map(place_key))
 }
 # a reading under no binders yet, on this checker
@@ -246,11 +249,17 @@ fresh_reading(c: Checker, by_key: map<text, TypedFunction>, s: TypingState) as E
 # a pure function's value, the function of its parameters its body computes; ø for any other
 definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := match typed.define {
 	Define(name, parameters, body) => {
+		if is_axiom(typed.define) { return ø }
 		# a body converted to the result, an int given where an int? is, is no term yet
 		inside = parameters_reading(typed, by_key, s)
 		# GUESS: the body's type and the result name the same Free variables, so `Even(n + n)` meets `Even(double(n))` by unfolding double
-		if not equal(inside.c, kernel_value(body) ?? return ø, kernel_result(typed, by_key, s) ?? return ø) { return ø }
-		lambdas(typed.locals, term_of(body, inside) ?? course_defined(typed, body, inside) ?? return ø)
+		wanted = kernel_result(typed, by_key, s) ?? return ø
+		# a proof typed against a statement not read yet (calls.wap statement_term) proves the statement as read now: the
+		# kernel checks it against the function's type as it enters it
+		stood_in = typed.result == STATEMENT_TERM
+		proof = if stood_in then with_type_of(body, wanted) else body
+		if not stood_in and not equal(inside.c, kernel_value(proof) ?? return ø, wanted) { return ø }
+		lambdas(typed.locals, term_of(proof, inside) ?? course_defined(typed, proof, inside) ?? return ø)
 	}
 	_ => ø
 }
@@ -325,6 +334,7 @@ call_read(called: Node, arguments: list, x: Entering, wanted: Term?, proved: (in
 	kernel = kernel_declaration(typed)
 	if kernel != ø { return kernel_called(kernel!, typed, arguments, x, wanted, proved) }
 	function = instance_entered(typed, x.by_key, x.s) ?? return ø
+	if computes_unknown(function) { return ø }
 	apply_all(function, arguments_read(function, arguments, x, proved) ?? return ø)
 }
 # the typed function a call calls; ø for a call of no function of the program
@@ -373,6 +383,13 @@ arguments_read(function: Term, arguments: list, x: Entering, proved: (int, list,
 		}
 	}
 	given
+}
+# whether a function is one the kernel only assumes and that computes a value: what it does is unknown (it may write,
+# raise or never end), so a call of it is no term and its caller is assumed too; an assumed proof states a proposition
+computes_unknown(function: Term) as bool := {
+	d = declaration_of(TYPES.environment, function)
+	# its type is closed, so it is read on a checker of no binders
+	d.kind is Axiom and not is_proposition(checker(TYPES.environment, []), d.type)
 }
 # GUESS (item 1, notes/coc-t6a4.md): an arm of a match on a bare parameter, directly in the function's result, is expected the result
 # with the parameter taken for the arm's case applied to its fields (entered on the function's checker); any other arm keeps `expected`.

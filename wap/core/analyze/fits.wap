@@ -99,14 +99,20 @@ holder_of(record: Node, given: list<Binding>, s: TypingState) as Term := {
 # letters_bound), each made under a key of its own
 holder_made(record: Node, fields: list<Node>, typed: list<Node>, key: text, called: Node, s: TypingState) as Term := {
 	if record_letters(record_declared(record)) is empty { return record_term(record) }
-	made = Signature(text(called), key, DefinitionKind.Case, called, fields.map(field => written_type(declared_type(field))), record_term(record))
+	made = Signature(text(called), key, DefinitionKind.Case, called, fields.map(field => written_type(declared_type(field))), record_term(record), "", record)
 	holder_of(record, (letters_bound(made, typed.map(value_type), s) ?? refused(called, "${called}'s values give one letter two types")).letters, s)
 }
-# the type a field's value is typed for before its holder is known: its own, ø where it names a letter
-field_wanted(field: Node) as Term? := { type = written_type(declared_type(field)); if has_letters(type) then ø else type }
+# the type a field's value is typed for before its holder is known: its own, ø where it names a parameter
+field_wanted(field: Node, record: Node) as Term? := { type = written_type(declared_type(field)); if names_parameter(type, record) then ø else type }
+# whether a type names one of a record's parameters, `T` of `item: T`, `a` of `left: a`
+names_parameter(type: Term?, record: Node) as bool := type != ø and constants_in(type!).any(word => record_letters(record_declared(record)).any(letter => text(letter) == type_text(word)))
 # a value given to a field as the field's type has it in its holder, refused when it cannot get there; value is the
 # code that gave it
-field_checked(given: Node, field: Node, holder: Term, record: Node, value: Node, s: TypingState) as Node := converted(given, field_type_in(field, holder, record) ?? field_type(field), s, value, "the field holds")
+# a field of a parameter's type holds any value, `item: T`, its value boxed once it fits its type in the holder
+field_checked(given: Node, field: Node, holder: Term, record: Node, value: Node, s: TypingState) as Node := {
+	fitting = converted(given, field_type_in(field, holder, record) ?? field_type(field), s, value, "the field holds")
+	if is_parameter_of(written_type(declared_type(field)), record) then converted(fitting, ANY_TERM, s, value, "the field holds") else fitting
+}
 # What `x as T` does where nothing is written (wiki/conversion.md "Fitting" and "Repacking"): checked is the cast,
 # every other way repacks; written, `x as T` is the maker T(x) ("Making").
 # How a value of the given type gets where the wanted one is: as it is, of that type, a list where a bare `list` is, a
@@ -128,6 +134,8 @@ COUNTING = "i64.extend_i32_u"
 counted(given: Term?, wanted: Term?) as bool := given == BOOL_TERM and wanted == INT_TERM
 conversion(given: Term?, wanted: Term?, s: TypingState) as Conversion? := {
 	if given == ø or wanted == ø { return ø }
+	# every proof fits a statement not read yet; the kernel checks it as it enters its function
+	if wanted == STATEMENT_TERM { return Conversion.Same }
 	if given == wanted or bare_fit(given, wanted, s.records) or extends_class(given, wanted, s.records) or subtype_base(given, s.records) == wanted { return Conversion.Same }
 	# a function value of its own type where a function type is wanted, or an unknown holding function values
 	if function_value_parts(given) != ø and (s.members.has(variable_id(wanted)) or adapted_name(given, wanted, s) != ø) { return Conversion.Adapted }
@@ -217,6 +225,7 @@ empty_map_written(n: Node) as bool := match n { List(items, Bracket.Curly, separ
 bare_fit(given: Term, wanted: Term, records: Records) as bool := {
 	if wanted in [LIST_TERM, MAP_TERM] { return parts_of_type(type_text(wanted), given) != ø }
 	if wanted == FUNCTION_TERM { return function_value_parts(given) != ø or function_parts(given) != ø }
+	if is_any_instance(wanted) { return head_of(given) == head_of(wanted) }
 	if wanted != ENUM_TERM { return no }
 	record = record_named(records, given) ?? return no
 	not cases_of(record) is empty

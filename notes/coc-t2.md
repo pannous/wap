@@ -139,7 +139,7 @@ Checker.judgements: list<Checked>
 
 ## Numbers: i64 with the overflow check
 
-The kernel stops using lib/magnitude (`use magnitude` in terms, typing, show and numbers; 12 call sites).
+The kernel holds magnitude (wap/kernel/magnitude.wap, `use "magnitude.wap"` in terms, show and numbers): a count up to i64 is a Numeral, one past it a Large.
 
 - `Numeral(value: i64)`, written with the wrapping word: `int` is the unbounded whole numbers (wiki/number.md,
   test/test_number_wanted.wap), and the kernel's bound is 6.7's, not storage's.
@@ -184,8 +184,8 @@ The kernel stops using lib/magnitude (`use magnitude` in terms, typing, show and
   the size ceiling (SIZE_NODES, 143,077 today) rises by the kernel's measured nodes (21,312 as moved) in the same
   commit as the move, and the typing census covers the kernel from then on. Every later sub-step measures again
   (scripts/wap-size.warp over `compiler_sources`) and sets SIZE_NODES to what it measured, in its own commit.
-- The first seed refresh that matters is T3's, when core `use`s wap/kernel/typing.wap. By then T2b has removed
-  `use magnitude`, so the compiler links no library module. Until then, the kernel's source may use only types
+- The first seed refresh that matters is T3's, when core `use`s wap/kernel/typing.wap. The kernel holds its own magnitude.wap,
+  so the compiler links no library module. Until then, the kernel's source may use only types
   words the seed's types module holds; it does so today, since the seed's compilers build the theory extension.
 
 ## The migration in landable sub-steps
