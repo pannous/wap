@@ -1,0 +1,226 @@
+# A function's effects (wiki/effects.md): what it may do beyond computing its value, found from its typed body and
+# the functions it names. A host operation brings its row's effect (types/effects.wap IO_OPERATIONS, FAILING_OPERATIONS), a
+# `while` Div, a variable declared `global` read or given a value State, and each call its callee's effects; a call
+# inside a `try` brings no Fail. Functions that call each other round, a recursion, may not end: Div, until T5c tells
+# those that end. A foreign function's body cannot be read: its claim is its effects, else IO for the host's (WASI)
+# and FFI for any other module's. `effects of f` names them; `! IO` after a body claims them, and a function past its
+# claim is refused. Each typed function carries its effects as the fact EFFECTS, which a compiled module writes as the
+# claim of its export (extensions/wasm/modules.wap).
+
+use folder
+use "../errors.wap"
+use "../stage.wap"
+use "../bindings.wap"
+use "../type_notation.wap"
+use "../../kernel/forms.wap"
+use "../../kernel/primitives.wap"
+use "../../kernel/environment.wap"
+use "../../types/effects.wap"
+
+# the words of the effects in their order
+EFFECT_NAMES = EFFECT_ORDER.map(effect => text(effect))
+# each host operation's effect, by its name
+OPERATION_EFFECT = operation_effects()
+
+operation_effects() as map<text, Effect> := {
+	effects: map<text, Effect> = {}
+	for operation in IO_OPERATIONS { effects[operation] = Effect.IO }
+	for operation in FAILING_OPERATIONS { effects[operation] = Effect.Fail }
+	effects
+}
+# a typed function called, and whether its Fail is caught, by a `try` or by a divisor that is no 0
+class Callee { key: text; caught: bool }
+# What a typed function does itself, the typed functions it calls, its parameters' keys, and when it may fail: never
+# (none), only where one of these parameters is 0, a divisor (their places), or whatever it is given (ø)
+class Own { effects: list<Effect> = []; calls: list<Callee> = []; parameters: list<text> = []; divisors: list<int>? = []; assigned: list<int> = [] }
+# The effects of the typed functions, joined over the groups of functions that call each other round (groups.wap):
+# each function's own part and the effects found, each group's alike
+class Joining {
+	by_key: map<text, TypedFunction>
+	s: TypingState
+	own: map<text, Own> = {}
+	found: map<text, list<Effect>> = {}
+}
+
+# every typed function's effects, written on its Define and counted (TYPES.effects), and its claim checked
+effects_written(s: TypingState) := {
+	joining = effects_joined(s)
+	claims_checked(s, joining)
+	for typed in s.functions.filter(typed => typed.define != ø and fact_of(typed.define, EFFECTS) == ø) {
+		found = joining.found.get(instance_key(typed)) ?? []
+		typed.define = with_fact(typed.define, EFFECTS, Text(effects_text(found, failing_claim(own_of(instance_key(typed), joining), typed))))
+		counted = if found is empty then [PURE_WORD] else found.map(effect => text(effect))
+		for effect in counted { TYPES.effects[effect] = (TYPES.effects.get(effect) ?? 0) + 1 }
+	}
+}
+# the effects of every typed function so far, joined again only once more of them are typed
+effects_joined(s: TypingState) as Joining := {
+	by_key: map<text, TypedFunction> = {}
+	for typed in s.functions { if typed.define != ø { by_key[instance_key(typed)] = typed } }
+	if s.joined != ø and #s.joined!.by_key == #by_key { return s.joined! }
+	joining = Joining(by_key, s)
+	for group in groups_of(by_key.keys, key => own_of(key, joining).calls.map(call => call.key)) { group_joined(group, joining) }
+	s.joined = joining
+	joining
+}
+# a group of functions that call each other round, each with the group's own effects and its calls' outside it: every
+# group it calls is joined before it
+group_joined(group: list<text>, x: Joining) := {
+	round = #group > 1 or own_of(group#1, x).calls.any(call => call.key == group#1)
+	effects: list<Effect> = if round then [Effect.Div] else []
+	for member in group {
+		effects += own_of(member, x).effects
+		for call in own_of(member, x).calls { if not group.contains(call.key) { effects += (x.found.get(call.key) ?? []).filter(effect => not (call.caught and effect == Effect.Fail)) } }
+	}
+	for member in group { x.found[member] = effects.unique }
+}
+# what a typed function's body does itself and calls, read once
+own_of(key: text, x: Joining) as Own := {
+	if x.own.has(key) { return x.own[key] }
+	# while its body is read, a call back to it may fail whatever it is given
+	x.own[key] = Own([], [], [], ø)
+	own = Own([], [], parameters_of(x.by_key[key]).map(parameter => place_key(declared_name(parameter))))
+	body = body_of(x.by_key[key])
+	if fact_of(body, CLAIMED) != ø and is_foreign(body) { claimed_own(fact_of(body, CLAIMED)!, x.by_key[key], own) } else { effects_in(body, no, own, x) }
+	# a parameter the body assigns no longer holds what the caller gave
+	if own.divisors != ø and own.divisors!.any(at => own.assigned.contains(at)) { own.divisors = ø }
+	x.own[key] = own
+	own
+}
+body_of(typed: TypedFunction) as Node := match typed.define { Define(name, parameters, body) => body; _ => Empty }
+parameters_of(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters); _ => [] }
+parameter_names(typed: TypedFunction) as list<text> := parameters_of(typed).map(parameter => text(declared_name(parameter)))
+# a foreign function's claim taken as its own effects, a `Fail(b)` failing only where its parameter b is 0
+claimed_own(claim: Node, typed: TypedFunction, own: Own) := {
+	own.effects = effects_named(effect_words(claim))
+	names = parameter_names(typed)
+	strays = fails_by(claim).filter(name => not names.contains(name))
+	if strays is not empty { refused(claim, "${text(Effect.Fail)}(${strays#1}) names no parameter of ${text(defined_name(typed.define!))}, whose parameters are ${names.join(", ")}") }
+	divisors = fails_by(claim).map(name => names.index_of(name))
+	own.divisors = if not own.effects.contains(Effect.Fail) then [] else if divisors is empty then ø else divisors
+}
+# how a claim writes a function's Fail: `Fail(b)` where it fails only where its parameter b is 0
+failing_claim(own: Own, typed: TypedFunction) as text := {
+	if own.divisors == ø or own.divisors! is empty { return text(Effect.Fail) }
+	names = parameter_names(typed)
+	"${text(Effect.Fail)}(${own.divisors!.unique.map(at => names#at).join(", ")})"
+}
+is_foreign(n: Node) as bool := match n { Prim(operation, arguments) => text(operation) == FOREIGN; _ => no }
+claimed_effects(body: Node) as list<Effect> := effects_named(effect_words(fact_of(body, CLAIMED)!))
+# the effects words name, the others (Pure, a Fail(b)'s parameters) left out
+effects_named(words: list<text>) as list<Effect> := words.filter(word => EFFECT_NAMES.contains(word)).map(word => Effect(word))
+# the effects a claim writes, one or a phrase of several, `! IO`, `! (IO FFI)`, as `effects of` writes them, and
+# `Fail(b)`, a Fail only where the parameter b is 0
+effect_words(claim: Node) as list<text> := claim_words(claim).filter(word => not fails_by(claim).contains(word))
+claim_words(claim: Node) as list<text> := match claim { Call(called, arguments) => [text(called)] + arguments.flat_map(word => claim_words(word)); _ => items_or_one(claim).map(word => text(word)) }
+# the parameters a claim's `Fail(b, …)` fails by
+fails_by(claim: Node) as list<text> := match claim { Call(called, arguments) => if text(called) == text(Effect.Fail) and not arguments.any(word => EFFECT_NAMES.contains(text(word))) then arguments.map(word => text(word)) else arguments.flat_map(word => fails_by(word)); _ => [] }
+# what a typed body does itself, and the typed functions it names, called or given as values; a function value written
+# in it brings its function's, as what it is given may call it; a definition in it is its own function. The effects a
+# node brings itself: its operation's, a loop's, a global variable's, a block's sharing the program's variables,
+# `global y`
+effects_in(n: Node, caught: bool, own: Own, x: Joining) := match n {
+	Fn(parameters, body) => { own.calls += instances_named(place_key(name_for(LAMBDA_NAME, n)), x).map(key => Callee(key, caught)) }
+	Define(name, parameters, body) => ø
+	Try(body, handler) => {
+		effects_in(body, yes, own, x)
+		match handler { Fn(parameters, handled) => effects_in(handled, caught, own, x); _ => ø }
+	}
+	Symbol(name) => {
+		named = fact_of(n, DEFINED_AT) ?? return
+		if is_kind_word(fact_of(named, ASSIGNS), DefinitionKind.Global) { effect_added(Effect.State, caught, own) }
+		# a function given as a value may be given anything
+		for key in instances_named(place_key(named), x) {
+			if own_of(key, x).divisors != [] { divisor_met(Empty, caught, own) }
+			own.calls += [Callee(key, caught)]
+		}
+	}
+	Call(called, arguments) => {
+		for argument in arguments { effects_in(argument, caught, own, x) }
+		named = fact_of(called, DEFINED_AT)
+		key = if named == ø then "" else place_key(named!)
+		if not x.by_key.has(key) { return effects_in(called, caught, own, x) }
+		divisors = own_of(key, x).divisors
+		# each divisor met, so each one the caller is given is recorded
+		safe = divisors != ø and divisors!.map(at => divisor_met(arguments#at, caught, own)).all(met => met)
+		if divisors == ø { divisor_met(Empty, caught, own) }
+		own.calls += [Callee(key, caught or safe)]
+	}
+	Prim(operation, arguments) => {
+		for argument in arguments { effects_in(argument, caught, own, x) }
+		if DIVIDING.contains(text(operation)) { if not divisor_met(arguments#2, caught, own) and not caught { own.effects += [Effect.Fail] } } else { effect_added(if text(operation) == FOREIGN then (if text(arguments#1) == WASI then Effect.IO else Effect.FFI) else OPERATION_EFFECT.get(text(operation)), caught, own) }
+	}
+	_ => {
+		if n is While { effect_added(Effect.Div, caught, own) }
+		if n is Block and globals_named(n) is not empty { effect_added(Effect.State, caught, own) }
+		match unwrapped(n) { Set(place, value) => own.assigned += [parameter_at(place, own)]; _ => ø }
+		for part in direct_parts(unwrapped(n)) { effects_in(part, caught, own, x) }
+	}
+}
+# a divisor met: whether it is a whole number other than 0 written in place, which no division fails by; else the
+# function may fail where its parameter is 0, if the divisor is one, or whatever it is given
+divisor_met(divisor: Node, caught: bool, own: Own) as bool := {
+	if match divisor { Number(value) => value != 0; _ => no } { return yes }
+	at = parameter_at(divisor, own)
+	if not caught and own.divisors != ø { own.divisors = if at > 0 then own.divisors! + [at] else ø }
+	no
+}
+# which of the function's parameters a name is, 0 for none
+parameter_at(n: Node, own: Own) as int := {
+	named = fact_of(n, DEFINED_AT)
+	if named == ø then 0 else own.parameters.index_of(place_key(named!))
+}
+# an effect a body does itself, none where it is ø, a Fail none where a `try` catches it
+effect_added(effect: Effect?, caught: bool, own: Own) := if effect != ø and not (caught and effect == Effect.Fail) {
+	own.effects += [effect!]
+	if effect == Effect.Fail { own.divisors = ø }
+}
+# the typed functions a name means: the one a call chose, or every one of a function named as a value
+instances_named(key: text, x: Joining) as list<text> := if x.by_key.has(key) then [key] else instances_of(key, x.s).filter(typed => typed.define != ø).map(typed => instance_key(typed))
+
+# `effects of f`: the effects of f's typed functions joined, as text; one nothing calls is typed for its written types
+effects_of_typed(n: Node, of: Node, s: TypingState, f: TypeFrame) as Node := {
+	definitions = definitions_named(text(of), s)
+	if definitions is empty { refused(of, "effects of ${of}: ${of} names no function") }
+	asked = definitions.flat_map(definition => instances_asked(definition, of, s))
+	joining = effects_joined(s)
+	with_type(placed_like(Text(effects_text(asked.flat_map(typed => joining.found.get(instance_key(typed)) ?? []))), n), TEXT_TYPE)
+}
+instances_asked(definition: Signature, at: Node, s: TypingState) as list<TypedFunction> := {
+	typed = instances_of(definition.key, s)
+	if typed is not empty { return typed }
+	if not all_typed(definition, s.records) { refused(at, "effects of ${definition.name}: nothing calls it and its parameters have no types, so no body of it is typed: write their types, `${definition.name}(x: int)`") }
+	[function_typed(definition, definition.parameters, s, at)]
+}
+# Pure, one effect, or several in parentheses, a Fail as given
+effects_text(found: list<Effect>, failing: text = text(Effect.Fail)) as text := {
+	named = EFFECT_ORDER.filter(effect => found.contains(effect)).map(effect => if effect == Effect.Fail then failing else text(effect))
+	if named is empty then PURE_WORD else if #named == 1 then named#1 else "(${named.join(" ")})"
+}
+
+# `f(x) := … ! IO`: the body, which f's effects are checked against the effects written after it
+claim_typed(n: Node, arguments: list, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
+	written = if f.function == ø then ø else s.defines.get(place_key(f.function!))
+	if not (match written ?? Empty { Define(name, List(items, Bracket.Round, separator), body) => yes; _ => no }) { refused(n, "a misplaced effect constraint: `! ${arguments#2}` claims a function's effects, after its body, `f(x) := … ! ${arguments#2}`") }
+	strays = effect_words(arguments#2).filter(word => not (EFFECT_NAMES + [PURE_WORD]).contains(word))
+	if strays is not empty { refused(arguments#2, "! ${strays#1} names no effect: a claim names ${PURE_WORD} or ${EFFECT_NAMES.join(", ")}") }
+	with_fact(typed_form(arguments#1, s, f, expected), CLAIMED, arguments#2)
+}
+# each typed function whose body claims its effects, refused where it has one the claim leaves out, naming the calls
+# down to the function that does it itself; a foreign function's claim is its effects, never checked
+claims_checked(s: TypingState, joining: Joining) := {
+	claimed = s.functions.filter(typed => fact_of(body_of(typed), CLAIMED) != ø and not is_foreign(body_of(typed)))
+	for typed in claimed {
+		body = body_of(typed)
+		key = instance_key(typed)
+		beyond = (joining.found.get(key) ?? []).filter(effect => not claimed_effects(body).contains(effect))
+		if beyond is not empty { refused(fact_of(body, CLAIMED)!, "${REFUSED}${EFFECT}: ${typed.function.name} is declared ! ${fact_of(body, CLAIMED)!} but has ${beyond#1} via ${chain_to(key, beyond#1, [], joining)}") }
+	}
+}
+# the calls from a function down to one whose own body does an effect, or that calls round back
+chain_to(key: text, effect: Effect, seen: list<text>, x: Joining) as text := {
+	name = x.by_key[key].function.name
+	if own_of(key, x).effects.contains(effect) or seen.contains(key) { return name }
+	next = own_of(key, x).calls.find(call => (x.found.get(call.key) ?? []).contains(effect)) ?? return name
+	"${name} → ${chain_to(next.key, effect, seen + [key], x)}"
+}
