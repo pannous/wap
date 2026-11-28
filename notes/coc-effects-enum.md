@@ -38,9 +38,9 @@ then check core's `use` of the same file declares nothing twice).
 `f(x) := … ! IO, FFI` and `t := nat ! IO, FFI` read as a definition whose value row is `[(… ! IO), FFI]`: the comma is a
 row separator, not an operator of the table, so no precedence entry can bind it. core/parse/operators.wap
 definition_row already puts the bare items after a definition into its last value; `last_joined` now also puts them
-into the right operand of an operator whose group has `gathers: yes` in types/operators.wap (the claim group; any
-group may declare it): `gathered` makes the operand `IO FFI` in round brackets, as `! (IO FFI)` reads. Core names no
-group. Alternative with no core change: write `! (IO FFI)`.
+into the right operand of an operator of types/operators.wap's claim_group, the way compound_assignment_group names
+the definitions: `gathered` makes the operand `IO FFI` in round brackets, as `! (IO FFI)` reads. A head's claim
+list before its definition, `f(x): int ! IO, FFI := …`, is gathered by definition_row's gathered_row the same way.
 Should turn green (unbuilt): test/wap/test_effects.wap "several effects claimed are written with commas", and in
 test/wap/test_theory_effects.wap "several effects are written with commas" and "a bound of several effects is written
 with commas".
