@@ -92,19 +92,23 @@ parameters_locals(typed: TypedFunction, s: TypingState) as list<Local> := {
 		if typed.entering_locals { refused(typed.define, "a hypothesis reads its own law's parameters: a statement in a parameter's place reads only the parameters before it") }
 		typed.entering_locals = yes
 		c = checker(TYPES.environment, [])
-		locals: list<Local> = []
-		names = parameter_names(typed)
-		written = parameters_of(typed).map(declared_type)
-		for at in 1 to #typed.arguments {
-			before = fresh_reading(c, {}, s).under(locals, names.take(at - 1).map(place_key))
-			locals += [entered(c, text(names#at), statement_held(written#at, typed, before, s) ?? settled_type(typed.arguments#at, s))]
-		}
-		typed.arguments = (1 to #typed.arguments).list().map(at => if is_statement_written(written#at) then locals#at.domain else typed.arguments#at)
+		# GUESS: raise takes a text, so the error is raised again by its message
+		locals = try parameters_entered(typed, c, s) catch e { typed.entering_locals = no; raise e.message }
+		typed.entering_locals = no
+		typed.arguments = (1 to #typed.arguments).list().map(at => if is_statement_written(declared_type(parameters_of(typed)#at)) then locals#at.domain else typed.arguments#at)
 		typed.locals = locals
 		typed.checker = c
-		typed.entering_locals = no
 	}
 	typed.locals
+}
+parameters_entered(typed: TypedFunction, c: Checker, s: TypingState) as list<Local> := {
+	locals: list<Local> = []
+	names = parameter_names(typed)
+	for at in 1 to #typed.arguments {
+		before = fresh_reading(c, {}, s).under(locals, names.take(at - 1).map(place_key))
+		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? settled_type(typed.arguments#at, s))]
+	}
+	locals
 }
 parameters_of(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters); _ => [] }
 parameter_names(typed: TypedFunction) as list := parameters_of(typed).map(parameter => declared_name(parameter))
@@ -115,10 +119,29 @@ kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 	match typed.written! {
 		Call(head, items) => {
 			given = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), parameters_reading(typed, by_key, s)) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)
-			apply_all(kernel_type(family_head(head, given))!, given)
+			apply_all(kernel_type(family_head(head, given, typed.checker!))!, given)
 		}
 		_ => ø
 	}
+}
+# The head of a type applied to these terms, on the checker they are read on: the program's word, or the kernel's
+# family with a level hole for each level parameter, its arguments unified with its binders' types in turn, each
+# dependent binder taking the argument before it, so the levels found fill the holes (`Equal(nat, a, b)`: u from nat's
+# Type); an argument of another type is refused, naming what the binder takes
+family_head(head: Node, arguments: list<Term>, c: Checker) as Term := {
+	if fact_of(head, DECLARED_BY) != ø { return word_named(head) }
+	family = declaration(TYPES.environment, text(head)) ?? refused(head, "${head} names no type the kernel holds")
+	el = elaboration_over(c)
+	holes = family.levels.map(name => level_hole(el))
+	type = with_levels(family.type, family.levels, holes)
+	for argument in arguments {
+		type = match type.shape {
+			Pi(binder, domain, body) => if unified(el, domain, type_of(el.c, argument)) then instantiated(body, argument) else refused(head, "${family.name} takes ${shown(domain)} here, and this is ${shown(type_of(el.c, argument))}")
+			_ => refused(head, "${family.name} takes fewer arguments than ${#arguments}")
+		}
+	}
+	if not problems_retried(el) { refused(head, "the levels of ${family.name} are found from none of its arguments") }
+	constant(named_id(TYPES.environment, family.name)!, family.name, holes.map(hole => level_filled(el, hole)))
 }
 # the frame its parameters are typed in, as a body's is
 reading_frame(typed: TypedFunction) as TypeFrame := {
