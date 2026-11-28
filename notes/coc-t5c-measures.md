@@ -23,9 +23,10 @@ step 4).
 ## The parts
 
 1. **Sizes.** Each enum taken apart into any universe gets `E·size(v): ·count` from its recursor, made the first time
-   a measure asks (as below and course): a case is one plus the sizes of its fields of a type of the block, a
-   container's (list<Tree>) one plus its items' sizes, through the nested motives (nested-inductive). int's size is
-   its count's (natural(n) is n, negative(n) is n + 1), a count's itself, any other type's zero. courses.wap +25.
+   a measure asks (as below and course): a case's value is one plus the sizes of its fields, a field of a type of
+   the block by the recursor's hypothesis (a container's items through the nested motives, list<Tree> as Tree's
+   block holds it), a field of another enum by that enum's size, any other field zero; a function field counts zero.
+   One rule for every enum: a count's size is itself plus one, int's one plus its count's. sizes.wap +40.
 2. **The default measure.** The sum of the parameters' sizes, `·add` over them. recursion.wap +6.
 3. **The term.** With μ the measure as a function of the parameters P and R the result:
    - `F = ·count.recursor(k => (P) -> at_most(successor(μ(P)), k) == yes -> R, zero_arm, step_arm)`
@@ -36,11 +37,19 @@ step 4).
      `at_most(μ(P), k) == yes`, and o the provers' proof of `at_most(successor(μ(A)), μ(P)) == yes`.
    - the function: `(P) => F(successor(μ(P)), P, ·at_most_same(successor(μ(P))))`.
    recursion.wap +40 (`measured_defined`, the call read in `recursive_called` from a `Measured` beside `Recursion`).
-4. **What the provers see.** A call's obligation is proved under the conditions of the `if` arms around it: inside a
-   measured recursion an `if` on a bool is read by `·bool_cases` with its premise bound (as `cases_term` reads a
-   proof's choice), its motive the constant result type. terms.wap +10.
-5. **Two count laws** (extensions/prove/integer_laws.wap, by paired_law): `·at_most_same(n): at_most(n, n) == yes`
-   and `·at_most_trans(a, b, c): at_most(a, b) == yes -> at_most(b, c) == yes -> at_most(a, c) == yes`. prove +12.
+   It rests on `·at_most` computing on open terms: `at_most(successor(a), successor(b))` is `at_most(a, b)` and
+   `at_most(successor(a), zero)` is no, both by the count's recursor on a successor (kernel/counting.wap, ·compared).
+   A call anywhere else than in an `if` arm, an `and`/`or` operand or a map over a field (in a lambda handed to
+   another function, say) is not read: the function stays Div.
+4. **What the provers see.** A call's obligation is proved under the conditions around it: inside a measured
+   recursion an `if` on a bool is read by `·bool_cases` with its premise bound (as `cases_term` reads a proof's
+   choice), its motive the constant result type; `a and b` reads b under `a == yes`, `a or b` under `a == no`.
+   terms.wap +14.
+5. **Two count laws**, proved theorems of the kernel library, never assumptions: `·at_most_same(n): at_most(n, n) ==
+   yes` by the count's recursor on n (zero computes to yes, a successor to the law at n), and `·at_most_trans(a, b,
+   c): at_most(a, b) == yes -> at_most(b, c) == yes -> at_most(a, c) == yes` by paired induction (paired_law) on a
+   and c, b split at each step: a zero computes to yes, a successor against zero refutes the premise by
+   no_is_not_yes, two successors are the law one below. prove +16.
 6. **`decreasing m`.** After the body, `f(n, m) := … decreasing m + n`: the measure written, a count or an int (its
    size), read under the parameters. A wiki passage first (wiki/effects.md "Div" names the measure; the spelling
    goes to the interviewer with this plan), then a sugar rule writing it as a fact on the Define. sugar +2, recursion
@@ -54,14 +63,21 @@ step 4).
 
 ## The estimate
 
-core about +75 (courses +25, recursion +57 with the call reading, terms +10, minus the sharing), sugar +2, prove +22,
+core about +100 (sizes +40, recursion +57 with the call reading, terms +14, minus the sharing), sugar +2, prove +26,
 types +8.
+
+## Not in this step
+
+A group of functions calling each other stays Div here; a measure shared by the group, one F over the sum of the
+members, is the next step, on the card of recursion through nested types (nested-courses).
 
 ## Outcome lines
 
-- `gcd(a: nat, b: nat): nat := if b == 0 then a else gcd(b, a % b)` with `law g: gcd(12, 18) == 6 := refl` proved
-  and `effects of gcd` Pure: a measure (the default, a + b falls since a % b < b) the provers prove with the arm's
-  premise `b != 0`. wiki/effects.md "Div".
+- `gcd(a: nat, b: nat): nat := if b == 0 then a else gcd(b, a % b) decreasing b` with `law g: gcd(12, 18) == 6 :=
+  refl` proved and `effects of gcd` Pure: `a % b < b` under the arm's premise `b != 0`. wiki/effects.md "Div".
+- the same gcd without `decreasing b` is Div and runs: the default a + b does not fall (gcd(3, 5) calls gcd(5, 3)).
+- a function of two parameters where one falls and the other stays, `steps(n: nat, k: nat) := if n == 0 then k else
+  steps(n - 1, k)` written through a subtraction no guard reads, is Pure by the default measure.
 - `ackermann` by `decreasing` a pair is out of reach (a tuple measure, 9.3's lexicographic order): Div, runs.
 - A function moving away keeps Div and runs (test_effects, from T5c1).
 - A tree of a list of trees counted through `children.map(count)` is Pure and `law` computes it (part 7).
