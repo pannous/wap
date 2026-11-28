@@ -113,7 +113,8 @@ parameters_entered(typed: TypedFunction, c: Checker, s: TypingState, by_key: map
 	names = parameter_nodes(typed)
 	for at in 1 to #typed.arguments {
 		before = fresh_reading(c, by_key, s).under(locals, names.take(at - 1).map(place_key))
-		locals += [entered(c, text(names#at), statement_held(declared_type(parameters_of(typed)#at), typed, before, s) ?? kernel_headed(settled_type(typed.arguments#at, s), c, s))]
+		written = declared_type(parameters_of(typed)#at)
+		locals += [entered(c, text(names#at), statement_held(written, typed, before, s) ?? written_read(written, reading_frame(typed), before) ?? kernel_headed(settled_type(typed.arguments#at, s), c, s))]
 	}
 	locals
 }
@@ -124,15 +125,25 @@ parameters_checker(typed: TypedFunction, s: TypingState) as Checker := {
 }
 # the names its definition gives its parameters, as written
 parameter_nodes(typed: TypedFunction) as list<Node> := parameters_of(typed).map(parameter => declared_name(parameter))
-# GUESS (T6a3's value reader): the result as the kernel reads it: where a family is written applied to values, the head applied to its arguments
-# read as values under the parameters (`Even(double(n))`, each value through term_of and the checker's Locals); any other result as settled
+# GUESS (T6a3's value reader): the result as the kernel reads it, under the parameters (written_read); any other result as
+# settled
 kernel_result(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := {
-	if is_statement_written(typed.written) { return statement_held(typed.written, typed, parameters_reading(typed, by_key, s), s) }
-	if typed.written == ø or not is_family_call(typed.written!) { return kernel_settled(typed.result ?? return ø, s, parameters_checker(typed, s)) }
-	match typed.written! {
+	if typed.written == ø or not (is_statement_written(typed.written) or is_family_call(typed.written!)) { return kernel_settled(typed.result ?? return ø, s, parameters_checker(typed, s)) }
+	reading = parameters_reading(typed, by_key, s)
+	statement_held(typed.written, typed, reading, s) ?? written_read(typed.written, reading_frame(typed), reading)
+}
+# A written type read under a reading's binders, the same for a parameter's, a result's and a function type's parts: a
+# statement as its proposition, ø while the functions it calls are not entered yet; a family applied to values as the
+# head applied to their terms (`Even(double(n))`, each value typed in the frame and read through term_of); ø for any
+# other type, which its caller reads as settled
+written_read(written: Node?, frame: TypeFrame, reading: Entering) as Term? := {
+	s = reading.s
+	if is_statement_written(written) { return proposition_of(TYPES.environment, term_of(typed_form(written!, s, frame, BOOL_TERM), reading) ?? return ø) }
+	if written == ø or not is_family_call(written!) { return ø }
+	match written! {
 		Call(head, items) => {
-			given = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, reading_frame(typed), ø), parameters_reading(typed, by_key, s)) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)
-			kernel_headed(apply_all(kernel_type(family_word(head))!, given), typed.checker!, s)
+			given = items.map(item => if is_value_written(item) then term_of(typed_form(item, s, frame, ø), reading) ?? refused(item, "a type may depend only on values the program computes without acting") else kernel_type(type_term(item))!)
+			kernel_headed(apply_all(kernel_type(family_word(head))!, given), reading.c, s)
 		}
 		_ => ø
 	}
@@ -289,7 +300,8 @@ term_of(n: Node, x: Entering) as Term? := match n {
 	_ => ø
 }
 # a function type as a pi: each parameter a binder (an unnamed one under NO_BINDER) entered on the reading's checker in
-# order, the result read under them, a statement result as its proposition (the law `(n: nat) -> n + n == 2 * n`)
+# order, each read under the ones before it and the result under all, as a function's parameters and result are
+# (written_read; the law `(n: nat) -> n + n == 2 * n`)
 arrow_term(arguments: list, x: Entering) as Term? := {
 	parameters = items_or_one(arguments#1)
 	locals: list<Local> = []
@@ -297,16 +309,15 @@ arrow_term(arguments: list, x: Entering) as Term? := {
 	frame = TypeFrame()
 	for parameter in parameters {
 		named = declared_type(parameter) != ø
-		type = type_term(declared_type(parameter) ?? parameter)
-		locals += [entered(x.c, if named then text(declared_name(parameter)) else NO_BINDER, type)]
+		written = declared_type(parameter) ?? parameter
+		locals += [entered(x.c, if named then text(declared_name(parameter)) else NO_BINDER, arrow_part(written, frame, x.under(locals, keys)) ?? return ø)]
 		keys += [if named then place_key(declared_name(parameter)) else NO_BINDER]
-		if named { frame.variables += [Binding(place_key(declared_name(parameter)), type)] }
+		if named { frame.variables += [Binding(place_key(declared_name(parameter)), type_term(written))] }
 	}
-	inner = x.under(locals, keys)
-	result = arguments#2
-	read = if is_statement_written(result) then proposition_of(TYPES.environment, term_of(typed_form(result, x.s, frame, BOOL_TERM), inner) ?? return ø) else type_term(result)
-	pis(locals, read)
+	pis(locals, arrow_part(arguments#2, frame, x.under(locals, keys)) ?? return ø)
 }
+# a part of a function type read under the binders before it: a statement that cannot be read yet leaves no term
+arrow_part(written: Node, frame: TypeFrame, reading: Entering) as Term? := written_read(written, frame, reading) ?? if is_statement_written(written) then ø else kernel_settled(type_term(written), reading.s, reading.c)
 # a list literal, its items folded into list's cases as a text's code points are: [1, 2] is item(1, item(2, empty))
 # (type_notation.wap lists_declared); ø where an item has no term
 list_term(n: Node, items: list, x: Entering) as Term? := {
