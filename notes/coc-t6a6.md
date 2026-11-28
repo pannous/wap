@@ -56,7 +56,7 @@ What already landed:
      Sugar −2 rules, plus the two refusal lines :33-34 (calls of `and(...)`), which a function makes moot. Core 0.
    - (B), if lazy-implies' three build checks show that a block argument in an infix call does not hold: a kind rule
      at stage 3 turns an `If` whose operands are typed Prop into `And` or `Or`. Sugar +2, core 0.
-   - lazy-implies lands first. Its build answers this choice.
+   - (A), decided (wap-supervisor), unless lazy-implies' build shows a block argument in an infix call cannot work.
 
 4. **Or and Exists eliminate into Prop only.**
    - The kernel's recursor today takes a motive at any level. A block in Prop with two cases, or with a field that is
@@ -64,7 +64,7 @@ What already landed:
    - The rule is about 8 lines in kernel/inductive.wap, where the motive's level is chosen.
    - It refuses `match` on an `A or B` into bool (proposition.md:95, "a proof decides no data") with the kernel's
      argument-type refusal. The test's word "refused by elimination" is the analyze message that names it, about +2.
-   - This is a kernel change: it goes to warp-interviewer before it is built.
+   - Decided by the kernel owner (wap-supervisor): the standard CIC restriction, built with T6a6.
 
 5. **A comparison's type.** proposition.md:6-7 says `type of (2 + 2 == 4)` is Prop. :55 says a comparison where a
    bool is wanted is decided.
@@ -77,7 +77,7 @@ What already landed:
      one phrase special-cased, against "no special cases".
    - (C), Lean's way: comparisons are Prop, decided to bool through a Decidable instance. Every `if` goes through
      instance search (C1). Core +40 or more, and the self-compile slows.
-   - I recommend (A). Its question to warp-interviewer goes with this plan.
+   - (A) is the default. The wiki text of proposition.md:6-7 waits for the user; until then the wiki and the two red test lines stay as they are.
 
 ## Needs
 
