@@ -158,15 +158,24 @@ written_read(written: Node?, frame: TypeFrame, reading: Entering) as Term? := {
 # binders and in its arguments too, is headed at the levels its arguments give (family_applied); a term holding no level
 # parameter, typing's bare levels, is as it is. A function named as a family's argument, `same_value` of
 # `quotient(fraction, same_value)`, is that function
-kernel_headed(t: Term, c: Checker, s: TypingState) as Term := if not t.holds_parameter then t else match t.shape {
+kernel_headed(t: Term, c: Checker, s: TypingState) as Term := levels_headed(curried(t), c, s)
+levels_headed(t: Term, c: Checker, s: TypingState) as Term := if not t.holds_parameter then t else match t.shape {
 	Apply(function, argument) => {
-		given = arguments(t).map(part => function_valued(part, s) ?? kernel_headed(part, c, s))
+		given = arguments(t).map(part => function_valued(part, s) ?? levels_headed(part, c, s))
 		family = declared_at(TYPES.environment, constant_id(head_of(t)))
-		if family == ø or family!.levels is empty then apply_all(kernel_headed(head_of(t), c, s), given) else family_applied(family!, given, c)
+		if family == ø or family!.levels is empty then apply_all(levels_headed(head_of(t), c, s), given) else family_applied(family!, given, c)
 	}
 	Pi(binder, domain, body) => binder_headed(c, s, binder, domain, body, pi)
 	Lambda(binder, domain, body) => binder_headed(c, s, binder, domain, body, lambda)
-	Projection(structure, field, of) => projection(structure, field, kernel_headed(of, c, s))
+	Projection(structure, field, of) => projection(structure, field, levels_headed(of, c, s))
+	_ => t
+}
+# A function type as the kernel reads it, one pi per parameter, as arrow_term writes a written one: typing's `(int,
+# text) -> bool`, a pi over its parameter list (type_notation.wap function_type_of), is int -> text -> bool, in its parts
+# too, so a function's declaration and a function value given for it meet in one encoding. A kernel pi is as it is
+curried(t: Term) as Term := match t.shape {
+	Pi(binder, domain, body) => if kernel_pi(t) then t else parameters_listed(domain).reverse().fold(curried(body), (inner, parameter) => pi(NO_BINDER, curried(parameter), inner))
+	Apply(function, argument) => apply(curried(function), curried(argument))
 	_ => t
 }
 # the function a type's argument word names, by its definer, as the kernel holds it (type_notation.wap value_word); ø
@@ -180,9 +189,9 @@ function_valued(part: Term, s: TypingState) as Term? := {
 # a binder made again of its domain headed and its body headed with the binder entered as a variable of that domain
 # GUESS: a named kernel maker (pi, lambda) passes as a function value
 binder_headed(c: Checker, s: TypingState, binder: text, domain: Term, body: Term, made: (text, Term, Term) -> Term) as Term := {
-	headed = kernel_headed(domain, c, s)
+	headed = levels_headed(domain, c, s)
 	inside = entered(c, binder, headed)
-	made(binder, headed, abstracted(kernel_headed(instantiated(body, inside.variable), c, s), variable_id(inside.variable)))
+	made(binder, headed, abstracted(levels_headed(instantiated(body, inside.variable), c, s), variable_id(inside.variable)))
 }
 # a kernel family applied to its arguments in order (`Equal(nat, a, b)`: u from nat's Type); applied to fewer than
 # it takes, a function of the rest (`Equal(nat, a)`)
@@ -291,7 +300,7 @@ let_read(x: Entering, name: Node, type: Term, given: Term, body: (Entering) -> T
 # a typed node's term, ø where it is not pure
 term_of(n: Node, x: Entering) as Term? := match n {
 	Number(value) => if value is int and kernel_value(n) == INT_TERM then int_numeral(TYPES.environment, value) else ø
-	Text(value) => if universe_level(kernel_value(n)) == ø then quoted(value) else ø
+	Text(value) => if universe_level(kernel_value(n)) == ø then quoted(value) else type_value_term(n)
 	List(items, Bracket.Square, separator) => list_term(n, items, x)
 	True => TYPES.environment.literals!.yes_case
 	False => TYPES.environment.literals!.no_case
@@ -305,6 +314,9 @@ term_of(n: Node, x: Entering) as Term? := match n {
 	Block(statements) => if has_fact(n, HELD_ARGUMENTS) then term_of(held_call(n), x) else lets_term(statements, x)
 	_ => ø
 }
+# A type written as a value has no term; a statement over binders written so, `((n: nat) -> n + n == 2 * n) and yes`,
+# is refused, since its binders were not kept (calls.wap type_value_written), never left to make its law assumed
+type_value_term(n: Node) as Term? := if levels_equal(universe_level(kernel_value(n))!, Zero) and function_parts(fact_type(fact_of(n, DENOTES))) != ø then refused(n, "a statement over binders is read where a type is written, as a law's statement or a parameter's type: write it there, or name it as a law") else ø
 # a function type as a pi: each parameter a binder (an unnamed one under NO_BINDER) entered on the reading's checker in
 # order, each read under the ones before it and the result under all, as a function's parameters and result are
 # (written_read; the law `(n: nat) -> n + n == 2 * n`); its parts are typed in the frame around it, with its own named
@@ -319,7 +331,7 @@ arrow_term(arguments: list, around: TypeFrame, x: Entering) as Term? := {
 		written = declared_type(parameter) ?? parameter
 		locals += [entered(x.c, if named then text(declared_name(parameter)) else NO_BINDER, arrow_part(written, frame, x.under(locals, keys)) ?? return ø)]
 		keys += [if named then place_key(declared_name(parameter)) else NO_BINDER]
-		if named { frame = TypeFrame(variables: frame.variables + [Binding(place_key(declared_name(parameter)), type_term(written))]) }
+		if named { frame = TypeFrame(variables: frame.variables + [Binding(place_key(declared_name(parameter)), type_term(written))], letters: frame.letters) }
 	}
 	pis(locals, arrow_part(arguments#2, frame, x.under(locals, keys)) ?? return ø)
 }
