@@ -25,8 +25,7 @@ in either order of the crossed counts.
 `fixing_proof` keeps its name test: it picks the proof by the statement's name, and a list of (statement, proof) pairs
 would spell every statement a second time.
 
-The refusal for a word outside `SHORTCUT_WORDS` (bindings.wap:86) says which statement it refused. The other refusals
-of that file name no statement yet.
+Every refusal in bindings.wap names the statement it refused: `bound` wraps `binding_made` and puts the statement before the message.
 
 ## A helper used once, or nothing using it
 
