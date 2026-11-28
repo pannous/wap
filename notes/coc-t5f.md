@@ -74,14 +74,14 @@ coc-plan.md 9.7: types, levels and proofs emit nothing.
   Erasure drops it: the kernel's sort of its type is Prop, read once per binder. Its argument at every call goes
   too.
 - **Levels** are not values: `Type(u)`'s u emits nothing.
-- **Types used as values stay.** wiki/universe.md:49 `identity(int)` gives `int`, a type as a run-time value. So a
+- **Types used as values stay.** wiki/universe.md:52 `identity(int)` gives `int`, a type as a run-time value. So a
   type argument is erased only where nothing in the body uses it as a value.
   - The test is the binder's uses, not its sort.
   - This is where wap differs from Lean, which erases every type.
 - **T4e's value arguments** (`vector(T, n: nat)`): n is an index, used in the type. It emits nothing unless the body
   reads it.
 - Test lines, from wiki pages, once those forms run:
-  - wiki/universe.md:47-50 (`identity(3)`, `identity(int)`, `identity(Type)`);
+  - wiki/universe.md:50-53 (`identity(3)`, `identity(int)`, `identity(Type)`);
   - a function with a proof parameter called with `by`, from the T6a1b wiki lines.
 
   Each test checks the value it runs to, never the module's shape.
