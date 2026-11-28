@@ -72,7 +72,7 @@ T4a and T4b add a type form, so they take the careful path; T4c changes how a ch
 | T5a | definitions and pure expressions as kernel terms (notes/coc-t5.md) | T5's | T5's |
 | T4d computed (steps: notes/coc-t4d.md) | an obligation whose value and predicate compute is decided when compiling: no is refused by condition, yes needs no check | +30 (the predicate's constant given its body by T5a; `computed` at the value) | normal plus the census; the two compile-time refusal lines of test/wap/test_subtype_wanted |
 | T4c char | `char` is `text where #it == 1`, kept as its code point (user 2026-11-27: the i32 stays, a declared conversion takes a char up to text, wiki/char.md:7 unchanged); core's char conversions go (char_text, the READS row, the place-typed `'a'`, `is_plain`'s char, about 49 uses) for that one conversion; `type Port < int where …` once c-type-names has `<` | about −10 core, +30 types | careful, the speed gate measured at this step; test_subtype_page and test_char_page unchanged; `[1, "a"]` is a `list<int or text>` (with T5u's unions it is `list<char or int>` while "a" is a char); the run-time check line of test/wap/test_subtype_wanted; the Port line |
-| T4e value arguments | a type alias of value parameters, `vector(T, n: nat)`, `index(xs)`; its arguments found by unification and compared by computing | +60 | careful; the vector and index lines; test_type_wanted's `dot` and `append` lines |
+| T4e value arguments (plan: notes/coc-t4e.md, core about +74, kernel +6, types +4) | a type alias of value parameters, `vector(T, n: nat)`, `index(xs)`; its arguments found by unification and compared by computing | +60 | careful; the vector and index lines; test_type_wanted's `dot` and `append` lines |
 
 Order: T4a, T4b, then T5u (unions, coc-plan's T5u row), then T5a (definitions and pure expressions as kernel terms), then T4d, T4c (after c-type-names
 lands) and T4e. A char literal is a char by computing (`#"a" == 1`), so T4c follows T4d: before it, every char
@@ -82,9 +82,9 @@ literal would be checked at run time, or the place-typed `'a'` kept under anothe
 
 T4 as a whole: about +180 core (+90, +30, +30, −30, +60) and +30 types, against coc-plan's +409 (450 analyze and 100
 types added, 141 deleted). The difference: the plan counted a mechanism of its own for conditions and obligations,
-where narrowing and findings exist. The 141 deleted lines are the extension's elaborate/conditions.wap (with
-obligations.wap, 64, and convert.wap, 28): they go in T5, since the theory's doors read programs as written until
-then (as T3g's work moved to T5); core's analyze/conditions.wap stays and grows by T4b's 30.
+where narrowing and findings exist. The 141 deleted lines are the extension's conditions file (with
+obligations, 64, and convert, 28), gone with the extension's elaborator; core's analyze/conditions.wap stays and
+grows by T4b's 30.
 
 ## Gate
 
@@ -111,3 +111,18 @@ The T4 row's `effects of` line (a function with a check left is Fail) moves to T
   `.chars`. The other reading keeps the code point as char's storage and makes the up-conversion a declared one
   (c-type-names' `<`); it keeps core's READS row and costs a conversion where the plan's costs nothing.
   Recommendation: the plan's, its text, core −30; the other reading about −10.
+
+## T4c re-read on unify-typers 2b0e87be
+
+- **Where core's char conversions are now:**
+  - `char_text` (analyze/calls.wap:218);
+  - the char row of `READS` (type_notation.wap:322-326);
+  - `is_plain`'s char (calls.wap, fits.wap, types.wap).
+
+  The row's "about 49 uses" is counted again by the builder.
+- **`type X < T` is not there.** sugar/definitions.wap:30 reads only `type $head = $body`. records.wap's `class $name <
+  $base` is a class's extends. The Port line (test_subtype_wanted:20-21) waits on c-type-names' `<`.
+- **The three T4d steps it needs are planned** (coc-t4d.md). T4d3's text rows give `#"a" == 1` by computing, which is
+  what a char literal needs.
+- **Estimate: about −10 core, +30 types**, as the row says. The speed gate is measured at this step. It lands after
+  T4d1 to T4d3, and after c-type-names for the Port line only. The rest does not wait on `<`.

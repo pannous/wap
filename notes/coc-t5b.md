@@ -31,11 +31,9 @@ statements T5d's, classes T5e's. Line counts are `grep -vc '^\s*#'` on main f749
 - **`type of` is the model for `effects of`:** sugar/types.wap `rule type of $x => type_of($x)`, and calls.wap
   answers the call by TYPE_OF_WORD with a text literal (`type_of_typed`).
 - **No effects in core:** nothing in wap/core or wap/kernel says effect.
-- **The theory's twins of this step:** elaborate/blocks.wap (111, enums and classes into blocks), elaborate/match.wap
-  (216: arms to minor premises, dependent motives, the course of a recursion), elaborate/effects.wap (191: inference
-  and computation types). Each serves two readers: a program read through the door, and the explicit theory spelling
-  (`enum Equal(a: T): T -> Prop`, `Equal[1](bool, …)`, a theorem by `match` with a dependent motive), which analyze
-  cannot type until propositions and indexed families move to wap/types (section "T6 and T7" below).
+- **The explicit theory spelling** (`enum Equal(a: T): T -> Prop`, `Equal[1](bool, …)`, a theorem by `match` with a
+  dependent motive) is one analyze cannot type until propositions and indexed families move to wap/types (section
+  "T6 and T7" below).
 
 ## Enums as inductive blocks
 
@@ -109,17 +107,15 @@ The audit's R3, migration steps 2 to 4.
   types/operators.wap): `!` has a postfix row only, `required` in the superscript group, and a prefix alias `not`.
   After an operand the reader takes a spaced `!` as infix where it has an infix reading, and since it has none it
   falls through to the postfix, though the function's own comment says spaced on both sides is infix. So
-  `print(t) ! IO` is `required(print(t))` followed by `IO` in a space list, the shape the theory's
-  elaborate/effects.wap `effect_marked` reads (a space list whose first item is the `!` call). `double(x) := x * 2 !
+  `print(t) ! IO` is `required(print(t))` followed by `IO` in a space list. `double(x) := x * 2 !
   Pure` is worse: the superscript group binds tighter than `*`, so `!` lands on the `2`, `x * required(2)` then
-  `Pure`, and neither analyze nor `effect_marked` sees a claim.
+  `Pure`, and analyze sees no claim.
 - **The claim's reading, recommended:** a table row, no reader branch: `!` gets an infix reading in a group of its
   own between `arrow` and `assignment` (types/operators.wap), so `f(x) := x * 2 ! Pure` is the claim applied to the
   whole body and `x!` stays `required(x)`. The reader then does what its comment says (spaced on both sides is
   infix). Where spacing alone separates the claim from the postfix `!` (`x ! IO` against `x! IO`), `wap format`
   prints the reading explicitly, the claim as `(x) ! IO` and the unwrap as `x!` glued (CLAUDE.md "Refuse, never
-  guess"). types +2, core 0, its commit carrying `spec: wiki/effects.md` on its own line; the claim's check +10 in analyze (in T5b1's +120). The theory's `effect_marked` reads the
-  infix call instead of the space list (−5 extension).
+  guess"). types +2, core 0, its commit carrying `spec: wiki/effects.md` on its own line; the claim's check +10 in analyze (in T5b1's +120).
 - **What reads it:** terms.wap enters only a Pure function (or Fail with T5d's `T or Error`) as a definition; the
   census prints how many functions have each effect, and T5's gate becomes "every function defined, Div, or opaque by
   a named effect".
@@ -135,8 +131,8 @@ normal path.
 | T5b1 effects | prim rows carry their effect; analyze writes `effects` per instance; `effects of`, one table of questions with `type of`; the `!` claim checked; the census prints the effects | core +120 (analyze/effects.wap +100, calls.wap's question table +10, the claim +10), kernel +10 (primitives.wap), sugar +1 | elaborate/effects.wap's inference half, about −120: the door (A2) reads the `effects` fact of a program's functions; the computation types (`T ! e`, Eff) stay for T6 | test_effects_wanted's four `effects of` checks (a constant free variable Pure, a global State, `! IO`, `! Pure`); test_errors_wanted's "effects of a function that can fail name Fail, try removes it"; wiki/effects.md's `effects of f // State` and `// Pure`, moved to test_effects_page |
 | T5b2 enums | an enum's declaration fills its word with an inductive block, cases its constructors; mutual enums one block; a case's value a constructor term; open or refused enums stay assumed, counted | core +80 (analyze/inductives.wap: block of a record +50, grouping +15, case terms in terms.wap +15), kernel 0 (A1's fill) | the door finds a program's enum filled and elaborates it no more (declare.wap's block path for programs, about −15); blocks.wap stays for indexed families and propositions | the census counts enums defined and assumed, a ratchet; every test as before (an enum's equality, a law's `Dime == Dime`, needs the decidable equality coc-plan.md 7 adds per block: T6) |
 | T5b3 bool | core declares bool's block, `enum bool: Type { no; yes }`, in core_environment; `if` is bool's recursor; the Choice goes (section "T5b3: the Choice goes") | core −5, kernel −12 | none: the theory's reader is gone | every test as before; laws with `if`, `and`, `or`, `not` and `implies` reach the provers' recursor reading |
-| T5b4 match | a match on a filled enum with case arms is the recursor's case split, the catch-all filling the cases left; literal arms are choices on the row's equality | core +60 (terms.wap `match_term` +45, literal arms +15) | match.wap's program path: the door takes analyze's term; `arm_of`, `names_case`, `pattern_name`, `pattern_fields` and `minor_elaborated`'s non-dependent half, about −50; the dependent motive (`motive_made`) stays for T6, the course (`course_elaborated`) goes with T5c | wiki/law.md and enum.md: `enum Coin { Penny, Nickel, Dime }`, `cents(c: Coin) := match c { Penny: 1; Nickel: 5; Dime: 10 }`, `law dime: cents(Dime) == 10` prints `dime: Proved` (test_law_runs, a new line); `effects of cents` is Pure (coc-t5.md T5b row); "match on Coin misses Dime" unchanged |
-| T5b5 the recursor | `E.recursor(minors…, value)` typed with its motive found; it runs by the definition analyze adds to the enum | core +50 (calls.wap: the recursor's type for a filled enum +30, the added definition +20) | match.wap `recursor_given`, about −8 | the form of wiki/enum.md on an enum of the program, `enum Tree { leaf, node(left: Tree, right: Tree) }`, `leaves(t: Tree): int := Tree.recursor(1, (l, r, below_l, below_r) => below_l + below_r, t)`, `leaves(node(leaf, leaf))` is 2 (test_enum_wanted); enum.md's `enum nat { zero, successor }` is a teaching example, no second nat: its `double(3)` is 6 runs on a program's own enum only with a numeral of that enum, so the page's line goes green with T6c, where `zero` and `successor(k)` are patterns of the one nat, `int where it >= 0` |
+| T5b4 match | (plan: notes/coc-t5b4.md) a match on a filled enum with case arms is the recursor's case split, the catch-all filling the cases left; literal arms are choices on the row's equality | core +60 (terms.wap `match_term` +45, literal arms +15) | match.wap's program path: the door takes analyze's term; `arm_of`, `names_case`, `pattern_name`, `pattern_fields` and `minor_elaborated`'s non-dependent half, about −50; the dependent motive (`motive_made`) stays for T6, the course (`course_elaborated`) goes with T5c | wiki/law.md and enum.md: `enum Coin { Penny, Nickel, Dime }`, `cents(c: Coin) := match c { Penny: 1; Nickel: 5; Dime: 10 }`, `law dime: cents(Dime) == 10` prints `dime: Proved` (test_law_runs, a new line); `effects of cents` is Pure (coc-t5.md T5b row); "match on Coin misses Dime" unchanged |
+| T5b5 the recursor | (plan: notes/coc-t5b4.md) `E.recursor(minors…, value)` typed with its motive found; it runs by the definition analyze adds to the enum | core +50 (calls.wap: the recursor's type for a filled enum +30, the added definition +20) | match.wap `recursor_given`, about −8 | the form of wiki/enum.md on an enum of the program, `enum Tree { leaf, node(left: Tree, right: Tree) }`, `leaves(t: Tree): int := Tree.recursor(1, (l, r, below_l, below_r) => below_l + below_r, t)`, `leaves(node(leaf, leaf))` is 2 (test_enum_wanted); enum.md's `enum nat { zero, successor }` is a teaching example, no second nat: its `double(3)` is 6 runs on a program's own enum only with a numeral of that enum, so the page's line goes green with T6c, where `zero` and `successor(k)` are patterns of the one nat, `int where it >= 0` |
 
 Order: T5b1 can start at once (it needs neither the fill nor the door for its core half); its theory deletion waits
 for the door (A2). T5b2 needs A1 on main. T5b3 and T5b4 follow T5b2 in either order; T5b3 first is recommended,
@@ -212,7 +208,7 @@ T5b is done when:
 - the census counts every enum of wap's source defined or assumed with a reason (open field, refused), and prints the
   effects per function; the defined instances ratchet does not fall;
 - the kernel holds no Choice: `if` computes by bool's recursor;
-- elaborate/effects.wap holds no inference of a program's effects, and the door elaborates no program's enum or plain
+- the extension holds no inference of a program's effects, and the door elaborates no program's enum or plain
   match;
 - the whole suite has no new red, `--stage 2` is a fixed point; the self-compile and memory are measured and reported
   (soundness, never a limit).

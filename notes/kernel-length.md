@@ -30,7 +30,7 @@ in either order of the crossed counts.
 | where | what | lines |
 |---|---|---|
 | integer_laws.wap:23, :347 `·add_swapped` | No caller (the card's note). linear.wap's regrouper does without it | −2 |
-| logic.wap:18, :29, :54-61 `·yes_is_not_no`; :19, :30, :62-75 `·bool_cases` | No caller on int-takes, t6a3a or unify-linear. unify-provers.md:80-81 and :100 plan them only for the divide laws, which are not built. Both go and come back with divide | −16 |
+| logic.wap:18, :29, :54-61 `·yes_is_not_no`; :19, :30, :62-75 `·bool_cases` | No caller on int-takes, t6a3a or unify-linear. unify-provers.md:80-81 and :100 plan them only for the divide laws, which are not built. Both go. `·bool_cases` comes back in the commit of its first caller, a proof by cases over a comparison (Q1's sign_product or T6a4's case proofs); `·yes_is_not_no` with divide | −16 |
 | integer_laws.wap:232 `parts_zero` | An induction inside paired's zero arm. paired's at_zero takes a step (the card's note) | −2 |
 
 ## Parameters always passed the same
@@ -48,8 +48,8 @@ saves the rebuild in every regrouping. This counts toward a "standing OK speed" 
 
 ## Dead code across wap/ (wap-tree-wap's caller scan, on the card)
 
-wap-tree-wap scanned origin/int-takes for names with no caller; the scan is a todo note on card kernel-length. 13
-names, 38 lines, are dead and go in the same card: seen_ids, declared_named, axioms_shown, REFUSED_DECLARATION,
+wap-tree-wap scanned origin/int-takes for names with no caller; the scan is a todo note on card kernel-length. 12
+names, about 37 lines, are dead and go in the same card: seen_ids, declared_named, REFUSED_DECLARATION,
 RUNNING, shown_for, is_sort, shortcut_kind with DECLARED_SHORTCUTS, written_parts_of, language_loaded, library_path,
 instantiate_all.
 
@@ -57,12 +57,13 @@ These stay:
 - CALL_REF, an opcode row.
 - Names called from outside wap/: declared_code and enums_shown (scripts/wap-census.warp); host_word,
   host_word_answered and caller_memory (main.c).
+- axioms_shown, which V1 calls for `axioms of` (notes/coc-v1.md).
 - Gaps waiting on a caller: courses.wap (T5c3), texts_declared (T4d3's text rows), the quotients (Q1) and
   condition_proof (T4d1's to check).
 
 ## Total
 
-About −55 code lines in the five files, against the card's measured −12, plus the dead code's 38 elsewhere:
+About −55 code lines in the five files, against the card's measured −12, plus the dead code's about 37 elsewhere:
 - integer_laws.wap about −24;
 - counting.wap about −8;
 - logic.wap −16;
