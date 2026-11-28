@@ -100,3 +100,82 @@ If the respect proof is still not found, what is missing comes back as a further
 Core about +37 (+12, +5, +12, +8), prove +5, types about +21 (+27 with the doubt's A), kernel 0. The row had core +50
 and types +40: T4e's value arguments carry the type form, and `set`'s relation is a few lines over sorting.
 Careful path (a new type's conversions), after T4e, V3, T5b5, T6a1 and C1 (Equatable's `==`).
+
+## Re-read on 5285eb86: what stands of q1-library, the functions, the cost
+
+**What 5285eb86 holds.**
+- kernel/quotients.wap declares `quotient`, `quotient.of`, `quotient.lift` and `quotient.induct` (:28-60), with the
+  relation `r: (a: T) -> (b: T) -> Prop` and lift's `respects` premise. That is unchanged since unify.
+- No type reading of a value argument: type_term (type_notation.wap:386) raises "… is no type" on `quotient(fraction,
+  same_value)`, as it does on T6a4's `Even(double(n))` (notes/coc-t6a4.md "The substitutions").
+- T4e is still planned, not landed. Its "applied-alias reading", T6a3's indices and T6a4's dependent results are one
+  reader, a value inside a type read by `term_of` under `typed.reading`, so Q1's part 1 is that reader's third user, not
+  a mechanism of its own.
+- **A name clash:** types/floats.wap:12 declares `quotient(a: int, b: int): int`, the truncated division, and
+  prelude.wap:63's `÷` calls it.
+  - Its own DEBT note (:8-10) says the name is to stay hidden for warp's exact division, but programs see it, and
+    `quotient(T, same)` is the kernel's type former of the same name.
+  - Before Q1: rename it `truncated_quotient`, beside its sibling `truncated_remainder`. It is a types-only rename with
+    four callers in floats.wap and one in prelude.wap, no form, net 0, so a standing OK small fix.
+
+**What of origin/q1-library f6cbee70 stands** (one file, types/quotients.wap, +34, on unify-typers 323ba86a, not
+included by types.wap):
+- **Stands:** `fraction` (with `bottom: int where it != 0`), `same_value`, `type rational = quotient(fraction,
+  same_value)`, `same_items` and `type set<T>`. These are plain wap, written as the wiki writes them.
+- **Stands:** `axiom quotient_sound(a: T, b: T, same: (T, T) -> Prop, h: same(a, b)): (quotient.of(a) as quotient(T,
+  same)) == quotient.of(b)`. It uses the program spelling `axiom …` that unify-axioms' rule reads, and its `as` gives
+  `of` its expected type (part 3).
+- **Stands:** function_extensionality as a `chain` theorem (wiki/proof.md:56). Its relation, `(p, q) => for a: A, p(a) ==
+  q(a)`, is a proposition, as the plan says it must be.
+- **Goes when the file is included:** the second `sign(x: int)`. lib/math.wap:134 still has it, and the commit keeps both
+  until the include. Whoever adds the include deletes math.wap's line in the same commit, so it is never written
+  twice.
+- **Doubtful:** `law sign_product` and `law sign_respects` have no written proof.
+  - Under V3's part 5 a law that is only Tested proves nothing, so the `sign` lift's respect obligation would be
+    refused.
+  - sign_respects (`a * d == c * b` implies `sign(a * b) == sign(c * d)`) is nonlinear, beyond the provers.
+  - It needs a proof by cases on the signs (T6a4), over `positive_product`, the helper law.md:36-44 proves (`x > 0 and y >
+    0 implies x * y > 0`).
+  - So the decided A stands, with this order: positive_product first, then sign_product by sign's cases, then
+    sign_respects from sign_product. Each is Proved or written with `by`. The builder checks each verdict with `wap
+    verify` before the lift line is expected green.
+  - sign_product is not dead: it is sign_respects' lemma.
+
+**The parts as functions.**
+1. **The type:** T4e's reader in type_term: a Call whose head is a kernel type former with value parameters (here
+   `quotient`, whose declaration says `(T: Sort u) -> (r: …) -> Sort u`) reads its value arguments by
+   `term_of(argument, reading)`.
+   - A bool relation is read as a proposition by T6a6's `Prop(b: bool)` conversion, adapted over the function value
+     (fits.wap:108, Adapted). So `same_value` needs no `== yes` wrapper written.
+   - The term is `apply_all(constant_of(e, QUOTIENT, [level]), [T, r])`.
+   - The up conversion, a T where the quotient is wanted, is `quotient.of`: a Read conversion found as a function named
+     as the type (reads_as), `of(a: T): quotient(T, same)`. Never down.
+   - core +8 on top of T4e's reader (the former's value parameters, the bool relation's adaptation, the up direction).
+2. **`==`:** types/quotients.wap's `==(a: quotient(T, same), b: quotient(T, same)): bool := same(a, b)`. It holds only
+   for a bool `same`; a Prop relation has no `==`, and its call is refused as no overload. types +1.
+3. **`of` from the expected type:** a letter found from the type wanted, beside letters_bound's from the arguments
+   (letters.wap:131: `denoted` already passes types in). It is the expected type's parts unified with the result's.
+   core +5.
+4. **`lift` and its obligation:**
+   - The call `q.lift(f)` builds the respect statement as V3 builds an obligation's: a law of the enclosing function,
+     `law_statement(e, …, value, [])` with value `lambdas([a, b, joined], Equal(R, f(a), f(b)))`, through
+     `typed.reading`. proof_found proves it with laws_of.
+   - An unproved one is refused with the statement shown. It cannot be checked at run time.
+   - A program calling lift loads the prove extension (T7's rule for proofs).
+   - core +10, prove 0 (V3's door does the proving).
+5. **Kernel terms:** `of` and `lift` calls enter as QUOTIENT_OF and QUOTIENT_LIFT through called_term's lookup (T5b5)
+   with the found relation as an argument. So `law lift_of … := refl` computes by compute.wap's quotient rule.
+   core +6.
+6. **The library:** q1-library's file as above, plus `==` (2), the include in types.wap, and math.wap's `sign(x: int)`
+   deleted. types +3 over the branch.
+
+**Cost.** core +29 (+8, +5, +10, +6), on top of T4e's reader, which T6a3 and T6a4 share; types about +37 (the
+branch's 34 and 3); prove 0; kernel 0. That is against the old estimate of core +37 and prove +5, because V3's
+obligation-as-law does part 4's proving.
+
+**Order.** The `truncated_quotient` rename (any time). Then T4e's reader (with T6a3/T6a4), V3 (part 4), T6a6 (`Prop(b)`
+and the logic for the theory lines), C1a (Equatable's `==` reaches the quotient's), and T6a4 (the sign lemmas by
+cases). Careful path: a new type's conversions.
+
+**Green.** The table above, unchanged. The `sign` lift lines (test_quotient_wanted:10-11) hold only once the three sign
+laws are Proved.
