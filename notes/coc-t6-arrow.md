@@ -25,7 +25,7 @@ is the proposition "for every n" (wiki/proposition.md:20, :34). Card dependent-t
 
 1. **Scope (about +6).**
    - An arrow is a type wherever it stands, as a value or in a type's place. A named parameter, `(x: T, …) -> R`, is a
-     binder of that name. An unnamed one, `(int) -> text`, gets an anonymous binder (kernel terms.wap's NO_BINDER, as
+     binder of that name. An unnamed one, `(int) -> text`, gets an anonymous binder (analyze/terms.wap's NO_BINDER on t6a4, as
      minor_of names an unnamed field). There is one reading for both, with no split.
    - Its binders are a layer of their own: `within(scope, parameter_definitions(parameters, depth + 1))`, the same call
      applied_type makes for an alias's parameters (scope.wap).
