@@ -48,3 +48,19 @@ family member refused. Estimates: core +55, kernel 0, sugar 0.
 ## Open for the user
 Whether a case's found letter may also appear only in its result (`zero: Even(n)`, no field). Recommended: refused,
 the letter is then nothing's value; wiki/proposition.md writes none.
+
+## Ruling: a letter only the result writes (wap-supervisor)
+Allowed, as Lean's `nil: Vector(T, 0)`. The letter is an implicit binder; the call solves it from its arguments' types,
+then from the type wanted at the use; where neither tells which, the use is refused ("cannot tell which n it means"),
+never the declaration. Outcome lines: test_theory_elaborate `anywhere_wanted` (solved) and `anywhere_unknown`
+(refused at the use).
+
+## Built (unbuilt, GUESSes)
+inductives.wap: `Found`, `found_written`/`found_in` (the letters, an index's type from the family's header, else a
+type), `case_read` and `index_read` (a family applied to numerals, constructors and `+`, text-keyed values no longer),
+`case_type` (found letters as `·`-marked binders before the fields, the written result at the end, a result that is
+no member of the enum refused), `found_count`, `found_applied` (holes for the letters, the arguments' kernel types
+unified with the field types, the type wanted where a letter is left, the use refused where still open). GUESSes:
+`case_fields(item)` gives a constructor call's arguments; `n` and `T` as a case's letters arrive as bare symbols with
+no DEFINED_AT; typing's own type for a family case's call stays the bare enum, so `found_applied` reads the kernel's
+type of the arguments and compares nothing against `value_type(n)`.
