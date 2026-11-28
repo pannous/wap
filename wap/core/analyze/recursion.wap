@@ -1,0 +1,141 @@
+# A structural recursion enters the kernel (notes/coc-t5c3.md): a function matching a parameter of a program's enum
+# and calling itself on that value's fields is the enum's course, `Tree·course(motive, step, t)`. The motive gives the
+# other parameters' function type, so a call may change them; the step is the match on the value, the values below it
+# riding the match, and a call on a field of the case is the field's hypothesis in them (courses.wap).
+
+use folder
+use "../stage.wap"
+use "../bindings.wap"
+use "../type_notation.wap"
+use "../../kernel/forms.wap"
+use "../../kernel/terms.wap"
+use "../../kernel/environment.wap"
+use "../../kernel/inductive.wap"
+use "../../kernel/typing.wap"
+use "../../kernel/compute.wap"
+use "../../kernel/equal.wap"
+use "../../kernel/recursors.wap"
+use "courses.wap"
+use "terms.wap"
+
+# the function being read, the place of the parameter its recursion takes apart, and inside a course's step that
+# parameter's value `held` with the step's variable `of` standing for the value taken apart, and the parameter's
+# values at the fields of the case whose values below hold hypotheses, in the order of those values
+class Recursion { key: text; place: int; held: Term? = ø; of: Term? = ø; fields: list<Term> = [] }
+# the binder of the values below the case's value, which the match rides
+BELOW_BINDER = "·below"
+# how many times a choice may take values apart before its condition decides
+GUARD_DEPTH = 4
+
+# a function whose body matches one of its parameters, or chooses by a condition that waits on one, as the course of
+# that parameter's enum; ø for any other (x: the reading under the function's parameters)
+course_defined(typed: TypedFunction, body: Node, x: Entering) as Term? := match body {
+	Case(subject, arms) => {
+		place = x.binders.index_of(place_key(fact_of(subject, DEFINED_AT) ?? return ø))
+		if place <= 0 { return ø }
+		domain = kernel_settled(typed.arguments#place, x.s)
+		if TYPES.enums.get(word_id(domain)) != ENUM_DEFINED or block_of(TYPES.environment, domain, "course").block.parameters != 0 { return ø }
+		match course_of(TYPES.environment, constant_name(domain)) {
+			Through(name) => course_applied(typed, place, x.variables#place, domain, (id, riding, below, inside) => arm_minor(id, arms, domain, riding, below, inside), x)
+			Without(reason) => ø
+		}
+	}
+	If(condition, then_part, else_part) => {
+		waiting = waiting_on(x.c, computed(x.c, term_of(condition, x) ?? return ø)) ?? return ø
+		place = x.variables.index_where(variable => same(variable, waiting))
+		if place <= 0 { return ø }
+		guard_read(body, condition, then_part, else_part, Entering(x.binders, x.variables, x.c, x.by_key, x.s, Recursion(instance_key(typed), place)))
+	}
+	_ => ø
+}
+# A choice inside a recursion: where the condition computes, the part chosen; where it waits on a free variable, that
+# variable's type taken apart with the choice again in every case, until the condition computes (wiki/Footguns.md
+# "Deciding termination"). So `if n <= 0 then 1 else n * f(n - 1)` on a whole number reads the call where n is
+# natural(successor(c)), n - 1 computing to natural(c), the hypothesis for c
+guard_read(n: Node, condition: Node, then_part: Node, else_part: Node, x: Entering, depth: int = 0) as Term? := {
+	truths = TYPES.environment.literals!
+	decided = computed(x.c, term_of(condition, x) ?? return ø)
+	if same(decided, truths.yes_case) { return term_of(then_part, x) }
+	if same(decided, truths.no_case) { return term_of(else_part, x) }
+	if depth >= GUARD_DEPTH { return ø }
+	variable = waiting_on(x.c, decided) ?? return ø
+	split_read(variable, kernel_value(n) ?? return ø, x, inside => guard_read(n, condition, then_part, else_part, inside, depth + 1))
+}
+# a free variable's type taken apart, read in each case: by its recursor, or by its course where the type holds itself
+# and the variable lies in the parameter recursed on (and no course is open already)
+split_read(variable: Term, result: Term, x: Entering, read: (Entering) -> Term?) as Term? := {
+	r = x.recursion ?? return ø
+	domain = kernel_type(type_of(x.c, variable)) ?? return ø
+	if not taken_apart(domain) { return ø }
+	if not recursive_enum(domain) { return plain_split(variable, domain, result, x, read) }
+	typed = x.by_key.get(r.key) ?? return ø
+	if r.held != ø or not holds_variable(x.variables#(r.place), variable) { return ø }
+	match course_of(TYPES.environment, constant_name(domain)) {
+		Through(name) => course_applied(typed, r.place, variable, domain, (id, riding, below, inside) => minor_of(id, ø, domain, riding, below, inside, (taken, value) => read(valued(taken, inside.recursion!.of!, value))), x)
+		Without(reason) => ø
+	}
+}
+plain_split(variable: Term, domain: Term, result: Term, x: Entering, read: (Entering) -> Term?) as Term? := {
+	motive = lambda("_", domain, result)
+	minors = block_of(TYPES.environment, domain, "match").block.types#1.cases.map(case => minor_of(named_id(TYPES.environment, case.name)!, ø, domain, motive, value => ø, x, (inside, value) => read(valued(inside, variable, value))))
+	if minors.any(minor => minor == ø) then ø else recursor_applied(domain, motive, minors.map(minor => minor!) + [variable])
+}
+# whether a type is one enum of one type that may be taken apart into any universe, and whether a case holds itself
+taken_apart(domain: Term) as bool := match (declaration(TYPES.environment, constant_name(domain)) ?? return no).kind {
+	Inductive(facts) => facts.any_motive and #facts.plain.types == 1
+	_ => no
+}
+recursive_enum(domain: Term) as bool := block_of(TYPES.environment, domain, "match").block.types#1.cases.any(case => field_types(declared_at(TYPES.environment, named_id(TYPES.environment, case.name)!)!.type).contains(domain))
+holds_variable(t: Term, variable: Term) as bool := not same(abstracted(t, variable_id(variable)), t)
+# The free variable a term's computing waits on: the value its recursor takes apart, or what that value waits on; ø
+# for a term that waits on none
+waiting_on(c: Checker, t: Term) as Term? := {
+	stuck = computed(c, t)
+	match head(stuck).shape {
+		Free(id) => if arguments(stuck) is empty then stuck else ø
+		Constant(name, levels, id) => match (declared_at(c.environment, id) ?? return ø).kind {
+			Recursor(facts) => if #arguments(stuck) <= before_major(facts) then ø else waiting_on(c, arguments(stuck)#(before_major(facts) + 1))
+			_ => ø
+		}
+		_ => ø
+	}
+}
+# the course of the variable's type, its step the choice or match read in each of the type's cases (minor_for makes
+# one case's minor premise); the parameters other than the one recursed on ride as the step's own binders
+course_applied(typed: TypedFunction, place: int, variable: Term, domain: Term, minor_for: (int, Term, (Term) -> Term?, Entering) -> Term?, x: Entering) as Term? := {
+	s = x.s
+	result = kernel_result(typed, x.by_key, s) ?? return ø
+	others = (1 to #typed.arguments).list().filter(at => at != place)
+	# GUESS (item 4): the motive and the step's binders read the others' types with the recursed parameter taken for the step's own
+	locals = parameters_locals(typed, s)
+	recursed_id = variable_id(locals#place.variable)
+	motive_value = entered(x.c, "x", domain)
+	taking = (term: Term) => replaced_by(term, recursed_id, motive_value.variable)
+	motive = lambdas([motive_value], pis(others.map(at => Local(locals#at.binder, taking(locals#at.domain), locals#at.variable)), taking(result)))
+	below_of = (value: Term) => apply_all(constant_of(TYPES.environment, constant_name(domain) + BELOW_SUFFIX, [TYPE_LEVEL]), [motive, value])
+	riding_value = entered(x.c, "y", domain)
+	riding = lambdas([riding_value], pi("below", below_of(riding_value.variable), apply(motive, riding_value.variable)))
+	step_value = entered(x.c, "x", domain)
+	step_below = entered(x.c, "below", below_of(step_value.variable))
+	step_others = others.map(at => entered(x.c, "_", replaced_by(locals#at.domain, recursed_id, step_value.variable)))
+	step_locals = [step_value, step_below] + step_others
+	held = replaced_by(x.variables#place, variable_id(variable), step_value.variable)
+	inside = Entering([x.binders#place, NO_BINDER] + others.map(at => x.binders#at), [held, step_below.variable] + variables(step_others), x.c, x.by_key, s, Recursion(instance_key(typed), place, held, step_value.variable))
+	minors = block_of(TYPES.environment, domain, "course").block.types#1.cases.map(case => minor_for(named_id(TYPES.environment, case.name)!, riding, value => below_of(value), inside))
+	if minors.any(minor => minor == ø) { return ø }
+	step = lambdas(step_locals, apply(recursor_applied(domain, riding, minors.map(minor => minor!) + [step_value.variable]), step_below.variable))
+	course = apply_all(constant_of(TYPES.environment, constant_name(domain) + COURSE, [TYPE_LEVEL]), [motive, step, variable])
+	apply_all(course, others.map(at => x.variables#at))
+}
+# a call of the function being read on the parameter's value at a field of the case taken apart: that field's
+# hypothesis in the values below, given the other arguments; ø for any other call
+recursive_called(called: Node, arguments: list, x: Entering) as Term? := {
+	r = x.recursion ?? return ø
+	if place_key(fact_of(called, DEFINED_AT) ?? return ø) != r.key or #arguments < r.place { return ø }
+	given = term_of(arguments#(r.place), x) ?? return ø
+	at = r.fields.index_where(field => equal(x.c, given, field))
+	if at <= 0 { return ø }
+	pair = TYPES.environment.products!.pair
+	rest = (2 to at).list().fold(x.variables#(x.binders.index_of(BELOW_BINDER)), (path, step) => projection(pair, 2, path))
+	terms_applied(projection(pair, 1, projection(pair, 1, rest)), arguments.take(r.place - 1) + arguments.drop(r.place), x)
+}

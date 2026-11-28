@@ -48,9 +48,9 @@ PROOF_REFUSED := "proof"
 class TypedLaw { name: text; key: text; id: int?; assumed: text?; given: list<Premise> = []; proof: Node? = ø; binders: list<text> = [] }
 # a law's hypothesis: its binder's name and the id of its function
 class Premise { binder: text; id: int }
-# the laws of a program, in the order they are stated; a law analyze refuses, or one a hypothesis of which it refuses,
-# says why on standard error
-laws_typed(wap_folder: text, program: text): list<TypedLaw> := {
+# a program through the compile's front, its laws split off: what both doors read (verify.wap, check.wap)
+class ProgramTyped { split: Split; typed: Node; refusals: map<text, text> }
+program_typed(wap_folder: text, program: text): ProgramTyped := {
 	front = base_language()
 	modules_bringable(front)
 	rules_files_loaded(front, wap_folder)
@@ -61,6 +61,15 @@ laws_typed(wap_folder: text, program: text): list<TypedLaw> := {
 	typed = typed_modules(front, [module_declared(declared_program(split.code))], types, program)
 	refusals = TYPES.refused!
 	TYPES.refused = ø
+	ProgramTyped(split, typed, refusals)
+}
+# the laws of a program, in the order they are stated; a law analyze refuses, or one a hypothesis of which it refuses,
+# says why on standard error
+laws_typed(wap_folder: text, program: text): list<TypedLaw> := {
+	front = program_typed(wap_folder, program)
+	split = front.split
+	typed = front.typed
+	refusals = front.refusals
 	keys: map<text, text> = {}
 	for statement in statements_in(typed) { if statement is Define { keys[text(defined_name(statement))] = function_key(statement) } }
 	laws: list<TypedLaw> = []
@@ -168,10 +177,11 @@ typed_verdict(law: TypedLaw): TypedVerdict := {
 	if is_constant(value, e.literals!.yes_case) then Holds else if is_constant(value, e.literals!.no_case) then Breaks else Open
 }
 # whether the provers prove a law's statement yes for every value of its binders, the proof declared as its theorem, of the law's own name, so a later proof uses it
-law_proved(e: Environment, law: TypedLaw, d: Declaration): bool := {
-	statement = law_statement(e, d.type, unfolding(d)!, law.given)
+law_proved(e: Environment, law: TypedLaw, d: Declaration): bool := statement_proved(e, law.name, law_statement(e, d.type, unfolding(d)!, law.given))
+# whether the provers prove a statement, the proof declared as the theorem of this name
+statement_proved(e: Environment, name: text, statement: Term): bool := {
 	proof = proof_found(elaboration(e, []), statement, []) ?? return no
-	declared(e, Declaration(law.name, [], statement, Theorem(proof)))
+	declared(e, Declaration(name, [], statement, Theorem(proof)))
 	yes
 }
 # the axioms a law declared by its name rests on, none for one declared by no name of its own
@@ -199,10 +209,12 @@ proof_term(e: Environment, statement: Term, proof: Node): Term? := match unwrapp
 	Symbol(name) => if name == REFL_WORD then reflexive_under(e, statement) else ø
 	_ => {
 		named = by_named(proof) ?? return ø
-		laws = named.map(law => declaration(e, text(law)) ?? refused(PROOF_REFUSED, "by ${law}: ${law} names no law proved before"))
+		laws = named.map(law => declaration(e, text(law)) ?? refused(PROOF_REFUSED, unproved_named(e, law)))
 		proof_found(elaboration(e, []), statement, laws) ?? refused(PROOF_REFUSED, "by ${named.join(", ")}: the provers find no proof of ${shown(statement)} from ${named.join(", ")}")
 	}
 }
+# why a law a `by` names is no lemma: a law stated but not proved proves nothing, any other name is no law
+unproved_named(e: Environment, law: Node): text := if named_id(e, LAW_FUNCTION + text(law)) is ø then "by ${law}: ${law} names no law proved before" else "refused by unproved law: ${law} is Tested, so it proves nothing"
 # the laws a `by` names, as the reader wrote them: `by a`, `by a, b`, `by(a, b)`; ø for another proof
 by_named(proof: Node) as list<Node>? := match unwrapped(proof) {
 	Key(called, applied, arguments) => if text(called) == BY_WORD then items_of(arguments) else ø
