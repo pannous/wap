@@ -43,8 +43,8 @@ step 4).
    another function, say) is not read: the function stays Div.
 4. **What the provers see.** A call's obligation is proved under the conditions around it: inside a measured
    recursion an `if` on a bool is read by `·bool_cases` with its premise bound (as `cases_term` reads a proof's
-   choice), its motive the constant result type; `a and b` reads b under `a == yes`, `a or b` under `a == no`.
-   terms.wap +14.
+   choice), its motive the constant result type. `a and b` and `a or b` are ifs by sugar (sugar/conditions.wap), so
+   b is read under `a == yes` or `a == no` with no line of their own. terms.wap +14.
 5. **Two count laws**, proved theorems of the kernel library, never assumptions: `·at_most_same(n): at_most(n, n) ==
    yes` by the count's recursor on n (zero computes to yes, a successor to the law at n), and `·at_most_trans(a, b,
    c): at_most(a, b) == yes -> at_most(b, c) == yes -> at_most(a, c) == yes` by paired induction (paired_law) on a
