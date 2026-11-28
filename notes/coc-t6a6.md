@@ -32,7 +32,7 @@ What already landed:
    implies(a: Prop, b: Prop): Prop := a -> b
    enum Decidable(p: Prop): Type { yes(h: p); no(h: not p) }
    law and_swap(a: Prop, b: Prop, h: And(a, b)): And(b, a) := And.intro(h.right, h.left)
-   @axiom proposition_extensionality(a: Prop, b: Prop, ab: a -> b, ba: b -> a): a == b
+   axiom proposition_extensionality(a: Prop, b: Prop, ab: a -> b, ba: b -> a): a == b
    Prop(b: bool): Prop := b == yes
    ```
    - `Prop(b)` is bool's conversion to a proposition: a function named as the type is its conversion (calls.wap:498,
@@ -44,7 +44,7 @@ What already landed:
      named Prop, the fix is to look the conversion up by `type_word(held)`, at most core +2.
    - `use classical` is a library file, wap/types/classical.wap:
      ```wap
-     @axiom excluded_middle(a: Prop): a or not a
+     axiom excluded_middle(a: Prop): a or not a
      ```
      It is one line, and the verdict's "rests on excluded_middle" comes from V1's axiom report.
 
