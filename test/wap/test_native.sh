@@ -402,6 +402,7 @@ unformatted.wap:2: layout: f(a) = a * 2
 1"
 # a word before the program picks the build mode (wiki/cli.md "Build modes")
 check "wap release runs the program" "$(cd "$stage" && "$native_wap" release hello.wap 2>&1)" "Hello"
+check "wap fast wraps an int at 64 bits" "$(cd "$stage" && "$native_wap" fast 'xs = [9223372036854775807]; print(xs#1 + 1)' 2>&1)" "-9223372036854775808"
 # wap format reads a program in its own grammar, the operators of the modules it uses known (wiki/operator.md), and a
 # used module's refusal leaves it reading the same (card refusal-partway)
 for refused in no yes; do
