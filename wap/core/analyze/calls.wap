@@ -162,21 +162,23 @@ call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s
 	meant = chosen_definition(n, called, scopes, given, expected, s)
 	# the obligations of a dispatcher's choices at this call, by their places in the obligations (types.wap decided_code)
 	dispatched = s.dispatched
-	taken = proofs_held(n, meant, arguments_fitted(meant, given, s) + defaults_given(meant, #given, s, f ?? TypeFrame()), s)
+	holding = arguments_held(meant, given, s, f)
+	taken = proofs_held(n, meant, arguments_fitted(meant, holding.arguments, s) + defaults_given(meant, #given, s, f ?? TypeFrame()), s)
 	s.levels_written.remove(text(called))
 	s.letters_given.remove(text(called))
 	chosen = function_typed(meant, taken.map(argument => value_type(argument)), s, n)
 	if f != ø { called_reads(chosen, n, s, f!) }
 	typed = result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
 	# a result type reading the parameters or letters is the call's, filled by its arguments (earlier_filled)
-	if subset_condition(value_type(typed)) != ø { typed = with_type_of(typed, earlier_filled(value_type(typed)!, meant.parameters, parameters_in(meant, s), taken, #taken + 1, n, s)!) }
+	if subset_condition(value_type(typed)) != ø { typed = with_type_of(typed, earlier_filled(value_type(typed)!, meant, meant.parameters, taken, #taken + 1, n, s)!) }
 	# the letters only the result writes, never one the caller's frame binds (letters.wap letters_settled)
 	result = value_type(typed)
 	letters = letters_in(result).unique().filter(letter => f == ø or not f!.letters.any(bound => bound.key == letter))
 	if not letters is empty { typed = with_type_of(typed, letters_settled(result!, letters, meant, n, expected, s)) }
 	# the call's proof holes, those kept since it began, are the typed call's, whose arguments the kernel reads
 	if #s.obligations > kept { for obligation in s.obligations.drop(kept) { if obligation.call === n { obligation.call = typed } } }
-	if dispatched is empty then typed else obligations_noted(typed, dispatched)
+	held = if dispatched is empty then typed else obligations_noted(typed, dispatched)
+	if holding.sets is empty then held else with_type_of(refitted(Block(holding.sets + [held]), n), value_type(held))
 }
 # A call's arguments with each proof it leaves to the provers, a `by` at a statement's place, held for the run (wiki/
 # type.md "Proved or checked"): a truth its arguments compute, by the function of the parameters before it the
@@ -335,33 +337,32 @@ char_text(character: Node) as Node := with_type(refitted(Text(text(character)), 
 # a plain value boxed for an any or an optional
 arguments_fitted(definition: Signature, given: list, s: TypingState) as list := {
 	letters = (letters_bound(definition, given.map(value_type), s, denoted_types(given)) ?? NOTHING_CALLED).letters
-	parameters = parameters_in(definition, s)
 	types = definition.parameters.map(type => substituted(type, letters))
-	wanted = (1 to #given).map(at => earlier_filled(types#at, types, parameters, given, at, given#at, s))
+	wanted = (1 to #given).map(at => earlier_filled(types#at, definition, types, given, at, given#at, s))
 	(1 to #given).map(at => if counted(value_type(given#at), wanted#at) then with_type_of(placed_like(Prim(symbol(COUNTING), [given#at]), given#at), wanted#at) else as_wanted(given#at, wanted#at, s))
 }
 # A parameter's type that reads the parameters before it, `xs: list<int> where #it == n` or `i: index(xs)`, as this call
-# wants it, and its result type, which reads them all, `vector(T, m + n)` of append: their arguments written in (wiki/type.md "Dependent Types"), so its condition reads the call's own values,
-# never a name where the call sits. A letter, a one-letter name nothing defines, `n` of `dot(a: vector(number, n), b:
-# vector(number, n))`, is written in as the call fills it (letter_filling). A name it reads of a parameter after it, or
-# of one of the function around the call that the callee does not bind, has no reading and is refused
-earlier_filled(type: Term?, types: list<Term?>, parameters: list<Node>, given: list, at: int, place: Node, s: TypingState) as Term? := {
+# wants it, and its result type, which reads them all, `vector(T, m + n)` of append: their arguments written in where
+# the condition's names are bound to those parameters, by declaration (wiki/type.md "Dependent Types"), so it reads the
+# call's own values. A letter, a one-letter name nothing defines, `n` of `dot(a: vector(number, n), b: vector(number,
+# n))`, is written in as the call fills it (letter_filling). One reading a parameter after it is refused
+earlier_filled(type: Term?, definition: Signature, types: list<Term?>, given: list, at: int, place: Node, s: TypingState) as Term? := {
 	condition = subset_condition(type) ?? return type
-	names = condition_names(condition_of(condition))
-	places = (1 to #parameters).filter(place => names.contains(text(parameter_name(parameters#place))))
-	later = places.find(place => place >= at)
-	if later != ø { refused(place, "this parameter's type reads ${parameter_name(parameters#later!)}, which comes after it: put ${parameter_name(parameters#later!)} first") }
-	bound = places.map(place => text(parameter_name(parameters#place)))
-	letters = condition_letters(names.filter(name => not bound.contains(name)), s)
-	around = parameters_read(names.filter(name => not bound.contains(name) and not letters.contains(name)), s.functions.find(function => instance_key(function) == s.within))
-	if around is not empty { refused(place, "this parameter's type reads ${around.join(", ")}, which the function it is called from has as parameters too: rename one") }
+	names = parameter_names_of(definition, s)
+	places = parameters_read(condition_of(condition), names)
+	later = places.find(read => read >= at)
+	if later != ø { refused(place, "this parameter's type reads ${names#later!}, which comes after it: put ${names#later!} first") }
+	letters = condition_letters(condition_symbols(condition_of(condition)), s)
 	if places is empty and letters is empty { return type }
-	written = places.fold(condition, (code, place) => parameter_written(code, text(parameter_name(parameters#place)), argument_written(given#place)))
-	filled = letters.fold(written, (code, letter) => parameter_written(code, letter, letter_filling(letter, types, given) ?? refused(place, "no argument says what ${letter} is: give a parameter the condition `#it == ${letter}`")))
+	written = places.fold(condition, (code, read) => written_where(code, part => reads_declared(part, names#read), argument_written(given#read)))
+	filled = letters.fold(written, (code, letter) => written_where(code, part => is_letter_read(part, letter), letter_filling(letter, types, given) ?? refused(place, "no argument says what ${letter} is: give a parameter the condition `#it == ${letter}`")))
 	subset_term(narrowed_type(type)!, filled)
 }
-# the letters among a condition's names: one-letter names nothing defines (wiki/type.md "Dependent Types")
-condition_letters(names: list<text>, s: TypingState) as list<text> := names.filter(name => is_letter_name(name) and named_in(s.kind_rules!.scope, name) is empty)
+# the names of a definition's parameters as written, none for one typing holds no definition of (a record's)
+parameter_names_of(definition: Signature, s: TypingState) as list<Node> := match s.defines.get(definition.key) { Define(name, parameters, body) => items_of(parameters).map(parameter => parameter_name(parameter)); _ => [] }
+# the letters a condition reads: one-letter names bound to nothing, which nothing defines (wiki/type.md "Dependent Types")
+condition_letters(symbols: list<Node>, s: TypingState) as list<text> := symbols.filter(symbol => is_letter_read(symbol, text(symbol)) and is_letter_name(text(symbol)) and named_in(s.kind_rules!.scope, text(symbol)) is empty).map(symbol => text(symbol)).unique
+is_letter_read(n: Node, letter: text) as bool := n is symbol and text(n) == letter and fact_of(n, BINDING) == ø
 # A letter's value at a call: the first parameter whose condition is an equation with the letter alone on one side,
 # `#it == n`, its other side read of that parameter's argument, `#[1, 2, 3]`; ø where none is
 letter_filling(letter: text, types: list<Term?>, given: list) as Node? := {
@@ -376,26 +377,66 @@ letter_filling(letter: text, types: list<Term?>, given: list) as Node? := {
 equated_side(type: Term?, letter: text) as Node? := match condition_of(subset_condition(type) ?? return ø) {
 	Call(called, arguments) => {
 		if text(called) != EQUALITY_WORD or #arguments != 2 { return ø }
-		if text(made_value(arguments#2)) == letter then arguments#1 else if text(made_value(arguments#1)) == letter then arguments#2 else ø
+		if is_letter_read(made_value(arguments#2), letter) then arguments#1 else if is_letter_read(made_value(arguments#1), letter) then arguments#2 else ø
 	}
 	_ => ø
 }
 # a definition whose parameters' conditions read a letter no parameter's equation defines is refused, naming it
 letters_defined(definition: Signature, s: TypingState) := for type in definition.parameters {
-	for letter in condition_letters(condition_names(condition_of(subset_condition(type) ?? continue)), s) {
+	for letter in condition_letters(condition_symbols(condition_of(subset_condition(type) ?? continue)), s) {
 		if not definition.parameters.any(other => equated_side(other, letter) != ø) { refused(define_of(definition, s), "${letter} is a letter no parameter says the value of: give one the condition `#it == ${letter}`") }
 	}
 }
-# an argument a later parameter's type reads, written into it: a parameter of the function around or a value written
-# in place, a list of such values too, which the kernel reads as they are; any other would be computed again by the
-# check, and is refused
-argument_written(argument: Node) as Node := if written_in_place(argument) then argument else refused(argument, "a parameter after this one reads it in its type: give a value written in place or a parameter here")
-written_in_place(n: Node) as bool := is_bound(n, DefinitionKind.Parameter) or not n is symbol and (n is List or direct_parts(n) is empty) and direct_parts(n).all(written_in_place)
+# An argument a later parameter's type reads is held once (arguments_held) where it is more than a variable's read or a
+# value written in place, and written into the type as that read. A call made without a frame holds none: an argument
+# there that would be computed again is refused
+argument_written(argument: Node) as Node := if written_in_place(argument) then argument else refused(argument, "a parameter after this one reads it in its type: name it first")
+written_in_place(n: Node) as bool := if n is symbol then fact_of(n, BINDING) != ø else (n is List or direct_parts(n) is empty) and direct_parts(n).all(written_in_place)
+# the places of a call's arguments that its parameters' or result's types read: by a parameter's declaration, or by a
+# letter's equation
+places_read(definition: Signature, s: TypingState) as list<int> := {
+	names = parameter_names_of(definition, s)
+	read: list<int> = []
+	for type in definition.parameters + [definition.result] {
+		code = condition_of(subset_condition(type) ?? continue)
+		read += parameters_read(code, names)
+		for letter in condition_letters(condition_symbols(code), s) { read += (1 to #definition.parameters).filter(at => equated_side(definition.parameters#at, letter) != ø) }
+	}
+	read.unique
+}
+# Each argument at those places that is more than a variable's read or a value written in place, held in a fresh local
+# of the frame, so it is computed once (wiki/type.md "Proved or checked": a condition reads the call's values): the
+# Sets that hold them, run before the call, and the arguments, each held one read from its local
+HELD_WORD = "held"
+class Holding { sets: list<Node> = []; arguments: list = [] }
+arguments_held(definition: Signature, given: list, s: TypingState, f: TypeFrame?) as Holding := {
+	read = if f == ø then [] else places_read(definition, s).filter(at => at <= #given and not written_in_place(given#at))
+	if read is empty { return Holding([], given) }
+	holding = Holding([], [])
+	for at in 1 to #given {
+		if not read.contains(at) { holding.arguments += [given#at]; continue }
+		value = given#at
+		type = value_type(value) ?? refused(value, "an argument a later parameter's type reads has no type yet")
+		local = with_binding(name_once(HELD_WORD, value, s), DefinitionKind.Local)
+		local = with_fact(local, DEFINED_AT, local)
+		variables_added(local, Binding(place_key(local), type), s, f!)
+		holding.sets += [with_type_of(placed_like(Set(local, value), value), EMPTY_TERM)]
+		holding.arguments += [with_type_of(placed_like(local, value), type)]
+	}
+	holding
+}
 # A written type where a value stands, typed as the type value it is: a type word, a type name applied, `vector(int, 2
-# + 1)`, which is its definition with the arguments written in, or a type written out, `list<int> where #it == 3`
-# (wiki/type.md: a type is itself a value); ø for any other code
+# + 1)`, which is its definition with the arguments written in, or a subtype of a type written out, `list<int> where
+# #it == 3` (wiki/type.md: a type is itself a value); ø for any other code, `a | b` of ints or `xs where p` of a list
+# TODO (card proof-words) is_code_call, wap-theory-reads-types' predicate, decides whether a call is a type once it lands
 type_value_written(n: Node, s: TypingState) as Node? := match n {
-	Call(called, arguments) => type_value(type_term(applied_type(n, called, arguments, s.kind_rules!.scope) ?? (if subset_written(n) != ø then type_bound(n, s.kind_rules!.scope) else return ø)), n)
+	Call(called, arguments) => {
+		applied = applied_type(n, called, arguments, s.kind_rules!.scope)
+		if applied != ø { return type_value(type_term(applied!), n) }
+		subset = subset_written(n) ?? return ø
+		if type_value_written(subset#1, s) == ø and written_parts(subset#1) == ø { return ø }
+		type_value(type_term(type_bound(n, s.kind_rules!.scope)), n)
+	}
 	_ => if n is symbol and names_type_value(n, ø, s) then type_value(type_term(n), n) else ø
 }
 # An `==` of two type values, decided when compiling (terms.wap comparison_decided) and placed as its yes or no
