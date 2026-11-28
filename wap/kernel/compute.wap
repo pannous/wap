@@ -26,6 +26,15 @@ computed(c: Checker, t: Term): Term := {
 	if kept { remember(c.heads, t, result) }
 	result
 }
+# a closed truth computed, yes or no as the literals hold them; ø for one with a free variable, never unfolded, so a
+# condition over a parameter cannot stall compiling, and ø where its check gave up past the budget: undecided, its
+# run's check stays; any other refusal is raised
+decided(e: Environment, t: Term): bool? := if t.holds_free then ø else try { truth_value(e, computed(checker(e, []), t)) } catch gave {
+	refusal_only(gave, [GAVE_UP])
+	ø
+}
+# a computed truth as the literals hold it, ø for any other term
+truth_value(e: Environment, value: Term): bool? := if same(value, e.literals!.yes_case) then yes else if same(value, e.literals!.no_case) then no else ø
 
 # t computed by beta and zeta alone, so the caller chooses what unfolds, and by the steps of an elimination (a
 # recursor, a quotient's way out, a projection) whose value is computed whole to find the case it was made by. The
@@ -43,7 +52,11 @@ computed_folded(c: Checker, t: Term): Term := {
 			}
 			Constant(name, levels, _) => { result = eliminated(c, leading, given) ?? break }
 			Projection(structure, field, of) => { result = apply_all(field_of(c, structure, field, of) ?? break, given) }
-			Quoted(value) => { result = apply_all(text_opened(c, value), given) }
+			# a text literal is a value, as a numeral is, opened where a rule asks for its case (numbers.wap as_case)
+			Quoted(value) => {
+				if given is empty { break }
+				result = apply_all(text_opened(c, value), given)
+			}
 			_ => break
 		}
 		stepped(c)
@@ -61,18 +74,30 @@ eliminated(c: Checker, constant: Term, given: list<Term>): Term? := {
 	}
 }
 # a row applied to two literals, computed by the row's fold (primitives.wap): a whole number, or a truth of the
-# literals' binding; ø while an argument computes to no literal, refused where an arithmetic row passes i64 (6.7)
+# literals' binding; ø while an argument computes to no literal, and where an arithmetic row passes i64: a verdict holds for the run's
+# value, so until literals are exact the run keeps its check (6.7)
 row_step(c: Checker, operation: text, given: list<Term>): Term? := {
+	if TEXT_ROWS.contains(operation) { return text_row_step(c, operation, given) }
 	if #given != 2 { return ø }
 	a = literal(computed(c, given#1)) ?? return ø
 	b = literal(computed(c, given#2)) ?? return ø
 	truths = c.environment.literals ?? return ø
 	value = folded(operation, a, b)
-	if value == ø and FOLDED_ARITHMETIC.contains(operation) { refused(ROW_OVERFLOW, "${operation} of ${a} and ${b} passes the largest whole number") }
 	match value ?? return ø {
 		Whole(whole) => numeral(whole)
 		Truth(holds) => if holds then truths.yes_case else truths.no_case
 	}
+}
+# a text row applied to texts that compute to literals: their count of code points, their equality, their joining
+text_row_step(c: Checker, operation: text, given: list<Term>): Term? := {
+	texts = given.map(part => match computed(c, part).shape { Quoted(value) => value; _ => ø })
+	if texts.any(part => part == ø) { return ø }
+	first = texts#1!
+	if operation == TEXT_COUNT_ROW { return int_numeral(c.environment, #first) }
+	second = texts#2!
+	if operation == TEXT_JOIN_ROW { return quoted(first + second) }
+	truths = c.environment.literals ?? return ø
+	if first == second then truths.yes_case else truths.no_case
 }
 # A recursor applied to a case (iota, notes/coc-plan.md 7): the case's computation rule at the recursor's levels,
 # applied to the recursor's parameters, motives and minor premises, to the case's fields and to the arguments left

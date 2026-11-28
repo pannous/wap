@@ -74,6 +74,13 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	# a proof's `by f, g` is of the statement wanted, which its laws make hold (wiki/proof.md)
 	if question_word(called, BY_WORD) { return proof_typed(n, BY_WORD, expected) }
 	if claims_effects(called, arguments) { return claim_typed(n, arguments, s, f, expected) }
+	# a type name applied where a value stands is the type it names, `vector(int, 3)`, and two types compare when compiling
+	applied = type_value_written(n, s)
+	if applied != ø { return applied! }
+	if text(called) == EQUALITY_WORD and #arguments == 2 {
+		compared = arguments.map(argument => type_value_written(argument, s))
+		if compared.all(value => value != ø) { return types_compared(n, compared.map(value => value!), s) }
+	}
 	if rest_named(n) != ø { refused(n, "a list's items spread, `...xs`, stand only in a list, `[...xs, 4]`") }
 	levelled = level_written_call(called)
 	if levelled != ø { return call_typed(n, levelled!, arguments, s, f, expected) }
@@ -154,21 +161,29 @@ call_chosen(n: Node, called: Node, scopes: list, given: list, expected: Term?, s
 	s.letters_given[text(called)] = letters
 	# where no definition takes the arguments, one whose class has a get is read through it, `x > 5` of a signal
 	if given.any(argument => got_from(argument, s)) and not (try { chosen_definition(n, called, scopes, given, expected, s); yes } catch e { no }) { given = given.map(argument => got(argument, s)) }
-	meant = chosen_definition(n, called, scopes, given, expected, s)
 	kept = #s.obligations
-	taken = proofs_held(n, meant, arguments_fitted(meant, given, s) + defaults_given(meant, #given, s, f ?? TypeFrame()), s)
+	s.dispatched = []
+	meant = chosen_definition(n, called, scopes, given, expected, s)
+	# the obligations of a dispatcher's choices at this call, by their places in the obligations (types.wap decided_code)
+	dispatched = s.dispatched
+	holding = arguments_held(meant, given, s, f)
+	taken = proofs_held(n, meant, arguments_fitted(meant, holding.arguments, s) + defaults_given(meant, #given, s, f ?? TypeFrame()), s)
 	s.levels_written.remove(text(called))
 	s.letters_given.remove(text(called))
 	chosen = function_typed(meant, taken.map(argument => value_type(argument)), s, n)
 	if f != ø { called_reads(chosen, n, s, f!) }
 	typed = result_of(refitted(Call(calling(called, chosen, s), taken), n), chosen)
+	# a result type reading the parameters or letters is the call's, filled by its arguments as given, before their
+	# conversions and in place of the locals holding them, so the kernel reads it as the call written (earlier_filled)
+	if subset_condition(value_type(typed)) != ø { typed = with_type_of(typed, earlier_filled(value_type(typed)!, meant, meant.parameters, given + taken.drop(#given), #taken + 1, n, s)!) }
 	# the letters only the result writes, never one the caller's frame binds (letters.wap letters_settled)
 	result = value_type(typed)
 	letters = letters_in(result).unique().filter(letter => f == ø or not f!.letters.any(bound => bound.key == letter))
 	if not letters is empty { typed = with_type_of(typed, letters_settled(result!, letters, meant, n, expected, s)) }
 	# the call's proof holes, those kept since it began, are the typed call's, whose arguments the kernel reads
-	for obligation in s.obligations.drop(kept) { if obligation.call === n { obligation.call = typed } }
-	typed
+	if #s.obligations > kept { for obligation in s.obligations.drop(kept) { if obligation.call === n { obligation.call = typed } } }
+	held = if dispatched is empty then typed else obligations_noted(typed, dispatched)
+	if holding.sets is empty then held else with_fact(with_type_of(refitted(Block(holding.sets + [held]), n), value_type(held)), HELD_ARGUMENTS, Text(HELD_WORD))
 }
 # A call's arguments with each proof it leaves to the provers, a `by` at a statement's place, held for the run (wiki/
 # type.md "Proved or checked"): a truth its arguments compute, by the function of the parameters before it the
@@ -181,9 +196,10 @@ proofs_held(n: Node, definition: Signature, taken: list, s: TypingState) as list
 proof_held(n: Node, definition: Signature, parameters: list, taken: list, at: int, s: TypingState) as Node := {
 	statement = declared_type(parameters#at)!
 	shown = written_span(statement) ?? text(statement)
-	decided = is_decided(statement, s)
-	check = if decided then with_fact(word_called(n, text(statement_checker(definition, parameters, at, s)), taken.take(at - 1) + [message_given(condition_refused(shown, n), n)], BOOL_TERM, s), PROOF_HOLE, taken#at) else ø
-	obligation_kept(Obligation(warning_of(n, "${shown} ${if decided then OBLIGATION_LEFT else PROOF_LEFT}"), ø, ø, s.within, call: n, place: at, check: check), s)
+	checkable = is_decided(statement, s)
+	check = if checkable then with_fact(word_called(n, text(statement_checker(definition, parameters, at, s)), taken.take(at - 1) + [message_given(condition_refused(shown, n), n)], BOOL_TERM, s), PROOF_HOLE, taken#at) else ø
+	line = warning_of(n, "${shown} ${if checkable then OBLIGATION_LEFT else PROOF_LEFT}")
+	obligation_kept(Obligation(line, ø, ø, s.within, call: n, place: at, check: check), "${line} ${at}", s)
 	check ?? with_fact(with_type(placed_like(True, n), BOOL_TYPE), PROOF_HOLE, taken#at)
 }
 # whether a statement is a truth its values compute, which the run can check: a bool function's call, and parts
@@ -204,7 +220,7 @@ is_decided(statement: Node, s: TypingState) as bool := match statement {
 statement_checker(definition: Signature, parameters: list, at: int, s: TypingState) as Node := {
 	name = name_once("${definition.name} ${declared_name(parameters#at)} held", parameters#at, s)
 	before = parameters.take(at - 1)
-	written_once(name, before.map(parameter => type_given(parameter)) + [TEXT_TERM], reads => {
+	written_once(name, before.map(parameter => type_given(parameter)) + TEXT_TERM, reads => {
 		statement = (1 to #before).fold(declared_type(parameters#at)!, (inner, place) => substituted(inner, text(declared_name(before#place)), reads#place))
 		If(statement, True, raising(reads.last, name, s))
 	}, BOOL_TERM, s)
@@ -336,8 +352,124 @@ char_text(character: Node) as Node := with_type(refitted(Text(text(character)), 
 # a plain value boxed for an any or an optional
 arguments_fitted(definition: Signature, given: list, s: TypingState) as list := {
 	letters = (letters_bound(definition, given.map(value_type), s, denoted_types(given)) ?? NOTHING_CALLED).letters
-	wanted = definition.parameters.map(type => substituted(type, letters))
+	types = definition.parameters.map(type => substituted(type, letters))
+	wanted = (1 to #given).map(at => earlier_filled(types#at, definition, types, given, at, given#at, s))
 	(1 to #given).map(at => if counted(value_type(given#at), wanted#at) then with_type_of(placed_like(Prim(symbol(COUNTING), [given#at]), given#at), wanted#at) else as_wanted(given#at, wanted#at, s))
+}
+# A parameter's type that reads the parameters before it, `xs: list<int> where #it == n` or `i: index(xs)`, as this call
+# wants it, and its result type, which reads them all, `vector(T, m + n)` of append: their arguments written in where
+# the condition's names are bound to those parameters, by declaration (wiki/type.md "Dependent Types"), so it reads the
+# call's own values. A letter, a one-letter name nothing defines, `n` of `dot(a: vector(number, n), b: vector(number,
+# n))`, is written in as the call fills it (letter_filling). One reading a parameter after it is refused
+earlier_filled(type: Term?, definition: Signature, types: list<Term?>, given: list, at: int, place: Node, s: TypingState) as Term? := {
+	condition = subset_condition(type) ?? return type
+	names = parameter_names_of(definition, s)
+	places = parameters_read(condition_of(condition), names)
+	later = places.find(read => read >= at)
+	if later != ø { refused(place, "this parameter's type reads ${names#later!}, which comes after it: put ${names#later!} first") }
+	letters = condition_letters(condition_symbols(condition_of(condition)), s)
+	if places is empty and letters is empty { return type }
+	written = places.fold(condition, (code, read) => written_where(code, part => reads_declared(part, names#read), argument_written(given#read)))
+	filled = letters.fold(written, (code, letter) => written_where(code, part => is_letter_read(part, letter), letter_filling(letter, types, given) ?? refused(place, "no argument says what ${letter} is: give a parameter the condition `#it == ${letter}`")))
+	subset_term(narrowed_type(type)!, filled)
+}
+# the names of a definition's parameters as written, none for one typing holds no definition of (a record's)
+parameter_names_of(definition: Signature, s: TypingState) as list<Node> := match s.defines.get(definition.key) { Define(name, parameters, body) => items_of(parameters).map(parameter => parameter_name(parameter)); _ => [] }
+# the letters a condition reads: one-letter names bound to nothing, which nothing defines (wiki/type.md "Dependent Types")
+condition_letters(symbols: list<Node>, s: TypingState) as list<text> := symbols.filter(symbol => is_letter_read(symbol, text(symbol)) and is_letter_name(text(symbol)) and named_in(s.kind_rules!.scope, text(symbol)) is empty).map(symbol => text(symbol)).unique
+is_letter_read(n: Node, letter: text) as bool := n is symbol and text(n) == letter and fact_of(n, BINDING) == ø
+# A letter's value at a call: the first parameter whose condition is an equation with the letter alone on one side,
+# `#it == n`, its other side read of that parameter's argument, `#[1, 2, 3]`; ø where none is
+letter_filling(letter: text, types: list<Term?>, given: list) as Node? := {
+	for place in 1 to #given {
+		side = equated_side(types#place, letter) ?? continue
+		return parameter_written(side, IT_WORD, argument_written(given#place))
+	}
+	ø
+}
+# the side of a subtype's condition `e == n` or `n == e` that the letter alone is equal to, the letter as written or made
+# into its parameter's type by an applied type name, `#it == (n as nat)`; ø for any other type
+equated_side(type: Term?, letter: text) as Node? := match condition_of(subset_condition(type) ?? return ø) {
+	Call(called, arguments) => {
+		if text(called) != EQUALITY_WORD or #arguments != 2 { return ø }
+		if is_letter_read(made_value(arguments#2), letter) then arguments#1 else if is_letter_read(made_value(arguments#1), letter) then arguments#2 else ø
+	}
+	_ => ø
+}
+# a definition whose parameters' conditions read a letter no parameter's equation defines is refused, naming it
+letters_defined(definition: Signature, s: TypingState) := for type in definition.parameters {
+	for letter in condition_letters(condition_symbols(condition_of(subset_condition(type) ?? continue)), s) {
+		if not definition.parameters.any(other => equated_side(other, letter) != ø) { refused(define_of(definition, s), "${letter} is a letter no parameter says the value of: give one the condition `#it == ${letter}`") }
+	}
+}
+# An argument a later parameter's type reads is held once (arguments_held) where it is more than a variable's read or a
+# value written in place, and written into the type as that read. A call made without a frame holds none: an argument
+# there that would be computed again is refused
+argument_written(argument: Node) as Node := if written_in_place(argument) then argument else refused(argument, "a parameter after this one reads it in its type: name it first")
+written_in_place(n: Node) as bool := n is symbol and fact_of(n, BINDING) != ø or literal_in_place(n)
+# a value written in place: a literal, or a list of them
+literal_in_place(n: Node) as bool := not n is symbol and (n is List or direct_parts(n) is empty) and direct_parts(n).all(literal_in_place)
+# the places of a call's arguments that its parameters' or result's types read: by a parameter's declaration, or by a
+# letter's equation
+places_read(definition: Signature, s: TypingState) as list<int> := {
+	names = parameter_names_of(definition, s)
+	read: list<int> = []
+	for type in definition.parameters + [definition.result] {
+		code = condition_of(subset_condition(type) ?? continue)
+		read += parameters_read(code, names)
+		for letter in condition_letters(condition_symbols(code), s) { read += (1 to #definition.parameters).filter(at => equated_side(definition.parameters#at, letter) != ø) }
+	}
+	read.unique
+}
+# Each argument at those places that is more than a variable's read or a value written in place, held in a fresh local
+# of the frame, so it is computed once (wiki/type.md "Proved or checked": a condition reads the call's values): the
+# Sets that hold them, run before the call, and the arguments, each held one read from its local
+HELD_WORD = "held"
+# on a call's Block holding its arguments: the kernel reads the call with each held local's value written in
+HELD_ARGUMENTS = "held_arguments"
+# the call a Block holding its arguments makes, each held local's read written over by the local's value, assigned once
+held_call(n: Node) as Node := match n {
+	Block(statements) => statements.take(#statements - 1).fold(statements.last, (call, statement) => match statement { Set(local, value) => written_where(call, part => reads_declared(part, local), value); _ => call })
+	_ => n
+}
+class Holding { sets: list<Node> = []; arguments: list<Node> = [] }
+arguments_held(definition: Signature, given: list, s: TypingState, f: TypeFrame?) as Holding := {
+	# every argument up to the last one read is held, a variable's read too, so the arguments run in the order written
+	last = if f == ø then 0 else places_read(definition, s).filter(at => at <= #given and not written_in_place(given#at)).fold(0, (most, at) => if at > most then at else most)
+	read = (1 to last).filter(at => not literal_in_place(given#at))
+	if read is empty { return Holding([], given) }
+	holding = Holding([], [])
+	for at in 1 to #given {
+		if not read.contains(at) { holding.arguments += [given#at]; continue }
+		value = given#at
+		type = value_type(value) ?? refused(value, "an argument a later parameter's type reads has no type yet")
+		local = with_binding(name_once(HELD_WORD, value, s), DefinitionKind.Local)
+		local = with_fact(local, DEFINED_AT, local)
+		variables_added(local, Binding(place_key(local), type), s, f!)
+		holding.sets += [with_type_of(placed_like(Set(local, value), value), EMPTY_TERM)]
+		holding.arguments += [with_type_of(placed_like(local, value), type)]
+	}
+	holding
+}
+# A written type where a value stands, typed as the type value it is: a type word, a type name applied, `vector(int, 2
+# + 1)`, which is its definition with the arguments written in, or a subtype of a type written out, `list<int> where
+# #it == 3` (wiki/type.md: a type is itself a value); ø for any other code, `a | b` of ints or `xs where p` of a list.
+# A call is a type by its head's declaration (scope.wap makes_type), a `where` by its first part's
+type_value_written(n: Node, s: TypingState) as Node? := match n {
+	Call(called, arguments) => {
+		if makes_type(called, s.kind_rules!.scope) { return type_value(type_term(applied_type(n, called, arguments, s.kind_rules!.scope) ?? type_named_bound(n, s.kind_rules!.scope)), n) }
+		subset = subset_written(n) ?? return ø
+		if type_value_written(subset#1, s) == ø and written_parts(subset#1) == ø { return ø }
+		type_value(type_term(type_named_bound(n, s.kind_rules!.scope)), n)
+	}
+	_ => if n is symbol and names_type_value(n, ø, s) then type_value(type_term(n), n) else ø
+}
+# An `==` of two type values, decided when compiling (terms.wap comparison_decided) and placed as its yes or no
+# (types.wap decided_code): the run never compares types
+types_compared(n: Node, values: list<Node>, s: TypingState) as Node := {
+	denoted = values.map(value => fact_type(fact_of(value, DENOTES))!)
+	place = obligation_kept(Obligation(warning_of(n, "two types compared"), n, denoted#1, s.within, compared: denoted#2), "${place_of(n)}${n} compared", s)
+	obligations_noted(with_type(refitted(Call(symbol(EQUALITY_WORD), values), n), BOOL_TYPE), [place])
 }
 # the call of a word with these typed arguments, the definition chosen among all of the word's
 word_called(n: Node, word: text, given: list, expected: Term?, s: TypingState) as Node := call_chosen(n, symbol(word), word_scopes(word, s), given, expected, s, ø)
@@ -405,10 +537,9 @@ scoped_definitions(called: Node, s: TypingState) as list<list<Signature>> := can
 # the definition a defining name means: its own, or, for the name of a function typed already (a call typed again),
 # the definition that typed function came from, so typing a typed form again changes nothing
 definition_at(definer: Node, s: TypingState) as Signature := definition_keyed(place_key(definer), s) ?? definition_keyed(typed_from(place_key(definer), s), s) ?? refused(definer, "the typing stage found no definition here")
-typed_from(key: text, s: TypingState) as text := {
-	for typed in s.functions { if place_key(declared_name(signed_name(typed, s))) == key { return typed.function.key } }
-	""
-}
+typed_from(key: text, s: TypingState) as text := (typed_named(key, s) ?? return "").function.key
+# the typed function whose signed name has the key, a call's DEFINED_AT
+typed_named(key: text, s: TypingState) as TypedFunction? := s.functions.find(typed => place_key(declared_name(signed_name(typed, s))) == key)
 # the one definition of a key, ø when none has it: a key names one definition, so two of one key are refused
 definition_keyed(key: text, s: TypingState) as Signature? := {
 	keyed = definitions_keyed(key, s)
@@ -689,6 +820,7 @@ result_given(body: Node, frame: TypeFrame, name: Node, s: TypingState) as Term? 
 A_DEFINE = "a function's definition is a Define"
 shaped_typed(definition: Signature, argument_types: list, s: TypingState, at: Node) as TypedFunction := match define_of(definition, s) { Define(name, parameters, body) => {
 	key = definition.key
+	letters_defined(definition, s)
 	called = letters_bound(definition, argument_types, s) ?? NOTHING_CALLED
 	settled_by(called.answers, s)
 	letters = called.letters
@@ -730,7 +862,7 @@ body_typed(typed: TypedFunction, definition: Signature, name: Node, parameters: 
 	typed_parameters = (1 to #typed.arguments).map(at => parameter_typed(items_of(parameters)#at, typed.arguments#at, frame)).map(parameter => match parameter { Key(name, Op.Colon, type) => refitted(Key(name, Op.Colon, statement_typed(type, s, frame)), parameter); _ => parameter })
 	frame.variables += captured_by(define_of(definition, s), typed.arguments)
 	typed.written = if typed.written == ø then ø else statement_typed(typed.written!, s, frame)
-	typed_within(function_key(define_of(definition, s)), [definition.key] + typed.arguments.map(type => type_text(type, yes)), s, () => {
+	typed_within(function_key(define_of(definition, s)), [definition.key] + typed.arguments.map(type => type_text(type, yes)), s, frame, () => {
 		# an axiom is its written type alone: its body is never read
 		typed_body = if is_axiom(define_of(definition, s)) then with_type_of(body, written) else typed_form(body, s, frame, typed.result)
 		given = result_given(typed_body, frame, name, s)
@@ -747,12 +879,16 @@ body_typed(typed: TypedFunction, definition: Signature, name: Node, parameters: 
 # work typed within a function's instance: s.within names the function (its obligations') and TYPES.instance the
 # instance, keyed under the instance it is first typed within (a nested function of a generic one is one per instance), both put
 # back after work runs, a raise too
-typed_within(function: text, instance: list<text>, s: TypingState, work: () -> ø) := {
+typed_within(function: text, instance: list<text>, s: TypingState, frame: TypeFrame?, work: () -> ø) := {
 	enclosing = s.within
+	enclosing_frame = s.frame
 	enclosing_instance = TYPES.instance
-	put_back = () => { s.within = enclosing; TYPES.instance = enclosing_instance }
+	put_back = () => { s.within = enclosing; s.frame = enclosing_frame; TYPES.instance = enclosing_instance }
 	s.within = function
-	TYPES.instance = keyed_text([enclosing_instance] + instance)
+	s.frame = frame
+	# GUESS (for wap-q1-kernel): the enclosing key is already keyed, so it is joined, never escaped again: each level
+	# escaped anew doubled its marks, a key growing as 2 ^ depth
+	TYPES.instance = enclosing_instance + LEVEL_MARK + keyed_text(instance)
 	try work() catch e { put_back(); raise e.message }
 	put_back()
 }

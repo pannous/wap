@@ -38,8 +38,14 @@ TYPES_DEPTH = -2
 # two modules defining one name are refused, used or not
 bound_program(program: Block, types: list<Signature>, modules: list<Module>, standard: map<text, list<text>>) as Block := {
 	known = identified_program(program, types, modules, standard)
-	finished(known, known.statements.map(statement => bound(statement, known.scope, PROGRAM_DEPTH)))
+	finished(known, known.statements.filter(statement => not is_type_name(statement)).map(statement => bound(statement, known.scope, PROGRAM_DEPTH)))
 }
+# a type's name, `nat: Type := int where it >= 0`: no value to compute, each use of it the type it names (type_bound)
+is_type_name(statement: Node) as bool := match statement { Define(Key(name, Op.Colon, result), parameters, body) => items_of(parameters) is empty and universe_written(result) != ø; _ => no }
+# what a definition giving a type has its name hold (declarations.wap type_named_value), ø for any other statement;
+# the name as it defines, holding that
+type_definer(statement: Node, name: Node) as Node := with_fact(name, TYPE_NAMED, named_type_of(statement) ?? return name)
+named_type_of(statement: Node) as Node? := match statement { Define(Key(name, Op.Colon, result), parameters, body) => if universe_written(result) == ø then ø else type_named_value(parameters, body); _ => ø }
 # the words around a program: the modules it uses, then the types module's, outermost, and the standard library's
 # beyond them
 scope_around(types: list<Signature>, modules: list<Module>, standard: map<text, list<text>> = {}) as Scope := Scope([Layer(modules_scope(modules) + types_scope(types))], no, standard)
@@ -57,7 +63,7 @@ library_words(signature: Signature, depth: int) as list<Definition> := match sig
 # code bound inside a scope; a typed rule's hole holds code bound and typed already, which stays as it is
 bound(n: Node, scope: Scope, depth: int) as Node := if fact_of(n, TYPED_HOLE) != ø then n else form_bound(n, scope, depth)
 form_bound(n: Node, scope: Scope, depth: int) as Node := match n {
-	Symbol(name) => resolved(n, scope, depth)
+	Symbol(name) => named_type(named_in(scope, name), name, scope) ?? resolved(n, scope, depth)
 	Block(statements) => refitted(Block(all_bound(statements, block_scope(n, statements, scope, depth), depth)), n)
 	Define(name, parameters, body) => with_captures(refitted(Define(defined_bound(name, parameters, scope, depth), parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
 	Fn(parameters, body) => with_captures(refitted(Fn(parameters_bound(parameters, scope, depth), body_bound(parameters, body, scope, depth)), n), scope, depth)
@@ -118,25 +124,104 @@ type_bound(type: Node, scope: Scope, depth: int) as Node := {
 	code = fact_of(type, AS_CODE)
 	if code != ø and is_code_call(code!, scope) then bound(code!, scope, depth) else type_named_bound(type, scope)
 }
-type_named_bound(type: Node, scope: Scope) as Node := match type {
+# a type by name: a subtype's parent bound as a type, its condition by declaration (condition_bound)
+type_named_bound(type: Node, scope: Scope) as Node := {
+	subset = subset_written(type)
+	if subset != ø { return with_parts(type, part => if part === subset#1 then type_named_bound(part, scope) else if part === subset#2 then condition_bound(part, scope) else part) }
+	type_part_bound(type, scope)
+}
+type_part_bound(type: Node, scope: Scope) as Node := match type {
 	Symbol(name) => {
-		record = record_meant(scope, name)
+		# the record or the named type its scope sees, the innermost: a type's name is the type it names, as written
+		meant = named_in(scope, name).filter(definition => definition.kind == DefinitionKind.Record or names_type(definition))
+		named = named_type(meant, name, scope)
+		if named != ø { return named! }
+		# a type name with parameters stands only applied, `vector(int, 3)`
+		if meant is not empty and names_type(meant#1) { match fact_of(meant#1.definer, TYPE_NAMED)! { Fn(parameters, body) => arguments_refused(type, name, items_of(parameters)); _ => ø } }
 		# a case word narrows the enum its scope sees, whatever other enums hold a case so named
-		if record == ø { return with_fact(type, NARROWS, type_named_bound(symbol((case_owner(scope, name) ?? return type).name), scope)) }
-		with_fact(type, DECLARED_BY, record_declared(record!.definer))
+		if meant is empty { return with_fact(type, NARROWS, type_named_bound(symbol((case_owner(scope, name) ?? return type).name), scope)) }
+		with_fact(type, DECLARED_BY, record_declared(meant#1.definer))
 	}
 	List(items, bracket, separator) => refitted(List(items.map(item => type_named_bound(item, scope)), bracket, separator), type)
-	Call(called, arguments) => refitted(Call(called, arguments.map(argument => type_named_bound(argument, scope))), type)
+	Call(called, arguments) => applied_type(type, called, arguments, scope) ?? refitted(Call(called, arguments.map(argument => type_named_bound(argument, scope))), type)
 	Key(name, op, parts) => refitted(Key(type_named_bound(name, scope), op, type_named_bound(parts, scope)), type)
 	_ => type
 }
+# A subtype's condition with each name bound to the variable of that name its scope sees, by declaration, `n` of `xs:
+# list<int> where #it == n` (its DEFINED_AT the parameter n), a parameter, a local or a capture: a name of no variable,
+# and a field's name after a dot, as written; the type a value is made into, `(xs as list<T>)`, as a type
+condition_bound(n: Node, scope: Scope) as Node := match n {
+	Symbol(name) => {
+		if fact_of(n, BINDING) != ø { return n }
+		innermost = named_in(scope, name)
+		if innermost is empty or not VARIABLE_KINDS.contains(innermost#1.kind) then n else with_fact(with_binding(n, innermost#1.kind), DEFINED_AT, innermost#1.definer)
+	}
+	Get(subject, key) => refitted(Get(condition_bound(subject, scope), key), n)
+	Call(called, arguments) => if not made_value(n) === n then refitted(Call(called, [condition_bound(arguments#1, scope), type_named_bound(arguments#2, scope)]), n) else refitted(Call(called, arguments.map(argument => condition_bound(argument, scope))), n)
+	_ => with_parts(n, part => condition_bound(part, scope))
+}
+# the scope a type name's definition is bound in: the use's, with every definition deeper than the type's own
+# declaration left out, so it reads the names around where it is declared, a function's parameters and locals among them
+declared_scope(scope: Scope, depth: int) as Scope := Scope(scope.layers.map(layer => if layer.definitions.any(definition => definition.depth > depth) then Layer(layer.definitions.filter(definition => definition.depth <= depth)) else layer), scope.looped, scope.standard, scope.declaring)
+# A type name with parameters applied, `vector(int, 3)`: its body with the arguments written in for the parameters,
+# `list<int> where #it == 3`, shown by the use as written; ø where the call names no such type
+applied_type(type: Node, called: Node, arguments: list, scope: Scope) as Node? := {
+	if not called is symbol { return ø }
+	meant = named_in(scope, text(called)).filter(definition => names_type(definition))
+	if meant is empty { return ø }
+	match fact_of(meant#1.definer, TYPE_NAMED)! {
+		Fn(parameters, body) => {
+			taken = items_of(parameters)
+			if #taken != #arguments { arguments_refused(type, text(called), taken) }
+			# the definition bound where it is declared, the arguments where they are written
+			outer = declared_scope(scope, meant#1.depth)
+			unread_names_refused(body, text(called), within(outer, parameter_definitions(parameters, 0)))
+			written = (1 to #taken).fold(type_named_bound(body, outer), (part, at) => parameter_written(part, text(parameter_name(taken#at)), condition_bound(argument_given(taken#at, arguments#at, text(called)), scope)))
+			with_fact(written, WRITTEN, Text("${type}"))
+		}
+		_ => ø
+	}
+}
+# an argument as a type's parameter takes it: a type parameter (bare, or `T: Type`) only a written type, a value
+# parameter its value made into the parameter's type, `-1 as nat`, so its condition decides it like a call's argument
+argument_given(parameter: Node, argument: Node, name: text) as Node := {
+	written = declared_type(parameter)
+	if written != ø and universe_written(written!) == ø { return placed_like(Call(symbol(RESULT_WORD), [argument, written!]), argument) }
+	if is_type_written(argument) or argument is symbol then argument else refused(argument, "${name}'s ${text(parameter_name(parameter))} is a type, and this is a value")
+}
+arguments_refused(at: Node, name: text, parameters: list) := refused(at, "${name} takes ${#parameters} arguments, ${parameters.map(parameter => text(parameter_name(parameter))).join(", ")}")
+# a parameter written in where the body names it: never a field's name after a dot, `it.n`, which is no parameter
+parameter_written(n: Node, name: text, value: Node) as Node := written_where(n, part => text(part) == name, value)
+# code with a value written in for each name these pick, `n` of `#it == n`: never a field's name after a dot
+written_where(n: Node, picked: (Node) -> bool, value: Node) as Node := match n {
+	Get(subject, key) => refitted(Get(written_where(subject, picked, value), key), n)
+	_ => if n is symbol and picked(n) then value else with_parts(n, part => written_where(part, picked, value))
+}
+names_type(definition: Definition) as bool := fact_of(definition.definer, TYPE_NAMED) != ø
+# the type the innermost of these definitions names, as written by its name; ø where it names none
+named_type(definitions: list<Definition>, name: text, scope: Scope) as Node? := {
+	if definitions is empty { return ø }
+	named = fact_of(definitions#1.definer, TYPE_NAMED) ?? return ø
+	# a name with parameters is a type only applied (applied_type)
+	if named is Fn { return ø }
+	outer = declared_scope(scope, definitions#1.depth)
+	unread_names_refused(named, name, outer)
+	with_fact(type_named_bound(named, outer), WRITTEN, Text(name))
+}
+# a type name whose condition reads a name that is none of its parameters and that its scope does not define is refused
+# where it is declared: each use would read that name wherever it sits
+unread_names_refused(named: Node, name: text, scope: Scope) := {
+	condition = (subset_written(named) ?? return)#2
+	unread = condition_names(condition_of(condition)).filter(read => named_in(scope, read) is empty)
+	if unread is not empty { refused(named, "${name}'s condition reads ${unread.join(", ")}, which is none of its parameters: write `type ${name}(${unread.join(", ")}) = …`") }
+}
+# whether a head makes types, a definition it means a record, a family or a function giving a universe
+makes_type(called: Node, scope: Scope) as bool := definitions_meant(text(called), scope).any(definition => definition.types)
 # A call in a type's place is a type where a type's notation writes it, `int | text`, `3 * int`, `int where it > 0`,
 # or its head makes types, a record or a function giving a universe, `Even(n)`, `vector(int, 3)`, or the kernel's
 # family, `Equal(…)`; a call of any other function in scope is code, a statement or a value a type names, `a + 0 == a`,
 # `P(f)`, bound as code is
 is_code_call(type: Node, scope: Scope) as bool := match type { Call(called, arguments) => not is_type_written(type) and text(called) != ARRAY_TIMES and names_function_in(called, scope) and not makes_type(called, scope); _ => no }
-# whether a head makes types, a definition it means a record, a family or a function giving a universe
-makes_type(called: Node, scope: Scope) as bool := definitions_meant(text(called), scope).any(definition => definition.types)
 # An arm: the name its pattern holds a new variable of the arm, which its result sees; `_` and literals name none
 arm_bound(arm: Arm, scope: Scope, depth: int) as Node := match arm {
 	Arm(pattern, result) => {
@@ -207,7 +292,7 @@ core_word(called: Node, word: text, scope: Scope) as bool := called is symbol an
 type_test_bound(n: Node, called: Node, arguments: list, scope: Scope, depth: int) as Node := {
 	tested = arguments#2
 	if names_value(tested, scope) { return bound(refitted(Call(symbol(EQUALITY_WORD), arguments), n), scope, depth) }
-	type = if tested is symbol and names_case(tested, scope) then resolved(tested, scope, depth) else tested
+	type = if tested is symbol and names_case(tested, scope) then resolved(tested, scope, depth) else type_named_bound(tested, scope)
 	refitted(Call(called, [bound(arguments#1, scope, depth), type]), n)
 }
 # a call's argument: a named one, `by: f`, its value bound and its name the parameter's word
@@ -316,9 +401,9 @@ resolved_taking(name: Node, given: int?, scope: Scope, depth: int) as Node := {
 	# a name nothing defines is read as the word its alias gives, `length` count (types/operators.wap word_aliases),
 	# else as a standard module's word
 	if meant is empty {
-		# a universe, `Prop`, and a proof's words, `refl`, are the language's own: typing reads them (types.wap
-		# names_type_value, proof_typed)
-		if universe_written(name) != ø or PROOF_WORDS.contains(text(name)) { return name }
+		# a universe, `Prop`, a proof's words, `refl`, and the kernel's declarations, `Equal`, are the language's own:
+		# typing reads them (types.wap names_type_value, proof_typed, type_notation.wap family_type)
+		if universe_written(name) != ø or PROOF_WORDS.contains(text(name)) or declaration(TYPES.environment, text(name)) != ø { return name }
 		# a letter is its function's, what the call binds it to: typing reads it (types.wap letter_bound)
 		if is_letter_name(text(name)) { return name }
 		alias = word_aliased(text(name))
