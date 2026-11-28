@@ -505,9 +505,15 @@ conforms(given: Term?, wanted: Term?, s: TypingState) as bool := {
 	protocol = protocol_named(s.records, wanted) ?? return no
 	if given == ø { return no }
 	key = "${type_text(given, yes)} ${type_text(wanted, yes)}"
-	# yes while the answer is open, coinductively, so a word's trial that asks it again ends and agrees with the answer
-	if not s.conforming.has(key) { s.conforming[key] = yes; s.conforming[key] = fields_of(protocol).all(word => does_word(given, word, s)) }
-	s.conforming[key]
+	if s.conforming.has(key) { return s.conforming[key] }
+	# yes while the answer is open, coinductively, so a word's trial that asks it again ends and agrees with it; a no, or
+	# a raise, takes back all the trials found meanwhile, the yeses that read the open one among them
+	trial = trial_taken(s)
+	s.conforming[key] = yes
+	does = try fields_of(protocol).all(word => does_word(given, word, s)) catch e { no }
+	if not does { trial_undone(trial, s) }
+	s.conforming[key] = does
+	does
 }
 # A program adds to a function every program has only where none of its definitions takes these types already
 # (wiki/function.md): `+(n: int, t: Ship)` adds one, `round(x)` and `missing(x: int?)` are taken; a function taking a
@@ -578,10 +584,20 @@ does_as(definition: Signature, taken: list<Term?>, s: TypingState) as bool := {
 	types = definition.parameters
 	if #types != #taken { return no }
 	if types#1 != ø and not is_letter(types#1!) { return shaped(types#1!, s) == taken#1 }
-	kept = s.refusals
+	trial = trial_taken(s)
 	does = try { function_typed(definition, taken, s, definition.definer); yes } catch e { no }
-	s.refusals = kept
+	if not does { trial_undone(trial, s) }
 	does
+}
+# what a trial adds to the typing state, taken back where it fails: the conformances answered, the instances typed,
+# half typed ones among them, so no later call finds one, and the refusals, so the definition's other instances type
+class Trial { conforming: list<text>; functions: list<TypedFunction>; refusals: list<Refusal> }
+trial_taken(s: TypingState) as Trial := Trial(s.conforming.keys, s.functions, s.refusals)
+trial_undone(trial: Trial, s: TypingState) := {
+	for typed in s.functions.drop(#trial.functions) { s.instances[typed.function.key] = instances_of(typed.function.key, s).filter(each => each !== typed) }
+	for key in s.conforming.keys.filter(key => not trial.conforming.contains(key)) { s.conforming.remove(key) }
+	s.functions = trial.functions
+	s.refusals = trial.refusals
 }
 
 # whether the Nodes a definition takes, two or more, are all values read as one: values that are no Nodes never meet as
