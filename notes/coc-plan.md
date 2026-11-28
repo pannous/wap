@@ -1175,6 +1175,121 @@ None of the second reading remains: no PROOF_MARK and no stated_proof_typed or s
 or hole fold, no reading key in the state or the Entering, no written_proof, and law_proved only for laws without a
 proof. Core about −20 against T6a1b's first form; one field, `TYPES.prove`.
 
+#### A call's proof hole is an obligation
+
+A `by` a call leaves (a hypothesis parameter's default, `nonzero: b != 0 = by`, lift's respect) is an obligation on
+wiki/type.md's "Proved or checked" ladder, as a subtype's narrowing is (V3's Obligation, with its goal the parameter's
+statement at the call's arguments):
+- `wap check` and `wap verify` prove it under the laws proved before it; a proved one leaves no run check.
+- In a compile without provers, a decidable goal is checked when the program runs, and an undecidable one (a for-line,
+  lift's respect) is refused, naming the verify extension.
+- A `by` inside a law's proof is no obligation: in a build the law's function is assumed (T6a1b).
+- Typing records every call's hole, at the top level and in acting functions too; reading a pure body into the kernel
+  discharges the ones it meets. V3's Obligation takes the goal as a term beside its subtype condition (core about +2).
+
+#### A proved obligation loses its run check
+
+wiki/type.md "Proved or checked" puts proving (3) before the run check (4). V3 builds the check at typing
+(dispatch.wap narrowed_call, the narrowing word wrapped around the argument) and proves only in the check door
+(extensions/verify/check.wap), which emits nothing. So a module keeps the check of an obligation the door proved.
+
+The change, in one compile:
+1. **check.wap runs between typing and emission.** The door already runs the compile's front (program_typed), then the
+   laws' verdicts, then obligation_proved over the obligations. It then runs the back too: compiler.wap's `compiled`
+   splits at `typed`, and its emission half becomes a pipeline function both the compiler and the door call
+   (`module_of(typed, …)`, moved, not new). The verdicts come first, so a law the provers proved is a fact for the
+   obligations after it, as V3 says.
+2. **Emission learns from a fact.** An Obligation keeps the call narrowed_call made. A proved one writes a PROVED fact
+   on that call, and elaboration takes a narrowing call that has the fact as its first argument. A stage writes a fact
+   on a node and makes no new hole. The check then goes from the code and from the function's effects (no Fail from
+   it). core about +3: the kept call, the fact, the elaborate arm.
+3. **Plain builds stay as they are.** Without the provers no fact is written, every check stays (step 4), and nothing
+   is proved, so a build costs what it costs today. A module with fewer checks comes from the check door with an output
+   path (`wap check program.wap out.wasm`). That spelling is a CLI form, so it goes to warp-interviewer with
+   wiki/cli.md's line.
+4. **The cost** is not measured yet. It is one first_proof per obligation entered with a kernel term, after the
+   verdicts. The builder measures the check door against a plain compile over test/wap's samples and the compiler's own
+   source, times and obligation counts, before the doors change. Proving stays the door's, so the measure decides
+   nothing about plain builds; it decides whether `wap check` stays a listing or becomes the assured build.
+
+Lines: core about +3, pipeline 0 (moved), check.wap about +4, compiler.wap about −6. Careful path: the emission half
+moves, which the self-build uses.
+
+#### int-takes: int is natural(n) | negative(n) over the count
+
+Inside proofs `int = natural(n: ·count) | negative(n: ·count)`, with negative(n) = -(n + 1), Lean's `Int.ofNat |
+Int.negSucc`, over the hidden `·count = zero | successor(·count)`. It replaces `zero | positive | negative`. It lands as
+its own step from int-takes-on-batch aaa29124 (unbuilt, on 5285eb86), after typed-by-result, whose terms.wap stays three
+cases. The branch merges onto main with no conflict.
+
+**Step 1: the two cases (aaa29124 as it is).** kernel −2.
+- kernel/terms.wap:126 INT_CASES two names, with NATURAL_CASE and NEGATIVE_CASE (22c1211b's names, on q1).
+- kernel/counting.wap int_declared (:151-186): both cases take a count. UPS is the count of natural, DOWNS the
+  successor of negative's. MINUS and DIFFERENCE go by from_zero. int_bridge_declared's two-case split (:243-262).
+- kernel/numbers.wap:44 int_numeral: `natural(numeral(v))`, or `negative(numeral(-1 - v))` below zero.
+- kernel/show.wap:48-58: an int's case shown as its whole number.
+- kernel/integer_laws.wap zero_of; extensions/prove/linear.wap's int value read (:319) and zero_of.
+- Every int_split caller is generic over the arms (counting.wap :160-164, :258, :262; integer_laws.wap :221), so no
+  other line changes.
+
+**Step 2: int's declaration in core beside Equal.** Already so: core_environment (core/type_notation.wap:145-153)
+declares equality, the count, then int. The `·` mark hides the count from programs. 0.
+
+**Step 3: literals stay binary.** A count numeral is a kernel Numeral, and the shortcuts (counting.wap
+shortcut_fixed, fixed by theorems the kernel checks) compute ·add, ·subtract, ·multiply and the comparisons on two
+numerals at once. A recursor meets a numeral one successor at a time, never unfolded to unary. Step 1 keeps it: an int
+literal is a case over one numeral. 0.
+
+**Step 4: the words joined to the cases.** types/integers.wap gains `successor(n: int): int := n + 1` and
+`predecessor(n: int): int := n - 1`, with next and previous as their aliases (one word each, the others with a got-it
+note), beside nat's patterns by inverse (7b771f28, on q1). The kernel joins them to the case definitions with four
+theorems, each by refl on the two-case definitions (integer_laws.wap, kernel +8):
+- successor(natural(c)) == natural(·successor(c));
+- successor(negative(·zero)) == natural(·zero);
+- successor(negative(·successor(c))) == negative(c);
+- predecessor(natural(·zero)) == negative(·zero).
+The provers then rewrite at the case level without unfolding sum. types +4.
+
+**Step 5: Lean's Int theorems bind with no bridge.**
+- Binding is by shape, as Nat binds today (extensions/theory/second/bindings.wap:65-75, `enum nat { zero;
+  successor(n: nat) }`). The two cases bind Int.ofNat and Int.negSucc to natural and negative, by position, not by
+  name: extensions +6, an `int_bound` beside the number binding.
+- A theorem about Lean's Int.add is about Lean's definition, though. It binds to wap's sum only if both are the same
+  term. Lean defines Int.add by its four case pairs and subNatNat. counting.wap:172-181 defines SUM, TIMES and NOT_ABOVE
+  by crossed counts (`difference(ups(a) + ups(b), downs(a) + downs(b))`). The two agree on natural+natural and
+  negative+negative by computing, but on a mixed pair only up to a proof (·add recurses on its second count, so
+  `add(zero, successor(n))` is stuck for a variable n).
+- Decided (user 2026-11-27, Lean's exact shape so that imported Int theorems bind with no bridge): Lean's definitions in
+  the kernel. SUM, TIMES and NOT_ABOVE by cases, with DIFFERENCE as subNatNat (37ffb139 already gives it Lean's
+  argument order). Lean's constants then bind to wap's by checked shape. int_bridge_declared and integer_laws.wap's
+  proofs are re-read on the new definitions; the product laws (cb5b24ae, on q1) are written over the crossed form.
+  Measure to report: kernel about +10 for the definitions, about +30 of product-law churn (theory steps have no size
+  limit). A step of its own after steps 1-4.
+- The count's own functions bind already: ·add and ·multiply recurse on the second count as Lean's Nat.add and
+  Nat.mul do, and ·subtract is Lean's Nat.sub (the predecessor of `m - n` at `successor(n)`, counting.wap:87).
+
+**Test lines.**
+- Green after step 1: test_theory_induction "square(-x) == square(x) is proved along the cases of an integer" (two
+  arms, not three) and "twice(x) == 2 * x". Neither is a regression if it stays red: their other cause is T5c4.
+- Unchanged: test_theory_prelude_checked_wanted:8. The theory prelude's own Lean-spelled block (`int.of_nat`,
+  `int.negative_successor`, quotients_made.wap) is the second reader's, not the kernel's int.
+- Watch: test_theory_arithmetic's Proved lines and every linear-prover line (int_value's two cases); show's whole
+  numbers in every `type of` and failure message that prints an int case; test_law_runs.
+- Step 4: one test_theory_arithmetic line, `law next_after(n: int): successor(n) == n + 1` Proved by refl (wiki/
+  number.md's successor, if the page names it; if not, the words wait for a page line).
+
+**Order and cost.** Step 1 after typed-by-result lands (careful path: the kernel's int, which every compile declares).
+Steps 2-3 need nothing. Step 4 is normal path. Step 5 is careful. Totals: kernel −2 (1),
++8 (4), about +40 (5); types +4; extensions +6.
+
+**What conflicts with unify-typers' current shape.**
+- main is three cases. q1 9e41e3d7 and typed-by-result b3daebfd mixed two-case names with three-case code; the
+  supervisor's ruling takes typed-by-result back to three. q1 needs the same fix before it merges with step 1.
+- The product laws on q1 (cb5b24ae) are written for the three cases (`case_of(b, 3)`, a fieldless zero). When step 1
+  lands they are re-read on two cases, so whichever of q1 and int-takes lands second carries that merge.
+- pattern-arms-t5c4 is consistently two-case (T5c4's nat recursor over int's cases), so it should land after step 1,
+  not before.
+
 #### Each step's wiki lines and the tests that pin them
 
 A builder starts from these lines red. "red" is the last recorded full run (test/reds.txt); `_wanted` files are
