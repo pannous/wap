@@ -26,7 +26,8 @@ such as T5c3's `leaves`. Read on unify-typers 2b0e87be, with T4d1 (notes/coc-t4d
 
 - `type vector(T, n: nat) = list<T> where #it == n` reads two ways. sugar/definitions.wap:30 makes it the
   definition `vector(T, n: nat) := list<T> where #it == n`, a function whose value is a type. rules/stages.wap
-  declaration_taken makes it a rewrite rule, the way `type Long = int` is read. Part (1) below uses the rule.
+  declaration_taken makes it a rewrite rule. The rule reading goes in the alias step of
+  wap-primitive-lookup-tables, which makes an alias declare a type name.
 - A subtype's condition is found by its word: `subset_condition(type)` (type_notation.wap:209) asks
   `TYPES.conditions` for a word's id. An applied alias, `vector(int, 3)`, is no word, so it has no condition.
 - `conditions_entered` (analyze/terms.wap:177-190) declares `<subtype> holds : parent -> bool` with `it` as its one
@@ -37,21 +38,15 @@ such as T5c3's `leaves`. Read on unify-typers 2b0e87be, with T4d1 (notes/coc-t4d
 ## What analyze must compute
 
 1. **An applied alias is its body with the arguments written in.**
-   - `type vector(T, n: nat) = list<T> where #it == n` is the rule `vector($T, $n) => list<$T> where #it == $n`.
-     Each parameter of the head is a hole of the pattern and of the template, and its written type is dropped
-     (rules/stages.wap alias_added).
-   - `vector(int, 3)` then reads as `list<int> where #it == 3`. That is a subtype by condition, which type_term
-     already reads, keyed by its code.
-   - A type is shown as its body: `list<int> where #it == 3`. The test lines compare types as values (7), never as
-     text.
-   - core +7.
-   - **Open:**
-     - A rule is global syntax. Every call `vector(a, b)` or `index(a)` in any program reads as the type, even
-       when the program defines its own function of that name.
-     - A parameter's written type (`n: nat`) is never checked.
-     - The function reading avoids both. It calls `vector(T, n: nat) := …` in a type place and reads it as its
-       body with the arguments written in (sugar/definitions.wap:30). The name stays shown and scoped. The cost
-       is about core +8 more than the rule.
+   - `type vector(T, n: nat) = list<T> where #it == n` declares the type name `vector`, a function of its
+     parameters whose value is a type. This is the alias step of wap-primitive-lookup-tables, the step nat
+     needs too. No rule is involved.
+   - At each use in a type place, `vector(int, 3)` is the body with the arguments written in:
+     `list<int> where #it == 3`. That is a subtype by condition, which type_term already reads, keyed by its code.
+   - The type is shown by its name, `vector(int, 3)`.
+   - Each parameter's written type is checked at the use, as a call's arguments are.
+   - A program's own function named `vector` or `index` is an overload or a shadow, as for any name.
+   - core +7 beyond the alias step.
 2. **A condition's other names are its function's first parameters.** After (1), a condition whose arguments
    are closed has only one name, `it`. Two kinds of name stay free in a condition:
    - a letter, the `n` of `dot(a: vector(number, n), …)`;
@@ -97,10 +92,10 @@ such as T5c3's `leaves`. Read on unify-typers 2b0e87be, with T4d1 (notes/coc-t4d
    - The letters are typing's own, filled as type letters are (core/analyze/letters.wap). The kernel's holes are
      not needed.
    - core +8.
-   - **Open:** wap/test_type_wanted:6 says "refused by argument type", but this refusal is the narrowing's, by
-     condition. The wording goes to the interviewer.
+   - The refusal is by argument type, as wap/test_type_wanted:6 says. The condition is part of the parameter's
+     type, so a refusal by it is a refusal by argument type, and the refusal says so.
 5. **A result type is its template with the letters' fillings.**
-   - `append([1], [2, 3])`'s `vector(T, m + n)` reads `list<int> where #it == #[1] + #[2, 3]`.
+   - `append([1], [2, 3])`'s `vector(T, m + n)` is `vector(int, #[1] + #[2, 3])`.
    - `type of` shows that type. `type of append([1], [2, 3]) == vector(int, 3)` is (7)'s comparison, which
      computes both conditions.
    - The obligation on the body (`#(a + b) == m + n`) stays the run's check until a law proves it (V3).
@@ -188,7 +183,7 @@ narrowing, not kernel terms.
 
 | part | lines |
 |---|---|
-| (1) an applied alias is its body, as a rule | core +7 |
+| (1) an applied alias is its body (after the alias step) | core +7 |
 | (2) a condition's free names as its first parameters | core +10 |
 | (3) list's block, its literal and its count | core +8, kernel +3 |
 | (4) letters filled at typing with code | core +8 |
