@@ -1071,11 +1071,11 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T6a1 proofs of bool laws, T6a2 hypotheses | re-read on unify (notes/coc-t6a12.md: T6a1 in verify, core +10; T6a2's binders landed, its run skip and implies left) | | unify-typers (the deletion commit, the int enum) |
 | T6a3a propositions in wap spelling | in progress | t6a3a ad022f23; wap-native-no-layout-any | M2b step 1, T6a1 |
 | T6a3 indexed families, the sort-only part (a family over sorts, no parameters) | next | | T6a3a, T5b2 |
-| generic records: `enum Boxed<T>`, `class Pair<A, B>` read, and a letter field filled at each use by T6a7's letters_bound (notes/coc-generic-records.md) | planned; card generic-records, wap-theory-reads-types | | T6a3's sort-only part, T6a7 |
-| T6a3 indexed families, the parameters | waits | | generic records |
+| generic records with T6a3's parameters, one landing: `enum Boxed<T>`, `class Pair<A, B>` read, a letter field filled at each use by T6a7's letters_bound, and the kernel block taking the letters as its parameters (notes/coc-generic-records.md) | planned; card generic-records, wap-theory-reads-types | | T6a3's sort-only part, T6a7 |
 | T6a4 proofs by cases and induction | planned (notes/coc-t6a4.md) | | T5c3, T5c4, unify-dedup landed |
-| T6a5 False, Exists, undecidable | waits | | T5b1; Exists also the T6a3 parameters |
-| T6a6 the logic in wap/types | waits | | T6a1 to T6a5 |
+| T6a1b `by` read as a term | planned (below); builder wap-q1-kernel, branch typed-by on t6a4-riders | | T6a4 (its Free locals are the premises); before Q1 and V3 |
+| T6a5 False, Exists, undecidable | waits | | T5b1; Exists also generic records with T6a3's parameters |
+| T6a6 the logic in wap/types | planned (notes/coc-t6a6.md) | | generic records with T6a3's parameters, unify-axioms, lazy-implies; Exists lines T6a5 |
 | T6a7 universes | planned (notes/coc-t6a7.md) | | T6a6 |
 | V1 one verdict per law | planned (notes/coc-v1.md; the plain-compile report cut, no wiki passage); builder wap-primitive-lookup-tables after t5b-effects | | T6a1, exact-big-literals (show.wap) |
 | V2 `wap check`, V3 proved laws as facts | planned (notes/coc-v2.md, notes/coc-v3.md) | | V1 (V3 also T6a2 and unify-dedup) |
@@ -1110,10 +1110,11 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | T6a1 proofs | coc-t6a12.md | +10 | | | verify +35, extension +3 |
 | T6a2 hypotheses (what is left) | coc-t6a12.md | | +10 | (+3 with T6a6) | extension +4 |
 | T6a3 indexed families | coc-t6a.md | +100 | | | |
-| generic records | coc-generic-records.md | its plan's | | | |
+| generic records with T6a3's parameters | coc-generic-records.md | its plan's | | | |
 | T6a4 cases and induction | coc-t6a4.md | +92 | 0 (apart's builder moved, net 0) | | |
+| T6a1b `by` as a term | coc-plan.md (below) | +12 | | | verify −30 |
 | T6a5 False, Exists | coc-t6a.md | +29 | | +2 | |
-| T6a6 the logic in wap/types | coc-t6a.md | +30 | | +38 | |
+| T6a6 the logic in wap/types | coc-t6a6.md | +3 to +7 | +8 | +26 | sugar −2 |
 | T6a7 universes | coc-t6a7.md | +61 | | | |
 | V1 verdicts | coc-v1.md | +7 | | +2 | verify +23, extension +1 |
 | V2 `wap check` | coc-v2.md | +4 | | | native +2 |
@@ -1121,7 +1122,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | C1 traits (C1a) | coc-c1.md | +13 | | +19 | |
 | C2 trait values (B) | coc-c2.md | +15 | | | |
 | C1b structures | coc-c2.md | +22, with V3 or Q1 | | | |
-| C4 generic dispatch | coc-c2.md | −90 with C2's A, at T5g | | | |
+| C4 generic dispatch | coc-c4.md | −18 (the rounds stay; their whole-program retype goes) | | | |
 | Q1 quotients | coc-q1.md | +37 | | +27 | prove +5 |
 | T7 the extension retires | coc-t7.md | 0 (moves) | | | native +12 |
 | T8a the reader | coc-t8.md | +12 | +2 | | |
@@ -1140,6 +1141,7 @@ are counted apart, since a plain compile does not load them.
 | step | what works after it | core / kernel / types (estimate) | extension | wiki pages it serves | outcome tests |
 |---|---|---|---|---|---|
 | T6a7 universes in analyze | A binder's type may be a universe, `Sort(u)`, `Type(u)` or `Prop`, and a one-letter level name nothing defines is found as `T` is (universe.md "One definition at every level"); `type of Type` is `Type(1)`; a level written as an argument, `identity[1](int, 3)`, is read where the name before it is a function with level parameters, and refused with both readings named where it might also be an index (`fs[1](3)` of a list, wiki/lambda.md) | core +45 (level binders found +20, a written level argument +15, levels shown +10), kernel 0 | 0 | universe.md | test_theory.wap's 13 universe lines: `type of (A: Type) -> A` is `Type(1)`, `bad: Type := Type` refused, `box(int)` refused where box takes a `Type(1)` |
+| T6a1b `by` read as a term | `by f, g` (and a chain step's `x by f`) wherever a proof stands, in a match arm, a chain step or a let, not only after a law's `:=`: typed as the statement expected there (refused where none is), read by term_of as a hole whose context is the locals in scope (parameters, hypotheses, a case's premise), the named laws kept with it; verify's provers answer each hole, a plain build answers none; `refl` a term the same way; chain sugar over the one `by` | core +12 (calls.wap +3, terms.wap +6, refl +3), kernel 0 | verify −30 (proof_apart, Split.proofs, proof_term, by_named and reflexive_under go: a second reading of proofs) | proof.md, law.md | Q1's sign_product and square_positive arms; test_proof_wanted's by lines |
 | V1 one verdict per law | A plain compile computes each law. Without binders, it is Proved by computing or reported as FAILED, and it never stops the program. With binders, the run tries it and it is Tested. `wap verify` adds the provers and prints proof.md's six verdicts: Proved (with "rests on" its axioms, from the kernel's `axioms_of`), Tested, FAILED with the counterexample, Untested, Assumed (an `assume` it uses) and Axiom | core +25 (analyze/laws.wap: the statement computed to yes or no, its notice), kernel 0 | verify +30 (Tested, Assumed and Axiom beside today's three) | proof.md "Checking proofs", law.md "Checking a law" | `law double(3) == 6` Proved on a plain compile; `hard: Assumed`; `uses_choice: Proved, rests on choice`; an `axiom` line `Axiom`; a program's own `runs(…)` refused by `wap verify` too (test_theory_layouts: only the types module says how the host runs a declaration) |
 | V2 `wap check` | `wap check` lists the obligations left to the run, `--strict` refuses each one not proved, and the laws' verdicts are printed as `wap verify` prints them. Both commands load the proof extension through one door; a plain compile never loads it. dispatch.wap's global `obligations` list becomes a fact the door reads | core −5 (the global list goes), kernel 0 | check +40 (a door beside verify.wap, sharing door_arguments and the verdicts) | type.md "Proved or checked", effects.md (`wap check --strict` refuses an impure function), cli.md | `wap check` on `xs#i` with nothing proving `i` in range lists "is checked when the program runs"; `--strict` exits 1 naming it; a program with every obligation proved lists none |
 | V3 proved laws are facts | A law proved earlier is a fact for the laws after it (law.md's `fact(n) > 0` with its helper law first) and for obligations (3.9 step 2: an obligation matched against the conclusions of proved laws by unification, with no search, so a plain compile needs no provers). An obligation the provers prove under `wap check` loses its run check and its Fail | core +30 (an obligation instantiated from a proved law's conclusion), kernel 0 | prove +15 (an obligation as a Goal) | law.md (the helper-law example), type.md "Proved or checked" | law.md's pair both Proved; `#xs > 0` discharged by a proved law, so `effects of` the function has no Fail |
@@ -1147,6 +1149,31 @@ are counted apart, since a plain compile does not load them.
 | Q1 quotients | `quotient(T, same)` is a type, `.of` puts a value in and `.lift` takes a function that respects `same` out (the kernel has quotients since K5); `fraction`, `rational` and `set` are quotients in wap/types | core +50 (the type form +20, `.of` and `.lift` typed +20, values compared by `same` +10), kernel 0, types +40 (fraction, rational, set) | 0 | quotient.md | test_theory_quotients_wanted's three laws: `lift` on `quotient.of` computes, `half == fraction(2, 4)`; test_theory_prelude_checked's lines in wap spelling |
 | C2 instances passed | A value whose type is not known at the call (a list of mixed shapes, a value through `any`, a function value) carries its instance. The instance is the record of its type's function references, built where the value is boxed into the trait (`x as shape`, a `list<shape>` literal); a word called on it reads its field (call_ref). Where the type is known statically, the call is specialised as today, with no change to the emitted code. This pays off calls.wap's protocol DEBT (mixed lists, `x is shape` at run time). A trait's word with a body is the instance's default where the type has none (green today for known types, test_protocols) | core +110 (the instance built at boxing +40, a word called through it +30, the trait value's layout as a row of T1's table +20, defaults in the instance +20), emit +20 (a record of function references), kernel 0 | 0 | trait.md "Dispatch", "Constraints", "Declaring a trait" (each type its own `area`) | `[square(2), circle(1)].map(area)` gives each its own; `smallest([person("Ann", 3), person("Bo", 1)])` through `Comparable list`; careful path (value layout) |
 | C4 generic dispatch through instances | A generic definition (`f(x: T)` with a trait word in its body) called on a boxed value takes the value's instance, instead of a dispatcher retyped round by round for each boxed type. dispatch.wap's rounds go (generic_choices, generic_results, taken, dispatches_completed, deeper_type, fits_generic, boxed_known, dispatcher_retyped: about 90 lines); its `is` chains over the definitions of a word called on an `any` stay, because an `any` is the trait of no words and carries no instance | core −90 (measured at the gate) | 0 | trait.md "Dispatch" | every dispatch test as before; a generic `describe(x: T)` called on mixed boxed values picks each type's `area`; the rounds' "nests without end" refusal is never reached |
+
+The kernel's laws (kernel/integer_laws.wap, Q1's product laws among them) are declared on every compile, so one term
+the kernel refuses there breaks every program: test_hello is the first check of any change to them.
+
+#### T6a1b: a law is its proof's function
+
+There is one law form. `law name(params): statement := proof` and its theorem twin are the function
+`@proof name(params): statement := proof ! Pure` (extensions/laws.wap), in the plain build and in verify alike. Verify
+reads a law from that Define:
+1. **The laws** are the Defines annotated @proof. A law without a proof keeps law_statements' bool function
+   `law_name(params): bool`, which V1's verdicts and the law runs test.
+2. **The statement** is the Define's written result, read by kernel_result under the function's reading: a bool
+   expression in a result place is its truth. The law's statement is the declared function's type, `pis(locals,
+   result)`. A subtype parameter's condition is a hypothesis of its local (parameters_reading).
+3. **The proof** is the function's value. `TYPES.prove`, a function from a ByHole to a proof, is set by verify before
+   typing to the provers' answer. by_term calls it and gives the proof term itself, so definition_of enters the
+   function as an ordinary Defined declaration. In a plain build `TYPES.prove` is ø: by_term gives the hole, and a
+   function still holding one is no definition.
+4. **The verdict:** a @proof function the kernel holds as Defined is declared the theorem of its name, its type the
+   statement (Holds). One typing refused gives its refusal by key (TYPES.refused). `assume` and `axiom` are typed at
+   the statement and give no value, so the law is declared an axiom.
+
+None of the second reading remains: no PROOF_MARK and no stated_proof_typed or stated_term, no TYPES.proofs, ReadProof
+or hole fold, no reading key in the state or the Entering, no written_proof, and law_proved only for laws without a
+proof. Core about −20 against T6a1b's first form; one field, `TYPES.prove`.
 
 #### Each step's wiki lines and the tests that pin them
 
