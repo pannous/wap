@@ -31,11 +31,9 @@ statements T5d's, classes T5e's. Line counts are `grep -vc '^\s*#'` on main f749
 - **`type of` is the model for `effects of`:** sugar/types.wap `rule type of $x => type_of($x)`, and calls.wap
   answers the call by TYPE_OF_WORD with a text literal (`type_of_typed`).
 - **No effects in core:** nothing in wap/core or wap/kernel says effect.
-- **The theory's twins of this step:** elaborate/blocks.wap (111, enums and classes into blocks), elaborate/match.wap
-  (216: arms to minor premises, dependent motives, the course of a recursion), elaborate/effects.wap (191: inference
-  and computation types). Each serves two readers: a program read through the door, and the explicit theory spelling
-  (`enum Equal(a: T): T -> Prop`, `Equal[1](bool, …)`, a theorem by `match` with a dependent motive), which analyze
-  cannot type until propositions and indexed families move to wap/types (section "T6 and T7" below).
+- **The explicit theory spelling** (`enum Equal(a: T): T -> Prop`, `Equal[1](bool, …)`, a theorem by `match` with a
+  dependent motive) is one analyze cannot type until propositions and indexed families move to wap/types (section
+  "T6 and T7" below).
 
 ## Enums as inductive blocks
 
@@ -109,17 +107,15 @@ The audit's R3, migration steps 2 to 4.
   types/operators.wap): `!` has a postfix row only, `required` in the superscript group, and a prefix alias `not`.
   After an operand the reader takes a spaced `!` as infix where it has an infix reading, and since it has none it
   falls through to the postfix, though the function's own comment says spaced on both sides is infix. So
-  `print(t) ! IO` is `required(print(t))` followed by `IO` in a space list, the shape the theory's
-  elaborate/effects.wap `effect_marked` reads (a space list whose first item is the `!` call). `double(x) := x * 2 !
+  `print(t) ! IO` is `required(print(t))` followed by `IO` in a space list. `double(x) := x * 2 !
   Pure` is worse: the superscript group binds tighter than `*`, so `!` lands on the `2`, `x * required(2)` then
-  `Pure`, and neither analyze nor `effect_marked` sees a claim.
+  `Pure`, and analyze sees no claim.
 - **The claim's reading, recommended:** a table row, no reader branch: `!` gets an infix reading in a group of its
   own between `arrow` and `assignment` (types/operators.wap), so `f(x) := x * 2 ! Pure` is the claim applied to the
   whole body and `x!` stays `required(x)`. The reader then does what its comment says (spaced on both sides is
   infix). Where spacing alone separates the claim from the postfix `!` (`x ! IO` against `x! IO`), `wap format`
   prints the reading explicitly, the claim as `(x) ! IO` and the unwrap as `x!` glued (CLAUDE.md "Refuse, never
-  guess"). types +2, core 0, its commit carrying `spec: wiki/effects.md` on its own line; the claim's check +10 in analyze (in T5b1's +120). The theory's `effect_marked` reads the
-  infix call instead of the space list (−5 extension).
+  guess"). types +2, core 0, its commit carrying `spec: wiki/effects.md` on its own line; the claim's check +10 in analyze (in T5b1's +120).
 - **What reads it:** terms.wap enters only a Pure function (or Fail with T5d's `T or Error`) as a definition; the
   census prints how many functions have each effect, and T5's gate becomes "every function defined, Div, or opaque by
   a named effect".
@@ -212,7 +208,7 @@ T5b is done when:
 - the census counts every enum of wap's source defined or assumed with a reason (open field, refused), and prints the
   effects per function; the defined instances ratchet does not fall;
 - the kernel holds no Choice: `if` computes by bool's recursor;
-- elaborate/effects.wap holds no inference of a program's effects, and the door elaborates no program's enum or plain
+- the extension holds no inference of a program's effects, and the door elaborates no program's enum or plain
   match;
 - the whole suite has no new red, `--stage 2` is a fixed point; the self-compile and memory are measured and reported
   (soundness, never a limit).
