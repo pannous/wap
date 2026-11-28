@@ -35,6 +35,14 @@ int-takes b75d1257.
   `difference_parts` (:230-236) and the laws over difference are restated over the second count. It is Lean's
   `subNatNat` order.
 
+- **A guard reads by the count's equations.** Lean's `n - 1` at natural(successor(c)) is subNatNat(c + 1, 1),
+  whose definition waits on c. The guard reader computes with a checker that also rewrites a shortcut's function by
+  its fixing statements (kernel equating, numbers.wap equation_fired), so it computes to natural(c). The terms it
+  makes are checked by the ordinary kernel, which never rewrites so.
+- **Dependent motives are not read.** In a recursion proving P(n), c's hypothesis is a P(c), and the call it
+  stands for is a P(subNatNat(c + 1, 1)). The ordinary kernel does not convert the two, so such a declaration is
+  refused. A function into data, `fact(n): int`, has one motive at every case and reads.
+
 ## The forms, wiki passages and red lines
 
 | form | wiki | red line today | after |
