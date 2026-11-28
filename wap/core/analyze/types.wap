@@ -137,6 +137,8 @@ class TypingState {
 	# keeps at their type, by key (wiki/type.md "Writing a type")
 	retypings: list<text> = []
 	fixed: list<text> = []
+	# the functions a function value names (function_values.wap adapted_name)
+	valued_functions: list<text> = []
 	# the globals the program gives values of other types, by key, and the functions' reads of globals
 	rebound_globals: list<text> = []
 	function_globals: list<Node> = []
@@ -435,19 +437,29 @@ function_added(definition: Define, s: TypingState) as Signature := {
 # The typed program with each definition it writes standing where it was written as the functions it became, once
 # every unknown settled: instances one settling made alike are one (letters.wap distinct_instances)
 instances_placed(n: Node, s: TypingState) as Node := match n {
-	Block(statements) => refitted(Block(statements.flat_map(statement => if statement is Define then functions_typed_from([statement], s).map(define => instances_placed(proofs_erased(define, s), s)) else [instances_placed(statement, s)])), n)
-	_ => decided_code(n, s) ?? refitted(with_parts(proofs_dropped(n, s) ?? n, part => instances_placed(part, s)), n)
+	Block(statements) => refitted(Block(statements.flat_map(statement => if statement is Define then functions_typed_from([statement], s).map(define => instances_placed(erased_parameters(define, s), s)) else [instances_placed(statement, s)])), n)
+	_ => decided_code(n, s) ?? refitted(with_parts(erased_arguments(n, s) ?? n, part => instances_placed(part, s)), n)
 }
-# Erasure (notes/coc-t5f.md T5f3): a binder whose values are proofs, its type a proposition or a statement only a proof
-# decides, emits nothing, as the run would only pass it `yes` (calls.wap proof_held). Its function takes it no more, a
-# read of it is the truth it held, and each call drops the argument there, running before the call a check it makes
-proof_places(definition: Signature, s: TypingState) as list<int> := {
+# Erasure (notes/coc-t5f.md T5f3): a parameter the run has no use for emits nothing: one whose values are proofs, its
+# type a proposition or a statement only a proof decides, as the run would only pass it `yes` (calls.wap proof_held),
+# a read of it the truth it held; and a type, or an index other types name (`n` of `xs: vector(int, n)`), that the
+# body never reads. Its function takes it no more and each call drops the argument there, running before the call an
+# argument that calls. A function a host or a function value calls keeps every parameter, as they pass them all
+erased_places(definition: Signature, s: TypingState) as list<int> := {
+	if has_fact(definition.definer, EXPORTED_AS) or s.valued_functions.contains(definition.key) { return [] }
 	parameters = parameters_in(definition, s)
-	(1 to #definition.parameters).filter(at => is_proof_type(definition.parameters#at) or (definition.parameters#at == STATEMENT_TERM and not is_decided(declared_type(parameters#at)!, s)))
+	(1 to #definition.parameters).filter(at => is_proof(definition, parameters#at, at, s) or is_unread_index(definition, parameters#at, at, s))
 }
-proofs_erased(define: Node, s: TypingState) as Node := match define {
+is_proof(definition: Signature, parameter: Node, at: int, s: TypingState) as bool := is_proof_type(definition.parameters#at) or (definition.parameters#at == STATEMENT_TERM and not is_decided(declared_type(parameter)!, s))
+is_unread_index(definition: Signature, parameter: Node, at: int, s: TypingState) as bool := {
+	name = text(declared_name(parameter))
+	named = universe_level(definition.parameters#at) != ø or mentions_type(definition.result, [name]) or others_than(definition.parameters, [at]).any(type => mentions_type(type, [name]))
+	named and not reads(body_of(definition, s), [place_key(declared_name(parameter))])
+}
+body_of(definition: Signature, s: TypingState) as Node := match define_of(definition, s) { Define(name, parameters, body) => body }
+erased_parameters(define: Node, s: TypingState) as Node := match define {
 	Define(name, parameters, body) => {
-		places = proof_places(definition_keyed(function_key(define), s) ?? return define, s)
+		places = erased_places(definition_keyed(function_key(define), s) ?? return define, s)
 		if places is empty { return define }
 		items = items_of(parameters)
 		erased = places.map(at => place_key(declared_name(items#at)))
@@ -456,14 +468,20 @@ proofs_erased(define: Node, s: TypingState) as Node := match define {
 	_ => define
 }
 others_than(items: list, places: list<int>) as list := (1 to #items).filter(at => not places.contains(at)).map(at => items#at)
-proofs_read(n: Node, erased: list<text>) as Node := if n is symbol and fact_of(n, DEFINED_AT) != ø and erased.contains(place_key(fact_of(n, DEFINED_AT)!)) then with_type(placed_like(True, n), BOOL_TYPE) else refitted(with_parts(n, part => proofs_read(part, erased)), n)
-proofs_dropped(n: Node, s: TypingState) as Node? := match n {
+# a read of one of these places
+is_read_of(n: Node, keys: list<text>) as bool := n is symbol and fact_of(n, DEFINED_AT) != ø and keys.contains(place_key(fact_of(n, DEFINED_AT)!))
+reads(n: Node, keys: list<text>) as bool := is_read_of(n, keys) or direct_parts(n).any(part => reads(part, keys))
+proofs_read(n: Node, erased: list<text>) as Node := if is_read_of(n, erased) then with_type(placed_like(True, n), BOOL_TYPE) else refitted(with_parts(n, part => proofs_read(part, erased)), n)
+erased_arguments(n: Node, s: TypingState) as Node? := match n {
 	Call(called, arguments) => {
-		places = proof_places(definition_keyed(place_key(fact_of(called, DEFINED_AT) ?? return ø), s) ?? return ø, s)
+		key = place_key(fact_of(called, DEFINED_AT) ?? return ø)
+		definition = definition_keyed(key, s)
+		if definition == ø and is_bound(called, DefinitionKind.Function) { refused(called, "${text(called)} names a function compiling holds no definition of, at ${key}") }
+		places = erased_places(definition ?? return ø, s)
 		if places is empty { return ø }
 		call = refitted(Call(called, others_than(arguments, places)), n)
-		checks = places.map(at => arguments#at).filter(argument => not argument is True)
-		if checks is empty then call else with_type_of(refitted(Block(checks + [call]), n), value_type(n))
+		runs = places.map(at => arguments#at).filter(argument => argument is Call)
+		if runs is empty then call else with_type_of(refitted(Block(runs + [call]), n), value_type(n))
 	}
 	_ => ø
 }
