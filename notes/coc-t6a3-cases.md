@@ -96,3 +96,11 @@ function's result (terms.wap): `term_of(typed_form(item, s, frame, ø), reading)
 Risks (unbuilt): typed_form on an index whose letter's DEFINED_AT is a node no typing pass met may refuse the symbol as
 unknown; `by_key` is empty at this point (functions are given, `distinct_instances` ran), so a user function in an index
 needs `s.functions` as `by_key`.
+
+## F3 built (unbuilt, GUESSes)
+`enums_entered(records, s)` threads the TypingState down to `case_read`. `index_read(item, case, found, s)` reads an index
+as `family_read` reads a function's result: each found letter of a value type is substituted by a definer (`found_definer`:
+a parameter named by the case's name, DEFINED_AT itself), typed by `typed_form` in a frame binding those definers, read by
+`term_of` under an Entering over locals at the letters' domains (functions from `instances_keyed(s.functions)`), the
+locals then replaced by the letters' constants for `block_named`. `index_read`'s number/`+` reading and `constructed` are
+gone. GUESS: typed_form on a constructor of a not yet declared block (`Even(nat.zero)` inside its own block) may refuse.
