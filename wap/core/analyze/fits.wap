@@ -196,14 +196,6 @@ converted(n: Node, wanted: Term, s: TypingState, at: Node, place: text) as Node 
 	if way == Conversion.Checked and unrefined(wanted) != wanted { return checked_refined(n, given, wanted, at, s, place) }
 	if way == Conversion.Checked then with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [n]), n), wanted) else repacked(n, way, wanted, s)
 }
-# the function telling whether a value meets an item type's condition and those of the subtypes it is a subtype of
-item_holds(item: Term, n: Node, s: TypingState) as Node := {
-	name = name_once("holds(${type_text(item, yes)})", n, s)
-	parent = narrowed_type(item)!
-	rest = if subset_condition(parent) != ø then item_holds(parent, n, s) else ø
-	written_once(name, [unrefined(item)], reads => If(narrowing_test(reads#1, item, n, s), if rest == ø then True else Call(rest!, [reads#1]), False), BOOL_TERM, s)
-	name
-}
 # a list given where its refinement's parent list is wanted: a copy of a literal, any other list (a named place, a
 # call's result, which may be a list the program holds) is copied only where written, `xs as list<int>`, the type's
 # call (made), as a callee changing the copy would leave the list unchanged
@@ -212,7 +204,22 @@ copied(n: Node, wanted: Term, at: Node, s: TypingState) as Node := {
 	if not is_new_list(n) { refused(at, "${n} is a list of its own: write `${n} as ${type_text(wanted)}` where a copy of it is wanted") }
 	copy_of(n, wanted, s)
 }
-copy_of(n: Node, wanted: Term, s: TypingState) as Node := with_type_of(word_called(n, COPY_WORD, [n], ø, s), wanted)
+copy_of(n: Node, wanted: Term, s: TypingState) as Node := copy_call(n, value_type(n) ?? wanted, wanted, n, s)
+# a list copied as the list of the refinement wanted, each list in it a copy too, so no change of the copy reaches the
+# original: a list of items by `copy`, a list of lists by one function for each pair of types, which copies each item
+copy_call(read: Node, given: Term, wanted: Term, n: Node, s: TypingState) as Node := {
+	if not holds_lists(wanted) { return with_type_of(word_called(n, COPY_WORD, [read], ø, s), wanted) }
+	with_type_of(word_called(n, text(deep_copy(given, wanted, n, s)), [read], ø, s), wanted)
+}
+# whether a type is a list of lists
+holds_lists(type: Term) as bool := type_word(type) == LIST_TYPE and item_type(type) != ø and type_word(item_type(type)!) == LIST_TYPE
+deep_copy(given: Term, wanted: Term, n: Node, s: TypingState) as Node := {
+	name = name_once("copied(${type_text(given, yes)} to ${type_text(wanted, yes)})", n, s)
+	item_given = item_type(given)!
+	item_wanted = item_type(wanted)!
+	written_once(name, [given], reads => with_type_of(Call(symbol("map"), [reads#1, if holds_lists(item_wanted) then deep_copy(item_given, item_wanted, n, s) else symbol(COPY_WORD)]), wanted), wanted, s)
+	name
+}
 # a value made of the type written, `xs as list<int>`: the copy asked for where a list of a refinement is given for its
 # parent's list, else the conversion a place of the type makes
 type_made(value: Node, wanted: Term, s: TypingState, at: Node) as Node := {
@@ -224,11 +231,27 @@ type_made(value: Node, wanted: Term, s: TypingState, at: Node) as Node := {
 checked_refined(n: Node, given: Term, wanted: Term, at: Node, s: TypingState, place: text) as Node := {
 	cast = with_type_of(placed_like(Prim(symbol(CHECKED_CAST), [n]), n), unrefined(wanted))
 	if checkable(wanted) { return copy_checked(cast, wanted, at, s) }
-	if conversion(unrefined(wanted), wanted, s) in [Conversion.Narrowed, Conversion.Wrapped] { return converted(cast, wanted, s, at, place) }
+	if base_of_optional(wanted) != ø { return optional_checked(cast, wanted, at, s, place) }
+	if conversion(unrefined(wanted), wanted, s) == Conversion.Narrowed { return converted(cast, wanted, s, at, place) }
 	refused(at, "a cast out of ${type_text(given)} cannot check ${type_text(wanted)} yet")
+}
+# an optional of a refinement, `positive?`, from its parent's optional: ø stays ø, a value is converted the way a value
+# of the refinement's base is, by one function for each type
+optional_checked(cast: Node, wanted: Term, at: Node, s: TypingState, place: text) as Node := {
+	base = base_of_optional(wanted)!
+	name = name_once("${NARROWING_WORD}(${type_text(wanted, yes)})", cast, s)
+	written_once(name, [unrefined(wanted)], reads => If(word_called(cast, MISSING_WORD, [reads#1], BOOL_TERM, s), with_type_of(Empty, EMPTY_TERM), converted(with_type_of(word_called(cast, REQUIRED_WORD, [reads#1], ø, s), unrefined(base)), base, s, at, place)), wanted, s)
+	word_called(cast, text(name), [cast], wanted, s)
 }
 # whether a list's items have a condition, or are lists whose items do
 checkable(wanted: Term) as bool := type_word(wanted) == LIST_TYPE and (subset_condition(item_type(wanted)) != ø or item_type(wanted) != ø and checkable(item_type(wanted)!))
+# the function telling whether a value is of an item type, its condition and those of the subtypes it is of, as
+# narrowing_test asks them, written once for each type
+item_holds(item: Term, n: Node, s: TypingState) as Node := {
+	name = name_once("holds(${type_text(item, yes)})", n, s)
+	written_once(name, [unrefined(item)], reads => narrowing_test(reads#1, item, n, s), BOOL_TERM, s)
+	name
+}
 # the function telling whether all the items of a list of this type meet its item type's condition, written once for
 # each type: a list of lists asks that of each item by the function of the item's type
 items_hold(wanted: Term, n: Node, s: TypingState) as Node := {
@@ -242,7 +265,7 @@ items_hold(wanted: Term, n: Node, s: TypingState) as Node := {
 # naming the place, then the copy; one function for each type
 copy_checked(n: Node, wanted: Term, at: Node, s: TypingState) as Node := {
 	name = name_once("${COPY_WORD}(${type_text(wanted, yes)})", n, s)
-	written_once(name, [unrefined(wanted), TEXT_TERM], reads => If(Call(items_hold(wanted, n, s), [reads#1]), with_type_of(Call(symbol(COPY_WORD), [reads#1]), wanted), raising(reads#2, name, s)), wanted, s)
+	written_once(name, [unrefined(wanted), TEXT_TERM], reads => If(Call(items_hold(wanted, n, s), [reads#1]), copy_call(reads#1, unrefined(wanted), wanted, n, s), raising(reads#2, name, s)), wanted, s)
 	word_called(n, text(name), [n, message_given(other_shape(wanted, at, s), at)], wanted, s)
 }
 # whether a wasm row on whole numbers is the code, its result a word wherever the word is wanted
