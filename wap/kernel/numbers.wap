@@ -52,7 +52,8 @@ whole_numeral(e: Environment, size: Magnitude, negative: bool): Term := {
 	if negative and not is_zero(size) then apply(i.negative, count_literal(difference(size, ONE))) else apply(i.natural, count_literal(size))
 }
 # a function bound to a shortcut
-class BoundFunction { function: Term; kind: Shortcut }
+# a function a shortcut binds, its kind and the statements fixing the shortcut's functions, read once (equation_fired)
+class BoundFunction { function: Term; kind: Shortcut; statements: list<Term> = [] }
 
 # The free variables a theorem's statement is built with, made its binders when the statement uses them
 class Quantified { id: int; binder: text }
@@ -145,7 +146,7 @@ shortcut_declared(e: Environment, kind: Shortcut, functions: list<Term>, theorem
 	statements = shortcut_statements(e, kind, functions)
 	if #theorems != #statements { refused(SHORTCUT, "${kind} is fixed by ${#statements} theorems, and is given ${#theorems}") }
 	for at in 1 to #statements { theorem_fixes(e, theorems#at, statements#at) }
-	for at in 1 to #kinds { n.shortcuts += [BoundFunction(functions#at, kinds#at)] }
+	for at in 1 to #kinds { n.shortcuts += [BoundFunction(functions#at, kinds#at, statements)] }
 }
 
 TYPE := type_at(Zero)
@@ -318,8 +319,7 @@ equation_fired(c: Checker, t: Term): Term? := {
 	n = c.environment.numbers ?? return ø
 	id = match head(t).shape { Constant(name, levels, id) => id; _ => ø }
 	bound = n.shortcuts.find(one => constant_id(one.function) == id) ?? return ø
-	kind = if bound.kind == Shortcut.Remainder then Shortcut.Divide else bound.kind
-	for statement in shortcut_statements(c.environment, kind, bound_kinds(kind).map(each => bound_function(n, each)!)) {
+	for statement in bound.statements {
 		binders = binder_count(statement)
 		sides = arguments(statement_body(statement))
 		taken: map<int, Term> = {}
@@ -331,26 +331,25 @@ equation_fired(c: Checker, t: Term): Term? := {
 	ø
 }
 # a side's part against a term: a binder takes it (the same term wherever it is named again), a constant applied fits
-# that constant applied, each argument computed to its case where the part names one
+# that constant applied, each argument computed to its case where the part names one, as iota opens a major premise
 fitted(c: Checker, part: Term, t: Term, taken: map<int, Term>): bool := {
-	match part.shape {
-		Bound(index) => {
-			if taken.has(index) { return equal(c, taken[index]!, t) }
-			taken[index] = t
-			return yes
-		}
-		_ => ø
+	if is_binder(part) {
+		index = binder_index(part)
+		if taken.has(index) { return equal(c, taken[index]!, t) }
+		taken[index] = t
+		return yes
 	}
 	parts = arguments(part)
 	given = arguments(t)
 	if not same(head(part), head(t)) or #parts != #given { return no }
 	for at in 1 to #parts {
-		argument = if is_binder(parts#at) then given#at else as_case(c, computed(c, given#at))
+		argument = if is_binder(parts#at) then given#at else case_computed(c, given#at)
 		if not fitted(c, parts#at, argument, taken) { return no }
 	}
 	yes
 }
 is_binder(t: Term): bool := match t.shape { Bound(index) => yes; _ => no }
+binder_index(t: Term): int := match t.shape { Bound(index) => index; _ => -1 }
 binder_count(t: Term): int := match t.shape { Pi(binder, domain, body) => 1 + binder_count(body); _ => 0 }
 statement_body(t: Term): Term := match t.shape { Pi(binder, domain, body) => statement_body(body); _ => t }
 

@@ -20,12 +20,16 @@ use "terms.wap"
 
 # the function being read, the place of the parameter its recursion takes apart, and inside a course's step that
 # parameter's value `held` with the step's variable `of` standing for the value taken apart, and the parameter's
-# values at the fields of the case whose values below hold hypotheses, in the order of those values
-class Recursion { key: text; place: int; held: Term? = ø; of: Term? = ø; fields: list<Term> = [] }
+# values at the fields of the case whose values below hold hypotheses, in the order of those values, and the checker
+# its reading computes by the count's equations with, one per recursion (kernel equating)
+class Recursion { key: text; place: int; held: Term? = ø; of: Term? = ø; fields: list<Term> = []; equating: Checker? = ø }
 # the binder of the values below the case's value, which the match rides
 BELOW_BINDER = "·below"
 # how many times a choice may take values apart before its condition decides
 GUARD_DEPTH = 4
+# the checker a recursion's reading computes by the count's equations with: the recursion's own, made once, so its
+# budget and memories serve the whole reading
+equations_checker(x: Entering) as Checker := (x.recursion ?? return equating(x.c)).equating ?? equating(x.c)
 
 # a function whose body matches one of its parameters, or chooses by a condition that waits on one, as the course of
 # that parameter's enum; ø for any other (x: the reading under the function's parameters)
@@ -41,11 +45,11 @@ course_defined(typed: TypedFunction, body: Node, x: Entering) as Term? := match 
 		}
 	}
 	If(condition, then_part, else_part) => {
-		by_equations = equating(x.c)
+		by_equations = equations_checker(x)
 		waiting = waiting_on(by_equations, computed(by_equations, term_of(condition, x) ?? return ø)) ?? return ø
 		place = x.variables.index_where(variable => same(variable, waiting))
 		if place <= 0 { return ø }
-		guard_read(body, condition, then_part, else_part, reread(x, x.binders, x.variables, Recursion(instance_key(typed), place)))
+		guard_read(body, condition, then_part, else_part, reread(x, x.binders, x.variables, Recursion(instance_key(typed), place, equating: by_equations)))
 	}
 	_ => ø
 }
@@ -55,7 +59,7 @@ course_defined(typed: TypedFunction, body: Node, x: Entering) as Term? := match 
 # natural(successor(c)), n - 1 computing to natural(c), the hypothesis for c. The reading computes by the count's
 # equations too (kernel equating): Lean's m - 1 waits on m where its equations give the count before
 guard_read(n: Node, condition: Node, then_part: Node, else_part: Node, x: Entering, depth: int = 0) as Term? := {
-	by_equations = equating(x.c)
+	by_equations = equations_checker(x)
 	value = computed(by_equations, term_of(condition, x) ?? return ø)
 	verdict = truth_value(TYPES.environment, value)
 	if verdict != ø { return term_of(if verdict! then then_part else else_part, x) }
@@ -122,7 +126,7 @@ course_applied(typed: TypedFunction, place: int, variable: Term, domain: Term, m
 	step_others = others.map(at => entered(x.c, "_", replaced_by(locals#at.domain, recursed_id, step_value.variable)))
 	step_locals = [step_value, step_below] + step_others
 	held = replaced_by(x.variables#place, variable_id(variable), step_value.variable)
-	inside = reread(x, [x.binders#place, NO_BINDER] + others.map(at => x.binders#at), [held, step_below.variable] + variables(step_others), Recursion(instance_key(typed), place, held, step_value.variable))
+	inside = reread(x, [x.binders#place, NO_BINDER] + others.map(at => x.binders#at), [held, step_below.variable] + variables(step_others), Recursion(instance_key(typed), place, held, step_value.variable, equating: equations_checker(x)))
 	minors = block_of(TYPES.environment, domain, "course").block.types#1.cases.map(case => minor_for(named_id(TYPES.environment, case.name)!, riding, value => below_of(value), inside))
 	if minors.any(minor => minor == ø) { return ø }
 	step = lambdas(step_locals, apply(recursor_applied(domain, riding, minors.map(minor => minor!) + [step_value.variable]), step_below.variable))
@@ -136,7 +140,7 @@ recursive_called(called: Node, arguments: list, x: Entering) as Term? := {
 	r = x.recursion ?? return ø
 	if place_key(fact_of(called, DEFINED_AT) ?? return ø) != r.key or #arguments < r.place { return ø }
 	given = term_of(arguments#(r.place), x) ?? return ø
-	by_equations = equating(x.c)
+	by_equations = equations_checker(x)
 	at = r.fields.index_where(field => equal(by_equations, given, field))
 	if at <= 0 { return ø }
 	pair = TYPES.environment.products!.pair
