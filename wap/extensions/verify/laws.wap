@@ -116,14 +116,13 @@ axioms_asked(statement: Node, split: Split) as bool := match unwrapped(statement
 proof_apart(statement: Node, split: Split) as Node := {
 	axiom = axiom_function(statement)
 	if axiom != ø { split.laws += [axiom!]; split.proofs[axiom!] = symbol(AXIOM_WORD); return statement }
-	name = law_function(statement) ?? return statement
-	match statement {
-		Call(defines, parts) => match unwrapped(parts#2) {
-			Key(mark, applied, sides) => if text(mark) != PROOF_MARK then statement else {
-				split.proofs[name] = items_of(sides)#2
-				refitted(Call(defines, [parts#1, items_of(sides)#1]), statement)
-			}
-			_ => statement
+	law = law_read(statement) ?? return statement
+	match unwrapped(law.body) {
+		Key(mark, applied, sides) => if text(mark) != PROOF_MARK then statement else {
+			proof = items_of(sides)#2
+			split.proofs[law.name] = proof
+			# a proof that is a term, `choice(a)`, is the law's function itself, its statement its result type
+			if is_term_proof(proof) then law_written(LawRead(law.defines, law.head, law.name, law.applied, law.arguments, items_of(sides)#1, proof), law.name, law.arguments, proof, statement) else law_written(law, law.name, law.arguments, items_of(sides)#1, statement)
 		}
 		_ => statement
 	}
@@ -138,37 +137,35 @@ axiom_function(statement: Node) as text? := match statement {
 called_word(n: Node) as Node := match unwrapped(n) { Key(called, Op.None, group) => called; _ => n }
 # the name a definition's head declares, `choice` of `choice(a: Prop): a` and of `num: Type`
 head_word(declared: Node) as Node := match unwrapped(declared) { Key(head, Op.Colon, result) => called_word(head); _ => declared }
-# the name of a law's function a statement defines, ø for any other statement
-law_function(statement: Node) as text? := match statement {
-	Call(defines, parts) => match parts#1 {
-		Key(head, colon, result) => match unwrapped(head) {
-			Key(name, applied, arguments) => if text(name).starts_with(LAW_FUNCTION) then text(name) else ø
+# A law's function as a statement defines it, `law_x(a: int) := …`, its result written or not: its parts, ø for any
+# other statement
+class LawRead { defines: Node; head: Node; name: text; applied: Op; arguments: Node; result: Node?; body: Node }
+law_read(statement: Node) as LawRead? := match statement {
+	Call(defines, parts) => {
+		result = match parts#1 { Key(declared, Op.Colon, type) => type; _ => ø }
+		head = match parts#1 { Key(declared, Op.Colon, type) => declared; _ => parts#1 }
+		match unwrapped(head) {
+			Key(name, applied, arguments) => if text(name).starts_with(LAW_FUNCTION) then LawRead(defines, head, text(name), applied, arguments, result, parts#2) else ø
 			_ => ø
 		}
-		_ => ø
 	}
 	_ => ø
 }
-hypotheses_apart(statement: Node, split: Split) as list := match statement {
-	Call(defines, parts) => match parts#1 {
-		Key(head, colon, result) => match unwrapped(head) {
-			Key(name, applied, arguments) => {
-				if law_function(statement) == ø { return [statement] }
-				split.laws += [text(name)]
-				binders = items_of(arguments)
-				names = binders.map(binder => text(declared_name(binder)))
-				given = binders.filter(binder => is_hypothesis(binder, names, split.language))
-				if given is empty { return [statement] }
-				values = with_items(arguments, binders.filter(binder => not is_hypothesis(binder, names, split.language)))
-				function = (called: text, value: Node) => refitted(Call(defines, [Key(refitted(Key(symbol(called), applied, values), head), colon, result), value]), statement)
-				split.given[text(name)] = given.map(binder => Given(text(declared_name(binder)), "${name}${LAW_GIVEN}${declared_name(binder)}"))
-				[function(text(name), parts#2)] + given.map(binder => function("${name}${LAW_GIVEN}${declared_name(binder)}", declared_type(binder)!))
-			}
-			_ => [statement]
-		}
-		_ => [statement]
-	}
-	_ => [statement]
+# a law's function written again under a name, with these binders and this body, its result as the law wrote it
+law_written(law: LawRead, name: text, arguments: Node, body: Node, at: Node) as Node := {
+	head = refitted(Key(symbol(name), law.applied, arguments), law.head)
+	refitted(Call(law.defines, [if law.result == ø then head else Key(head, Op.Colon, law.result!), body]), at)
+}
+hypotheses_apart(statement: Node, split: Split) as list := {
+	law = law_read(statement) ?? return [statement]
+	split.laws += [law.name]
+	binders = items_of(law.arguments)
+	names = binders.map(binder => text(declared_name(binder)))
+	given = binders.filter(binder => is_hypothesis(binder, names, split.language))
+	if given is empty { return [statement] }
+	values = with_items(law.arguments, binders.filter(binder => not is_hypothesis(binder, names, split.language)))
+	split.given[law.name] = given.map(binder => Given(text(declared_name(binder)), "${law.name}${LAW_GIVEN}${declared_name(binder)}"))
+	[law_written(law, law.name, values, law.body, statement)] + given.map(binder => law_written(law, "${law.name}${LAW_GIVEN}${declared_name(binder)}", values, declared_type(binder)!, statement))
 }
 # whether a binder's annotation is a statement about the law's binders, a truth of them written with an operator of
 # the language, `h: a <= b`, `h: not (a <= b)`, `h: a and b`; a type, `x: T` or `e: Even(n)`, is a word or a call of
@@ -220,6 +217,11 @@ proof_word(proof: Node?) as text := match unwrapped(proof ?? return "") { Symbol
 # is refused by value type, naming the statement it proves and the one it should; `assume` declares the statement an
 # axiom of the law's name, which every law resting on it names (wiki/proof.md "What a proof rests on")
 proof_checked(e: Environment, law: TypedLaw, d: Declaration, proof: Node): TypedVerdict := {
+	# a proof term the kernel took as the law's function proves its type, the statement
+	if is_term_proof(proof) {
+		declared(e, Declaration(law.name, [], d.type, Theorem(constant(law.id!, law.key, []))))
+		return Holds
+	}
 	statement = law_statement(e, d.type, unfolding(d)!, law.given)
 	taken = taken_as(proof)
 	if taken != ø {
@@ -238,6 +240,8 @@ proof_term(e: Environment, statement: Term, proof: Node): Term? := match unwrapp
 		proof_found(elaboration(e, []), statement, laws) ?? refused(PROOF_REFUSED, "by ${named.join(", ")}: the provers find no proof of ${shown(statement)} from ${named.join(", ")}")
 	}
 }
+# whether a proof is a term to check, `choice(a)` or `h`, not a word wap verify takes, `refl`, `axiom`, or `by` laws
+is_term_proof(proof: Node) as bool := by_named(proof) == ø and not (proof_word(proof) in [REFL_WORD, AXIOM_WORD, ASSUME_WORD])
 # the laws a `by` names, as the reader wrote them: `by a`, `by a, b`, `by(a, b)`; ø for another proof
 by_named(proof: Node) as list<Node>? := match unwrapped(proof) {
 	Key(called, applied, arguments) => if text(called) == BY_WORD then items_of(arguments) else ø

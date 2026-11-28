@@ -68,7 +68,19 @@ kernel_signature(typed: TypedFunction, s: TypingState) as Term? := {
 	parameters = typed.arguments.map(type => settled_type(type, s))
 	result = kernel_settled(typed.result ?? return ø, s)
 	if (parameters + [result]).any(type => has_letters(type) or has_unknowns(type)) { return ø }
-	parameters.reverse.fold(result, (body, parameter) => pi("_", parameter, body))
+	names = match typed.define { Define(name, written, body) => items_of(written).map(parameter => text(declared_name(parameter))); _ => return ø }
+	binders_closed((1 to #names).map(at => Binding(names#at, parameters#at)), result, [])
+}
+# a function type over its binders, each a type the ones after it and the result may name: `(a: Prop) -> a`, the
+# names bound already in `bound`
+binders_closed(binders: list<Binding>, result: Term, bound: list<Binding>) as Term := {
+	c = checker(TYPES.environment, [])
+	variables: list<Term> = []
+	for binder in binders {
+		variables.add(hypothesis(c, binder.key, type_substituted(binder.type, bound)))
+		bound.add(Binding(binder.key, variables.last!))
+	}
+	closed_over(c, type_substituted(result, bound), variables, no)
 }
 # a pure function's value, the function of its parameters its body computes; ø for any other
 definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := match typed.define {
@@ -77,7 +89,9 @@ definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 		if kernel_value(body) != kernel_settled(typed.result ?? return ø, s) { return ø }
 		names = items_of(parameters).map(parameter => declared_name(parameter))
 		value = term_of(body, Entering(names.map(place_key), by_key, s)) ?? return ø
-		(1 to #names).reverse.fold(value, (inner, at) => lambda(text(names#at), settled_type(typed.arguments#at, s), inner))
+		# each parameter's type names the ones before it as the bound variables they are inside the function
+		domain = (at: int) => type_substituted(settled_type(typed.arguments#at, s), (1 .. at).map(before => Binding(text(names#before), bound(at - 1 - before))))
+		(1 to #names).reverse.fold(value, (inner, at) => lambda(text(names#at), domain(at), inner))
 	}
 	_ => ø
 }
