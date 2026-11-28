@@ -199,11 +199,11 @@ wap/
     rules.wap                 the rule files a build loads beyond every program's: foreign lines, laws
     verify_rules.wap          the rule files `wap verify` loads in their place: foreign lines, each law a function
     laws.wap, law_runs.wap    a law a hint verify tests: `law` read as a function, each law run on trial values
-    verify/                   `wap verify`: the door reading programs with laws through analyze's terms (verify.wap, laws.wap, options.wap: `--tree <root>` or `--seed <folder>`)
+    proof/verify/             `wap verify`: the door reading programs with laws through analyze's terms (verify.wap, laws.wap, options.wap: `--tree <root>` or `--seed <folder>`)
     theory/                   what stays of the dependent type theory beside the compiler (notes/theory.md "Files")
       below.wap               the statements that bind names, below and course
       export.wap, second/     what the kernel accepted written as lean4export records, and the second checker that reads them
-    prove/                    the provers: a goal to a proof term, tried in order (notes/coc-plan.md 3.5 and 8)
+    proof/prove/              the provers: a goal to a proof term, tried in order (notes/coc-plan.md 3.5 and 8)
       goals.wap, prove.wap    the goal and the order the provers run in
       facts, computing, rewriting, introduction, induction, linear, apart   the ways to prove (wiki/proof.md)
     wasm/                     a compiled wap module used as its source

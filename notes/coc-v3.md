@@ -15,13 +15,13 @@ provers prove under `wap check` loses its run check and its Fail. Read on unify-
 
 - **Laws as lemmas are there.** The provers' facts are `laws_of(goal)`: the named laws plus `proved_laws(el.c)`, every
   law the kernel holds as a theorem (goals.wap:99-106). `law_proved` declares each proved law as a theorem of its own
-  name (verify/laws.wap:135-140). The law.md pair's red line (wap/test_theory_connectives_wanted:9) waits on its parts:
+  name (proof/verify/laws.wap:135-140). The law.md pair's red line (wap/test_theory_connectives_wanted:9) waits on its parts:
   - `fact` as a kernel definition: T5c4's guard reading;
   - `implies` with a hypothesis: T6a2's `chosen_decided`;
   - the induction along fact's recursion: there, test_theory_induction:14.
 - **A law's call** is T6a1's (notes/coc-t6a12.md).
 - **Obligations never meet the provers.** `wap check` is a compiler command, and the compiler never loads
-  extensions/prove.
+  extensions/proof/prove.
 
 ## The plan
 
@@ -29,7 +29,7 @@ provers prove under `wap check` loses its run check and its Fail. Read on unify-
    holds. A law that is only Tested or Untested is the bool function of its binders, and its call proves nothing.
    It is refused: `refused by unproved law: guess is Tested, so it proves nothing`. verify +4.
 2. **`wap check` through the proof door.** check moves from a compiler command to a door beside verify.wap. It shares
-   `door_arguments` and the typed front (`laws_typed`'s first half), and loads extensions/prove.
+   `door_arguments` and the typed front (`laws_typed`'s first half), and loads extensions/proof/prove.
    - It types the program, proves its laws as verify does, so proved laws are facts, then makes each obligation left
      a Goal: the narrowing's condition at its value, under the facts at its place (T4b's findings, the parameter's
      condition).
@@ -70,9 +70,9 @@ test_theory_verify. V3 after V2, T6a1 (a law's call) and T4d1 (the obligations i
 
 **What 5285eb86 holds.**
 - Laws as lemmas work as the plan above says.
-  - law_proved (verify/laws.wap:171) proves a law with `proof_found(elaboration(e, []), statement, [])`
-    (prove/prove.wap:18) and declares the proof as a Theorem of the law's name.
-  - laws_of (prove/goals.wap:106) gives every later goal `proved_laws`: Theorems, plus axioms stating a proposition.
+  - law_proved (proof/verify/laws.wap:171) proves a law with `proof_found(elaboration(e, []), statement, [])`
+    (proof/prove/prove.wap:18) and declares the proof as a Theorem of the law's name.
+  - laws_of (proof/prove/goals.wap:106) gives every later goal `proved_laws`: Theorems, plus axioms stating a proposition.
   - instance_of (goals.wap:50) instantiates a law's binders with holes, and applied_law unifies its conclusion with the
     goal.
 - An obligation is only a line of text.
@@ -85,7 +85,7 @@ test_theory_verify. V3 after V2, T6a1 (a law's call) and T4d1 (the obligations i
   raises on the first line.
 - Each obligation the compiler can already discharge by itself (an if's finding, a parameter's own condition;
   test_check:9-12) never reaches the list. V3 only has to prove what is left.
-- law_statement (verify/laws.wap:228-236) already states a function of binders as "yes for every value", with a
+- law_statement (proof/verify/laws.wap:228-236) already states a function of binders as "yes for every value", with a
   subtype binder's condition as a hypothesis (hypothesized, :238-243).
 
 **The one decision.** An obligation is a law of the function it sits in: "for every value of that function's
@@ -126,7 +126,7 @@ parameters, the condition holds of the argument".
    - check door +22.
 4. **The compiler's check command goes, and native runs the door** (driver.wap:250 `Action.Check` as Verify's).
    - core −6 (compiler.wap:139-146), native +3.
-5. **A proof calling an unproved law is refused** (verify/laws.wap proof_term's call branch).
+5. **A proof calling an unproved law is refused** (proof/verify/laws.wap proof_term's call branch).
    - A proof term whose head names a law with no Theorem in e (`declaration(e, name)!.kind is not Theorem`) is
      refused: `refused by unproved law: guess is Tested, so it proves nothing`.
    - It is the same lookup `by_named` already does (:202), with its refusal text. verify +4.

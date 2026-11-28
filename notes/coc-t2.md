@@ -32,12 +32,12 @@ unaffected (see "The seed rule").
 
 ## What stays in wap/extensions/theory
 
-- **The door** is wap/extensions/verify (verify.wap, laws.wap, options.wap): a program's laws judged by the kernel.
+- **The door** is wap/extensions/proof/verify (verify.wap, laws.wap, options.wap): a program's laws judged by the kernel.
 - **The courses** (`products(Pair, Unit)` and the course-of-values definitions) are ordinary definitions that the
   kernel checks, so they are not trusted code; core/analyze/courses.wap makes them.
 - **export.wap (103) and second/ (1,211).** The second opinion. T7 moves them to wap/extensions/proof. second/
   keeps its own unbounded numbers, because its job is to be independent of the kernel.
-- **wap/extensions/prove (951).** The provers use wap/kernel, and move to wap/extensions/proof at T7.
+- **wap/extensions/proof/prove (951).** The provers use wap/kernel.
 
 ## The persistent environment by id
 
@@ -94,7 +94,7 @@ class Environment {
 **Deleted by this:**
 - in the kernel: `copied` (13 lines), `reach_of` and `withdrawn`, the `places` and `declarations` maps, and the copy
   in inductive.wap `holding` and recursors.wap's axioms (the block's types are variables); with T2d `names_new` (6) and `ids`;
-- in prove/goals.wap: the reach/withdraw pair (`kept_if_given`);
+- in proof/prove/goals.wap: the reach/withdraw pair (`kept_if_given`);
 
 **Not deleted.** `refused_names` is not a rollback: it remembers why a refused name is missing so that a later use
 can say so. Analyze needs the same mechanism (a name declared in a refused statement).
@@ -180,7 +180,7 @@ The kernel holds magnitude (wap/kernel/magnitude.wap, `use "magnitude.wap"` in t
   refresh for T2 (coc-plan 11, "T1 and T2 change the kernel the seed reads") is not needed, so each sub-step lands
   on the normal path plus the census.
 - The moved files enter the census's and the size ratchet's scope automatically, because test/wap/compile.sh's
-  `compiler_sources` excludes only extensions/theory and extensions/prove. This is theory-switch's census note:
+  `compiler_sources` excludes only extensions/theory and extensions/proof/{prove,verify}. This is theory-switch's census note:
   the size ceiling (SIZE_NODES, 143,077 today) rises by the kernel's measured nodes (21,312 as moved) in the same
   commit as the move, and the typing census covers the kernel from then on. Every later sub-step measures again
   (scripts/wap-size.warp over `compiler_sources`) and sets SIZE_NODES to what it measured, in its own commit.

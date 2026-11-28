@@ -163,7 +163,7 @@ The files use each other freely: computing, equality and typing call one another
   each checked as it is declared: `equality_declared`, `logic_declared`, `count_declared`, `int_declared`. Their own
   names carry the mark `·`, so no program writes or meets them; `Equal` is the one a law states.
 - `equated(e, level, type, a, b)`: `Equal(type, a, b)`; `truth_stated(e, value)`: the proposition that a bool is yes.
-- `integer_laws_ready(e)`: int's laws declared once, before the first goal a prover is given (prove/goals.wap).
+- `integer_laws_ready(e)`: int's laws declared once, before the first goal a prover is given (proof/prove/goals.wap).
 
 ## Rules every file keeps
 

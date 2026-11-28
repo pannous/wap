@@ -493,7 +493,7 @@ kernel"). The second checker still reads magnitude, and magnitude's header still
    depth only if a target line needs it.
 
 Measures to report (track T has no limits): linear.wap's net lines (nat's parts out, int's in; about +20 net),
-wap/types' lemmas (about +90), the rest of prove/ 0, and prover time on the target tests before and after.
+wap/types' lemmas (about +90), the rest of proof/prove/ 0, and prover time on the target tests before and after.
 
 ## Not part of M2b
 

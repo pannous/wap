@@ -34,7 +34,7 @@ computing to `double(natural(c)) + 2`, which is what both proofs below need.
 
 ## The hypothesis a subtype binder brings, in a written proof
 
-verify/laws.wap already states a law without a proof under its binders' conditions. `hypothesized` (laws.wap:153)
+proof/verify/laws.wap already states a law without a proof under its binders' conditions. `hypothesized` (laws.wap:153)
 puts `Π n_holds: (n >= 0) == yes` after a binder of a subtype. A law with a written proof is a function, and its kernel
 type erases nat to int (core/analyze/terms.wap:157 `kernel_type`), so today it takes no hypothesis. T6a4 adds:
 
@@ -113,7 +113,7 @@ counting it.
 | **total** | **about +92** | **0** |
 
 (4) needs apart's term builder (apart.wap:31-55) in reach of core's match reading. Today it sits in
-extensions/prove. Two ways:
+extensions/proof/prove. Two ways:
 - **A (decided, track T):** move the builder into wap/kernel/, beside recursors.wap. That is kernel +25 and prove
   −25, net 0. The prover stays in apart.wap and calls it. The builder only makes a proof term: the kernel's checker
   judges it like any other value (typing.wap `declared`), so the trust base stays where it is.

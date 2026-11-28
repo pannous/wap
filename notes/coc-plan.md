@@ -1346,9 +1346,9 @@ the same word).
 What the batch (typed-by-result bf172282) already holds:
 - core enters a statement-typed parameter as its truth under the parameters before it (calls.wap statement_held,
   terms.wap parameters_entered), so a law's own function type is already `Π a, Π b, Π h: (a <= b) == yes, …`;
-- law_statement puts each subtype binder's condition as a premise (`n_holds`, verify/laws.wap condition_held);
+- law_statement puts each subtype binder's condition as a premise (`n_holds`, proof/verify/laws.wap condition_held);
 - the run skips a trial where a hypothesis is no (law_runs.wap, test_law_runs:34, :36 green);
-- proved and assumed laws are the provers' facts (prove/goals.wap laws_of, proved_laws);
+- proved and assumed laws are the provers' facts (proof/prove/goals.wap laws_of, proved_laws);
 - green: test_theory_verify:47 (an int hypothesis), :61 kept_bound (a nat hypothesis is its own proof).
 
 The plan, one mechanism twice: a hypothesis is a parameter of statement type, and nothing else is.
@@ -1507,7 +1507,7 @@ example stays red. C2 needs T5's classes with type arguments (the trait's struct
 **Beside the dedup and the exact-big-literals landing.**
 - The dedup (unify-dedup: the equation toolkit and the regrouper shared by kernel/counting.wap,
   extensions/proof/prove/integer_laws.wap and extensions/proof/prove/linear.wap) touches none of T6a7, V1, V2, C1, C2, C4 or Q1's
-  files, so these run in parallel with it. V3 touches extensions/prove (goals.wap, facts.wap), so it starts after the dedup lands. Of
+  files, so these run in parallel with it. V3 touches extensions/proof/prove (goals.wap, facts.wap), so it starts after the dedup lands. Of
   T6a, T6a4 starts after it (a nat subject goes through int's case split in counting.wap); T6a3, T6a5 and T6a6 run
   beside it.
 - exact-big-literals touches the reader, kernel/numbers.wap, kernel/show.wap and lib/magnitude.wap; no T6 step does.
