@@ -143,8 +143,10 @@ class TypingState {
 	assigned_values: map<text, list<Node>> = {}
 	counters: map<text, Node> = {}
 	bounds_found: map<text, Bounds?> = {}
-	# the carried words typed so far (runtime_asked)
-	asked_words: list<text> = []
+	# where typing met code the emitter writes a carried word for, and whether this pass typed them all first
+	# (carried_noted)
+	carried_sites: list<CarriedSite> = []
+	carried_typed: bool = no
 	# the globals the program gives values of other types, by key, and the functions' reads of globals
 	rebound_globals: list<text> = []
 	function_globals: list<Node> = []
@@ -245,6 +247,7 @@ typed_among(program: Block, library: list, rules: KindRules, library_scopes: map
 	back_to(s.el, Found({}, {}, [], [], []))
 	s.members = before.members
 	s.boxed = before.boxed.drop(0)
+	s.carried_typed = before.carried_typed
 	s.kind_rules = rules
 	s.library_scopes = library_scopes
 	s.ids = definers_of(program)
@@ -261,7 +264,6 @@ typed_among(program: Block, library: list, rules: KindRules, library_scopes: map
 	global_reads_checked(s)
 	conditions = conditions_typed(s)
 	if s.refusals { refusals_kept(s) }
-	for retyping in s.retypings { hint(retyping) }
 	statements = library_typed + statements_in(typed)
 	if strategy_of(s).dispatchers_exported { exported_dispatchers(defined, s) }
 	if s.unknowns is not empty { all_settled(s) }
@@ -273,6 +275,11 @@ typed_among(program: Block, library: list, rules: KindRules, library_scopes: map
 	entered = instances_entered(s.functions, s)
 	conditions_entered(conditions, entered, s)
 	obligations_entered(entered, s)
+	if carried_needed(s) {
+		s.carried_typed = yes
+		return typed_among(program, library, rules, library_scopes, signatures, s)
+	}
+	for retyping in s.retypings { hint(retyping) }
 	obligations.clear()
 	obligations.extend(s.obligations.filter(obligation => obligation.verdict == ø and obligation.row == ø))
 	effects_written(s)
@@ -283,25 +290,42 @@ typed_among(program: Block, library: list, rules: KindRules, library_scopes: map
 	if s.unknowns is not empty then settled_everywhere(whole, s) else whole
 }
 # the library's functions the emitter calls itself (kernel/primitives.wap RUNTIME_WORDS), typed as a call would: the
-# text words before the program, each carried word (kernel/scalars.wap CARRIED_WORDS) once typing meets code the
-# emitter writes it for, so a program types none it never needs
-runtime_typed(library: list, s: TypingState) := for definition in library.filter(define => runtime_named(text(defined_name(define)))).map(define => held_function(define, s)).filter(held => typed_first(held)) { function_typed(definition, definition.parameters, s, define_of(definition, s)) }
-typed_first(held: Signature) as bool := {
+# text words before the program; the carried words (kernel/scalars.wap CARRIED_WORDS) only in a pass after one whose
+# verdicts left carried code the program reaches (carried_needed), so a program whose every int row fits types none
+runtime_typed(library: list, s: TypingState) := for definition in library.filter(define => runtime_named(text(defined_name(define)))).map(define => held_function(define, s)).filter(held => typed_first(held, s)) { function_typed(definition, definition.parameters, s, define_of(definition, s)) }
+typed_first(held: Signature, s: TypingState) as bool := {
 	word = runtime_word(held.name, held.parameters) ?? return no
-	not CARRIED_WORDS.contains(word)
+	s.carried_typed or not CARRIED_WORDS.contains(word)
 }
-# a carried word typed, once, where ints are exact (core/emit/strategy.wap exact_ints); one the library lacks is the
-# emitter's to refuse, naming it (core/emit/primitives.wap runtime_call)
-runtime_asked(word: text, s: TypingState) := {
-	if not strategy_of(s).exact_ints or s.asked_words.contains(word) { return }
-	s.asked_words.add(word)
-	definition = s.definitions.find(held => held.kind == DefinitionKind.Function and runtime_word(held.name, held.parameters) == word) ?? return
-	function_typed(definition, definition.parameters, s, define_of(definition, s))
-}
-# a typed node, the carried words the emitter writes for it asked first
+# code the emitter writes a carried word for, in the function of this key (ø: a function's ints crossing to the host)
+class CarriedSite { word: text; within: text? }
+# a site noted where ints are exact (core/emit/strategy.wap exact_ints) and this pass types the carried words only
+# once verdicts ask for them
+carried_noted(word: text, within: text?, s: TypingState) := { if strategy_of(s).exact_ints and not s.carried_typed { s.carried_sites.add(CarriedSite(word, within)) } }
+# a typed node, the carried words the emitter writes for it noted
 words_asked(typed: Node, s: TypingState) as Node := {
-	for word in carried_words_of(typed) { runtime_asked(word, s) }
+	for word in carried_words_of(typed) { carried_noted(word, s.within, s) }
 	typed
+}
+# whether the program reaches carried code, so a pass more types the carried words; where it does not, each row
+# function's instances leave, every call of them run as its row (decided_code), so none is emitted carried
+carried_needed(s: TypingState) as bool := {
+	if s.carried_sites.any(site => site_reached(site, s)) { return yes }
+	for site in s.carried_sites { unemitted(site.within!, s) }
+	no
+}
+# a site the program reaches: one in a function that is no obliged row (its whole body a sum, difference, product or
+# order, dispatch.wap row_fitted), or in one some call of which keeps that row undecided
+# TODO (card exact-int-run) on-use-values' needed() decides it for every function once it lands
+site_reached(site: CarriedSite, s: TypingState) as bool := {
+	define = s.defines.get(site.within ?? return yes) ?? return yes
+	row = match define { Define(name, parameters, body) => match body { Prim(operation, arguments) => text(operation); _ => return yes }; _ => return yes }
+	if not (FOLDED_ARITHMETIC.contains(row) or ORDER_ROWS.contains(row)) { return yes }
+	s.obligations.any(obligation => obligation.row == row and obligation.verdict != yes)
+}
+unemitted(key: text, s: TypingState) := {
+	s.instances[key] = []
+	s.functions = s.functions.filter(typed => typed.function.key != key)
 }
 # the carried words of a typed node: a row on ints its own (core/emit/primitives.wap is_carried), a foreign call taking
 # or giving an int the boundary's (core/emit/host.wap foreign_code), an int literal below the scalars the widening. An
@@ -501,8 +525,9 @@ decided_code(n: Node, s: TypingState) as Node? := match n {
 # runs carried past the scalars
 row_placed(n: Node, arguments: list, record: Obligation, s: TypingState) as Node? := {
 	if record.verdict != yes { return ø }
-	code = if record.folded != ø then Number(record.folded!) else Prim(symbol(record.row!), arguments.map(argument => instances_placed(argument, s)))
-	with_type_of(placed_like(code, n), record.type!)
+	if record.folded != ø { return with_type_of(placed_like(Number(record.folded!), n), record.type!) }
+	row = Prim(symbol(record.row!), arguments.map(argument => instances_placed(argument, s)))
+	with_fact(with_type_of(placed_like(row, n), if ORDER_ROWS.contains(record.row!) then value_type(n)! else record.type!), FITTED, True)
 }
 # the code a dispatcher's call runs, from its choice at this place on: a call of that choice's definition where its
 # obligations are decided yes, the next choice's where one is decided no, ø where any waits on the run; past the
