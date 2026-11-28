@@ -26,6 +26,8 @@ MULTIPLY := "·multiply"
 COMPARED := "·compared"
 EQUALS := "·equals"
 AT_MOST := "·at_most"
+DIVIDE := "·divide"
+REMAINDER := "·remainder"
 UPS := "·ups"
 DOWNS := "·downs"
 DIFFERENCE := "·difference"
@@ -60,6 +62,11 @@ SUCCESSORS_SUBTRACT := fixing_name(SUBTRACT, 3)
 # a theorem of the building's environment, with no level parameters
 theorem(b: Building, name: text, binders: list<Local>, statement: Term, proof: Term) := theorem_declared(b.e, name, [], binders, statement, proof)
 truth_of(b: Building): Term := b.e.literals!.truth
+count_of(b: Building): Term := named(b, COUNT)
+count_zero(b: Building): Term := named(b, COUNT_ZERO)
+int_of(b: Building): Term := named(b, INT_WORD)
+sum(b: Building, left: Term, right: Term): Term := called(b, SUM, [left, right])
+minus(b: Building, x: Term): Term := called(b, MINUS, [x])
 
 successor(b: Building, t: Term): Term := apply(named(b, COUNT_SUCCESSOR), t)
 # the count's recursor at a level: into the motive's type of each count, from the base at zero and the step from each
@@ -96,12 +103,22 @@ count_declared(e: Environment) := {
 	declared(e, Declaration(COMPARED, [], pis([at_zero, m], comparison), Defined(lambdas([at_zero, m], paired(b, TYPE_LEVEL, (i, j) => truths.truth, at_zero.variable, j => truths.no_case, (j, k, before) => before, m.variable)))))
 	defined_over(b, EQUALS, count, ["m", "n"], truths.truth, x => apply(called(b, COMPARED, [named(b, IS_ZERO), x#1]), x#2))
 	defined_over(b, AT_MOST, count, ["m", "n"], truths.truth, x => apply(called(b, COMPARED, [function_of(b, "k", count, k => truths.yes_case), x#1]), x#2))
-	shortcut_fixed(b, Shortcut.Add, ADD)
-	shortcut_fixed(b, Shortcut.Subtract, SUBTRACT)
-	shortcut_fixed(b, Shortcut.Multiply, MULTIPLY)
-	shortcut_fixed(b, Shortcut.Equal, EQUALS)
-	shortcut_fixed(b, Shortcut.AtMost, AT_MOST)
+	shortcut_fixed(b, Shortcut.Add, [ADD])
+	shortcut_fixed(b, Shortcut.Subtract, [SUBTRACT])
+	shortcut_fixed(b, Shortcut.Multiply, [MULTIPLY])
+	shortcut_fixed(b, Shortcut.Equal, [EQUALS])
+	shortcut_fixed(b, Shortcut.AtMost, [AT_MOST])
+	# m % n counts up with m, back to zero where it reaches n, and m ÷ n counts those returns
+	defined_over(b, REMAINDER, count, ["m", "n"], count, x => counted(b, TYPE_LEVEL, to_count, count_zero(b), (k, r) => remainder_after(b, called(b, EQUALS, [successor(b, r), x#2]), r), x#1))
+	defined_over(b, DIVIDE, count, ["m", "n"], count, x => counted(b, TYPE_LEVEL, to_count, count_zero(b), (k, d) => branched(b, count, returns_at(b, k, x#2), successor(b, d), d), x#1))
+	shortcut_fixed(b, Shortcut.Divide, [DIVIDE, REMAINDER])
 }
+# a value of a type by a truth: at_yes at yes, at_no at no
+branched(b: Building, type: Term, condition: Term, at_yes: Term, at_no: Term): Term := truth_split(b.e, TYPE_LEVEL, function_of(b, "t", truth_of(b), t => type), at_no, at_yes, condition)
+# whether m % k returns to zero at m's successor
+returns_at(b: Building, m: Term, k: Term): Term := called(b, EQUALS, [successor(b, called(b, REMAINDER, [m, k])), k])
+# the remainder one step on from r: back to zero where it returns, else r's successor
+remainder_after(b: Building, returns: Term, r: Term): Term := branched(b, count_of(b), returns, count_zero(b), successor(b, r))
 
 # m's function of every n into `motive(m, n)`, by both counts at once, a definition or a proof alike: at zero the
 # function `at_zero`, at a successor and zero `at_first(j)` of the count j before it, at two successors
@@ -111,9 +128,9 @@ paired(b: Building, level: Level, motive: (Term, Term) -> Term, at_zero: Term, a
 	counted(b, level, i => for_every(b, count, j => motive(i, j)), at_zero, (j, before) => function_of(b, "n", count, n => counted(b, level, k => motive(successor(b, j), k), at_first(j), (k, r) => at_both(j, k, apply(before, k)), n)), m)
 }
 
-# A shortcut bound to a function, each statement fixing it declared a theorem: proved by computing where both sides
-# compute to one count, else by the count's recursor (subtract's two, counting down to zero)
-shortcut_fixed(b: Building, kind: Shortcut, function: text) := shortcut_proved(b, kind, [function], statements => (1 to #statements).map(at => fixing_proof(b, fixing_name(function, at), statements#at)))
+# A shortcut bound to its functions, each statement fixing them declared a theorem: proved by computing where both
+# sides compute to one count, else by the count's recursor (subtract's two, counting down to zero)
+shortcut_fixed(b: Building, kind: Shortcut, functions: list<text>) := shortcut_proved(b, kind, functions, statements => (1 to #statements).map(at => fixing_proof(b, fixing_name(functions#1, at), statements#at)))
 # a shortcut bound to its functions, each statement fixing them declared a theorem named by the first function, with
 # the proof made for it: the kernel refuses a proof that is not of its statement
 shortcut_proved(b: Building, kind: Shortcut, functions: list<text>, proved: (list<Term>) -> list<Term>) := {
@@ -192,8 +209,32 @@ int_declared(e: Environment) := {
 	defined_over(b, UNEQUAL, int, ["a", "b"], truth, x => called(b, NEGATED, [called(b, EQUAL_INTEGERS, [x#1, x#2])]))
 	e.bridges += [Bridge(int, named(b, EQUAL_INTEGERS))]
 	e.integers = Integers(int, case_of(b, NATURAL_CASE), case_of(b, NEGATIVE_CASE), named(b, SUM), named(b, MINUS), named(b, NOT_ABOVE))
-	shortcut_fixed(b, Shortcut.Difference, DIFFERENCE)
+	shortcut_fixed(b, Shortcut.Difference, [DIFFERENCE])
+	# int's ÷ and % truncated, as the host's div_s and rem_s: the sizes' quotient, negative where the cases differ,
+	# and the sizes' remainder with the dividend's sign; by zero the quotient is 0 and the remainder the dividend
+	ints_defined(b, TRUNCATED_QUOTIENT, (i, m, j, n) => signed(b, i == j, called(b, DIVIDE, [sized(b, i, m), sized(b, j, n)])))
+	ints_defined(b, TRUNCATED_REMAINDER, (i, m, j, n) => signed(b, i == NATURAL_CASE, called(b, REMAINDER, [sized(b, i, m), sized(b, j, n)])))
+	words_declared(b)
 }
+# A word's sums, differences and products wrap: the exact result's floor remainder by 2^64 above the smallest word,
+# put back past it
+words_declared(b: Building) := {
+	int = int_of(b)
+	defined_over(b, WORD_WRAPPED, int, ["x"], int, x => put_back(b, floored(b, called(b, SUBTRACTED, [x#1, word_smallest(b)]))))
+	for operation in WORD_MEANINGS.keys() { defined_over(b, WORD_MEANINGS[operation], int, ["a", "b"], int, x => called(b, WORD_WRAPPED, [called(b, INT_MEANINGS[operation], x)])) }
+}
+word_smallest(b: Building): Term := int_numeral(b.e, WHOLE_SMALLEST)
+# a count below 2^64 as the word it stands for, put back past the smallest word
+put_back(b: Building, c: Term): Term := sum(b, valued(b, NATURAL_CASE, c), word_smallest(b))
+# 2^64 - 1 as a count, and the modulus a word wraps by, its successor
+word_largest(b: Building): Term := count_literal(WORD_LARGEST)
+word_modulus(b: Building): Term := successor(b, word_largest(b))
+# an int's floor remainder by 2^64: the remainder of a count below it at either case, for a negative -(c + 1)
+# 2^64 - 1 - c % 2^64, so the remainder's bound holds of both
+floored(b: Building, x: Term): Term := int_split(b, TYPE_LEVEL, t => count_of(b), (at, c) => called(b, REMAINDER, [below_word(b, at, c), word_modulus(b)]), x)
+below_word(b: Building, at: int, c: Term): Term := if at == NATURAL_CASE then c else called(b, SUBTRACT, [word_largest(b), called(b, REMAINDER, [c, word_modulus(b)])])
+# a count as an int, natural or negated
+signed(b: Building, positive: bool, c: Term): Term := if positive then valued(b, NATURAL_CASE, c) else minus(b, valued(b, NATURAL_CASE, c))
 # a function of two ints by both ints' cases, each arm made from their indices and counts
 ints_defined(b: Building, name: text, arm: (int, Term, int, Term) -> Term) := {
 	int = named(b, INT_WORD)

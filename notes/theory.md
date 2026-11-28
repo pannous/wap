@@ -247,14 +247,14 @@ each of `N`: `f(m, Z) == m` is `(m: N) -> …`, and `f(Z, Z) == yes` has no bind
 | `shortcut(multiply, f, …)` | `f: N -> N -> N`, after add `g` | `f(m, Z) == Z`; `f(m, S(n)) == g(f(m, n), m)` |
 | `shortcut(equal, f, …)` | `f: N -> N -> bool` | `f(Z, Z) == yes`; `f(S(m), Z) == no`; `f(Z, S(n)) == no`; `f(S(m), S(n)) == f(m, n)` |
 | `shortcut(at_most, f, …)` | `f: N -> N -> bool` | `f(Z, n) == yes`; `f(S(m), Z) == no`; `f(S(m), S(n)) == f(m, n)` |
-| `shortcut(divide, d, r, …)` | `d`, `r: N -> N -> N`, after add `g`, multiply `p`, at most `l` | `g(p(d(m, n), n), r(m, n)) == m`; `d(m, Z) == Z`; `l(r(m, S(n)), n) == yes` |
+| `shortcut(divide, d, r, …)` | `d`, `r: N -> N -> N`, after equal `e` | `d(Z, n) == Z`; `d(S(m), n) == if e(S(r(m, n)), n) then S(d(m, n)) else d(m, n)`; `r(Z, n) == Z`; `r(S(m), n) == if e(S(r(m, n)), n) then Z else S(r(m, n))` (the `if` the truth values' recursor) |
 | the kernel's own int difference `d` (no statement binds it) | `d: N -> N -> int` | `d(Z, Z) == zero`; `d(S(m), Z) == positive(m)`; `d(Z, S(n)) == negative(n)`; `d(S(m), S(n)) == d(m, n)` |
 
 A theorem licenses its shortcut when it is a declared theorem whose type is the built statement (`same`, so binder
 names aside) and neither it nor the function rests on an axiom (`axioms_of` is empty for both). A shortcut fires
 only on its bound constant, without levels, applied to two numbers, and gives what the arithmetic of numbers
 without a bound gives: a number, or a truth value. A statement the order forbids is refused: multiply needs add
-bound, divide needs add, multiply and at most. The rules these statements refuse by are `numbers` (a shape that
+bound, divide needs equal. The rules these statements refuse by are `numbers` (a shape that
 is not the wanted one, a second numbers statement) and `shortcut` (a function's type, a theorem's statement, an
 axiom rested on, a function bound already or needed and not bound).
 
