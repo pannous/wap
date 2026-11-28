@@ -23,6 +23,7 @@ use "../../kernel/numbers.wap"
 use "../../kernel/recursors.wap"
 use "../../kernel/equality.wap"
 use "../../kernel/logic.wap"
+use "../../kernel/compute.wap"
 use "../../types/effects.wap"
 
 # the binders of a state, of the rounds a fold has made and of the rounds below
@@ -82,17 +83,24 @@ state_after(statement: Node, state: State, x: Entering) as Term? := match statem
 	}
 	For(place, count, body) => {
 		place_type = kernel_value(place) ?? return ø
-		rounds(state, x, apply(named_constant(UPS), term_of(count, x) ?? return ø), (inside, made, below, before) => counted_round(place, place_type, body, state, inside, made, apply(below, before)))
+		counted = term_of(count, x) ?? return ø
+		rounds(state, x, apply(named_constant(UPS), counted), (inside, made, below, before) => counted_round(place, place_type, counted, body, state, inside, made, apply(below, before)))
 	}
 	While(condition, body) => measured_loop(statement, condition, body, state, x)
 	_ => ø
 }
 # a part's statements read under the state's names, giving the state's values after them
 round_state(part: Node, state: State, x: Entering) as Term? := block_term(statements_of(unwrapped(part)), x, inside => state_tuple(state, inside))
-# a for's round after the ones made before it: the state they leave bound, the place the count of rounds made plus one
-counted_round(place: Node, place_type: Term, body: Node, state: State, x: Entering, made: Term, before: Term) as Term? := {
+# a for's round after the ones made before it: the state they leave bound, the place the count of rounds made plus one,
+# known to lie between 1 and the count
+counted_round(place: Node, place_type: Term, count: Term, body: Node, state: State, x: Entering, made: Term, before: Term) as Term? := {
 	place_value = apply(TYPES.environment.integers!.natural, successor_of(TYPES.environment, made))
-	state_bound(state, before, x, inside => let_read(inside, place, place_type, place_value, at => round_state(body, state, at)))
+	state_bound(state, before, x, inside => let_read(inside, place, place_type, place_value, at => round_state(body, state, ranged(at, place, count))))
+}
+ranged(x: Entering, place: Node, count: Term) as Entering := {
+	e = TYPES.environment
+	at = x.variables#(binder_place(x, binding_key(place)))
+	knowing(x, [apply_all(named_constant(NOT_ABOVE), [int_numeral(e, 1), at]), apply_all(named_constant(NOT_ABOVE), [at, count])].map(fact => truth_stated(e, fact)))
 }
 # The count's recursor folding rounds over a state, at a count of rounds: at zero the state as it is, at one more than
 # k the round given k, the function of the k rounds below and the state before
@@ -107,6 +115,31 @@ rounds(state: State, x: Entering, count: Term, round: (Entering, Term, Term, Ter
 	unchanged = entered(x.c, STATE_BINDER, type)
 	recursor = named_constant(recursor_name(COUNT), [level_of(x.c, step)])
 	apply(apply_all(recursor, [lambda("_", named_constant(COUNT), step), lambdas([unchanged], unchanged.variable), at_step, count]), state_tuple(state, x))
+}
+
+# A value checked against a condition when the program runs, `narrowed(i, message, …)` (dispatch.wap narrowed_call),
+# read as the value itself where the provers show the condition here from what is known here (wiki/type.md "Proved or
+# checked"): the lets' values, a round's range, a while's condition, the parameters' conditions. Its obligations are
+# then proved, and the run checks nothing; else the call is read as it is
+obliged_term(n: Node, arguments: list, x: Entering) as Term? := {
+	places = obligation_places(n)
+	if places is empty or #arguments < 2 or TYPES.prove == ø { return ø }
+	records = places.map(at => x.s.obligations#at)
+	if not records.all(record => record.choice == 0 and record.row == ø and record.compared == ø and record.call == ø and record.type != ø) { return ø }
+	value = term_of(arguments#1, x) ?? return ø
+	read = arguments.drop(2).map(argument => term_of(argument, x))
+	if read.any(term => term == ø) { return ø }
+	given = read.map(term => term!) + [value]
+	proving = x.under(x.known, x.known.map(fact => NO_BINDER))
+	if not records.all(record => condition_proved(record, given, proving)) { return ø }
+	for record in records { record.verdict = yes }
+	value
+}
+# whether the provers prove an obligation's condition at these values: its other names' first, then the value
+condition_proved(record: Obligation, given: list<Term>, x: Entering) as bool := {
+	condition = named_id(TYPES.environment, record.holds ?? condition_name(TYPES.environment, record.type!) ?? return no) ?? return no
+	held = match declared_at(TYPES.environment, condition)!.kind { Defined(value) => value; _ => return no }
+	hole_term([], truth_stated(TYPES.environment, beta(held, given)), x, yes) != ø
 }
 
 # whether a function changes a value in place, itself or through what it calls, or has State, or calls a function
@@ -131,7 +164,8 @@ measured_loop(loop: Node, condition: Node, body: Node, state: State, x: Entering
 	inner = x.under(named, state.keys)
 	held = term_of(condition, inner) ?? return ø
 	measure = counted_measure(c, held) ?? return ø
-	ran = round_state(body, state, inner) ?? return ø
+	# a round's body runs where the condition holds
+	ran = round_state(body, state, knowing(inner, [truth_stated(TYPES.environment, held)])) ?? return ø
 	m = Measuring(state, named, held, measure, ran)
 	k = entered(c, ROUNDS_BINDER, named_constant(COUNT))
 	start = successor_of(TYPES.environment, apply(named_constant(UPS), measure_at(m, state_tuple(state, x))))

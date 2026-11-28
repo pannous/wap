@@ -330,20 +330,28 @@ definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingS
 }
 # what a body is read in, locally nameless (kernel/terms.wap): the binders around it by their keys, the innermost last,
 # each the free variable of the checker c it was entered with; a term read under them is closed over them with `lambdas`
-class Entering { binders: list<text>; variables: list<Term>; c: Checker; by_key: map<text, TypedFunction>; s: TypingState; recursion: Recursion? = ø }
+# (known: facts true where it reads that no term proves, a let's name equal to its value, a round's place between 1
+# and its count: an obligation met there is proved under them, statements.wap obliged_term)
+class Entering { binders: list<text>; variables: list<Term>; c: Checker; by_key: map<text, TypedFunction>; s: TypingState; recursion: Recursion? = ø; known: list<Local> = [] }
 # the same reading under more binders, entered as locals under these keys
 # (a course's case names the values of the parameter at the fields its values below hold hypotheses of)
 under(x: Entering, locals: list<Local>, keys: list<text>, fields: list<Term> = []) as Entering := if #keys != #locals then raise "a reading's binders and their variables go out of step: ${keys.join(", ")} for ${#locals} variables" else reread(x, x.binders + keys, x.variables + variables(locals), if fields is empty or x.recursion == ø then x.recursion else Recursion(x.recursion!.key, x.recursion!.place, x.recursion!.held, x.recursion!.of, fields))
 # the same reading with a free variable taken for a value, in every binder's term
 valued(x: Entering, of: Term, value: Term) as Entering := reread(x, x.binders, x.variables.map(variable => replaced_by(variable, variable_id(of), value)), x.recursion)
 # the same reading over other binders, their variables and a recursion, every other part carried
-reread(x: Entering, binders: list<text>, variables: list<Term>, recursion: Recursion?) as Entering := Entering(binders, variables, x.c, x.by_key, x.s, recursion)
+reread(x: Entering, binders: list<text>, variables: list<Term>, recursion: Recursion?) as Entering := Entering(binders, variables, x.c, x.by_key, x.s, recursion, x.known)
+# the same reading knowing more facts
+knowing(x: Entering, facts: list<Term>) as Entering := {
+	inside = reread(x, x.binders, x.variables, x.recursion)
+	inside.known = x.known + facts.map(fact => entered(x.c, NO_BINDER, fact))
+	inside
+}
 # a let of a name: its body read with the name a free variable of the type, closed over it again, under the key of the
 # binding the name holds, so an assignment to a name bound before binds it again (statements.wap)
 let_read(x: Entering, name: Node, type: Term, given: Term, body: (Entering) -> Term?) as Term? := let_keyed(x, text(name), binding_key(name), type, given, body)
 let_keyed(x: Entering, binder: text, key: text, type: Term, given: Term, body: (Entering) -> Term?) as Term? := {
 	local = entered(x.c, binder, type)
-	read = body(x.under([local], [key])) ?? return ø
+	read = body(knowing(x.under([local], [key]), [equated(TYPES.environment, level_of(x.c, type), type, local.variable, given)])) ?? return ø
 	let_in(binder, type, given, abstracted(read, variable_id(local.variable)))
 }
 # the key of the binding a name holds where it stands: its definer's, itself where it is the definer
@@ -363,7 +371,7 @@ term_of(n: Node, x: Entering) as Term? := match n {
 	Symbol(name) => binder_term(n, x) ?? refl_term(n) ?? by_term(n, x) ?? named_function_term(n, x) ?? case_term(n, n, [], x)
 	Get(receiver, field) => field_term(receiver, field, x)
 	Key(head, Op.None, List(items, Bracket.Curly, separator)) => instance_term(n, head, items, x)
-	Call(called, arguments) => by_term(n, x) ?? recursive_called(called, arguments, x) ?? value_applied(called, arguments, x) ?? called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
+	Call(called, arguments) => obliged_term(n, arguments, x) ?? by_term(n, x) ?? recursive_called(called, arguments, x) ?? value_applied(called, arguments, x) ?? called_term(n, called, arguments, x) ?? case_term(n, called, arguments, x)
 	Fn(parameters, body) => lambda_term(n, x)
 	Prim(operation, arguments) => row_term(n, text(operation), arguments, x)
 	If(condition, then_part, else_part) => choice_term(n, condition, then_part, else_part, x)
@@ -838,6 +846,8 @@ obligations_entered(by_key: map<text, TypedFunction>, s: TypingState) := for obl
 obligation_entered(obligation: Obligation, by_key: map<text, TypedFunction>, s: TypingState) := {
 	if obligation.call != ø { return hole_entered(obligation, by_key, s) }
 	if obligation.compared != ø { return comparison_decided(obligation, s) }
+	# proved where a function's value met it (statements.wap obliged_term)
+	if obligation.verdict == yes { return }
 	shown = subset_condition(obligation.type) ?? return
 	within = within_of(obligation, by_key, s)
 	condition = named_id(TYPES.environment, obligation.holds ?? condition_name(TYPES.environment, obligation.type ?? return)!) ?? return
