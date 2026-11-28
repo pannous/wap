@@ -212,17 +212,11 @@ class TypeFrame {
 # the program typed, after the types module's functions it calls, the typed rules firing as it is typed; its definitions
 # first checked against the functions every program has (words): those its own file writes, beside the types every
 # module it uses declares
-typed_program(program: Block, library: Library, rules: KindRules, signatures: list<Signature>, words: list<Signature>, written: list<Signature>) as Block := typed_among(program, statements_in(library.code), rules, library.scopes, library.signatures + signatures, TypingState(), written, words, signatures)
+typed_program(program: Block, library: Library, rules: KindRules, signatures: list<Signature>, words: list<Signature>, written: list<Signature>) as Block := typed_among(program, statements_in(library.code), rules, library.scopes, library.signatures + signatures, written, words, signatures)
 # the program typed, after the library's records and those of its definitions it calls, each definition shaped and
 # bound when typing first reaches it (core/analyze/calls.wap reached)
-typed_among(program: Block, library: list, rules: KindRules, library_scopes: map<text, Scope>, signatures: list<Signature>, before: TypingState = TypingState(), defined: list<Signature> = [], words: list<Signature> = [], declared: list<Signature> = []) as Block := {
+typed_among(program: Block, library: list, rules: KindRules, library_scopes: map<text, Scope>, signatures: list<Signature>, defined: list<Signature> = [], words: list<Signature> = [], declared: list<Signature> = []) as Block := {
 	s = TypingState()
-	# shared with the round before: the unknowns types may name and the function values those hold
-	s.unknowns = before.unknowns
-	s.el = before.el
-	back_to(s.el, Found({}, {}, [], [], []))
-	s.members = before.members
-	s.boxed = before.boxed.drop(0)
 	s.kind_rules = rules
 	s.library_scopes = library_scopes
 	s.ids = definers_of(program)
@@ -244,8 +238,7 @@ typed_among(program: Block, library: list, rules: KindRules, library_scopes: map
 	for retyping in s.retypings { hint(retyping) }
 	statements = library_typed + statements_in(typed)
 	if memory_of(s) == ø { exported_dispatchers(defined, s) }
-	if s.unknowns is not empty { all_settled(s) }
-	if dispatches_completed(s) { return typed_among(program, library, rules, library_scopes, signatures, s) }
+	dispatches_completed(s)
 	s.functions = distinct_instances(s.functions, s)
 	s.instances = {}
 	for instance in s.functions { instance_indexed(instance, s) }
@@ -538,13 +531,13 @@ name_typed(n: Node, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
 	# a case name of two enums is the expected enum's, `True` where a Node is wanted Node.True (decision enum-case-unambiguous)
 	if is_bound(n, DefinitionKind.Case) {
 		case = expected_case(n, expected, s) ?? n
-		return case_call_typed(case, case, [], s, f)
+		return case_call_typed(case, case, [], s, f, expected)
 	}
 	if is_bound(n, DefinitionKind.Field) { return typed_form(receiver_field(n), s, f, ø) }
 	if names_type_value(n, expected, s) { return type_value(type_term(n), n) }
 	if names_function(n) {
 		case = expected_case(n, expected, s)
-		if case != ø { return case_call_typed(case, case, [], s, f) }
+		if case != ø { return case_call_typed(case, case, [], s, f, expected) }
 		return if names_constant(n, expected, s) then call_typed(n, n, [], s, f, expected) else function_named_typed(n, expected, s)
 	}
 	type = variable_type(n, s, f) ?? read_before_given(n, s, f)
@@ -625,15 +618,23 @@ defined_at(name: Node) as Node := fact_of(name, DEFINED_AT) ?? refused(name, "th
 is_definer(name: Node) as bool := place_key(name) == place_key(defined_at(name))
 
 # A case of an enum, `Dime`, or a case given its fields' values, `Circle(3)`: a value of the enum's type
-case_call_typed(n: Node, called: Node, arguments: list<Node>, s: TypingState, f: TypeFrame) as Node := {
-	fields = case_fields(case_declaring(s.records, called))
+# of the enum's letters as its values bind them, as a call binds a definition's (letters.wap letters_bound)
+case_call_typed(n: Node, called: Node, arguments: list<Node>, s: TypingState, f: TypeFrame, expected: Term? = ø) as Node := {
+	enum = enum_declaring(s.records, called)
+	case = case_declaring(s.records, called)
+	fields = case_fields(case)
 	values = arranged_in(fields, arguments) ?? refused(n, "${called} takes a value for each of its fields: ${field_names(fields)}")
-	given = (1 to #values).map(at => field_checked(typed_form(values#at, s, f, written_type(declared_type(fields#at))), fields#at, values#at, s))
-	case_typed_as(n, called, given, s)
+	known = expected_holder(enum, expected)
+	typed = (1 to #values).map(at => typed_form(values#at, s, f, if known == ø then field_wanted(fields#at, enum) else field_type_in(fields#at, known!, enum)))
+	holder = known ?? holder_made(enum, fields, typed, "case ${place_key(case_name(case))}", called, s)
+	case_typed_as(n, called, (1 to #values).map(at => field_checked(typed#at, fields#at, holder, enum, values#at, s)), s, holder)
 }
-case_typed_as(n: Node, called: Node, given: list, s: TypingState) as Node := {
+# the type of its enum a place expects of a case, `Stack<text>` of `words: Stack<text> = Stack.item("a", Stack.empty)`,
+# its letters filled before the values are typed; ø where it expects another type or the enum's any-instance
+expected_holder(enum: Node, expected: Term?) as Term? := if expected != ø and head_of(expected!) == head_of(record_term(enum)) and not is_any_instance(expected!) and not has_unknowns(expected!) then expected else ø
+case_typed_as(n: Node, called: Node, given: list, s: TypingState, holder: Term? = ø) as Node := {
 	typed = if given is empty and n === called then n else refitted(Call(called, given), n)
-	with_type_of(typed, record_term(enum_declaring(s.records, called)))
+	with_type_of(typed, holder ?? holder_of(enum_declaring(s.records, called), [], s))
 }
 # a primitive's value is of the type its built-in's definition writes, or its place expects (`x: int = prim …`, a
 # value of another module), none when neither says one

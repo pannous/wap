@@ -155,7 +155,7 @@ TYPES: TypeTerms = TypeTerms()
 class ByHole { c: Checker; context: list<Term>; type: Term; laws: list<Node>; function: (text) -> Term? }
 core_environment() as Environment := {
 	e = Environment()
-	for core in CORE_WORDS { word_declared(e, core.word, core.parts) }
+	for core in CORE_WORDS { word_declared(e, core.word, kind_of(core.parts)) }
 	literals_declared(e)
 	products_declared(e)
 	equality_declared(e)
@@ -177,9 +177,11 @@ truths_declared(e: Environment) as list<Term> := {
 	inductive_declared(e, InductiveBlock([], 0, [BlockType(BOOL_TYPE, DATA_TERM, names.map(name => WrittenCase(name, pi(BOOL_TYPE, DATA_TERM, bound(0)))))]))
 	names.map(name => constant(named_id(e, name)!, name, []))
 }
-# a type word declared, an opaque type of its parts' types in its sort; its id, its place in the environment. Its
-# type is a type by construction, so it is added unchecked
-word_declared(e: Environment, key: text, parts: int, sort: Term = DATA_TERM) as int := axiom_added(e, key, (1 to parts).fold(sort, (kind, at) => pi("_", DATA_TERM, kind)), yes)
+# a type word declared, an opaque type of this type, a function of its parts giving its sort; its id, its place in the
+# environment. Its type is a type by construction, so it is added unchecked
+word_declared(e: Environment, key: text, type: Term) as int := axiom_added(e, key, type, yes)
+# the type of a word of parts that are data, giving data or this sort
+kind_of(parts: int, sort: Term = DATA_TERM) as Term := (1 to parts).fold(sort, (kind, at) => pi("_", DATA_TERM, kind))
 # an axiom added, in core's scope for a word of core's own, seen from every scope (word_keyed)
 axiom_added(e: Environment, name: text, type: Term, core: bool = no) as int := {
 	added(e, Declaration(name, [], type, DeclarationKind.Axiom), core)
@@ -187,7 +189,7 @@ axiom_added(e: Environment, name: text, type: Term, core: bool = no) as int := {
 }
 # a type word's term, the word declared by its key the first time
 word_term(word: text) as Term := word_keyed(word, word)
-word_keyed(word: text, key: text, parts: int = 0, sort: Term = DATA_TERM) as Term := constant(TYPES.environment.core.get(key) ?? word_declared(TYPES.environment, key, parts, sort), word, [])
+word_keyed(word: text, key: text, type: Term = DATA_TERM) as Term := constant(TYPES.environment.core.get(key) ?? word_declared(TYPES.environment, key, type), word, [])
 # the sort a record's header names, `enum False: Prop {}` (wiki/proposition.md), data where it names none: a universe, or the
 # types of the enum's indices and then a universe, `enum Even: nat -> Prop` (GUESS, T6a3's indices: a Pi over each index
 # type, so the word is declared a family and `Even(4)` kernel-checks); ø for any other sort
@@ -199,6 +201,22 @@ sorted(sort: Node) as Term? := {
 		Call(arrow, items) => if text(arrow) == FUNCTION_ARROW and #items == 2 then indexed(items_or_one(items#1), sorted(items#2)) else ø
 		_ => ø
 	}
+}
+# a record's header as its word is declared: a function of its parameters giving its sort, each parameter of the type
+# its header writes, `a: Prop` of `enum And(a: Prop, b: Prop): Prop`, data for a bare letter, `T` of `enum list<T>`;
+# a parameter's type names the parameters before it by their binders, `P: T -> Prop`
+record_header(declared: Node, sort: Term) as Term := {
+	letters = record_letters(declared)
+	ids = letters.map(letter => word_id(type_term(letter)))
+	types = record_parameters(declared).map(parameter => match parameter { Key(letter, Op.Colon, type) => type_term(type); _ => DATA_TERM })
+	(1 to #letters).list().reverse.fold(sort, (body, at) => pi(text(letters#at), block_named(types#at, ids.take(at - 1), 0), body))
+}
+# a term with each of these words, named by its id, the binder standing for it this deep
+block_named(t: Term, ids: list<int>, depth: int) as Term := match t.shape {
+	Constant(name, levels, id) => if ids.contains(id) then bound(depth + #ids - ids.index_of(id)) else t
+	Apply(function, argument) => apply(block_named(function, ids, depth), block_named(argument, ids, depth))
+	Pi(binder, domain, body) => pi(binder, block_named(domain, ids, depth), block_named(body, ids, depth + 1))
+	_ => t
 }
 indexed(indices: list<Node>, sort: Term?) as Term? := if sort == ø then ø else indices.reverse.fold(sort!, (body, index) => pi("_", type_term(index), body))
 # a written word's term: a record's own by its declaration, a shape's with the type it narrows known
@@ -214,14 +232,14 @@ word_named(n: Node) as Term := {
 # finds the record it means (core/stage.wap record_named)
 declared_word(name: text, declared: Node) as Term := {
 	if core_place(name) != ø { return word_term(name) }
-	own = word_keyed(name, "${name} ${declaration_place(declared)}", 0, record_sort(declared) ?? DATA_TERM)
+	own = word_keyed(name, "${name} ${declaration_place(declared)}", record_header(declared, record_sort(declared) ?? DATA_TERM))
 	if not TYPES.declared.has(word_id(own)) { if TYPES.names.has(name) { TYPES.shared[TYPES.names[name]] = yes; TYPES.shared[word_id(own)] = yes } else { TYPES.names[name] = word_id(own) } }
 	TYPES.declared[word_id(own)] = declared
 	own
 }
 word_id(word: Term) as int := match word.shape { Constant(name, levels, id) => id; _ => 0 }
 # the declaration of the record a record's own word names, ø for any other type
-declared_by(type: Term?) as Node? := if is_word(type) then TYPES.declared.get(word_id(type!)) else ø
+declared_by(type: Term?) as Node? := if type == ø then ø else TYPES.declared.get(word_id(head_of(type!)))
 # a shape's word, known from here on to narrow this type
 narrowing(word: Term, type: Term) as Term := {
 	TYPES.narrows[word_id(word)] = type
@@ -306,7 +324,9 @@ function_parts(type: Term?) as FunctionType? := if type == ø then ø else match
 	_ => ø
 }
 # a Π as the kernel writes it, `(T: Type) -> T -> T`, over no parameter list of a function type
-kernel_pi(type: Term) as bool := match type.shape { Pi(binder, domain, body) => not same(domain, NO_PARAMETERS_TERM) and word_of(domain) != PARAMETERS_WORD; _ => no }
+kernel_pi(type: Term) as bool := match type.shape { Pi(binder, domain, body) => not lists_parameters(domain); _ => no }
+# a function type's parameter list or its word, `none` or `and(int, none)`, which no Π of the kernel reads
+lists_parameters(type: Term) as bool := same(type, NO_PARAMETERS_TERM) or word_of(type) == PARAMETERS_WORD
 parameters_listed(parameters: Term) as list<Term> := {
 	parts = parts_of_type(PARAMETERS_WORD, parameters) ?? return []
 	[parts#1] + parameters_listed(parts#2)
@@ -386,7 +406,7 @@ map_part(type: Term?, at: int) as Term? := {
 	if #parts == 2 then parts#at else ø
 }
 function_value_type(key: text, captures: list<Term>) as Term := {
-	word = word_keyed(FUNCTION_VALUE_TYPE, "${FUNCTION_VALUE_TYPE} ${key}", #captures)
+	word = word_keyed(FUNCTION_VALUE_TYPE, "${FUNCTION_VALUE_TYPE} ${key}", kind_of(#captures))
 	TYPES.functions[word_id(word)] = key
 	applied(word, captures)
 }
@@ -416,13 +436,25 @@ type_term(n: Node) as Term := {
 	binder = universe_binder(n)
 	if binder != ø { return binder! }
 	parts = written_parts(n)
-	if parts != ø { return type_built(word_term(text(parts#1)), parts.drop(1).map(part => type_term(part))) }
+	if parts != ø { return type_built(word_named(parts#1), parts.drop(1).map(part => held_where_trait(type_term(part)))) }
 	match n {
 		Call(times, items) => if text(times) == ARRAY_TIMES and #items == 2 and items#1 is number then list_type(type_term(items#2)) else if is_family_call(n) then family_typed(times, items) else raise("${n} is no type")
 		Empty => EMPTY_TERM
-		_ => word_named(n)
+		_ => any_instance(word_named(n))
 	}
 }
+# a trait in a value's place, a type's part, `list<shape>`, is the class holding its values with their words,
+# `@held(held_shape)` on its name (wap/sugar/records.wap); a parameter of the trait itself stays it, typed per type
+held_where_trait(type: Term) as Term := type_term(annotated(declared_by(type) ?? return type, HELD_ANNOTATION) ?? return type)
+# a generic record's word written alone, `Stack`, is any of its types: each letter any, as a bare `list` takes any list
+any_instance(word: Term) as Term := {
+	letters = record_letters(declared_by(word) ?? return word)
+	if letters is empty then word else applied(word, letters.map(letter => ANY_TERM))
+}
+# whether a type is one of a record's parameters, `T` of `item: T`, `a` of `left: a`
+is_parameter_of(type: Term?, record: Node) as bool := is_word(type) and record_letters(record_declared(record)).any(letter => text(letter) == type_text(type))
+# whether a type is a generic record's any instance, which each of its types fits as it is: one struct holds them all
+is_any_instance(type: Term) as bool := declared_by(type) != ø and parts_of(type) is not empty and parts_of(type).all(part => part == ANY_TERM)
 # GUESS (T6a3's value reader): a declared type applied to values, `Even(double(n))`. While typing, an argument that is no type stands as its
 # code, as a subtype's condition does (the type is keyed by it); terms.wap family_read reads the values under the function's parameters
 is_family_call(n: Node) as bool := match n { Call(head, items) => is_type_former(family_type(head)) and items.any(item => is_value_written(item)); _ => no }

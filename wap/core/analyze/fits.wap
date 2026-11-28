@@ -3,6 +3,7 @@
 
 use folder
 use "../stage.wap"
+use "../bindings.wap"
 use "../type_notation.wap"
 use "../../kernel/forms.wap"
 use "../errors.wap"
@@ -80,8 +81,38 @@ fits_type(n: Node, wanted: Term) as bool := {
 type_held(n: Node) as Term? := fact_type(fact_of(n, TYPE)) ?? fact_type(fact_of(fact_of(n, DEFINED_AT) ?? return ø, SIGNATURE))
 # a field's type, which every field writes
 field_type(field: Node) as Term := written_type(declared_type(field)) ?? refused(field, "a field has a type")
-# a value given to a field as the field's type has it, refused when it cannot get there; value is the code that gave it
-field_checked(given: Node, field: Node, value: Node, s: TypingState) as Node := converted(given, field_type(field), s, value, "the field holds")
+# a field's type in a value of its record's type, the record's letters all filled at once by the type's parts:
+# `item: T` of a Boxed<int> is an int
+# (ø for a field of no written type)
+field_type_in(field: Node, holder: Term, record: Node) as Term? := substituted(written_type(declared_type(field)), letters_filled(record, holder))
+letters_filled(record: Node, holder: Term) as list<Binding> := {
+	letters = record_letters(record_declared(record))
+	parts = parts_of(holder)
+	if #parts != #letters then [] else (1 to #letters).map(at => Binding(text(letters#at), parts#at))
+}
+# the type of a record a value of it has: its letters as given, each one not given an unknown its later uses settle
+holder_of(record: Node, given: list<Binding>, s: TypingState) as Term := {
+	letters = record_letters(record_declared(record))
+	if letters is empty then record_term(record) else applied(head_of(record_term(record)), letters.map(letter => type_keyed(text(letter), given) ?? unknown_type(s)))
+}
+# the type of a record its values make, its letters bound by them as a call binds a definition's (letters.wap
+# letters_bound), each made under a key of its own
+holder_made(record: Node, fields: list<Node>, typed: list<Node>, key: text, called: Node, s: TypingState) as Term := {
+	if record_letters(record_declared(record)) is empty { return record_term(record) }
+	made = Signature(text(called), key, DefinitionKind.Case, called, fields.map(field => written_type(declared_type(field))), record_term(record), "", record)
+	holder_of(record, (letters_bound(made, typed.map(value_type), s) ?? refused(called, "${called}'s values give one letter two types")).letters, s)
+}
+# the type a field's value is typed for before its holder is known: its own, ø where it names a parameter
+field_wanted(field: Node, record: Node) as Term? := { type = written_type(declared_type(field)); if names_parameter(type, record) then ø else type }
+# whether a type names one of a record's parameters, `T` of `item: T`, `a` of `left: a`
+names_parameter(type: Term?, record: Node) as bool := type != ø and constants_in(type!).any(word => record_letters(record_declared(record)).any(letter => text(letter) == type_text(word)))
+# a value given to a field as the field's type has it in its holder, refused when it cannot get there; value is the
+# code that gave it
+# a field of a parameter's type holds any value, `item: T`, its value boxed once it fits its type in the holder
+field_checked(given: Node, field: Node, holder: Term, record: Node, value: Node, s: TypingState) as Node := {
+	fitting = converted(given, field_type_in(field, holder, record) ?? field_type(field), s, value, "the field holds")
+	if is_parameter_of(written_type(declared_type(field)), record) then converted(fitting, ANY_TERM, s, value, "the field holds") else fitting
+}
 # What `x as T` does where nothing is written (wiki/conversion.md "Fitting" and "Repacking"): checked is the cast,
 # every other way repacks; written, `x as T` is the maker T(x) ("Making").
 # How a value of the given type gets where the wanted one is: as it is, of that type, a list where a bare `list` is, a
@@ -93,7 +124,7 @@ field_checked(given: Node, field: Node, value: Node, s: TypingState) as Node := 
 # list<int> is; checked, an any's value where another type is, raising there when it holds another; ø when it cannot.
 # The conversions a choice of overloads asks for, the static ones, never check: an any argument, or a Node where a
 # shape is wanted, is chosen for at run time (core/analyze/dispatch.wap).
-enum Conversion { Same, Boxed, Widened, Read, Wrapped, Subtyped, Narrowed, Settled, Checked, Adapted }
+enum Conversion { Same, Boxed, Widened, Read, Wrapped, Subtyped, Narrowed, Settled, Checked, Adapted, Held }
 STATIC_CONVERSIONS = [Conversion.Same, Conversion.Boxed, Conversion.Widened, Conversion.Read, Conversion.Wrapped]
 # the primitive that widens an int to a float
 WIDENING = "f64.convert_i64_s"
@@ -133,9 +164,14 @@ conversion(given: Term?, wanted: Term?, s: TypingState) as Conversion? := {
 	if optional != ø and base_of_optional(given) != ø and conversion(base_of_optional(given), optional, s) == Conversion.Same { return Conversion.Same }
 	if optional != ø and (given == EMPTY_TERM or conversion(given, optional, s) == Conversion.Same) { return Conversion.Wrapped }
 	if (has_unknowns(given) or has_unknowns(wanted)) and unified(wanted, given, [], s) != ø { return Conversion.Settled }
+	# where a trait's held class is wanted, `@holds(shape)` on its name, a value is boxed by the class's maker, which
+	# refuses a type lacking a word of the trait (wap/sugar/records.wap)
+	if given != ANY_TERM and held_trait(wanted, s) != ø { return Conversion.Held }
 	# out of an any, or of a union to a part of it, the way is a check when the program runs
 	if given == ANY_TERM or is_union(given) and union_parts(given).any(part => part in passing_types(wanted)) then Conversion.Checked else ø
 }
+# the trait a held class holds, ø for any other type
+held_trait(type: Term, s: TypingState) as Node? := annotated(record_declared(record_named(s.records, type) ?? return ø), HOLDS_ANNOTATION)
 # typed code as the wanted type has its value, its conversion written: an unknown settled, a character read as its
 # text, an any's value checked by `prim cast`, typed the wanted type, at the code's place; refused at `at` when it
 # cannot get there, naming the place that wants it, `the field holds a`
@@ -164,6 +200,7 @@ repacked(n: Node, way: Conversion, wanted: Term, s: TypingState) as Node := matc
 	Conversion.Wrapped => if value_type(n) == EMPTY_TERM then with_type_of(n, wanted) else boxed(n, wanted)
 	Conversion.Widened => with_type_of(placed_like(Prim(symbol(WIDENING), [n]), n), wanted)
 	Conversion.Adapted => function_converted(n, wanted, s)
+	Conversion.Held => word_called(n, type_word(wanted), [n], ø, s)
 	_ => n
 }
 # a list or a map put into an any or a union, its type kept for the dispatches that choose among generic definitions by it
@@ -194,6 +231,7 @@ empty_map_written(n: Node) as bool := match n { List(items, Bracket.Curly, separ
 bare_fit(given: Term, wanted: Term, records: Records) as bool := {
 	if wanted in [LIST_TERM, MAP_TERM] { return parts_of_type(type_text(wanted), given) != ø }
 	if wanted == FUNCTION_TERM { return function_value_parts(given) != ø or function_parts(given) != ø }
+	if is_any_instance(wanted) { return head_of(given) == head_of(wanted) }
 	if wanted != ENUM_TERM { return no }
 	record = record_named(records, given) ?? return no
 	not cases_of(record) is empty

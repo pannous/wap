@@ -37,6 +37,8 @@ SYMBOL_WORD = "symbol"
 SYMBOL_CASE = "Symbol"
 # the annotation the class rule writes on a protocol's record (sugar/records.wap)
 PROTOCOL_ANNOTATION = "protocol"
+# the bindings of a variable, whose function value a call of its name calls, never a module's word
+LEXICAL_KINDS = [DefinitionKind.Local, DefinitionKind.Parameter, DefinitionKind.Capture, DefinitionKind.Global]
 
 # the compiler's answer to a question by one of its own words (stage.wap QUESTION_WORDS): `type of x` the static type
 # of x, `effects of f` what f may do (core/analyze/effects.wap)
@@ -66,7 +68,7 @@ statement_term(written: Node, typed: TypedFunction, reading: Entering, s: Typing
 # A call: its arguments typed, each expecting its parameter's written type when only one definition takes that many
 # arguments; then the function it means, typed for these argument types
 call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame, expected: Term?) as Node := {
-	if is_bound(called, DefinitionKind.Case) { return case_call_typed(n, called, arguments, s, f) }
+	if is_bound(called, DefinitionKind.Case) { return case_call_typed(n, called, arguments, s, f, expected) }
 	if question_word(called, TYPE_TEST_WORD) { return type_test_typed(n, arguments, s, f) }
 	if QUESTION_WORDS.any(word => question_word(called, word)) { return answered(n, text(called), arguments#1, s, f) }
 	# a proof's `by f, g` is of the statement wanted, which its laws make hold (wiki/proof.md)
@@ -98,7 +100,7 @@ call_typed(n: Node, called: Node, arguments: list, s: TypingState, f: TypeFrame,
 	if jumped { return jumping(refitted(Block(given.take(jumped#1)), n)) }
 	# a type's own words are innermost, so the program's own Op's text beats the library's Op's in library code too; a
 	# compound assignment's own operator before them, `xs += [5]` growing xs in place where a type declares one
-	own = own_words(called, given, s)
+	own = own_words(called, given, scopes, s)
 	scopes = [own] + scopes.map(scope => scope.filter(definition => not own.any(word => word.key == definition.key)))
 	if fact_of(n, COMPOUND) != ø { scopes = [definitions_named(text(fact_of(n, COMPOUND)!), s)] + scopes }
 	made = made_from_map(n, called, candidates, given, s)
@@ -247,7 +249,7 @@ part_typed(n: Node, typed: Node, key: Node, s: TypingState, f: TypeFrame, expect
 	if reader != ø { return typed_form(named_call(reader.name, [reader], [typed], n, s), s, f, expected) }
 	record = record_named(s.records, value_type(typed))
 	field = if record == ø then ø else field_named(record, key)
-	if field != ø { return as_found(n, with_type_of(refitted(Get(typed, key), n), written_type(declared_type(field))), s, f) }
+	if field != ø { return as_found(n, with_type_of(refitted(Get(typed, key), n), field_type_in(field!, value_type(typed)!, record!)), s, f) }
 	part = pattern_part(n, typed, key, s)
 	if part != ø { return typed_form(part, s, f, expected) }
 	# a word nothing else defines read as its alias's word, `xs.length` count(xs)
@@ -323,13 +325,25 @@ made_from_map(n: Node, called: Node, candidates: list<Signature>, given: list, s
 	if record == ø or #given != 1 or key_type(value_type(given#1)) == ø and value_type(given#1) != ANY_TERM or candidates.any(definition => takes_fitting(definition, given, s)) { return ø }
 	instance_from_map(n, record, given#1, s)
 }
-# A type's own words travel with it: the definitions of a called name that the module of an argument's record declares
-# taking a value of that record, so a library's `show(xs#at)` finds a program's show(p: P), innermost
-own_words(called: Node, given: list, s: TypingState) as list := {
-	records = given.map(argument => record_named(s.records, base_or_self(value_type(argument)))).compact()
-	definitions_named(text(called), s).filter(definition => records.any(record => definition.module == (file_of(record) ?? "") and definition.parameters.any(type => takes_record(type, record))))
+# A type's own words travel with it: the definitions of a called name taking a value of an argument's record, in any
+# module of the compile, innermost. So a library's `show(xs#at)` finds a program's show(p: P), and the prelude's
+# `==(a: T, b: T) := equals(a, b)` a type's own equals from a module other than its class's. Two modules never define
+# one word alike (modules.wap clashes_refused), so a record's own words are one set wherever they are declared.
+# They are named definitions only: a name bound to a variable holding a function value is lexical and shadows every
+# module's word, and a function value's own function (its λ) is no word of a type. Another module's words come in
+# only where the call's own scopes have none taking the record, so a program's own word still beats a library's
+own_words(called: Node, given: list, scopes: list, s: TypingState) as list<Signature> := {
+	if LEXICAL_KINDS.any(kind => is_bound(called, kind)) { return [] }
+	placed = given.map(argument => record_named(s.records, base_or_self(value_type(argument))))
+	records = placed.compact()
+	# a word taking as many arguments, a record at its own place, by its signature alone (a library word has no Define)
+	taking = (definition: Signature) => not s.lambdas.has(definition.key) and #given <= #definition.parameters and (1 to #given).any(at => placed#at != ø and takes_record(definition.parameters#at, placed#at!))
+	words = definitions_named(text(called), s).filter(taking)
+	home = words.filter(definition => records.any(record => definition.module == (file_of(record) ?? "")))
+	if home is not empty or scopes.any(scope => scope.any(taking)) then home else words
 }
-takes_record(type: Term?, record: Node) as bool := type != ø and type_text(base_or_self(type)) == record_name(record)
+# (a generic record by its word, `Box<any>` of Box)
+takes_record(type: Term?, record: Node) as bool := type != ø and type_text(head_of(base_or_self(type)!)) == record_name(record)
 # the definitions a called name may mean, one list per scope, innermost first: the one it was bound or typed to, else
 # its candidates
 candidate_scopes(called: Node) as list := if fact_of(called, DEFINED_AT) != ø then [[defined_at(called)]] else match fact_of(called, CANDIDATES) {
@@ -477,9 +491,11 @@ innermost(definitions: list<Signature>, scopes: list) as list<Signature> := {
 # given type's own area.
 protocol_named(records: Records, type: Term?) as Node? := {
 	record = record_named(records, type)
-	if record == ø or annotation(record, PROTOCOL_ANNOTATION) == ø { return ø }
+	if record == ø or not is_protocol(record!) { return ø }
 	record
 }
+# whether a record is a protocol: its declaration carries the mark
+is_protocol(record: Node) as bool := annotation(record, PROTOCOL_ANNOTATION) != ø
 # whether a value of the given type fits the protocol wanted: no protocol wanted, or every word of it done for the type
 # DEBT: Protocols fit structurally, by specialisation only: a function of a protocol parameter is typed anew for each
 #   type given, so a list of mixed protocol values (run-time dispatch), a protocol's default bodies, `x is shape` and
@@ -489,8 +505,15 @@ conforms(given: Term?, wanted: Term?, s: TypingState) as bool := {
 	protocol = protocol_named(s.records, wanted) ?? return no
 	if given == ø { return no }
 	key = "${type_text(given, yes)} ${type_text(wanted, yes)}"
-	if not s.conforming.has(key) { s.conforming[key] = fields_of(protocol).all(word => does_word(given, word, s)) }
-	s.conforming[key]
+	if s.conforming.has(key) { return s.conforming[key] }
+	# yes while the answer is open, coinductively, so a word's trial that asks it again ends and agrees with it; a no, or
+	# a raise, takes back all the trials found meanwhile, the yeses that read the open one among them
+	trial = trial_taken(s)
+	s.conforming[key] = yes
+	does = try fields_of(protocol).all(word => does_word(given, word, s)) catch e { no }
+	if not does { trial_undone(trial, s) }
+	s.conforming[key] = does
+	does
 }
 # A program adds to a function every program has only where none of its definitions takes these types already
 # (wiki/function.md): `+(n: int, t: Ship)` adds one, `round(x)` and `missing(x: int?)` are taken; a function taking a
@@ -544,14 +567,38 @@ words_lacking(given: Term, protocol: Record, s: TypingState) as list<Lack> := fi
 lacks_text(lacking: list<Lack>, caller: text) as text := lacking.map(lack => "${lack.type} is not ${lack.protocol}: ${caller} needs ${lack.word}; define ${lack.word} := …").join("; ")
 # the parameters a fix-it proposes for values of these types, `a: dot, b: dot`
 parameters_proposed(types: list) as text := (1 to #types).map(at => "${PARAMETER_NAMES#at}: ${type_text(types#at)}").join(", ")
-does_word(given: Term, word: Node, s: TypingState) as bool := definitions_named(text(declared_name(word)), s).any(definition => does_as(definition, shaped(given, s), parameter_count(word), s))
-# how many parameters a protocol's required word takes, the value's own first
-parameter_count(word: Node) as int := #((function_parts(written_type(declared_type(word))) ?? refused(word, "a protocol's word is a function type")).parameters)
-# whether a definition takes a value of this type first, then as many parameters as a protocol's word: untyped or a
-# letter, it takes every type's, `equals(a: T, b: T)` making every value Equatable
-does_as(definition: Signature, given: Term, arity: int, s: TypingState) as bool := {
+does_word(given: Term, word: Node, s: TypingState) as bool := {
+	taken = word_taken(word, shaped(given, s))
+	definitions_named(text(declared_name(word)), s).any(definition => does_as(definition, taken, s))
+}
+# the types a protocol's required word takes for a value of this type, the protocol's place that type, `compare(b:
+# Comparable)` of an int (int, int)
+word_taken(word: Node, given: Term) as list<Term?> := {
+	parameters = (function_parts(written_type(declared_type(word))) ?? refused(word, "a protocol's word is a function type")).parameters
+	parameters.map(type => if type == parameters#1 then given else type)
+}
+# whether a definition takes a value of this type first, then the protocol's word's parameters: typed, by its first
+# parameter's type; untyped or a letter, by whether its instance at these types types, a trial whose refusal is not
+# kept, so `equals(a: T, b: T)` makes every value Equatable and `area(x: T)` calling what T lacks makes none a shape
+does_as(definition: Signature, taken: list<Term?>, s: TypingState) as bool := {
 	types = definition.parameters
-	#types == arity and (types#1 == ø or is_letter(types#1!) or shaped(types#1!, s) == given)
+	if #types != #taken { return no }
+	if types#1 != ø and not is_letter(types#1!) { return shaped(types#1!, s) == taken#1 }
+	trial = trial_taken(s)
+	does = try { function_typed(definition, taken, s, definition.definer); yes } catch e { no }
+	if not does { trial_undone(trial, s) }
+	does
+}
+# what a trial adds to the typing state, taken back where it fails: the conformances answered, the instances typed,
+# half typed ones among them, so no later call finds one, and the refusals, so the definition's other instances type
+class Trial { conforming: list<text>; functions: list<TypedFunction>; refusals: list<Refusal> }
+trial_taken(s: TypingState) as Trial := Trial(s.conforming.keys, s.functions, s.refusals)
+trial_undone(trial: Trial, s: TypingState) := {
+	for typed in s.functions.drop(#trial.functions) { s.instances[typed.function.key] = instances_of(typed.function.key, s).filter(each => each !== typed) }
+	for key in s.conforming.keys.filter(key => not trial.conforming.contains(key)) { s.conforming.remove(key) }
+	s.functions = trial.functions
+	s.refusals = trial.refusals
+	s.joined = ø
 }
 
 # whether the Nodes a definition takes, two or more, are all values read as one: values that are no Nodes never meet as
@@ -666,7 +713,8 @@ body_typed(typed: TypedFunction, definition: Signature, name: Node, parameters: 
 	typed.written = if typed.written == ø then ø else statement_typed(typed.written!, s, frame)
 	enclosing = s.within
 	s.within = function_key(define_of(definition, s))
-	typed_body = typed_form(body, s, frame, typed.result)
+	# an axiom is its written type alone: its body is never read
+	typed_body = if is_axiom(define_of(definition, s)) then with_type_of(body, written) else typed_form(body, s, frame, typed.result)
 	given = result_given(typed_body, frame, name, s)
 	# a written result stays the result, `show(x: any): text := raise(…)`; one that writes none and never returns jumps
 	typed.jumps = typed.jumps or written == ø and jumps(typed_body) and frame.returns is empty

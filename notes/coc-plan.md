@@ -984,7 +984,7 @@ step, measured against the step before; more goes to the user.
 | T7 the theory extension retires | what is left of wap/extensions/theory goes: its run door and its prelude, whose words now live once in wap/types; the provers (P3, P4), the second opinion (K7), the export, the arithmetic proofs and the door `wap check` live in wap/extensions/proof, which only `wap check` and proofs load | every test as before; `wap check` and the second opinion from wap/extensions/proof; the trust base listed by a command |
 | T8 exact int (steps T8a to T8c: "T8" below) | a whole literal past i64 reads as an int; i64 and i32 are wrapping refinements of int; an `int` is stored as i32 or i64 where computing or a fact in scope shows it fits, else as a big number from a library only the programs that need it load | `2 ^ 62 * 4` prints 18446744073709551616; a loop counter stays an i64 and the benchmarks keep their guardrails |
 
-Order: what each open step waits on is in "Where each step stands" below; each step's plan file has its own order.
+Order: what each open step waits on is on the board (below "Where each step stands"); each step's plan file has its own order.
 Each of T3 to T6 deletes the files of wap/extensions/theory/elaborate whose job analyze took over, so the two typers
 never both do one job.
 
@@ -1012,81 +1012,8 @@ interviewer.
 
 ### Where each step stands
 
-On main at 25046c0f and the branches on origin. A landed milestone of K, L, E and P landed in the theory extension
-(wap/extensions/theory); the kernel moved into wap/kernel in T2, and the rest reaches the compiler in the T step
-that names it. In progress names the branch, its tip and its owner; waits names the step it waits on.
-
-| step | state | commit, or branch and owner | waits on |
-|---|---|---|---|
-| K0 | landed | results in data/ | |
-| K1 | landed | 2c04a7ce | |
-| K2 | landed | 4e49e80f | |
-| K3 | landed | d6fd9b5f, d6286366 (the shortcuts), 8e79c8d3 (divide's) | |
-| K4 | landed | a016fa65 | |
-| K5 | landed | 94b0496e | |
-| K6 | landed | 4e49e80f, 438cf07e | |
-| K7 | landed | 0b72075e | |
-| L1 logic | landed; leaves with the theory prelude on unify-typers, back in wap/types at T6a6 | c9f1a8fd | |
-| L2 numbers | landed; on unify-typers int's laws live in the kernel (extensions/prove/integer_laws.wap) | f1220084 | |
-| L3 data | landed; its tests go as unpinned (lists as an enum is parked, "Not in T6") | 67154fad | |
-| L4 effects | landed; the effect facts are T5b1, computation types cut | 62ce375f | |
-| L5 collections | folded: `rational` and `set` are Q1, `i64` is T8b | | Q1, T8b |
-| E1 | landed; in analyze since T3 | 306c4004 | |
-| E2 | landed; reaches analyze in T5b and T5c | 80647de3 | |
-| E3 | landed; reaches analyze in C1 and C2 | d0bb3f37 | |
-| E4 | landed; in analyze since T4a, T4b | 2ea47109 | |
-| E5 | landed; reaches analyze in T5b1 and T5d | ac959757 | |
-| E6 | landed; reaches analyze in T5c | d0373dc1 | |
-| E7 | landed; in analyze since T5u and T5e | acff54b4, a4491606 | |
-| P1 | landed | a606bc60, 4ee96a68 (`wap verify` without Lean) | |
-| P2 | landed | e46a9dc0 | |
-| P3 | landed | df644b2e, 6fafd387 (linear) | |
-| P4 | landed | 2c38b2f7 | |
-| P on the unified typer | in progress: the provers over int (M2b, notes/unify-provers.md) | unify-provers e75b2e9c, unify-linear b07cbed1; wap-theory-reads-types | unify-typers |
-| T1 | landed | 3f95fa00 | |
-| T1b | landed | c483626d (step 1), 6c1a187c (step 3) | |
-| T2 | landed | d60bf285 (T2a to T2d), 383f6a92 (T2e), 59a4edd3 (T2f) | |
-| TM | landed (TM1 to TM3); TM4, the restart after a standard module, folded into T5 | 10bd563b (TM1), f9c06b41 (TM2, TM3) | |
-| T3 | landed, closed with machine-words | 896823f3 (T3a), 551ffd93 and 471a8882 (T3e), e0dea1d8 (T3f), d3791cd3, f5d9d5a8 | |
-| T4a, T4b | landed | 3410aa94 | |
-| T4d computed obligations | planned (notes/coc-t4d.md, built on the Obligation below "T4d: one verdict per obligation"); builder wap-q1-kernel; origin/t4d3 5db581f7 the source, never built | | the batch's Obligation (typed-by-result) |
-| T4c char | waits, no branch | | T4d1 to T4d3 |
-| T4e types that take values | planned (notes/coc-t4e.md) | | T4d1 to T4d3, unify-typers; its (8) T5b1 |
-| T5u | landed | 3410aa94, d0b3c9e8 (failable values, `T??`) | |
-| T5a | A1 landed; A2 (a typed law's verdict from analyze's environment) lands with unify-typers, which holds both its commits | 4112fe55, c43b08e3 | unify-typers |
-| unify-typers (M2, M2b) | in progress: core declares count, int and logic, the theory reader and prelude go, int's kernel laws in; unify-dedup 77e07344 merged into it | unify-typers bf69c6b8; wap-theory-reads-types | |
-| exact-big-literals | in progress: the kernel's counts past 2^63 exact as `Large` (decision 13) | exact-big-literals df289030; wap-native-no-layout-any | merging onto unify-typers |
-| T5b1 effects | in progress | t5b-effects 9e6cf1d2; wap-primitive-lookup-tables | |
-| T5b2 enums, T5b3 bool | in progress | t5b-enums 547f33e5; wap-annotation-attachment-fix | |
-| T5b4 match, T5b5 the recursor | planned (notes/coc-t5b4.md) | | T5b4: unify-typers; T5b5: its lookup half now, its enum half after unify-typers |
-| T5c1 ending as an effect | waits | | T5b1 |
-| T5c2 products and courses | landed | e86988d2 | |
-| T5c3 structural terms | planned (notes/coc-t5c3.md) | | T5b4, unify-typers, fix-core-name-shadowing |
-| T5c4 recursion over whole numbers | planned (notes/coc-t5c4.md) | | T5c3, int-takes, T5b4, T5b5 |
-| T5d statements | parked (plan f3594c8f, notes/coc-t5d.md) | | |
-| T5e classes, extends | landed | 25c7e387, 9b8169cd | |
-| T5f erasure, T5g compiled libraries | wait | | T5b to T5d |
-| kernel-length: the kernel's theory files shrunk, about −55 plus 38 dead (notes/kernel-length.md) | waits | | unify-typers, int-takes |
-| int-takes: int in Lean's shape, `natural(n) \| negative(n)` (notes/unify-provers.md) | waits; card int-takes, wap-theory-reads-types | | unify-typers |
-| T6a1 proofs of bool laws, T6a2 hypotheses | re-read on unify (notes/coc-t6a12.md: T6a1 in verify, core +10; T6a2's binders and run skip landed; hypotheses from the law's own type and implies as a hypothesis left, coc-plan.md "T6a2") | | unify-typers (the deletion commit, the int enum) |
-| T6a3a propositions in wap spelling | in progress | t6a3a ad022f23; wap-native-no-layout-any | M2b step 1, T6a1 |
-| T6a3 indexed families, the sort-only part (a family over sorts, no parameters) | next | | T6a3a, T5b2 |
-| generic records with T6a3's parameters, one landing: `enum Boxed<T>`, `class Pair<A, B>` read, a letter field filled at each use by T6a7's letters_bound, and the kernel block taking the letters as its parameters (notes/coc-generic-records.md) | planned; card generic-records, wap-theory-reads-types | | T6a3's sort-only part, T6a7 |
-| T6a4 proofs by cases and induction | planned (notes/coc-t6a4.md) | | T5c3, T5c4, unify-dedup landed |
-| T6a1b `by` read as a term | planned (below); builder wap-q1-kernel, branch typed-by on t6a4-riders | | T6a4 (its Free locals are the premises); before Q1 and V3 |
-| T6a5 False, Exists, undecidable | waits | | T5b1; Exists also generic records with T6a3's parameters |
-| T6a6 the logic in wap/types | planned (notes/coc-t6a6.md) | | generic records with T6a3's parameters, unify-axioms, lazy-implies; Exists lines T6a5 |
-| T6a7 universes | planned (notes/coc-t6a7.md) | | T6a6 |
-| V1 one verdict per law | in progress (notes/coc-v1.md; below "V1: every law gets its line"); origin/v1-rest 314c868f, builder wap-primitive-lookup-tables | | T6a1, exact-big-literals (show.wap) |
-| V2 `wap check`, V3 proved laws as facts | planned (notes/coc-v2.md, notes/coc-v3.md) | | V1 (V3 also T6a2 and unify-dedup) |
-| C1 traits | planned (notes/coc-c1.md: C1a now, the structures with C2); builder wap-annotation-attachment-fix once t5b-enums is handed off | | |
-| C2 instances passed, C4 generic dispatch | planned (notes/coc-c2.md: B decided, a trait value as the union of its conformers, core +15; A, instances, with C4 at T5g) | | C1 (C2 also T5e's type arguments) |
-| Q1 quotients | planned (notes/coc-q1.md; also after T4e and V3) | | C1, T6a3, T6a4 |
-| T7 the theory extension retires | planned (notes/coc-t7.md) | | T6 |
-| T8a the reader | planned (notes/coc-t8.md); its first commit is whole()'s sign | | exact-big-literals |
-| T8b the machine words | planned (notes/coc-t8.md; below "T8b: what a word's row means"); origin/t8b-q1 a739da9b holds its types part; builder wap-q1-kernel | | Q1, T4d |
-| T8b-k the words' kernel part | planned (below "T8b-k: the kernel's division and the wrapping meanings"); origin/t8b-kernel 8dd2847b holds its code, unbuilt; builder wap-q1-kernel | | exact-big-literals, int-takes, kernel-length, T8b |
-| T8c exact int on the run | planned (notes/coc-t8.md) | | T8a, T5f |
+Each step's state, branch, owner and what it waits on are on the board (https://github.com/users/pannous/projects/10)
+and in git.
 
 ### What each open step costs now
 
@@ -1097,6 +1024,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 |---|---|---|---|---|---|
 | T4d1 to T4d3 | coc-t4d.md, coc-plan.md (below) | +40 | +20 | | |
 | T4c char | coc-t4.md | −10 | | +30 | |
+| conversions-declared: a conversion is a declared function (audit 2026-11-28 R3) | notes/audit/2026-11-28.md R3; builds on T4c's `@read` pairs (origin/t4c, prelude.wap `@read text(c: char)`) | about −25 | | +30 | |
 | T4e types that take values | coc-t4e.md | +74 | +6 | +4 | |
 | T5b1 effects | coc-t5b.md | +120 | +10 | +1 | |
 | T5b2 enums, T5b3 bool | coc-t5b.md | +75 | −12 | | |
@@ -1121,7 +1049,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | V2 `wap check` | coc-v2.md | +4 | | | native +2 |
 | V3 proved laws as facts | coc-v3.md | −6 | | | check +25, prove +15, verify +4, native +3 |
 | C1 traits (C1a) | coc-c1.md | +13 | | +19 | |
-| C2 trait values (B) | coc-c2.md | +15 | | | |
+| C2 trait values (A, instances written by the trait's class rule) | coc-c2.md | +19 | | sugar +7 | emit 0 |
 | C1b structures | coc-c2.md | +22, with V3 or Q1 | | | |
 | C4 generic dispatch | coc-c4.md | −18 (the rounds stay; their whole-program retype goes) | | | |
 | Q1 quotients | coc-q1.md | +37 | | +27 | prove +5 |
