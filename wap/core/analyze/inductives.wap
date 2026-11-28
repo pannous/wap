@@ -13,6 +13,7 @@ use "../../kernel/environment.wap"
 use "../../kernel/inductive.wap"
 use "groups.wap"
 use "../../kernel/counting.wap"
+use "../../kernel/equality.wap"
 
 # what became of an enum, by its word's id (TYPES.enums), as the census counts it
 ENUM_DEFINED = "defined"
@@ -142,7 +143,7 @@ block_entered(enums: list<EnumRead>, s: TypingState) := {
 		# an enum with a case whose result or field the kernel cannot read stays open
 		if indexed.any(cases => cases.any(case => case.result_open or case.fields.any(field => field == ø))) { return enums_counted(ids, ENUM_OPEN) }
 		types = (1 to #enums).list().map(at => BlockType(enums#at.key, headers#at, indexed#at.map(case => WrittenCase(case_constructed(enums#at.key, case.name), case_type(case, enums#at, ids, keys, headers)))))
-		inductive_declared(TYPES.environment, InductiveBlock([], #parts_of(enums#1.whole), types))
+		if not equality_bound(enums#1, types) { inductive_declared(TYPES.environment, InductiveBlock([], #parts_of(enums#1.whole), types)) }
 	} catch refusal {
 		refusal_only(refusal)
 		# a refused enum is counted by the census, and a law over it says Tested, never Proved
@@ -151,6 +152,28 @@ block_entered(enums: list<EnumRead>, s: TypingState) := {
 	}
 	enums_counted(ids, ENUM_DEFINED)
 	for enum in enums { for case in enum.cases { TYPES.constructors[case.definer] = named_id(TYPES.environment, case_constructed(enum.key, case.name))! } }
+}
+# An enum of equality's shape, `enum Equal(a: T): T -> Prop { refl: Equal(a, a) }` (wiki/enum.md), is the core's
+# Equal at its type, so a law it states is an equation the provers know: its word is filled by the core's Equal and
+# its case is the core's refl, each at the type of its first parameter where the enum leaves it a letter, and the
+# kernel's check of the two definitions is the check of its shape; no for any other enum, which declares its block
+equality_bound(enum: EnumRead, types: list<BlockType>) as bool := {
+	if #types != 1 or #types#1.cases != 1 { return no }
+	domains = domains_of(types#1.type)
+	if #domains != 2 and #domains != 3 { return no }
+	e = TYPES.environment
+	given = if #domains == 2 then [domains#1] else []
+	case = types#1.cases#1
+	reach = mark(e)
+	try {
+		declared(e, Declaration(enum.key, [], types#1.type, DeclarationKind.Defined(apply_all(constant_of(e, EQUAL, [TYPE_LEVEL]), given))))
+		reflexive_type = match case.type.shape { Pi(binder, domain, body) => instantiated(body, enum.word); _ => case.type }
+		declared(e, Declaration(case.name, [], reflexive_type, DeclarationKind.Defined(apply_all(constant_of(e, REFL, [TYPE_LEVEL]), given))))
+		yes
+	} catch shape {
+		back_to(e, reach)
+		no
+	}
 }
 # an enum's header, the type its word was declared at: a function of its parameters and indices giving its sort
 header_of(enum: EnumRead) as Term := declared_at(TYPES.environment, word_id(enum.word))!.type
