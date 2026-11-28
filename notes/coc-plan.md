@@ -1062,7 +1062,7 @@ that names it. In progress names the branch, its tip and its owner; waits names 
 | T5c1 ending as an effect | waits | | T5b1 |
 | T5c2 products and courses | landed | e86988d2 | |
 | T5c3 structural terms | planned (notes/coc-t5c3.md) | | T5b4, unify-typers, fix-core-name-shadowing |
-| T5c4 recursion over whole numbers | planned (notes/coc-t5c4.md) | | T5c3, int-takes, T5b4, T5b5 |
+| T5c4 recursion over whole numbers | planned (notes/coc-t5c4.md); patterns by inverse built, each inverse a program's own declaration, numerals int, no zero or successor in wap/types | | T5c3, int-takes, T5b4, T5b5 |
 | T5d statements | parked (plan f3594c8f, notes/coc-t5d.md) | | |
 | T5e classes, extends | landed | 25c7e387, 9b8169cd | |
 | T5f erasure, T5g compiled libraries | wait | | T5b to T5d |
@@ -1103,7 +1103,7 @@ native, outside the compiler's count unless it is emit). A plan's own file has t
 | T5b5 the recursor | coc-t5b4.md | +14 (the lookup) | | +3, and the enum recursor as a sugar rule on t5c4 (c055162e) in place of core +47 | |
 | T5c1 ending | coc-t5c.md | +30 | | | |
 | T5c3 structural terms | coc-t5c3.md | +80 | | | |
-| T5c4 whole numbers | coc-t5c4.md | +60 (the guards +45, the inverse patterns +12, nat's recursor +3; (1)-(2) not built) | +5 | +5 | |
+| T5c4 whole numbers | coc-t5c4.md | +60 (the guards +45, nat's recursor +3; (1)-(2) not built); the inverse patterns, a program's own inverses, built at about +12 | +5 | +5 | |
 | T5f erasure | coc-t5.md | | | | emit +50 |
 | T5g compiled libraries | coc-t5.md | 0 | | | wasm +150 |
 | kernel-length | kernel-length.md | | −55, and about −37 dead | | |
