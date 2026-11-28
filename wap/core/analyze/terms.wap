@@ -69,18 +69,27 @@ kernel_signature(typed: TypedFunction, s: TypingState) as Term? := {
 	parameters = typed.arguments.map(type => settled_type(type, s))
 	result = kernel_settled(typed.result ?? return ø, s)
 	if (parameters + [result]).any(type => has_letters(type) or has_unknowns(type)) { return ø }
-	parameters.reverse.fold(result, (body, parameter) => pi("_", parameter, body))
+	pis(parameters_locals(typed, s), result)
 }
+# a function's parameters as Locals, entered once on one checker: every term made of the function names the same Free variables
+parameters_locals(typed: TypedFunction, s: TypingState) as list<Local> := {
+	if typed.checker == ø {
+		typed.checker = checker(TYPES.environment, [])
+		typed.locals = (1 to #typed.arguments).list().map(at => entered(typed.checker!, text(parameter_names(typed)#at), settled_type(typed.arguments#at, s)))
+	}
+	typed.locals
+}
+parameter_names(typed: TypedFunction) as list := match typed.define { Define(name, parameters, body) => items_of(parameters).map(parameter => declared_name(parameter)); _ => [] }
+# a body read under the function's own parameters
+parameters_reading(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Entering := Entering([], [], typed.checker ?? checker(TYPES.environment, []), by_key, s).under(parameters_locals(typed, s), parameter_names(typed).map(place_key))
 # a pure function's value, the function of its parameters its body computes; ø for any other
 definition_of(typed: TypedFunction, by_key: map<text, TypedFunction>, s: TypingState) as Term? := match typed.define {
 	Define(name, parameters, body) => {
 		# a body converted to the result, an int given where an int? is, is no term yet
-		if kernel_value(body) != kernel_settled(typed.result ?? return ø, s) { return ø }
-		names = items_of(parameters).map(parameter => declared_name(parameter))
-		reading = Entering([], [], checker(TYPES.environment, []), by_key, s)
-		parameters_entered = (1 to #names).list().map(at => entered(reading.c, text(names#at), settled_type(typed.arguments#at, s)))
-		inside = reading.under(parameters_entered, names.map(place_key))
-		lambdas(parameters_entered, term_of(body, inside) ?? course_defined(typed, body, inside) ?? return ø)
+		inside = parameters_reading(typed, by_key, s)
+		# GUESS: the body's type and the result name the same Free variables, so `Even(n + n)` meets `Even(double(n))` by unfolding double
+		if not equal(inside.c, kernel_value(body) ?? return ø, kernel_settled(typed.result ?? return ø, s)) { return ø }
+		lambdas(typed.locals, term_of(body, inside) ?? course_defined(typed, body, inside) ?? return ø)
 	}
 	_ => ø
 }
@@ -122,10 +131,19 @@ binder_term(n: Node, x: Entering) as Term? := {
 called_term(n: Node, called: Node, arguments: list, x: Entering) as Term? := {
 	definer = fact_of(called, DEFINED_AT) ?? return ø
 	typed = x.by_key.get(place_key(definer)) ?? return ø
-	if kernel_value(n) != kernel_settled(typed.result ?? return ø, x.s) or #arguments != #typed.arguments or (1 to #arguments).any(at => kernel_value(arguments#at) != kernel_settled(typed.arguments#at, x.s)) { return ø }
+	if #arguments != #typed.arguments { return ø }
 	function = instance_entered(typed, x.by_key, x.s) ?? return ø
+	# GUESS: each argument against its domain and the call against the result, both under the arguments before them (kernel/recursors.wap with_parameters peels the same way)
+	callee = type_of(x.c, function)
+	given = arguments.map(argument => term_of(argument, x))
+	if given.any(term => term == ø) { return ø }
+	for at in 1 to #arguments { if not equal(x.c, kernel_value(arguments#at) ?? return ø, taken(after_arguments(callee, given.take(at - 1)))) { return ø } }
+	if not equal(x.c, kernel_value(n) ?? return ø, after_arguments(callee, given)) { return ø }
 	terms_applied(function, arguments, x)
 }
+# a function type after the arguments given to its first places, and what it takes at the next
+after_arguments(callee: Term, given: list<Term>) as Term := instantiated_all(peeled(callee, #given), given)
+taken(callee: Term) as Term := match callee.shape { Pi(binder, domain, body) => domain; _ => callee }
 # a host operation on whole numbers, its row's constant of the operands' types
 row_term(n: Node, operation: text, arguments: list, x: Entering) as Term? := {
 	if not FOLDED_ROWS.contains(operation) { return ø }
